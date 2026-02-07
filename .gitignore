@@ -3,5 +3,6 @@ dist/
 *.tsbuildinfo
 .DS_Store
 bun.lockb
+bun.lock
 package-lock.json
 test-live.ts

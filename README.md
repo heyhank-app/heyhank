@@ -6,21 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
 
-```
-  Your Code
-     │
-     ▼
-┌─────────────────────┐
-│  ClaudeCodeController│
-│  ┌───────────────┐  │
-│  │  TeamManager  │  │     ┌─────────┐
-│  │  TaskManager  │──┼────▶│ Agent 1 │  claude CLI (PTY)
-│  │  ProcessMgr   │  │     └─────────┘
-│  │  InboxPoller  │──┼────▶│ Agent 2 │  claude CLI (PTY)
-│  └───────────────┘  │     └─────────┘
-└─────────────────────┘     │ Agent N │  claude CLI (PTY)
-                            └─────────┘
-```
+![Claude Code Controller UI](screenshot.png)
 
 No Agent SDK. No `-p` mode. Full programmatic control over real Claude Code instances through the internal filesystem-based teams protocol.
 
@@ -45,7 +31,7 @@ This library reverse-engineers Claude Code's internal team communication protoco
 npm install claude-code-controller
 ```
 
-> **Prerequisites:** Claude Code CLI v2.1.34+ installed, and `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` set in your environment.
+> **Prerequisites:** Claude Code CLI v2.1.34+ installed
 
 ---
 
@@ -310,14 +296,59 @@ ClaudeCodeController
 
 ---
 
+## Web UI
+
+A built-in web dashboard lets you spawn agents, see their messages in real-time, and handle plan/permission approvals — all from your browser.
+
+```bash
+cd web
+bun install
+```
+
+**Development** (two terminals):
+
+```bash
+bun run dev          # backend on :3456
+bun run dev:vite     # frontend on :5174 (proxies API to :3456)
+```
+
+Open http://localhost:5174
+
+**Production:**
+
+```bash
+bun run build        # build frontend
+bun run start        # serve everything on :3456
+```
+
+Open http://localhost:3456
+
+The UI provides:
+- **Session management** — initialize/shutdown the controller
+- **Agent spawning** — configure name, type, model, and environment variables
+- **Live message feed** — real-time messages via WebSocket
+- **Approval prompts** — interactive plan and permission approval banners
+- **Agent controls** — shutdown or kill agents individually
+
+---
+
 ## Development
 
 ```bash
 bun install          # install deps
-bun test             # run tests
+bun test             # run tests (89 tests)
 bun run typecheck    # type check
 bun run build        # build for distribution
 ```
+
+---
+
+## Roadmap
+
+- **Tmux session per agent** — Spawn each agent in its own tmux pane so you can attach to it (`tmux attach -t <agent>`) and watch it work in real time: tool calls, file edits, reasoning — like watching someone use Claude Code interactively
+- **Task management in the UI** — Create, assign, and track tasks from the web dashboard
+- **Agent-to-agent messaging** — Let agents communicate directly with each other
+- **Persistent sessions** — Resume a team session after server restart
 
 ---
 
