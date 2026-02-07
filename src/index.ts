@@ -35,6 +35,7 @@ export type {
   TaskFile,
   TaskStatus,
   AgentType,
+  PermissionMode,
   SpawnAgentOptions,
   ControllerOptions,
   ReceiveOptions,

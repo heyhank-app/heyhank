@@ -183,6 +183,7 @@ export class ClaudeCodeController
       color,
       claudeBinary: this.claudeBinary,
       permissions: opts.permissions,
+      permissionMode: opts.permissionMode,
       env,
     });
 

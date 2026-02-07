@@ -13,6 +13,7 @@ export interface SpawnOptions {
   color?: string;
   claudeBinary?: string;
   permissions?: string[];
+  permissionMode?: string;
   teammateMode?: "auto" | "tmux" | "in-process";
   /** Extra environment variables to inject into the agent process */
   env?: Record<string, string>;
@@ -67,6 +68,9 @@ export class ProcessManager {
     }
     if (opts.model) {
       claudeArgs.push("--model", opts.model);
+    }
+    if (opts.permissionMode) {
+      claudeArgs.push("--permission-mode", opts.permissionMode);
     }
     if (opts.permissions) {
       for (const perm of opts.permissions) {

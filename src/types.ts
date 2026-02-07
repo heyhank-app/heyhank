@@ -145,6 +145,14 @@ export type AgentType =
   | "Plan"
   | string;
 
+export type PermissionMode =
+  | "default"
+  | "acceptEdits"
+  | "bypassPermissions"
+  | "plan"
+  | "dontAsk"
+  | "delegate";
+
 export interface SpawnAgentOptions {
   name: string;
   type?: AgentType;
@@ -152,6 +160,7 @@ export interface SpawnAgentOptions {
   cwd?: string;
   prompt?: string;
   permissions?: string[]; // e.g. ["Bash", "Read", "Write"]
+  permissionMode?: PermissionMode;
   /** Environment variables to inject into the agent's process */
   env?: Record<string, string>;
 }
