@@ -1,98 +1,199 @@
 # claude-code-controller
 
-Programmatic TypeScript API to pilot [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agents. Spawn, message, and orchestrate multiple Claude Code teammates from your own code — without using `-p` mode or the Agent SDK.
+**Spawn, orchestrate, and control Claude Code agents from your own code.**
 
-This library exploits Claude Code's internal filesystem-based **teams/inbox/tasks** protocol to offer a clean interface for spawning agents, sending instructions, and receiving responses.
+[![npm](https://img.shields.io/npm/v/claude-code-controller)](https://www.npmjs.com/package/claude-code-controller)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
 
-## How it works
+```
+  Your Code
+     │
+     ▼
+┌─────────────────────┐
+│  ClaudeCodeController│
+│  ┌───────────────┐  │
+│  │  TeamManager  │  │     ┌─────────┐
+│  │  TaskManager  │──┼────▶│ Agent 1 │  claude CLI (PTY)
+│  │  ProcessMgr   │  │     └─────────┘
+│  │  InboxPoller  │──┼────▶│ Agent 2 │  claude CLI (PTY)
+│  └───────────────┘  │     └─────────┘
+└─────────────────────┘     │ Agent N │  claude CLI (PTY)
+                            └─────────┘
+```
 
-Claude Code has an internal "teammate" system that uses the filesystem for inter-agent communication:
+No Agent SDK. No `-p` mode. Full programmatic control over real Claude Code instances through the internal filesystem-based teams protocol.
 
-- **Teams** — `~/.claude/teams/{name}/config.json` stores team membership
-- **Inboxes** — `~/.claude/teams/{name}/inboxes/{agent}.json` for message passing
-- **Tasks** — `~/.claude/tasks/{name}/{id}.json` for task tracking
+---
 
-This library wraps that protocol and spawns real Claude Code TUI processes (via a PTY wrapper) in teammate mode, giving you full programmatic control.
+## Why?
+
+Claude Code is powerful interactively, but there's no clean way to control it programmatically for automation. The Agent SDK is a separate thing. The `-p` flag is limited to single prompts.
+
+This library reverse-engineers Claude Code's internal team communication protocol (filesystem-based inboxes, team configs, task files) and wraps it in a clean TypeScript API. You get:
+
+- **Real Claude Code agents** with all their tools (Bash, Read, Write, Glob, Grep...)
+- **Multi-agent orchestration** with message passing and task assignment
+- **Full event system** for plan approvals, permission requests, shutdowns
+- **Custom environment routing** to use any API provider
+
+---
 
 ## Install
 
 ```bash
-bun add claude-code-controller
-# or
 npm install claude-code-controller
 ```
 
-> **Requires**: Claude Code CLI v2.1.34+ installed and the env variable `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` set in your shell.
+> **Prerequisites:** Claude Code CLI v2.1.34+ installed, and `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` set in your environment.
+
+---
 
 ## Quick Start
 
 ```typescript
 import { ClaudeCodeController } from "claude-code-controller";
 
-const ctrl = new ClaudeCodeController({
-  teamName: "my-project",
-});
-
+const ctrl = new ClaudeCodeController({ teamName: "my-project" });
 await ctrl.init();
 
-// Spawn an agent
 const agent = await ctrl.spawnAgent({
-  name: "worker",
+  name: "coder",
   type: "general-purpose",
   model: "sonnet",
 });
 
-// Wait for it to boot
+// Wait for the agent to boot up
 await new Promise((r) => setTimeout(r, 10_000));
 
-// Ask a question and get a response
+// Ask something and get the answer back
 const answer = await agent.ask(
-  "What is 2+2? Reply using SendMessage.",
+  "Read package.json and tell me the project name. Reply using SendMessage.",
   { timeout: 60_000 }
 );
-console.log(answer); // "4"
+console.log(answer);
 
-// Clean up
 await ctrl.shutdown();
 ```
 
-## Custom Environment Variables
+---
 
-You can inject environment variables into agent processes. This is useful for routing agents through alternative API providers (e.g. z.ai for GLM models):
+## Real-World Examples
+
+### Multi-Agent Code Review
+
+```typescript
+const ctrl = new ClaudeCodeController({ teamName: "review" });
+await ctrl.init();
+
+// Spawn specialized reviewers in parallel
+const [security, perf, style] = await Promise.all([
+  ctrl.spawnAgent({ name: "security", type: "general-purpose", model: "opus" }),
+  ctrl.spawnAgent({ name: "perf", type: "general-purpose", model: "sonnet" }),
+  ctrl.spawnAgent({ name: "style", type: "general-purpose", model: "haiku" }),
+]);
+
+await new Promise((r) => setTimeout(r, 12_000));
+
+// Give each reviewer a different focus
+const reviews = await Promise.all([
+  security.ask("Review src/ for security vulnerabilities. Reply with SendMessage."),
+  perf.ask("Review src/ for performance issues. Reply with SendMessage."),
+  style.ask("Review src/ for code style issues. Reply with SendMessage."),
+]);
+
+console.log("Security:", reviews[0]);
+console.log("Performance:", reviews[1]);
+console.log("Style:", reviews[2]);
+
+await ctrl.shutdown();
+```
+
+### Task-Based Workflow
+
+```typescript
+const ctrl = new ClaudeCodeController({ teamName: "tasks" });
+await ctrl.init();
+
+const worker = await ctrl.spawnAgent({ name: "worker", model: "sonnet" });
+await new Promise((r) => setTimeout(r, 10_000));
+
+// Create and assign a task
+const taskId = await ctrl.createTask({
+  subject: "Add input validation",
+  description: "Add zod validation to all API route handlers in src/routes/",
+  owner: "worker",
+});
+
+// Wait for the agent to complete it
+const result = await ctrl.waitForTask(taskId, 120_000);
+console.log(`Task ${result.status}: ${result.subject}`);
+
+await ctrl.shutdown();
+```
+
+### Custom API Provider
+
+Route agents through any OpenAI-compatible endpoint:
 
 ```typescript
 const ctrl = new ClaudeCodeController({
-  teamName: "custom-env",
-  // Default env vars for all agents
+  teamName: "custom",
   env: {
-    ANTHROPIC_AUTH_TOKEN: "your-api-key",
-    ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic",
-  },
-});
-
-await ctrl.init();
-
-// Per-agent overrides (takes precedence over defaults)
-const agent = await ctrl.spawnAgent({
-  name: "worker",
-  env: {
-    ANTHROPIC_AUTH_TOKEN: "different-key-for-this-agent",
+    ANTHROPIC_BASE_URL: "https://your-proxy.example.com/api/anthropic",
+    ANTHROPIC_AUTH_TOKEN: process.env.MY_API_KEY!,
   },
 });
 ```
 
-## API
+Per-agent overrides take precedence:
+
+```typescript
+const agent = await ctrl.spawnAgent({
+  name: "worker",
+  env: { ANTHROPIC_AUTH_TOKEN: "different-key-for-this-agent" },
+});
+```
+
+### Event-Driven Control
+
+```typescript
+const ctrl = new ClaudeCodeController({ teamName: "events" });
+await ctrl.init();
+
+// Auto-approve all plan requests
+ctrl.on("plan:approval_request", (agent, msg) => {
+  ctrl.sendPlanApproval(agent, msg.requestId, true);
+});
+
+// Auto-approve safe tool use, reject dangerous ones
+ctrl.on("permission:request", (agent, msg) => {
+  const safe = ["Read", "Glob", "Grep"].includes(msg.toolName);
+  ctrl.sendPermissionResponse(agent, msg.requestId, safe);
+});
+
+// React to agent messages
+ctrl.on("message", (agent, msg) => {
+  console.log(`[${agent}] ${msg.text}`);
+});
+
+// Track lifecycle
+ctrl.on("agent:spawned", (name, pid) => console.log(`${name} started (${pid})`));
+ctrl.on("agent:exited", (name, code) => console.log(`${name} exited (${code})`));
+```
+
+---
+
+## API Reference
 
 ### `ClaudeCodeController`
 
-The main entry point. Manages the team, agents, tasks, and messaging.
-
 ```typescript
 const ctrl = new ClaudeCodeController({
-  teamName?: string,       // default: random UUID-based name
-  cwd?: string,            // working directory for agents
-  claudeBinary?: string,   // path to claude binary (default: "claude")
-  env?: Record<string, string>,  // default env vars for all agents
+  teamName?: string,                // default: auto-generated
+  cwd?: string,                     // working directory for agents
+  claudeBinary?: string,            // path to claude CLI (default: "claude")
+  env?: Record<string, string>,     // default env vars for all agents
   logLevel?: "debug" | "info" | "warn" | "error" | "silent",
 });
 ```
@@ -100,112 +201,125 @@ const ctrl = new ClaudeCodeController({
 #### Lifecycle
 
 | Method | Description |
-|--------|-------------|
-| `ctrl.init()` | Initialize the controller (must be called first) |
-| `ctrl.shutdown()` | Graceful shutdown: send shutdown requests, wait, kill remaining, clean up |
+|---|---|
+| `ctrl.init()` | Initialize controller. Must call first. |
+| `ctrl.shutdown()` | Graceful shutdown: request stop, wait, kill stragglers, clean up files. |
 
-#### Agent Management
+#### Agents
 
-| Method | Description |
-|--------|-------------|
-| `ctrl.spawnAgent(opts)` | Spawn a new Claude Code agent, returns `AgentHandle` |
-| `ctrl.isAgentRunning(name)` | Check if an agent process is alive |
-| `ctrl.killAgent(name)` | Force-kill an agent |
+| Method | Returns | Description |
+|---|---|---|
+| `ctrl.spawnAgent(opts)` | `AgentHandle` | Spawn a Claude Code agent |
+| `ctrl.isAgentRunning(name)` | `boolean` | Check if agent process is alive |
+| `ctrl.killAgent(name)` | `void` | Force-kill an agent |
+
+`SpawnAgentOptions`:
+
+```typescript
+{
+  name: string,
+  type?: "general-purpose" | "Bash" | "Explore" | "Plan" | string,
+  model?: "sonnet" | "opus" | "haiku" | string,
+  cwd?: string,
+  permissions?: string[],    // e.g. ["Bash", "Read", "Write"]
+  env?: Record<string, string>,
+}
+```
 
 #### Messaging
 
-| Method | Description |
-|--------|-------------|
-| `ctrl.send(agent, message, summary?)` | Send a message to an agent |
-| `ctrl.broadcast(message, summary?)` | Send to all agents |
-| `ctrl.receive(agent, opts?)` | Wait for messages from a specific agent |
-| `ctrl.receiveAny(opts?)` | Wait for a message from any agent |
+| Method | Returns | Description |
+|---|---|---|
+| `ctrl.send(agent, message, summary?)` | `void` | Send message to an agent |
+| `ctrl.broadcast(message, summary?)` | `void` | Send to all agents |
+| `ctrl.receive(agent, opts?)` | `InboxMessage[]` | Wait for messages from agent |
+| `ctrl.receiveAny(opts?)` | `InboxMessage` | Wait for message from any agent |
 
 #### Tasks
 
-| Method | Description |
-|--------|-------------|
-| `ctrl.createTask({ subject, description, owner? })` | Create a task (notifies owner) |
-| `ctrl.assignTask(taskId, agentName)` | Assign a task to an agent |
-| `ctrl.waitForTask(taskId, timeout?)` | Wait for task completion |
+| Method | Returns | Description |
+|---|---|---|
+| `ctrl.createTask({ subject, description, owner? })` | `string` (task ID) | Create a task, optionally assign it |
+| `ctrl.assignTask(taskId, agentName)` | `void` | Assign task to agent |
+| `ctrl.waitForTask(taskId, timeout?)` | `TaskFile` | Block until task completes |
 
-#### Protocol Responses
+#### Protocol
 
 | Method | Description |
-|--------|-------------|
-| `ctrl.sendPlanApproval(agent, requestId, approve, feedback?)` | Approve/reject a plan |
-| `ctrl.sendPermissionResponse(agent, requestId, approve)` | Approve/reject a permission request |
+|---|---|
+| `ctrl.sendPlanApproval(agent, requestId, approve, feedback?)` | Respond to plan approval request |
+| `ctrl.sendPermissionResponse(agent, requestId, approve)` | Respond to permission request |
 | `ctrl.sendShutdownRequest(agent)` | Request graceful shutdown |
 
 ### `AgentHandle`
 
-Proxy object returned by `spawnAgent()`. Simplifies interaction with a single agent.
+Convenience wrapper returned by `spawnAgent()`.
 
 ```typescript
-await agent.send(message, summary?)  // Send a message
-await agent.receive(opts?)           // Wait for response (returns text)
-await agent.ask(question, opts?)     // Send + receive in one call
-await agent.shutdown()               // Request graceful shutdown
-await agent.kill()                   // Force kill
-agent.isRunning                      // Check if alive
-agent.name                           // Agent name
-agent.pid                            // Process PID
+await agent.send(message, summary?)   // Send a message
+await agent.receive(opts?)            // Wait for response text
+await agent.ask(question, opts?)      // Send + receive in one call
+await agent.shutdown()                // Request graceful shutdown
+await agent.kill()                    // Force kill
+agent.isRunning                       // Check if alive (getter)
+agent.name                            // Agent name
+agent.pid                             // Process PID
+
+// Async iterator for streaming events
+for await (const msg of agent.events()) {
+  console.log(msg.text);
+}
 ```
 
 ### Events
 
-The controller is an `EventEmitter`:
-
 ```typescript
-ctrl.on("message", (agentName, message) => { ... });
-ctrl.on("idle", (agentName) => { ... });
-ctrl.on("shutdown:approved", (agentName, msg) => { ... });
-ctrl.on("plan:approval_request", (agentName, msg) => { ... });
-ctrl.on("permission:request", (agentName, msg) => { ... });
-ctrl.on("agent:spawned", (agentName, pid) => { ... });
-ctrl.on("agent:exited", (agentName, code) => { ... });
+ctrl.on("message",              (agentName, message) => { ... });
+ctrl.on("idle",                 (agentName) => { ... });
+ctrl.on("agent:spawned",        (agentName, pid) => { ... });
+ctrl.on("agent:exited",         (agentName, code) => { ... });
+ctrl.on("task:completed",       (task) => { ... });
+ctrl.on("shutdown:approved",    (agentName, message) => { ... });
+ctrl.on("plan:approval_request",(agentName, message) => { ... });
+ctrl.on("permission:request",   (agentName, message) => { ... });
+ctrl.on("error",                (error) => { ... });
 ```
 
-## Architecture
+---
+
+## How It Works
+
+Claude Code has an internal "teammate" system that communicates through the filesystem:
+
+| Component | Path | Purpose |
+|---|---|---|
+| Teams | `~/.claude/teams/{name}/config.json` | Team membership & config |
+| Inboxes | `~/.claude/teams/{name}/inboxes/{agent}.json` | Message passing |
+| Tasks | `~/.claude/tasks/{name}/{id}.json` | Task tracking |
+
+This library creates those files, spawns real Claude Code CLI processes via PTY, and communicates with them through the inbox protocol. Agents think they're in a normal team and respond naturally.
 
 ```
 ClaudeCodeController
-├── TeamManager        — CRUD for ~/.claude/teams/{name}/config.json
-├── TaskManager        — CRUD for ~/.claude/tasks/{name}/{id}.json
-├── ProcessManager     — Spawns claude CLI in PTY via Python wrapper
-├── InboxPoller        — Polls controller's inbox for agent messages
-└── AgentHandle        — Per-agent proxy (send/receive/ask)
+├── TeamManager        — team config CRUD
+├── TaskManager        — task lifecycle management
+├── ProcessManager     — PTY-based process spawning
+├── InboxPoller        — polls controller inbox for agent messages
+└── AgentHandle        — per-agent convenience wrapper
 ```
 
-### Protocol Message Types
-
-| Type | Direction | Description |
-|------|-----------|-------------|
-| Plain text (SendMessage) | Agent → Controller | Agent's response |
-| `idle_notification` | Agent → Controller | Agent finished its turn |
-| `task_assignment` | Controller → Agent | Assign work |
-| `shutdown_request` | Controller → Agent | Request shutdown |
-| `shutdown_approved` | Agent → Controller | Shutdown acknowledged |
-| `plan_approval_request` | Agent → Controller | Agent wants plan approved |
-| `plan_approval_response` | Controller → Agent | Approve/reject plan |
-| `permission_request` | Agent → Controller | Agent needs tool permission |
-| `permission_response` | Controller → Agent | Approve/reject permission |
+---
 
 ## Development
 
 ```bash
-# Install dependencies
-bun install
-
-# Run tests
-bun test
-
-# Type check
-bun run typecheck
-
-# Build
-bun run build
+bun install          # install deps
+bun test             # run tests
+bun run typecheck    # type check
+bun run build        # build for distribution
 ```
+
+---
 
 ## License
 
