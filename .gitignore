@@ -7,3 +7,4 @@ bun.lock
 package-lock.json
 test-live.ts
 web/dist/
+.env

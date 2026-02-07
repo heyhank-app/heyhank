@@ -26,6 +26,7 @@
     "dev": "bun run tsup --watch",
     "test": "bun test",
     "test:watch": "bun test --watch",
+    "test:e2e": "E2E=1 bun test tests/e2e.test.ts --timeout 600000",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit"
   },
