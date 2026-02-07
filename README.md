@@ -6,21 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
 
-```
-  Your Code
-     │
-     ▼
-┌─────────────────────┐
-│  ClaudeCodeController│
-│  ┌───────────────┐  │
-│  │  TeamManager  │  │     ┌─────────┐
-│  │  TaskManager  │──┼────▶│ Agent 1 │  claude CLI (PTY)
-│  │  ProcessMgr   │  │     └─────────┘
-│  │  InboxPoller  │──┼────▶│ Agent 2 │  claude CLI (PTY)
-│  └───────────────┘  │     └─────────┘
-└─────────────────────┘     │ Agent N │  claude CLI (PTY)
-                            └─────────┘
-```
+![Claude Code Controller UI](screenshot.png)
 
 No Agent SDK. No `-p` mode. Full programmatic control over real Claude Code instances through the internal filesystem-based teams protocol.
 
@@ -313,8 +299,6 @@ ClaudeCodeController
 ## Web UI
 
 A built-in web dashboard lets you spawn agents, see their messages in real-time, and handle plan/permission approvals — all from your browser.
-
-![Claude Code Controller UI](screenshot.png)
 
 ```bash
 cd web
