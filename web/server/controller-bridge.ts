@@ -1,7 +1,7 @@
 import { ClaudeCodeController, parseMessage } from "claude-code-controller";
-import type { InboxMessage, PlanApprovalRequestMessage, PermissionRequestMessage, ShutdownApprovedMessage } from "claude-code-controller";
+import type { InboxMessage, PlanApprovalRequestMessage, PermissionRequestMessage, ShutdownApprovedMessage, StatusLineData } from "claude-code-controller";
 import { WsManager } from "./ws-manager.js";
-import type { AgentInfo, Approval, Message, SessionInfo } from "./types.js";
+import type { AgentInfo, Approval, Message, SessionInfo, StatusLineInfo } from "./types.js";
 import { randomUUID } from "node:crypto";
 
 const MAX_MESSAGES_PER_AGENT = 500;
@@ -247,6 +247,19 @@ export class ControllerBridge {
       };
       this.pendingApprovals.set(parsed.requestId, approval);
       this.ws.broadcast({ type: "approval:permission", approval });
+    });
+
+    ctrl.on("agent:statusline", (name, data: StatusLineData) => {
+      const info: StatusLineInfo = {
+        model: data.model?.display_name,
+        contextUsedPercent: data.context_window?.used_percentage,
+        costUsd: data.cost?.total_cost_usd,
+        durationMs: data.cost?.total_duration_ms,
+        linesAdded: data.cost?.total_lines_added,
+        linesRemoved: data.cost?.total_lines_removed,
+        sessionId: data.session_id,
+      };
+      this.ws.broadcast({ type: "agent:statusline", agent: name, statusline: info });
     });
 
     ctrl.on("error", (err) => {

@@ -24,6 +24,16 @@ export { InboxPoller } from "./inbox-poller.js";
 // Low-level inbox operations
 export { writeInbox, readInbox, readUnread, parseMessage } from "./inbox.js";
 
+// StatusLine capture
+export {
+  StatusLineWatcher,
+  statusLineDir,
+  statusLineLogPath,
+  buildStatusLineCommand,
+  buildStatusLineSettings,
+} from "./statusline-capture.js";
+export type { StatusLineEvent, StatusLineCaptureEvents } from "./statusline-capture.js";
+
 // Path utilities
 export * from "./paths.js";
 
@@ -46,6 +56,7 @@ export type {
   SandboxPermissionRequestMessage,
   SandboxPermissionResponseMessage,
   PlainTextMessage,
+  StatusLineData,
   TeamConfig,
   TeamMember,
   TaskFile,

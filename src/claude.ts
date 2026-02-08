@@ -10,6 +10,7 @@ import type {
   InboxMessage,
   PermissionRequestMessage,
   PlanApprovalRequestMessage,
+  StatusLineData,
 } from "./types.js";
 
 // Polyfill for Node < 20.4
@@ -154,6 +155,7 @@ export interface PlanRequestInfo {
 export interface AgentEvents {
   message: [text: string];
   idle: [];
+  statusline: [data: StatusLineData];
   permission: [request: PermissionRequestInfo];
   plan: [request: PlanRequestInfo];
   exit: [code: number | null];
@@ -506,6 +508,9 @@ export class Agent extends EventEmitter<AgentEvents> {
     const onIdle = (name: string, _details: any) => {
       if (name === agentName) this.emit("idle");
     };
+    const onStatusLine = (name: string, data: StatusLineData) => {
+      if (name === agentName) this.emit("statusline", data);
+    };
     const onPermission = (name: string, parsed: PermissionRequestMessage) => {
       if (name !== agentName) return;
       let handled = false;
@@ -555,6 +560,7 @@ export class Agent extends EventEmitter<AgentEvents> {
 
     this.controller.on("message", onMessage);
     this.controller.on("idle", onIdle);
+    this.controller.on("agent:statusline", onStatusLine);
     this.controller.on("permission:request", onPermission);
     this.controller.on("plan:approval_request", onPlan);
     this.controller.on("agent:exited", onExit);
@@ -563,6 +569,7 @@ export class Agent extends EventEmitter<AgentEvents> {
     this.boundListeners = [
       { event: "message", fn: onMessage },
       { event: "idle", fn: onIdle },
+      { event: "agent:statusline", fn: onStatusLine },
       { event: "permission:request", fn: onPermission },
       { event: "plan:approval_request", fn: onPlan },
       { event: "agent:exited", fn: onExit },

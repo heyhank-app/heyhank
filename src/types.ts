@@ -129,6 +129,51 @@ export interface PlainTextMessage {
   text: string;
 }
 
+// ─── StatusLine ──────────────────────────────────────────────────────────────
+
+/** JSON data sent by Claude Code to the statusLine command via stdin. */
+export interface StatusLineData {
+  model?: {
+    id?: string;
+    display_name?: string;
+  };
+  session_id?: string;
+  context_window?: {
+    used_percentage?: number;
+    remaining_percentage?: number;
+    total_input_tokens?: number;
+    total_output_tokens?: number;
+    context_window_size?: number;
+    current_usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+    };
+  };
+  cost?: {
+    total_cost_usd?: number;
+    total_duration_ms?: number;
+    total_api_duration_ms?: number;
+    total_lines_added?: number;
+    total_lines_removed?: number;
+  };
+  workspace?: {
+    current_dir?: string;
+    project_dir?: string;
+  };
+  cwd?: string;
+  agent?: {
+    name?: string;
+  };
+  vim?: {
+    mode?: string;
+  };
+  output_style?: {
+    name?: string;
+  };
+}
+
 // ─── Team ────────────────────────────────────────────────────────────────────
 
 export interface TeamConfig {
@@ -229,6 +274,7 @@ export interface ControllerEvents {
   "task:completed": [task: TaskFile];
   "agent:spawned": [agentName: string, pid: number];
   "agent:exited": [agentName: string, code: number | null];
+  "agent:statusline": [agentName: string, data: StatusLineData];
   error: [error: Error];
 }
 

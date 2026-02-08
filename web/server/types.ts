@@ -32,6 +32,16 @@ export interface Message {
 }
 
 // WebSocket events (server → client)
+export interface StatusLineInfo {
+  model?: string;
+  contextUsedPercent?: number;
+  costUsd?: number;
+  durationMs?: number;
+  linesAdded?: number;
+  linesRemoved?: number;
+  sessionId?: string;
+}
+
 export type WsEvent =
   | { type: "snapshot"; session: SessionInfo; agents: AgentInfo[]; messages: Record<string, Message[]>; pendingApprovals: Approval[] }
   | { type: "session:initialized"; teamName: string }
@@ -40,6 +50,7 @@ export type WsEvent =
   | { type: "agent:exited"; agent: string; exitCode: number | null }
   | { type: "agent:idle"; agent: string }
   | { type: "agent:message"; agent: string; message: Message }
+  | { type: "agent:statusline"; agent: string; statusline: StatusLineInfo }
   | { type: "agent:shutdown_approved"; agent: string }
   | { type: "approval:plan"; approval: Approval }
   | { type: "approval:permission"; approval: Approval }

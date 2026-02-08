@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, existsSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { TeamManager } from "./team-manager.js";
 import { TaskManager } from "./task-manager.js";
@@ -10,6 +10,11 @@ import { InboxPoller, type PollEvent } from "./inbox-poller.js";
 import { writeInbox, readUnread, parseMessage } from "./inbox.js";
 import { AgentHandle, type AgentController } from "./agent-handle.js";
 import { createLogger } from "./logger.js";
+import {
+  StatusLineWatcher,
+  statusLineLogPath,
+  buildStatusLineSettings,
+} from "./statusline-capture.js";
 import type {
   ControllerOptions,
   ControllerEvents,
@@ -53,6 +58,7 @@ export class ClaudeCodeController
   readonly tasks: TaskManager;
   private processes: ProcessManager;
   private poller: InboxPoller;
+  private statusLineWatcher: StatusLineWatcher;
   private log: Logger;
   private cwd: string;
   private claudeBinary: string;
@@ -77,9 +83,15 @@ export class ClaudeCodeController
       "controller",
       this.log
     );
+    this.statusLineWatcher = new StatusLineWatcher(this.teamName, this.log);
 
     // Wire up poller events to the EventEmitter
     this.poller.onMessages((events) => this.handlePollEvents(events));
+
+    // Wire up statusLine events
+    this.statusLineWatcher.on("update", (event) => {
+      this.emit("agent:statusline", event.agentName, event.data);
+    });
   }
 
   // ─── Lifecycle ───────────────────────────────────────────────────────
@@ -93,6 +105,7 @@ export class ClaudeCodeController
 
     await this.team.create({ cwd: this.cwd });
     await this.tasks.init();
+    this.statusLineWatcher.ensureDir();
     this.poller.start();
     this.initialized = true;
     this.log.info(
@@ -143,8 +156,9 @@ export class ClaudeCodeController
     // Force kill any remaining
     await this.processes.killAll();
 
-    // Stop polling
+    // Stop polling and statusLine watchers
     this.poller.stop();
+    this.statusLineWatcher.stop();
 
     // Clean up filesystem
     await this.team.destroy();
@@ -181,8 +195,11 @@ export class ClaudeCodeController
     };
     await this.team.addMember(member);
 
-    // Ensure workspace is trusted so the CLI doesn't block on the trust prompt
-    this.ensureWorkspaceTrusted(cwd);
+    // Ensure workspace is trusted and inject statusLine capture settings
+    this.ensureWorkspaceTrusted(cwd, opts.name);
+
+    // Start watching this agent's statusLine log
+    this.statusLineWatcher.watchAgent(opts.name);
 
     // Merge default env with per-agent env (per-agent takes precedence)
     const env =
@@ -464,6 +481,7 @@ export class ClaudeCodeController
    * Kill a specific agent.
    */
   async killAgent(name: string): Promise<void> {
+    this.statusLineWatcher.unwatchAgent(name);
     await this.processes.kill(name);
     await this.team.removeMember(name);
   }
@@ -536,15 +554,32 @@ export class ClaudeCodeController
   /**
    * Ensure the agent's cwd has a .claude/settings.local.json so the
    * CLI skips the interactive workspace trust prompt.
+   * Also injects statusLine capture configuration.
    */
-  private ensureWorkspaceTrusted(cwd: string): void {
+  private ensureWorkspaceTrusted(cwd: string, agentName?: string): void {
     const claudeDir = join(cwd, ".claude");
     const settingsPath = join(claudeDir, "settings.local.json");
-    if (!existsSync(settingsPath)) {
-      mkdirSync(claudeDir, { recursive: true });
-      writeFileSync(settingsPath, "{}\n");
-      this.log.debug(`Created ${settingsPath} for workspace trust`);
+    mkdirSync(claudeDir, { recursive: true });
+
+    let settings: Record<string, unknown> = {};
+    if (existsSync(settingsPath)) {
+      try {
+        settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+      } catch {
+        settings = {};
+      }
     }
+
+    // Inject statusLine capture if we have an agent name
+    if (agentName && !settings.statusLine) {
+      const logPath = statusLineLogPath(this.teamName, agentName);
+      const statusLineSettings = buildStatusLineSettings(logPath);
+      settings = { ...settings, ...statusLineSettings };
+      this.log.debug(`Injected statusLine capture for "${agentName}"`);
+    }
+
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+    this.log.debug(`Updated ${settingsPath}`);
   }
 
   private ensureInitialized(): void {
