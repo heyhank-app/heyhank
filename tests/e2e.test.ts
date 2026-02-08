@@ -1302,6 +1302,62 @@ describe.skipIf(!E2E_ENABLED)("E2E: Task Assignment", () => {
   );
 });
 
+// ─── O: Untrusted Workspace ────────────────────────────────────────────────
+
+describe.skipIf(!E2E_ENABLED)("E2E: Untrusted Workspace", () => {
+  let ctrl: ClaudeCodeController;
+  let tempDir: string;
+
+  afterEach(async () => {
+    await cleanupCtrl(ctrl);
+    // Clean up temp dir
+    if (tempDir) {
+      try {
+        const { rmSync } = await import("node:fs");
+        rmSync(tempDir, { recursive: true, force: true });
+      } catch {}
+    }
+  });
+
+  it(
+    "agent works in a directory that has never been used with Claude",
+    async () => {
+      const { mkdtempSync } = await import("node:fs");
+      const { tmpdir } = await import("node:os");
+      tempDir = mkdtempSync(`${tmpdir()}/e2e-untrusted-`);
+
+      const teamName = `e2e-untrust-${randomUUID().slice(0, 8)}`;
+      ctrl = new ClaudeCodeController({
+        teamName,
+        cwd: tempDir,
+        logLevel: "info",
+        env: agentEnv(),
+      });
+      await ctrl.init();
+
+      const agent = await ctrl.spawnAgent({
+        name: "untrusted-worker",
+        type: "general-purpose",
+        model: CFG.model,
+      });
+
+      expect(agent.isRunning).toBe(true);
+
+      // Verify .claude/settings.local.json was created
+      const { existsSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      expect(existsSync(join(tempDir, ".claude", "settings.local.json"))).toBe(true);
+
+      // The agent should be able to receive messages and respond
+      // (the trust prompt should have been auto-accepted by the PTY wrapper)
+      await sleep(3_000);
+      expect(agent.isRunning).toBe(true);
+      console.log("[E2E] Agent running in untrusted workspace — trust prompt was auto-accepted");
+    },
+    30_000,
+  );
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Simplified API (claude.agent, claude.session, POST /ask)
 // ═══════════════════════════════════════════════════════════════════════════

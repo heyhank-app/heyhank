@@ -382,14 +382,25 @@ export class Agent extends EventEmitter<AgentEvents> {
 
     // Register listener BEFORE sending so we don't miss the response
     const responsePromise = new Promise<string>((resolve, reject) => {
+      let gotMessage = false;
       const timer = setTimeout(() => {
         cleanup();
         reject(new Error(`Timeout (${timeout}ms) waiting for response`));
       }, timeout);
 
       const onMsg = (text: string) => {
+        gotMessage = true;
         cleanup();
         resolve(text);
+      };
+      const onIdle = () => {
+        // Agent finished its turn. If a message was already received, ignore.
+        // Otherwise the agent went idle without sending a message — resolve
+        // with empty string so the caller doesn't hang forever.
+        if (!gotMessage) {
+          cleanup();
+          resolve("");
+        }
       };
       const onExit = (code: number | null) => {
         cleanup();
@@ -398,10 +409,12 @@ export class Agent extends EventEmitter<AgentEvents> {
       const cleanup = () => {
         clearTimeout(timer);
         this.removeListener("message", onMsg);
+        this.removeListener("idle", onIdle);
         this.removeListener("exit", onExit);
       };
 
       this.on("message", onMsg);
+      this.on("idle", onIdle);
       this.on("exit", onExit);
     });
 
@@ -424,14 +437,22 @@ export class Agent extends EventEmitter<AgentEvents> {
     const timeout = opts?.timeout ?? 120_000;
 
     return new Promise<string>((resolve, reject) => {
+      let gotMessage = false;
       const timer = setTimeout(() => {
         cleanup();
         reject(new Error(`Timeout (${timeout}ms) waiting for response`));
       }, timeout);
 
       const onMsg = (text: string) => {
+        gotMessage = true;
         cleanup();
         resolve(text);
+      };
+      const onIdle = () => {
+        if (!gotMessage) {
+          cleanup();
+          resolve("");
+        }
       };
       const onExit = (code: number | null) => {
         cleanup();
@@ -440,10 +461,12 @@ export class Agent extends EventEmitter<AgentEvents> {
       const cleanup = () => {
         clearTimeout(timer);
         this.removeListener("message", onMsg);
+        this.removeListener("idle", onIdle);
         this.removeListener("exit", onExit);
       };
 
       this.on("message", onMsg);
+      this.on("idle", onIdle);
       this.on("exit", onExit);
     });
   }

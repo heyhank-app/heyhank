@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -676,5 +676,120 @@ describe("Agent identity format", () => {
     );
     expect(ctrlMember).toBeDefined();
     expect(ctrlMember!.agentId).toBe(config.leadAgentId);
+  });
+});
+
+// ─── 8. Workspace trust ────────────────────────────────────────────────────
+
+describe("Workspace trust — ensureWorkspaceTrusted", () => {
+  it("creates .claude/settings.local.json in agent cwd if missing", async () => {
+    const teamName = `trust-${randomUUID().slice(0, 8)}`;
+    const agentCwd = mkdtempSync(join(tmpdir(), "cc-trust-test-"));
+
+    const ctrl = new ClaudeCodeController({ teamName, logLevel: "silent" });
+    await ctrl.init();
+
+    // spawnAgent calls ensureWorkspaceTrusted internally.
+    // We can't call spawnAgent without a real binary, so call the
+    // private method directly via any-cast.
+    (ctrl as any).ensureWorkspaceTrusted(agentCwd);
+
+    const settingsPath = join(agentCwd, ".claude", "settings.local.json");
+    expect(existsSync(settingsPath)).toBe(true);
+
+    const content = readFileSync(settingsPath, "utf-8");
+    expect(content.trim()).toBe("{}");
+
+    await ctrl.shutdown();
+  });
+
+  it("does not overwrite existing .claude/settings.local.json", async () => {
+    const teamName = `trust2-${randomUUID().slice(0, 8)}`;
+    const agentCwd = mkdtempSync(join(tmpdir(), "cc-trust-test2-"));
+
+    // Pre-create with custom content
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    mkdirSync(join(agentCwd, ".claude"), { recursive: true });
+    writeFileSync(
+      join(agentCwd, ".claude", "settings.local.json"),
+      '{"permissions":{"allow":["Bash(git:*)"]}}\n'
+    );
+
+    const ctrl = new ClaudeCodeController({ teamName, logLevel: "silent" });
+    await ctrl.init();
+
+    (ctrl as any).ensureWorkspaceTrusted(agentCwd);
+
+    // Should NOT have been overwritten
+    const content = readFileSync(
+      join(agentCwd, ".claude", "settings.local.json"),
+      "utf-8"
+    );
+    expect(content).toContain("Bash(git:*)");
+
+    await ctrl.shutdown();
+  });
+});
+
+// ─── 9. ask() idle handling ────────────────────────────────────────────────
+
+describe("ask() resolves on idle when no message is sent", () => {
+  let ctrl: InstanceType<typeof ClaudeCodeController>;
+  let teamName: string;
+
+  beforeEach(async () => {
+    teamName = `idle-ask-${randomUUID().slice(0, 8)}`;
+    ctrl = new ClaudeCodeController({ teamName, logLevel: "silent" });
+    await ctrl.init();
+  });
+
+  afterEach(async () => {
+    await ctrl.shutdown();
+  });
+
+  it("receive() returns idle message when agent goes idle without SendMessage", async () => {
+    // Simulate: agent goes idle without sending a content message
+    await writeInbox(teamName, "controller", {
+      from: "worker",
+      text: JSON.stringify({
+        type: "idle_notification",
+        from: "worker",
+        timestamp: new Date().toISOString(),
+        idleReason: "turn_complete",
+        summary: "Agent finished without sending a message",
+      }),
+      timestamp: new Date().toISOString(),
+    });
+
+    // Controller's receive() should return the idle message as fallback
+    const msgs = await ctrl.receive("worker", { timeout: 3_000 });
+    expect(msgs.length).toBeGreaterThan(0);
+    const parsed = JSON.parse(msgs[0].text);
+    expect(parsed.type).toBe("idle_notification");
+    expect(parsed.idleReason).toBe("turn_complete");
+  });
+
+  it("receive() prefers content messages over idle", async () => {
+    // Write a content message AND an idle notification
+    await writeInbox(teamName, "controller", {
+      from: "worker",
+      text: "The answer is 42",
+      timestamp: new Date().toISOString(),
+    });
+    await writeInbox(teamName, "controller", {
+      from: "worker",
+      text: JSON.stringify({
+        type: "idle_notification",
+        from: "worker",
+        timestamp: new Date().toISOString(),
+        idleReason: "turn_complete",
+      }),
+      timestamp: new Date().toISOString(),
+    });
+
+    const msgs = await ctrl.receive("worker", { timeout: 3_000 });
+    expect(msgs.length).toBe(1);
+    // Should return the content message, not the idle
+    expect(msgs[0].text).toBe("The answer is 42");
   });
 });

@@ -95,6 +95,8 @@ if pid == 0:
 else:
     signal.signal(signal.SIGTERM, lambda *a: (os.kill(pid, signal.SIGTERM), sys.exit(0)))
     signal.signal(signal.SIGINT, lambda *a: (os.kill(pid, signal.SIGTERM), sys.exit(0)))
+    buf = b""
+    trust_sent = False
     try:
         while True:
             r, _, _ = select.select([fd, 0], [], [], 1.0)
@@ -104,6 +106,12 @@ else:
                     if not data:
                         break
                     os.write(1, data)
+                    if not trust_sent:
+                        buf += data
+                        if b"Yes" in buf and b"trust" in buf:
+                            os.write(fd, b"\\r")
+                            trust_sent = True
+                            buf = b""
                 except OSError:
                     break
             if 0 in r:

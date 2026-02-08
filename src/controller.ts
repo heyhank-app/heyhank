@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { TeamManager } from "./team-manager.js";
 import { TaskManager } from "./task-manager.js";
 import { ProcessManager } from "./process-manager.js";
@@ -178,6 +180,9 @@ export class ClaudeCodeController
       subscriptions: [],
     };
     await this.team.addMember(member);
+
+    // Ensure workspace is trusted so the CLI doesn't block on the trust prompt
+    this.ensureWorkspaceTrusted(cwd);
 
     // Merge default env with per-agent env (per-agent takes precedence)
     const env =
@@ -525,6 +530,20 @@ export class ClaudeCodeController
         default:
           this.emit("message", raw.from, raw);
       }
+    }
+  }
+
+  /**
+   * Ensure the agent's cwd has a .claude/settings.local.json so the
+   * CLI skips the interactive workspace trust prompt.
+   */
+  private ensureWorkspaceTrusted(cwd: string): void {
+    const claudeDir = join(cwd, ".claude");
+    const settingsPath = join(claudeDir, "settings.local.json");
+    if (!existsSync(settingsPath)) {
+      mkdirSync(claudeDir, { recursive: true });
+      writeFileSync(settingsPath, "{}\n");
+      this.log.debug(`Created ${settingsPath} for workspace trust`);
     }
   }
 
