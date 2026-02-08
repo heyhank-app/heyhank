@@ -1,5 +1,3 @@
-import { EventEmitter } from "node:events";
-
 // ─── Inbox ───────────────────────────────────────────────────────────────────
 
 export interface InboxMessage {
@@ -14,6 +12,7 @@ export interface InboxMessage {
 // Structured message types that can appear inside InboxMessage.text as JSON
 export type StructuredMessage =
   | TaskAssignmentMessage
+  | TaskCompletedMessage
   | ShutdownRequestMessage
   | ShutdownApprovedMessage
   | IdleNotificationMessage
@@ -21,6 +20,8 @@ export type StructuredMessage =
   | PlanApprovalResponseMessage
   | PermissionRequestMessage
   | PermissionResponseMessage
+  | SandboxPermissionRequestMessage
+  | SandboxPermissionResponseMessage
   | PlainTextMessage;
 
 export interface TaskAssignmentMessage {
@@ -54,6 +55,10 @@ export interface IdleNotificationMessage {
   from: string;
   timestamp: string;
   idleReason: string;
+  summary?: string;
+  completedTaskId?: string;
+  completedStatus?: string;
+  failureReason?: string;
 }
 
 export interface PlanApprovalRequestMessage {
@@ -93,6 +98,32 @@ export interface PermissionResponseMessage {
   timestamp: string;
 }
 
+export interface TaskCompletedMessage {
+  type: "task_completed";
+  from: string;
+  taskId: string;
+  taskSubject: string;
+  timestamp: string;
+}
+
+export interface SandboxPermissionRequestMessage {
+  type: "sandbox_permission_request";
+  requestId: string;
+  workerId: string;
+  workerName: string;
+  workerColor?: string;
+  hostPattern: string;
+  timestamp: string;
+}
+
+export interface SandboxPermissionResponseMessage {
+  type: "sandbox_permission_response";
+  requestId: string;
+  host: string;
+  allow: boolean;
+  timestamp: string;
+}
+
 export interface PlainTextMessage {
   type: "plain_text";
   text: string;
@@ -114,10 +145,14 @@ export interface TeamMember {
   name: string;
   agentType: string;
   model?: string;
+  prompt?: string;
+  color?: string;
+  planModeRequired?: boolean;
   joinedAt: number; // epoch ms
   tmuxPaneId?: string;
   cwd: string;
   subscriptions?: string[];
+  backendType?: string; // "in-process" | "tmux" | "iterm2"
 }
 
 // ─── Tasks ───────────────────────────────────────────────────────────────────
@@ -143,6 +178,8 @@ export type AgentType =
   | "Bash"
   | "Explore"
   | "Plan"
+  | "claude-code-guide"
+  | "statusline-setup"
   | string;
 
 export type PermissionMode =
@@ -185,7 +222,7 @@ export interface ReceiveOptions {
 
 export interface ControllerEvents {
   message: [agentName: string, message: InboxMessage];
-  idle: [agentName: string];
+  idle: [agentName: string, details: IdleNotificationMessage];
   "shutdown:approved": [agentName: string, message: ShutdownApprovedMessage];
   "plan:approval_request": [agentName: string, message: PlanApprovalRequestMessage];
   "permission:request": [agentName: string, message: PermissionRequestMessage];

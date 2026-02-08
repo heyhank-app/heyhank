@@ -9,7 +9,7 @@ import { ClaudeCodeController } from "../src/controller.js";
 import { claude } from "../src/claude.js";
 import { writeInbox, readInbox } from "../src/inbox.js";
 import { createApi } from "../src/api/index.js";
-import type { PermissionRequestMessage, PlanApprovalRequestMessage } from "../src/types.js";
+import type { PermissionRequestMessage, PlanApprovalRequestMessage, IdleNotificationMessage } from "../src/types.js";
 
 // ─── E2E Gate ───────────────────────────────────────────────────────────────
 
@@ -33,7 +33,6 @@ const CFG = {
   baseUrl: process.env.E2E_BASE_URL || "https://api.z.ai/api/anthropic",
   apiTimeout: process.env.E2E_API_TIMEOUT_MS || "3000000",
   model: process.env.E2E_MODEL || "sonnet",
-  spawnWaitMs: 15_000,
   askTimeoutMs: 180_000,
 };
 
@@ -67,6 +66,85 @@ function waitForEvent<T extends unknown[]>(
   });
 }
 
+/**
+ * Wait for a specific agent to become ready (idle or message event).
+ * Much faster than sleep() — resolves as soon as the agent is responsive.
+ */
+function waitForAgentReady(
+  ctrl: ClaudeCodeController,
+  agentName: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error(`Agent "${agentName}" not ready within ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    const onReady = (name: string, ..._rest: any[]) => {
+      if (name === agentName && !settled) {
+        settled = true;
+        cleanup();
+        resolve();
+      }
+    };
+    const onExit = (name: string, code: number | null) => {
+      if (name === agentName && !settled) {
+        settled = true;
+        cleanup();
+        reject(new Error(`Agent "${agentName}" exited (code=${code}) before ready`));
+      }
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      ctrl.removeListener("idle", onReady);
+      ctrl.removeListener("message", onReady);
+      ctrl.removeListener("agent:exited", onExit);
+    };
+
+    ctrl.on("idle", onReady);
+    ctrl.on("message", onReady);
+    ctrl.on("agent:exited", onExit);
+  });
+}
+
+/**
+ * Wait for a specific agent process to exit.
+ * Much faster than sleep() after killAgent.
+ */
+function waitForAgentExit(
+  ctrl: ClaudeCodeController,
+  agentName: string,
+  timeoutMs = 10_000,
+): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Agent "${agentName}" did not exit within ${timeoutMs}ms`));
+    }, timeoutMs);
+    const onExit = (name: string, code: number | null) => {
+      if (name === agentName) {
+        cleanup();
+        resolve(code);
+      }
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      ctrl.removeListener("agent:exited", onExit);
+    };
+    ctrl.on("agent:exited", onExit);
+
+    // Already exited?
+    if (!ctrl.isAgentRunning(agentName)) {
+      cleanup();
+      resolve(null);
+    }
+  });
+}
+
 /** Inject a simulated message into the controller's inbox. */
 async function injectToController(
   teamName: string,
@@ -78,6 +156,16 @@ async function injectToController(
     text: JSON.stringify(message),
     timestamp: new Date().toISOString(),
   });
+}
+
+/** Robust controller cleanup helper. */
+async function cleanupCtrl(ctrl: ClaudeCodeController | undefined) {
+  if (!ctrl) return;
+  try {
+    await ctrl.shutdown();
+  } catch {
+    try { await ctrl.team.destroy(); } catch {}
+  }
 }
 
 // ─── A: Controller Lifecycle ────────────────────────────────────────────────
@@ -150,22 +238,7 @@ describe.skipIf(!E2E_ENABLED)("E2E: Agent Spawn", () => {
   let ctrl: ClaudeCodeController;
 
   afterEach(async () => {
-    if (ctrl) {
-      try {
-        // Force kill any remaining agents
-        const running = (ctrl as any).processes?.runningAgents?.() || [];
-        for (const name of running) {
-          try {
-            await ctrl.killAgent(name);
-          } catch {}
-        }
-        await ctrl.shutdown();
-      } catch {
-        try {
-          await ctrl.team.destroy();
-        } catch {}
-      }
-    }
+    await cleanupCtrl(ctrl);
   });
 
   it(
@@ -189,8 +262,8 @@ describe.skipIf(!E2E_ENABLED)("E2E: Agent Spawn", () => {
       expect(agent.pid).toBeGreaterThan(0);
       expect(agent.isRunning).toBe(true);
 
-      // Wait a bit and verify still alive
-      await sleep(5_000);
+      // Give the process a few seconds to verify it doesn't crash on startup
+      await sleep(3_000);
       expect(agent.isRunning).toBe(true);
     },
     30_000,
@@ -221,7 +294,7 @@ describe.skipIf(!E2E_ENABLED)("E2E: Agent Spawn", () => {
       expect(events).toContain("spawned:evworker");
 
       await ctrl.killAgent("evworker");
-      await sleep(2_000);
+      await waitForAgentExit(ctrl, "evworker");
 
       expect(events).toContain("exited:evworker");
     },
@@ -248,7 +321,7 @@ describe.skipIf(!E2E_ENABLED)("E2E: Agent Spawn", () => {
       expect(agent.isRunning).toBe(true);
 
       await ctrl.killAgent("killme");
-      await sleep(1_000);
+      await waitForAgentExit(ctrl, "killme");
 
       expect(ctrl.isAgentRunning("killme")).toBe(false);
     },
@@ -262,21 +335,7 @@ describe.skipIf(!E2E_ENABLED)("E2E: Ask Round-Trip", () => {
   let ctrl: ClaudeCodeController;
 
   afterEach(async () => {
-    if (ctrl) {
-      try {
-        const running = (ctrl as any).processes?.runningAgents?.() || [];
-        for (const name of running) {
-          try {
-            await ctrl.killAgent(name);
-          } catch {}
-        }
-        await ctrl.shutdown();
-      } catch {
-        try {
-          await ctrl.team.destroy();
-        } catch {}
-      }
-    }
+    await cleanupCtrl(ctrl);
   });
 
   it(
@@ -296,9 +355,8 @@ describe.skipIf(!E2E_ENABLED)("E2E: Ask Round-Trip", () => {
         model: CFG.model,
       });
 
-      // Wait for agent to fully initialize
-      await sleep(CFG.spawnWaitMs);
-
+      // No pre-wait needed — ask() sends the message to the agent's inbox
+      // and waits with its own timeout (askTimeoutMs) for a response.
       try {
         const response = await agent.ask(
           "What is 2+2? Send your answer back to me using the SendMessage tool.",
@@ -399,21 +457,7 @@ describe.skipIf(!E2E_ENABLED)("E2E: REST API", () => {
   let ctrl: ClaudeCodeController;
 
   afterEach(async () => {
-    if (ctrl) {
-      try {
-        const running = (ctrl as any).processes?.runningAgents?.() || [];
-        for (const name of running) {
-          try {
-            await ctrl.killAgent(name);
-          } catch {}
-        }
-        await ctrl.shutdown();
-      } catch {
-        try {
-          await ctrl.team.destroy();
-        } catch {}
-      }
-    }
+    await cleanupCtrl(ctrl);
   });
 
   it(
@@ -781,17 +825,7 @@ describe.skipIf(!E2E_ENABLED)("E2E: Live — Permission Mode", () => {
   let ctrl: ClaudeCodeController;
 
   afterEach(async () => {
-    if (ctrl) {
-      try {
-        const running = (ctrl as any).processes?.runningAgents?.() || [];
-        for (const name of running) {
-          try { await ctrl.killAgent(name); } catch {}
-        }
-        await ctrl.shutdown();
-      } catch {
-        try { await ctrl.team.destroy(); } catch {}
-      }
-    }
+    await cleanupCtrl(ctrl);
   });
 
   it(
@@ -815,7 +849,8 @@ describe.skipIf(!E2E_ENABLED)("E2E: Live — Permission Mode", () => {
         permissionMode: "delegate",
       });
 
-      await sleep(CFG.spawnWaitMs);
+      // No pre-wait needed — the message sits in the inbox until the agent
+      // finishes initializing, then it processes it.
 
       // Ask the agent to use Bash — in delegate mode it should NOT execute directly
       // but instead delegate to a sub-agent or report the restriction
@@ -858,17 +893,7 @@ describe.skipIf(!E2E_ENABLED)("E2E: Live — Plan Mode", () => {
   let ctrl: ClaudeCodeController;
 
   afterEach(async () => {
-    if (ctrl) {
-      try {
-        const running = (ctrl as any).processes?.runningAgents?.() || [];
-        for (const name of running) {
-          try { await ctrl.killAgent(name); } catch {}
-        }
-        await ctrl.shutdown();
-      } catch {
-        try { await ctrl.team.destroy(); } catch {}
-      }
-    }
+    await cleanupCtrl(ctrl);
   });
 
   it(
@@ -893,7 +918,8 @@ describe.skipIf(!E2E_ENABLED)("E2E: Live — Plan Mode", () => {
         permissionMode: "plan",
       });
 
-      await sleep(CFG.spawnWaitMs);
+      // No pre-wait needed — the message sits in the inbox until the agent
+      // finishes initializing, then it processes it.
 
       // Listen for both plan approval requests AND permission requests
       // (the CLI may route plan mode requests as either type)
@@ -958,6 +984,321 @@ describe.skipIf(!E2E_ENABLED)("E2E: Live — Plan Mode", () => {
       }
     },
     180_000,
+  );
+});
+
+// ─── J: Protocol — Shutdown Round-Trip ──────────────────────────────────────
+
+describe.skipIf(!E2E_ENABLED)("E2E: Protocol — Shutdown Round-Trip", () => {
+  let ctrl: ClaudeCodeController;
+
+  afterEach(async () => {
+    await cleanupCtrl(ctrl);
+  });
+
+  it(
+    "shutdown request triggers shutdown_approved event when agent ACKs",
+    async () => {
+      const teamName = `e2e-shutdown-${randomUUID().slice(0, 8)}`;
+      ctrl = new ClaudeCodeController({ teamName, logLevel: "warn", env: agentEnv() });
+      await ctrl.init();
+
+      const requestId = `shutdown-${Date.now()}@fake-agent`;
+
+      // Listen for the shutdown:approved event
+      const eventPromise = waitForEvent<[string, any]>(
+        ctrl,
+        "shutdown:approved",
+        5_000,
+      );
+
+      // Simulate an agent sending shutdown_approved
+      await injectToController(teamName, "fake-agent", {
+        type: "shutdown_approved",
+        requestId,
+        from: "fake-agent",
+        timestamp: new Date().toISOString(),
+      });
+
+      const [agentName, parsed] = await eventPromise;
+      expect(agentName).toBe("fake-agent");
+      expect(parsed.requestId).toBe(requestId);
+    },
+    10_000,
+  );
+
+  it(
+    "sendShutdownRequest writes correctly formatted message to agent inbox",
+    async () => {
+      const teamName = `e2e-shutmsg-${randomUUID().slice(0, 8)}`;
+      ctrl = new ClaudeCodeController({ teamName, logLevel: "warn", env: agentEnv() });
+      await ctrl.init();
+
+      // Register a fake agent so we can read its inbox
+      await ctrl.team.addMember({
+        agentId: `fake-agent@${teamName}`,
+        name: "fake-agent",
+        agentType: "general-purpose",
+        joinedAt: Date.now(),
+        cwd: process.cwd(),
+        tmuxPaneId: "",
+        subscriptions: [],
+      });
+
+      await ctrl.sendShutdownRequest("fake-agent");
+
+      const inbox = await readInbox(teamName, "fake-agent");
+      expect(inbox.length).toBeGreaterThanOrEqual(1);
+      const msg = JSON.parse(inbox[inbox.length - 1].text);
+      expect(msg.type).toBe("shutdown_request");
+      expect(msg.from).toBe("controller");
+      expect(msg.requestId).toContain("@fake-agent");
+      expect(msg.reason).toBeTruthy();
+    },
+    10_000,
+  );
+});
+
+// ─── K: Protocol — Idle Notification Details ───────────────────────────────
+
+describe.skipIf(!E2E_ENABLED)("E2E: Protocol — Idle Notification Details", () => {
+  let ctrl: ClaudeCodeController;
+
+  afterEach(async () => {
+    await cleanupCtrl(ctrl);
+  });
+
+  it(
+    "idle event carries full IdleNotificationMessage details",
+    async () => {
+      const teamName = `e2e-idle-${randomUUID().slice(0, 8)}`;
+      ctrl = new ClaudeCodeController({ teamName, logLevel: "warn", env: agentEnv() });
+      await ctrl.init();
+
+      const eventPromise = waitForEvent<[string, any]>(ctrl, "idle", 5_000);
+
+      await injectToController(teamName, "worker-1", {
+        type: "idle_notification",
+        from: "worker-1",
+        timestamp: new Date().toISOString(),
+        idleReason: "turn_complete",
+        summary: "Finished writing tests",
+        completedTaskId: "42",
+        completedStatus: "completed",
+      });
+
+      const [agentName, details] = await eventPromise;
+      expect(agentName).toBe("worker-1");
+      expect(details.type).toBe("idle_notification");
+      expect(details.idleReason).toBe("turn_complete");
+      expect(details.summary).toBe("Finished writing tests");
+      expect(details.completedTaskId).toBe("42");
+      expect(details.completedStatus).toBe("completed");
+    },
+    10_000,
+  );
+
+  it(
+    "idle event with failure reason",
+    async () => {
+      const teamName = `e2e-idlefail-${randomUUID().slice(0, 8)}`;
+      ctrl = new ClaudeCodeController({ teamName, logLevel: "warn", env: agentEnv() });
+      await ctrl.init();
+
+      const eventPromise = waitForEvent<[string, any]>(ctrl, "idle", 5_000);
+
+      await injectToController(teamName, "worker-err", {
+        type: "idle_notification",
+        from: "worker-err",
+        timestamp: new Date().toISOString(),
+        idleReason: "error",
+        failureReason: "API rate limit exceeded",
+      });
+
+      const [agentName, details] = await eventPromise;
+      expect(agentName).toBe("worker-err");
+      expect(details.failureReason).toBe("API rate limit exceeded");
+    },
+    10_000,
+  );
+});
+
+// ─── L: TeamMember New Fields ──────────────────────────────────────────────
+
+describe.skipIf(!E2E_ENABLED)("E2E: TeamMember New Fields", () => {
+  let ctrl: ClaudeCodeController;
+
+  afterEach(async () => {
+    await cleanupCtrl(ctrl);
+  });
+
+  it(
+    "spawnAgent writes all TeamMember fields to config",
+    async () => {
+      const teamName = `e2e-member-${randomUUID().slice(0, 8)}`;
+      ctrl = new ClaudeCodeController({
+        teamName,
+        logLevel: "warn",
+        env: agentEnv(),
+      });
+      await ctrl.init();
+
+      const agent = await ctrl.spawnAgent({
+        name: "full-worker",
+        type: "general-purpose",
+        model: CFG.model,
+        prompt: "You are a helpful test agent",
+      });
+
+      // Read back team config and verify all fields present
+      const config = await ctrl.team.getConfig();
+      const member = config.members.find((m) => m.name === "full-worker");
+      expect(member).toBeTruthy();
+      expect(member!.agentId).toBe(`full-worker@${teamName}`);
+      expect(member!.agentType).toBe("general-purpose");
+      expect(member!.model).toBe(CFG.model);
+      expect(member!.prompt).toBe("You are a helpful test agent");
+      expect(member!.color).toBeTruthy();
+      expect(member!.backendType).toBe("in-process");
+      expect(member!.planModeRequired).toBe(false);
+      expect(member!.cwd).toBeTruthy();
+      expect(member!.joinedAt).toBeGreaterThan(0);
+    },
+    30_000,
+  );
+});
+
+// ─── M: Broadcast ──────────────────────────────────────────────────────────
+
+describe.skipIf(!E2E_ENABLED)("E2E: Broadcast", () => {
+  let ctrl: ClaudeCodeController;
+
+  afterEach(async () => {
+    await cleanupCtrl(ctrl);
+  });
+
+  it(
+    "broadcast sends message to all registered agents",
+    async () => {
+      const teamName = `e2e-bcast-${randomUUID().slice(0, 8)}`;
+      ctrl = new ClaudeCodeController({ teamName, logLevel: "warn", env: agentEnv() });
+      await ctrl.init();
+
+      // Register two fake agents (no real process needed for inbox testing)
+      for (const name of ["agent-a", "agent-b"]) {
+        await ctrl.team.addMember({
+          agentId: `${name}@${teamName}`,
+          name,
+          agentType: "general-purpose",
+          joinedAt: Date.now(),
+          cwd: process.cwd(),
+          tmuxPaneId: "",
+          subscriptions: [],
+        });
+      }
+
+      await ctrl.broadcast("Hello everyone!", "greeting");
+
+      // Both agents should have the message
+      for (const name of ["agent-a", "agent-b"]) {
+        const inbox = await readInbox(teamName, name);
+        expect(inbox.length).toBeGreaterThanOrEqual(1);
+        const last = inbox[inbox.length - 1];
+        expect(last.text).toBe("Hello everyone!");
+        expect(last.from).toBe("controller");
+        expect(last.summary).toBe("greeting");
+      }
+    },
+    10_000,
+  );
+});
+
+// ─── N: Task Assignment Notification ──────────────────────────────────────
+
+describe.skipIf(!E2E_ENABLED)("E2E: Task Assignment", () => {
+  let ctrl: ClaudeCodeController;
+
+  afterEach(async () => {
+    await cleanupCtrl(ctrl);
+  });
+
+  it(
+    "createTask with owner sends task_assignment to agent inbox",
+    async () => {
+      const teamName = `e2e-taskassign-${randomUUID().slice(0, 8)}`;
+      ctrl = new ClaudeCodeController({ teamName, logLevel: "warn", env: agentEnv() });
+      await ctrl.init();
+
+      // Register a fake agent
+      await ctrl.team.addMember({
+        agentId: `worker@${teamName}`,
+        name: "worker",
+        agentType: "general-purpose",
+        joinedAt: Date.now(),
+        cwd: process.cwd(),
+        tmuxPaneId: "",
+        subscriptions: [],
+      });
+
+      const taskId = await ctrl.createTask({
+        subject: "Fix the bug",
+        description: "There is a null pointer exception in line 42",
+        owner: "worker",
+      });
+
+      expect(taskId).toBe("1");
+
+      // Verify task_assignment message was sent
+      const inbox = await readInbox(teamName, "worker");
+      expect(inbox.length).toBeGreaterThanOrEqual(1);
+      const msg = JSON.parse(inbox[inbox.length - 1].text);
+      expect(msg.type).toBe("task_assignment");
+      expect(msg.taskId).toBe("1");
+      expect(msg.subject).toBe("Fix the bug");
+      expect(msg.description).toBe("There is a null pointer exception in line 42");
+      expect(msg.assignedBy).toBe("controller");
+    },
+    10_000,
+  );
+
+  it(
+    "assignTask updates owner and notifies agent",
+    async () => {
+      const teamName = `e2e-reassign-${randomUUID().slice(0, 8)}`;
+      ctrl = new ClaudeCodeController({ teamName, logLevel: "warn", env: agentEnv() });
+      await ctrl.init();
+
+      await ctrl.team.addMember({
+        agentId: `worker-2@${teamName}`,
+        name: "worker-2",
+        agentType: "general-purpose",
+        joinedAt: Date.now(),
+        cwd: process.cwd(),
+        tmuxPaneId: "",
+        subscriptions: [],
+      });
+
+      // Create unassigned task
+      const taskId = await ctrl.createTask({
+        subject: "Implement feature X",
+        description: "Add the X feature",
+      });
+
+      // Assign it
+      await ctrl.assignTask(taskId, "worker-2");
+
+      // Verify task updated
+      const task = await ctrl.tasks.get(taskId);
+      expect(task.owner).toBe("worker-2");
+
+      // Verify assignment message
+      const inbox = await readInbox(teamName, "worker-2");
+      const msg = JSON.parse(inbox[inbox.length - 1].text);
+      expect(msg.type).toBe("task_assignment");
+      expect(msg.taskId).toBe(taskId);
+      expect(msg.assignedBy).toBe("controller");
+    },
+    10_000,
   );
 });
 

@@ -130,6 +130,7 @@ else:
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
+        CLAUDECODE: "1",
         CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1",
         ...opts.env,
       },

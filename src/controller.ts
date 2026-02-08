@@ -26,6 +26,9 @@ const PROTOCOL_ONLY_TYPES = new Set([
   "shutdown_approved",
   "plan_approval_response",
   "permission_response",
+  "task_completed",
+  "sandbox_permission_request",
+  "sandbox_permission_response",
 ]);
 
 const AGENT_COLORS = [
@@ -165,6 +168,10 @@ export class ClaudeCodeController
       name: opts.name,
       agentType: opts.type || "general-purpose",
       model: opts.model,
+      prompt: opts.prompt,
+      color,
+      planModeRequired: false,
+      backendType: "in-process",
       joinedAt: Date.now(),
       tmuxPaneId: "",
       cwd,
@@ -489,7 +496,7 @@ export class ClaudeCodeController
 
       switch (parsed.type) {
         case "idle_notification":
-          this.emit("idle", raw.from);
+          this.emit("idle", raw.from, parsed);
           break;
         case "shutdown_approved":
           this.log.info(
@@ -508,6 +515,9 @@ export class ClaudeCodeController
             `Permission request from "${raw.from}": ${parsed.toolName} (requestId=${parsed.requestId})`
           );
           this.emit("permission:request", raw.from, parsed);
+          break;
+        case "task_completed":
+          this.emit("message", raw.from, raw);
           break;
         case "plain_text":
           this.emit("message", raw.from, raw);

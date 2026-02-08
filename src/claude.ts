@@ -209,7 +209,7 @@ function waitForReady(
     }, timeoutMs);
 
     // Resolve early on idle or message — agent is confirmed responsive
-    const onReady = (name: string) => {
+    const onReady = (name: string, ..._rest: any[]) => {
       if (name === agentName && !settled) {
         settled = true;
         cleanup();
@@ -480,7 +480,7 @@ export class Agent extends EventEmitter<AgentEvents> {
     const onMessage = (name: string, msg: InboxMessage) => {
       if (name === agentName) this.emit("message", msg.text);
     };
-    const onIdle = (name: string) => {
+    const onIdle = (name: string, _details: any) => {
       if (name === agentName) this.emit("idle");
     };
     const onPermission = (name: string, parsed: PermissionRequestMessage) => {
