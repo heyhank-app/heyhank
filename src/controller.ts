@@ -570,8 +570,8 @@ export class ClaudeCodeController
       }
     }
 
-    // Inject statusLine capture if we have an agent name
-    if (agentName && !settings.statusLine) {
+    // Always inject/update statusLine capture for the current team+agent
+    if (agentName) {
       const logPath = statusLineLogPath(this.teamName, agentName);
       const statusLineSettings = buildStatusLineSettings(logPath);
       settings = { ...settings, ...statusLineSettings };
