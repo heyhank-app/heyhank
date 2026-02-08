@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/The-Vibe-Company/claude-code-controller/compare/claude-code-controller-v0.6.0...claude-code-controller-v0.6.1) (2026-02-08)
+
+
+### Bug Fixes
+
+* always update statusLine settings on agent spawn ([#21](https://github.com/The-Vibe-Company/claude-code-controller/issues/21)) ([71c343c](https://github.com/The-Vibe-Company/claude-code-controller/commit/71c343cfd29fff3204ad0cc2986ff000d1be5adc))
+
 ## [0.6.0](https://github.com/The-Vibe-Company/claude-code-controller/compare/claude-code-controller-v0.5.1...claude-code-controller-v0.6.0) (2026-02-08)
 
 
