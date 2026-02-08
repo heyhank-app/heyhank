@@ -20,21 +20,32 @@ async function get(path: string) {
 }
 
 export const api = {
-  initSession: (opts?: { teamName?: string; cwd?: string; env?: Record<string, string> }) =>
-    post("/session/init", opts),
+  initSession: (opts?: {
+    teamName?: string;
+    cwd?: string;
+    apiKey?: string;
+    baseUrl?: string;
+    env?: Record<string, string>;
+  }) => post("/session/init", opts),
   shutdownSession: () => post("/session/shutdown"),
   getStatus: () => get("/session/status"),
 
-  spawnAgent: (opts: { name: string; type?: string; model?: string; cwd?: string; env?: Record<string, string> }) =>
-    post("/agents/spawn", opts),
+  spawnAgent: (opts: {
+    name: string;
+    type?: string;
+    model?: string;
+    cwd?: string;
+    permissions?: string;
+    apiKey?: string;
+    baseUrl?: string;
+    env?: Record<string, string>;
+  }) => post("/agents/spawn", opts),
   sendMessage: (agent: string, message: string, summary?: string) =>
     post(`/agents/${encodeURIComponent(agent)}/send`, { message, summary }),
   killAgent: (agent: string) =>
     post(`/agents/${encodeURIComponent(agent)}/kill`),
   shutdownAgent: (agent: string) =>
     post(`/agents/${encodeURIComponent(agent)}/shutdown`),
-  approvePlan: (agent: string, requestId: string, approve: boolean, feedback?: string) =>
-    post(`/agents/${encodeURIComponent(agent)}/approve-plan`, { requestId, approve, feedback }),
-  approvePermission: (agent: string, requestId: string, approve: boolean) =>
-    post(`/agents/${encodeURIComponent(agent)}/approve-permission`, { requestId, approve }),
+  approve: (agent: string, requestId: string, type: "plan" | "permission", approve: boolean, feedback?: string) =>
+    post(`/agents/${encodeURIComponent(agent)}/approve`, { requestId, type, approve, feedback }),
 };

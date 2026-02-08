@@ -1,13 +1,14 @@
 import { Hono } from "hono";
 import { ClaudeCodeController } from "../controller.js";
+import { claude } from "../claude.js";
 import { ActionTracker } from "./action-tracker.js";
 import type {
+  AskBody,
   InitSessionBody,
   SpawnAgentBody,
   SendMessageBody,
   BroadcastBody,
-  ApprovePlanBody,
-  ApprovePermissionBody,
+  ApproveBody,
   CreateTaskBody,
   UpdateTaskBody,
   AssignTaskBody,
@@ -80,6 +81,34 @@ export function buildRoutes(state: ApiState) {
     });
   });
 
+  // ─── Ask (one-liner) ────────────────────────────────────────────────
+
+  api.post("/ask", async (c) => {
+    const body = await c.req.json<AskBody>();
+    if (!body.prompt) {
+      return c.json({ error: "prompt is required" }, 400);
+    }
+
+    try {
+      const response = await claude(body.prompt, {
+        model: body.model,
+        apiKey: body.apiKey,
+        baseUrl: body.baseUrl,
+        timeout: body.timeout,
+        cwd: body.cwd,
+        permissions: body.permissions,
+        env: body.env,
+        logLevel: "warn",
+      });
+
+      return c.json({ response });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Agent failed to respond";
+      return c.json({ error: message }, 500);
+    }
+  });
+
   // ─── Session ─────────────────────────────────────────────────────────
 
   api.get("/session", (c) => {
@@ -114,11 +143,17 @@ export function buildRoutes(state: ApiState) {
         }
       }
 
+      // Merge first-class options into env (first-class wins)
+      const env: Record<string, string> = { ...body.env };
+      if (body.apiKey) env.ANTHROPIC_AUTH_TOKEN = body.apiKey;
+      if (body.baseUrl) env.ANTHROPIC_BASE_URL = body.baseUrl;
+      if (body.timeout != null) env.API_TIMEOUT_MS = String(body.timeout);
+
       const controller = new ClaudeCodeController({
         teamName: body.teamName,
         cwd: body.cwd,
         claudeBinary: body.claudeBinary,
-        env: body.env,
+        env,
         logLevel: body.logLevel ?? "info",
       });
 
@@ -191,31 +226,6 @@ export function buildRoutes(state: ApiState) {
     return c.json({ pending, approvals, unassignedTasks, idleAgents });
   });
 
-  api.get("/actions/approvals", (_c) => {
-    getController(state);
-    return _c.json(state.tracker.getPendingApprovals());
-  });
-
-  api.get("/actions/tasks", async (c) => {
-    const ctrl = getController(state);
-    const tasks = await ctrl.tasks.list();
-    const unassigned = tasks
-      .filter((t) => !t.owner && t.status !== "completed")
-      .map((t) => ({
-        id: t.id,
-        subject: t.subject,
-        description: t.description,
-        status: t.status,
-        action: `POST /tasks/${t.id}/assign`,
-      }));
-    return c.json(unassigned);
-  });
-
-  api.get("/actions/idle-agents", (_c) => {
-    getController(state);
-    return _c.json(state.tracker.getIdleAgents());
-  });
-
   // ─── Agents ──────────────────────────────────────────────────────────
 
   api.get("/agents", async (c) => {
@@ -243,13 +253,34 @@ export function buildRoutes(state: ApiState) {
     const agentType = body.type || "general-purpose";
     state.tracker.registerAgentType(body.name, agentType);
 
+    // Merge first-class options into env
+    const agentEnv: Record<string, string> = { ...body.env };
+    if (body.apiKey) agentEnv.ANTHROPIC_AUTH_TOKEN = body.apiKey;
+    if (body.baseUrl) agentEnv.ANTHROPIC_BASE_URL = body.baseUrl;
+    if (body.timeout != null) agentEnv.API_TIMEOUT_MS = String(body.timeout);
+
+    // Resolve permissions: preset string or raw tool array
+    const permissionsArray = Array.isArray(body.permissions)
+      ? body.permissions
+      : undefined;
+    const PRESET_MAP: Record<string, string> = {
+      edit: "acceptEdits",
+      plan: "plan",
+      ask: "default",
+    };
+    const permissionMode =
+      typeof body.permissions === "string" && !Array.isArray(body.permissions)
+        ? (PRESET_MAP[body.permissions] as any)
+        : undefined;
+
     const handle = await ctrl.spawnAgent({
       name: body.name,
       type: body.type,
       model: body.model,
       cwd: body.cwd,
-      permissions: body.permissions,
-      env: body.env,
+      permissions: permissionsArray,
+      permissionMode,
+      env: Object.keys(agentEnv).length > 0 ? agentEnv : undefined,
     });
 
     return c.json(
@@ -307,37 +338,23 @@ export function buildRoutes(state: ApiState) {
     return c.json({ ok: true });
   });
 
-  api.post("/agents/:name/approve-plan", async (c) => {
+  api.post("/agents/:name/approve", async (c) => {
     const ctrl = getController(state);
     const name = c.req.param("name");
     validateName(name, "name");
-    const body = await c.req.json<ApprovePlanBody>();
+    const body = await c.req.json<ApproveBody>();
     if (!body.requestId) {
       return c.json({ error: "requestId is required" }, 400);
     }
-    await ctrl.sendPlanApproval(
-      name,
-      body.requestId,
-      body.approve ?? true,
-      body.feedback
-    );
-    state.tracker.resolveApproval(body.requestId);
-    return c.json({ ok: true });
-  });
+    if (!body.type || !["plan", "permission"].includes(body.type)) {
+      return c.json({ error: 'type must be "plan" or "permission"' }, 400);
+    }
 
-  api.post("/agents/:name/approve-permission", async (c) => {
-    const ctrl = getController(state);
-    const name = c.req.param("name");
-    validateName(name, "name");
-    const body = await c.req.json<ApprovePermissionBody>();
-    if (!body.requestId) {
-      return c.json({ error: "requestId is required" }, 400);
+    if (body.type === "plan") {
+      await ctrl.sendPlanApproval(name, body.requestId, body.approve ?? true, body.feedback);
+    } else {
+      await ctrl.sendPermissionResponse(name, body.requestId, body.approve ?? true);
     }
-    await ctrl.sendPermissionResponse(
-      name,
-      body.requestId,
-      body.approve ?? true
-    );
     state.tracker.resolveApproval(body.requestId);
     return c.json({ ok: true });
   });

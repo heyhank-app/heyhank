@@ -13,16 +13,13 @@ export function ApprovalBanner({ approval }: { approval: Approval }) {
   async function handleAction(approve: boolean) {
     setLoading(true);
     try {
-      if (isPlan) {
-        await api.approvePlan(
-          approval.agent,
-          approval.id,
-          approve,
-          approve ? undefined : feedback || undefined
-        );
-      } else {
-        await api.approvePermission(approval.agent, approval.id, approve);
-      }
+      await api.approve(
+        approval.agent,
+        approval.id,
+        approval.type,
+        approve,
+        isPlan && !approve ? feedback || undefined : undefined,
+      );
       removeApproval(approval.id);
     } catch (e: any) {
       alert(e.message);

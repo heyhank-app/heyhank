@@ -49,7 +49,7 @@ export class ActionTracker {
         requestId: parsed.requestId,
         timestamp: parsed.timestamp,
         planContent: parsed.planContent,
-        action: `POST /agents/${agent}/approve-plan`,
+        action: `POST /agents/${agent}/approve`,
       });
     };
 
@@ -61,7 +61,7 @@ export class ActionTracker {
         timestamp: parsed.timestamp,
         toolName: parsed.toolName,
         description: parsed.description,
-        action: `POST /agents/${agent}/approve-permission`,
+        action: `POST /agents/${agent}/approve`,
       });
     };
 

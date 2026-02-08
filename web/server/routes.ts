@@ -14,6 +14,8 @@ export function createRoutes(bridge: ControllerBridge) {
       teamName: body.teamName,
       cwd: body.cwd,
       claudeBinary: body.claudeBinary,
+      apiKey: body.apiKey,
+      baseUrl: body.baseUrl,
       env: body.env,
     });
     return c.json(session);
@@ -41,6 +43,9 @@ export function createRoutes(bridge: ControllerBridge) {
       type: body.type,
       model: body.model,
       cwd: body.cwd,
+      permissions: body.permissions,
+      apiKey: body.apiKey,
+      baseUrl: body.baseUrl,
       env: body.env,
     });
     return c.json(agent);
@@ -81,24 +86,20 @@ export function createRoutes(bridge: ControllerBridge) {
     return c.json({ ok: true });
   });
 
-  api.post("/agents/:name/approve-plan", async (c) => {
+  api.post("/agents/:name/approve", async (c) => {
     const name = c.req.param("name");
     const body = await c.req.json();
     if (!body.requestId) return c.json({ error: "requestId is required" }, 400);
+    if (!body.type || !["plan", "permission"].includes(body.type)) {
+      return c.json({ error: 'type must be "plan" or "permission"' }, 400);
+    }
 
     const ctrl = bridge.getController();
-    await ctrl.sendPlanApproval(name, body.requestId, body.approve ?? true, body.feedback);
-    bridge.removeApproval(body.requestId);
-    return c.json({ ok: true });
-  });
-
-  api.post("/agents/:name/approve-permission", async (c) => {
-    const name = c.req.param("name");
-    const body = await c.req.json();
-    if (!body.requestId) return c.json({ error: "requestId is required" }, 400);
-
-    const ctrl = bridge.getController();
-    await ctrl.sendPermissionResponse(name, body.requestId, body.approve ?? true);
+    if (body.type === "plan") {
+      await ctrl.sendPlanApproval(name, body.requestId, body.approve ?? true, body.feedback);
+    } else {
+      await ctrl.sendPermissionResponse(name, body.requestId, body.approve ?? true);
+    }
     bridge.removeApproval(body.requestId);
     return c.json({ ok: true });
   });

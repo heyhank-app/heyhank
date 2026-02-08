@@ -3,28 +3,17 @@ import { api } from "../api.js";
 
 const AGENT_TYPES = ["general-purpose", "Bash", "Explore", "Plan"];
 const MODELS = ["sonnet", "opus", "haiku"];
+const PERMISSIONS = ["full", "edit", "plan", "ask"];
 
 export function SpawnDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [type, setType] = useState("general-purpose");
   const [model, setModel] = useState("sonnet");
-  const [envPairs, setEnvPairs] = useState<{ key: string; value: string }[]>([]);
+  const [permissions, setPermissions] = useState("full");
+  const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  function addEnvPair() {
-    setEnvPairs([...envPairs, { key: "", value: "" }]);
-  }
-
-  function removeEnvPair(i: number) {
-    setEnvPairs(envPairs.filter((_, idx) => idx !== i));
-  }
-
-  function updateEnvPair(i: number, field: "key" | "value", val: string) {
-    const next = [...envPairs];
-    next[i] = { ...next[i], [field]: val };
-    setEnvPairs(next);
-  }
 
   async function handleSpawn() {
     if (!name.trim()) {
@@ -34,17 +23,14 @@ export function SpawnDialog({ onClose }: { onClose: () => void }) {
     setLoading(true);
     setError("");
 
-    const env: Record<string, string> = {};
-    for (const pair of envPairs) {
-      if (pair.key.trim()) env[pair.key.trim()] = pair.value;
-    }
-
     try {
       await api.spawnAgent({
         name: name.trim(),
         type,
         model,
-        env: Object.keys(env).length > 0 ? env : undefined,
+        permissions,
+        apiKey: apiKey || undefined,
+        baseUrl: baseUrl || undefined,
       });
       onClose();
     } catch (e: any) {
@@ -91,7 +77,7 @@ export function SpawnDialog({ onClose }: { onClose: () => void }) {
             />
           </div>
 
-          {/* Type + Model row */}
+          {/* Type + Model + Permissions row */}
           <div className="flex gap-4">
             <div className="flex-1">
               <label className="block text-xs font-medium text-gray-400 mb-1.5">Type</label>
@@ -121,52 +107,39 @@ export function SpawnDialog({ onClose }: { onClose: () => void }) {
                 ))}
               </select>
             </div>
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-gray-400 mb-1.5">Permissions</label>
+              <select
+                value={permissions}
+                onChange={(e) => setPermissions(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-sm bg-gray-800/60 border border-gray-700/60 rounded-lg focus:outline-none focus:border-blue-500/70 focus:ring-1 focus:ring-blue-500/30 text-gray-100 transition-all cursor-pointer"
+              >
+                {PERMISSIONS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          {/* Environment Variables */}
-          <div className="rounded-xl bg-gray-800/30 border border-gray-700/40 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <label className="text-xs font-medium text-gray-400">Environment Variables</label>
-              <button
-                type="button"
-                onClick={addEnvPair}
-                className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
-              >
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
-                  <path d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z" />
-                </svg>
-                Add
-              </button>
-            </div>
-            {envPairs.length === 0 && (
-              <p className="text-xs text-gray-600 italic">No environment variables configured</p>
-            )}
-            {envPairs.map((pair, i) => (
-              <div key={i} className="flex gap-2 mb-2">
-                <input
-                  type="text"
-                  value={pair.key}
-                  onChange={(e) => updateEnvPair(i, "key", e.target.value)}
-                  placeholder="KEY"
-                  className="flex-1 px-2.5 py-1.5 text-xs bg-gray-900/60 border border-gray-700/50 rounded-md font-mono text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500/50 transition-all"
-                />
-                <input
-                  type="text"
-                  value={pair.value}
-                  onChange={(e) => updateEnvPair(i, "value", e.target.value)}
-                  placeholder="value"
-                  className="flex-[2] px-2.5 py-1.5 text-xs bg-gray-900/60 border border-gray-700/50 rounded-md font-mono text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500/50 transition-all"
-                />
-                <button
-                  onClick={() => removeEnvPair(i)}
-                  className="w-7 h-7 rounded-md flex items-center justify-center text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
-                    <path d="M18 6L6 18M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            ))}
+          {/* API Key + Base URL */}
+          <div className="rounded-xl bg-gray-800/30 border border-gray-700/40 p-4 space-y-3">
+            <label className="text-xs font-medium text-gray-400">API Configuration <span className="text-gray-600">(optional, inherits from session)</span></label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="API Key (override session key)"
+              className="w-full px-2.5 py-1.5 text-xs bg-gray-900/60 border border-gray-700/50 rounded-md font-mono text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500/50 transition-all"
+            />
+            <input
+              type="text"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder="Base URL (override session URL)"
+              className="w-full px-2.5 py-1.5 text-xs bg-gray-900/60 border border-gray-700/50 rounded-md font-mono text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500/50 transition-all"
+            />
           </div>
 
           {error && (

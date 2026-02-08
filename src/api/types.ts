@@ -1,11 +1,37 @@
 import type { AgentType, LogLevel, TaskStatus } from "../types.js";
+import type { PermissionPreset } from "../claude.js";
 
 // ─── Request Bodies ──────────────────────────────────────────────────────────
+
+export interface AskBody {
+  /** The prompt to send to the agent. */
+  prompt: string;
+  /** Model to use. */
+  model?: string;
+  /** Anthropic API key. Maps to ANTHROPIC_AUTH_TOKEN. */
+  apiKey?: string;
+  /** API base URL. Maps to ANTHROPIC_BASE_URL. */
+  baseUrl?: string;
+  /** Request timeout in ms. Maps to API_TIMEOUT_MS. */
+  timeout?: number;
+  /** Working directory. */
+  cwd?: string;
+  /** Permission preset. Default: "full". */
+  permissions?: PermissionPreset;
+  /** Additional env vars. */
+  env?: Record<string, string>;
+}
 
 export interface InitSessionBody {
   teamName?: string;
   cwd?: string;
   claudeBinary?: string;
+  /** Anthropic API key. Maps to ANTHROPIC_AUTH_TOKEN. */
+  apiKey?: string;
+  /** API base URL. Maps to ANTHROPIC_BASE_URL. */
+  baseUrl?: string;
+  /** Request timeout in ms. Maps to API_TIMEOUT_MS. */
+  timeout?: number;
   env?: Record<string, string>;
   logLevel?: LogLevel;
 }
@@ -15,7 +41,14 @@ export interface SpawnAgentBody {
   type?: AgentType;
   model?: string;
   cwd?: string;
-  permissions?: string[];
+  /** Permission preset or raw tool list. */
+  permissions?: PermissionPreset | string[];
+  /** Anthropic API key. Maps to ANTHROPIC_AUTH_TOKEN. */
+  apiKey?: string;
+  /** API base URL. Maps to ANTHROPIC_BASE_URL. */
+  baseUrl?: string;
+  /** Request timeout in ms. Maps to API_TIMEOUT_MS. */
+  timeout?: number;
   env?: Record<string, string>;
 }
 
@@ -29,15 +62,11 @@ export interface BroadcastBody {
   summary?: string;
 }
 
-export interface ApprovePlanBody {
+export interface ApproveBody {
   requestId: string;
+  type: "plan" | "permission";
   approve?: boolean; // defaults to true
-  feedback?: string;
-}
-
-export interface ApprovePermissionBody {
-  requestId: string;
-  approve?: boolean; // defaults to true
+  feedback?: string; // plan approvals only
 }
 
 export interface CreateTaskBody {

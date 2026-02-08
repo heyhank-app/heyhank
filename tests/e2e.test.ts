@@ -6,6 +6,7 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { ClaudeCodeController } from "../src/controller.js";
+import { claude } from "../src/claude.js";
 import { writeInbox, readInbox } from "../src/inbox.js";
 import { createApi } from "../src/api/index.js";
 import type { PermissionRequestMessage, PlanApprovalRequestMessage } from "../src/types.js";
@@ -615,10 +616,10 @@ describe.skipIf(!E2E_ENABLED)("E2E: Protocol — Permission Handling", () => {
       expect(perm.toolName).toBe("Bash");
 
       // Approve via REST API
-      const approveRes = await app.request("/agents/fake-agent/approve-permission", {
+      const approveRes = await app.request("/agents/fake-agent/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId, approve: true }),
+        body: JSON.stringify({ requestId, type: "permission", approve: true }),
       });
       expect(approveRes.status).toBe(200);
 
@@ -757,10 +758,10 @@ describe.skipIf(!E2E_ENABLED)("E2E: Protocol — Plan Approval", () => {
       expect(plan.planContent).toContain("Step 1");
 
       // Approve via REST API
-      const approveRes = await app.request("/agents/fake-planner/approve-plan", {
+      const approveRes = await app.request("/agents/fake-planner/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId, approve: true, feedback: "Go ahead" }),
+        body: JSON.stringify({ requestId, type: "plan", approve: true, feedback: "Go ahead" }),
       });
       expect(approveRes.status).toBe(200);
 
@@ -957,5 +958,102 @@ describe.skipIf(!E2E_ENABLED)("E2E: Live — Plan Mode", () => {
       }
     },
     180_000,
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Simplified API (claude.agent, claude.session, POST /ask)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe.skipIf(!E2E_ENABLED)("Simplified API: claude.agent()", () => {
+  it(
+    "creates a persistent agent and handles ask()",
+    async () => {
+      const agent = await claude.agent({
+        model: CFG.model,
+        apiKey: CFG.authToken,
+        baseUrl: CFG.baseUrl,
+        timeout: Number(CFG.apiTimeout),
+        logLevel: "info",
+      });
+
+      console.log(`[E2E] Simplified agent ready (pid=${agent.pid})`);
+      expect(agent.isRunning).toBe(true);
+
+      const response = await agent.ask("What is 2+2? Reply with just the number.", {
+        timeout: CFG.askTimeoutMs,
+      });
+      console.log(`[E2E] Simplified agent response: ${response.slice(0, 200)}`);
+      expect(response).toBeTruthy();
+
+      await agent.close();
+      expect(agent.isRunning).toBe(false);
+    },
+    300_000,
+  );
+});
+
+describe.skipIf(!E2E_ENABLED)("Simplified API: claude.session()", () => {
+  it(
+    "creates a session with multiple agents",
+    async () => {
+      const session = await claude.session({
+        model: CFG.model,
+        apiKey: CFG.authToken,
+        baseUrl: CFG.baseUrl,
+        timeout: Number(CFG.apiTimeout),
+        logLevel: "info",
+      });
+
+      const agent1 = await session.agent("worker-1");
+      const agent2 = await session.agent("worker-2");
+
+      console.log(`[E2E] Session agents ready: worker-1 (pid=${agent1.pid}), worker-2 (pid=${agent2.pid})`);
+      expect(agent1.isRunning).toBe(true);
+      expect(agent2.isRunning).toBe(true);
+
+      const [r1, r2] = await Promise.all([
+        agent1.ask("What is 10+10? Reply with just the number.", {
+          timeout: CFG.askTimeoutMs,
+        }),
+        agent2.ask("What is 5*5? Reply with just the number.", {
+          timeout: CFG.askTimeoutMs,
+        }),
+      ]);
+
+      console.log(`[E2E] worker-1 response: ${r1.slice(0, 200)}`);
+      console.log(`[E2E] worker-2 response: ${r2.slice(0, 200)}`);
+      expect(r1).toBeTruthy();
+      expect(r2).toBeTruthy();
+
+      await session.close();
+    },
+    600_000,
+  );
+});
+
+describe.skipIf(!E2E_ENABLED)("Simplified API: POST /ask", () => {
+  it(
+    "returns a response from the /ask endpoint",
+    async () => {
+      const app = createApi();
+      const res = await app.request("/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: "What is 3+3? Reply with just the number.",
+          model: CFG.model,
+          apiKey: CFG.authToken,
+          baseUrl: CFG.baseUrl,
+          timeout: Number(CFG.apiTimeout),
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      console.log(`[E2E] POST /ask response: ${JSON.stringify(data).slice(0, 200)}`);
+      expect(data.response).toBeTruthy();
+    },
+    600_000,
   );
 });

@@ -79,12 +79,12 @@ export { ActionTracker } from "./action-tracker.js";
 
 export type {
   CreateApiOptions,
+  AskBody,
   InitSessionBody,
   SpawnAgentBody,
   SendMessageBody,
   BroadcastBody,
-  ApprovePlanBody,
-  ApprovePermissionBody,
+  ApproveBody,
   CreateTaskBody,
   UpdateTaskBody,
   AssignTaskBody,

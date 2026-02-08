@@ -202,14 +202,15 @@ describe("createApi (pre-initialized controller)", () => {
     expect(res.status).toBe(400);
   });
 
-  // ─── Plan Approval ───────────────────────────────────────────────────
+  // ─── Unified Approval ───────────────────────────────────────────────
 
-  it("POST /agents/:name/approve-plan sends approval", async () => {
-    const res = await app.request("/agents/coder/approve-plan", {
+  it("POST /agents/:name/approve sends plan approval", async () => {
+    const res = await app.request("/agents/coder/approve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         requestId: "plan-abc",
+        type: "plan",
         approve: true,
         feedback: "LGTM",
       }),
@@ -224,20 +225,29 @@ describe("createApi (pre-initialized controller)", () => {
     expect(parsed.feedback).toBe("LGTM");
   });
 
-  it("POST /agents/:name/approve-plan returns 400 without requestId", async () => {
-    const res = await app.request("/agents/coder/approve-plan", {
+  it("POST /agents/:name/approve returns 400 without requestId", async () => {
+    const res = await app.request("/agents/coder/approve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ approve: true }),
+      body: JSON.stringify({ type: "plan", approve: true }),
     });
     expect(res.status).toBe(400);
   });
 
-  it("POST /agents/:name/approve-plan defaults approve to true", async () => {
-    const res = await app.request("/agents/coder/approve-plan", {
+  it("POST /agents/:name/approve returns 400 without type", async () => {
+    const res = await app.request("/agents/coder/approve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ requestId: "plan-xyz" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /agents/:name/approve defaults approve to true for plans", async () => {
+    const res = await app.request("/agents/coder/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId: "plan-xyz", type: "plan" }),
     });
     expect(res.status).toBe(200);
 
@@ -246,13 +256,11 @@ describe("createApi (pre-initialized controller)", () => {
     expect(parsed.approved).toBe(true);
   });
 
-  // ─── Permission Approval ─────────────────────────────────────────────
-
-  it("POST /agents/:name/approve-permission sends response", async () => {
-    const res = await app.request("/agents/worker1/approve-permission", {
+  it("POST /agents/:name/approve sends permission response", async () => {
+    const res = await app.request("/agents/worker1/approve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId: "perm-42", approve: false }),
+      body: JSON.stringify({ requestId: "perm-42", type: "permission", approve: false }),
     });
     expect(res.status).toBe(200);
 
@@ -260,15 +268,6 @@ describe("createApi (pre-initialized controller)", () => {
     const parsed = JSON.parse(inbox[0].text);
     expect(parsed.type).toBe("permission_response");
     expect(parsed.approved).toBe(false);
-  });
-
-  it("POST /agents/:name/approve-permission returns 400 without requestId", async () => {
-    const res = await app.request("/agents/worker1/approve-permission", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    expect(res.status).toBe(400);
   });
 
   // ─── Tasks ───────────────────────────────────────────────────────────
@@ -668,7 +667,7 @@ describe("createApi /actions", () => {
     expect(body.approvals[0].agent).toBe("coder");
     expect(body.approvals[0].requestId).toBe("plan-123");
     expect(body.approvals[0].action).toBe(
-      "POST /agents/coder/approve-plan"
+      "POST /agents/coder/approve"
     );
     expect(body.pending).toBe(1);
   });
@@ -697,11 +696,11 @@ describe("createApi /actions", () => {
     expect(body.approvals[0].type).toBe("permission");
     expect(body.approvals[0].toolName).toBe("Write");
     expect(body.approvals[0].action).toBe(
-      "POST /agents/worker1/approve-permission"
+      "POST /agents/worker1/approve"
     );
   });
 
-  it("approve-plan resolves the approval from actions", async () => {
+  it("approve resolves the plan approval from actions", async () => {
     const planMsg = JSON.stringify({
       type: "plan_approval_request",
       requestId: "plan-resolve",
@@ -721,10 +720,10 @@ describe("createApi /actions", () => {
     let body = await res.json();
     expect(body.approvals).toHaveLength(1);
 
-    await app.request("/agents/coder/approve-plan", {
+    await app.request("/agents/coder/approve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId: "plan-resolve", approve: true }),
+      body: JSON.stringify({ requestId: "plan-resolve", type: "plan", approve: true }),
     });
 
     res = await app.request("/actions");
@@ -733,7 +732,7 @@ describe("createApi /actions", () => {
     expect(body.pending).toBe(0);
   });
 
-  it("approve-permission resolves the approval from actions", async () => {
+  it("approve resolves the permission approval from actions", async () => {
     const permMsg = JSON.stringify({
       type: "permission_request",
       requestId: "perm-resolve",
@@ -750,10 +749,10 @@ describe("createApi /actions", () => {
     // @ts-expect-error accessing private
     await ctrl.poller.poll();
 
-    await app.request("/agents/worker1/approve-permission", {
+    await app.request("/agents/worker1/approve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId: "perm-resolve" }),
+      body: JSON.stringify({ requestId: "perm-resolve", type: "permission" }),
     });
 
     const res = await app.request("/actions");
@@ -812,32 +811,6 @@ describe("createApi /actions", () => {
     const res = await app.request("/actions");
     const body = await res.json();
     expect(body.idleAgents).toHaveLength(0);
-  });
-
-  // ─── Sub-routes ──────────────────────────────────────────────────────
-
-  it("GET /actions/approvals returns only approvals", async () => {
-    const res = await app.request("/actions/approvals");
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual([]);
-  });
-
-  it("GET /actions/tasks returns only unassigned tasks", async () => {
-    await ctrl.createTask({ subject: "T", description: "D" });
-
-    const res = await app.request("/actions/tasks");
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toHaveLength(1);
-    expect(body[0].subject).toBe("T");
-  });
-
-  it("GET /actions/idle-agents returns only idle agents", async () => {
-    const res = await app.request("/actions/idle-agents");
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual([]);
   });
 
   // ─── Aggregated pending count ────────────────────────────────────────

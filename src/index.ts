@@ -1,4 +1,17 @@
-// Main API
+// Simplified API (recommended)
+export { claude, Agent, Session } from "./claude.js";
+export type {
+  ClaudeOptions,
+  AskOptions,
+  SessionOptions,
+  SessionAgentOptions,
+  PermissionPreset,
+  PermissionRequestInfo,
+  PlanRequestInfo,
+  AgentEvents,
+} from "./claude.js";
+
+// Full API (advanced usage)
 export { ClaudeCodeController } from "./controller.js";
 export { AgentHandle } from "./agent-handle.js";
 

@@ -4,6 +4,8 @@ import { api } from "../api.js";
 export function InitSession() {
   const [teamName, setTeamName] = useState("");
   const [cwd, setCwd] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -14,6 +16,8 @@ export function InitSession() {
       await api.initSession({
         teamName: teamName || undefined,
         cwd: cwd || undefined,
+        apiKey: apiKey || undefined,
+        baseUrl: baseUrl || undefined,
       });
     } catch (e: any) {
       setError(e.message);
@@ -39,28 +43,55 @@ export function InitSession() {
         <div className="space-y-5">
           <div>
             <label className="block text-xs font-medium text-gray-400 mb-1.5">
-              Team Name <span className="text-gray-600">(optional)</span>
+              API Key <span className="text-gray-600">(optional)</span>
             </label>
             <input
-              type="text"
-              value={teamName}
-              onChange={(e) => setTeamName(e.target.value)}
-              placeholder="my-project"
-              className="w-full px-3.5 py-2.5 text-sm bg-gray-800/60 border border-gray-700/60 rounded-lg focus:outline-none focus:border-blue-500/70 focus:ring-1 focus:ring-blue-500/30 text-gray-100 placeholder-gray-600 transition-all"
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="sk-ant-..."
+              className="w-full px-3.5 py-2.5 text-sm bg-gray-800/60 border border-gray-700/60 rounded-lg focus:outline-none focus:border-blue-500/70 focus:ring-1 focus:ring-blue-500/30 text-gray-100 font-mono placeholder-gray-600 transition-all"
             />
           </div>
 
           <div>
             <label className="block text-xs font-medium text-gray-400 mb-1.5">
-              Working Directory <span className="text-gray-600">(optional)</span>
+              Base URL <span className="text-gray-600">(optional)</span>
             </label>
             <input
               type="text"
-              value={cwd}
-              onChange={(e) => setCwd(e.target.value)}
-              placeholder="/path/to/project"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder="https://api.anthropic.com"
               className="w-full px-3.5 py-2.5 text-sm bg-gray-800/60 border border-gray-700/60 rounded-lg focus:outline-none focus:border-blue-500/70 focus:ring-1 focus:ring-blue-500/30 text-gray-100 font-mono placeholder-gray-600 transition-all"
             />
+          </div>
+
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-gray-400 mb-1.5">
+                Team Name <span className="text-gray-600">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={teamName}
+                onChange={(e) => setTeamName(e.target.value)}
+                placeholder="my-project"
+                className="w-full px-3.5 py-2.5 text-sm bg-gray-800/60 border border-gray-700/60 rounded-lg focus:outline-none focus:border-blue-500/70 focus:ring-1 focus:ring-blue-500/30 text-gray-100 placeholder-gray-600 transition-all"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-gray-400 mb-1.5">
+                Working Directory <span className="text-gray-600">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={cwd}
+                onChange={(e) => setCwd(e.target.value)}
+                placeholder="/path/to/project"
+                className="w-full px-3.5 py-2.5 text-sm bg-gray-800/60 border border-gray-700/60 rounded-lg focus:outline-none focus:border-blue-500/70 focus:ring-1 focus:ring-blue-500/30 text-gray-100 font-mono placeholder-gray-600 transition-all"
+              />
+            </div>
           </div>
 
           {error && (

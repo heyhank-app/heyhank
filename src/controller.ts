@@ -21,6 +21,13 @@ import type {
   LogLevel,
 } from "./types.js";
 
+/** Protocol-only message types handled via events; filtered out of receive()/receiveAny(). */
+const PROTOCOL_ONLY_TYPES = new Set([
+  "shutdown_approved",
+  "plan_approval_response",
+  "permission_response",
+]);
+
 const AGENT_COLORS = [
   "#00FF00",
   "#00BFFF",
@@ -271,11 +278,7 @@ export class ClaudeCodeController
 
       if (fromAgent.length > 0) {
         // Protocol-only messages are handled via events, skip them in receive()
-        const PROTOCOL_TYPES = new Set([
-          "shutdown_approved",
-          "plan_approval_response",
-          "permission_response",
-        ]);
+        const PROTOCOL_TYPES = PROTOCOL_ONLY_TYPES;
 
         // Prefer content messages (plain text or SendMessage from agent)
         const meaningful = fromAgent.filter((m) => {
@@ -320,7 +323,10 @@ export class ClaudeCodeController
       const unread = await readUnread(this.teamName, "controller");
       const meaningful = unread.filter((m) => {
         const parsed = parseMessage(m);
-        return parsed.type !== "idle_notification";
+        return (
+          parsed.type !== "idle_notification" &&
+          !PROTOCOL_ONLY_TYPES.has(parsed.type)
+        );
       });
 
       if (meaningful.length > 0) {

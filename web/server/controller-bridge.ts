@@ -53,6 +53,8 @@ export class ControllerBridge {
     teamName?: string;
     cwd?: string;
     claudeBinary?: string;
+    apiKey?: string;
+    baseUrl?: string;
     env?: Record<string, string>;
   }): Promise<SessionInfo> {
     if (this.controller) {
@@ -63,14 +65,19 @@ export class ControllerBridge {
     this.messages.clear();
     this.pendingApprovals.clear();
 
+    // Merge first-class options into env (first-class wins)
+    const env: Record<string, string> = {
+      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1",
+      ...opts.env,
+    };
+    if (opts.apiKey) env.ANTHROPIC_AUTH_TOKEN = opts.apiKey;
+    if (opts.baseUrl) env.ANTHROPIC_BASE_URL = opts.baseUrl;
+
     this.controller = new ClaudeCodeController({
       teamName: opts.teamName,
       cwd: opts.cwd,
       claudeBinary: opts.claudeBinary,
-      env: {
-        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1",
-        ...opts.env,
-      },
+      env,
       logLevel: "debug",
     });
 
@@ -98,10 +105,34 @@ export class ControllerBridge {
     type?: string;
     model?: string;
     cwd?: string;
+    permissions?: string;
+    apiKey?: string;
+    baseUrl?: string;
     env?: Record<string, string>;
   }): Promise<AgentInfo> {
     const ctrl = this.getController();
-    const handle = await ctrl.spawnAgent(opts);
+
+    // Merge first-class options into env
+    const agentEnv: Record<string, string> = { ...opts.env };
+    if (opts.apiKey) agentEnv.ANTHROPIC_AUTH_TOKEN = opts.apiKey;
+    if (opts.baseUrl) agentEnv.ANTHROPIC_BASE_URL = opts.baseUrl;
+
+    // Resolve permission preset
+    const PRESET_MAP: Record<string, string> = {
+      edit: "acceptEdits",
+      plan: "plan",
+      ask: "default",
+    };
+    const permissionMode = opts.permissions ? (PRESET_MAP[opts.permissions] as any) : undefined;
+
+    const handle = await ctrl.spawnAgent({
+      name: opts.name,
+      type: opts.type,
+      model: opts.model,
+      cwd: opts.cwd,
+      permissionMode,
+      env: Object.keys(agentEnv).length > 0 ? agentEnv : undefined,
+    });
 
     const info: AgentInfo = {
       name: opts.name,
