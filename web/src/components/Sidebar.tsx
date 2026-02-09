@@ -17,6 +17,7 @@ export function Sidebar() {
   const sessionStatus = useStore((s) => s.sessionStatus);
   const removeSession = useStore((s) => s.removeSession);
   const sessionNames = useStore((s) => s.sessionNames);
+  const pendingPermissions = useStore((s) => s.pendingPermissions);
 
   // Poll for SDK sessions on mount
   useEffect(() => {
@@ -153,6 +154,7 @@ export function Sidebar() {
               const isRunning = s.status === "running";
               const isCompacting = s.status === "compacting";
               const isEditing = editingSessionId === s.id;
+              const permCount = pendingPermissions.get(s.id)?.size ?? 0;
 
               return (
                 <div key={s.id} className="relative group">
@@ -173,7 +175,9 @@ export function Sidebar() {
                       <span className="relative flex shrink-0">
                         <span
                           className={`w-2 h-2 rounded-full ${
-                            s.sdkState === "exited"
+                            permCount > 0
+                              ? "bg-cc-warning"
+                              : s.sdkState === "exited"
                               ? "bg-cc-muted opacity-40"
                               : s.isConnected
                               ? isRunning
@@ -184,7 +188,10 @@ export function Sidebar() {
                               : "bg-cc-muted opacity-40"
                           }`}
                         />
-                        {isRunning && s.isConnected && (
+                        {permCount > 0 && (
+                          <span className="absolute inset-0 w-2 h-2 rounded-full bg-cc-warning/40 animate-[pulse-dot_1.5s_ease-in-out_infinite]" />
+                        )}
+                        {permCount === 0 && isRunning && s.isConnected && (
                           <span className="absolute inset-0 w-2 h-2 rounded-full bg-cc-success/40 animate-[pulse-dot_1.5s_ease-in-out_infinite]" />
                         )}
                       </span>
@@ -220,6 +227,11 @@ export function Sidebar() {
                       </p>
                     )}
                   </button>
+                  {permCount > 0 && (
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-cc-warning text-white text-[10px] font-bold leading-none px-1 group-hover:opacity-0 transition-opacity pointer-events-none">
+                      {permCount}
+                    </span>
+                  )}
                   <button
                     onClick={(e) => handleDeleteSession(e, s.id)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-cc-border text-cc-muted hover:text-cc-fg transition-all cursor-pointer"

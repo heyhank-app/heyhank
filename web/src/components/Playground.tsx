@@ -24,6 +24,20 @@ const PERM_BASH = mockPermission({
     command: "git log --oneline -20 && npm run build",
     description: "View recent commits and build the project",
   },
+  permission_suggestions: [
+    {
+      type: "addRules" as const,
+      rules: [{ toolName: "Bash", ruleContent: "git log --oneline -20 && npm run build" }],
+      behavior: "allow" as const,
+      destination: "session" as const,
+    },
+    {
+      type: "addRules" as const,
+      rules: [{ toolName: "Bash", ruleContent: "git log --oneline -20 && npm run build" }],
+      behavior: "allow" as const,
+      destination: "projectSettings" as const,
+    },
+  ],
 });
 
 const PERM_EDIT = mockPermission({
@@ -33,6 +47,14 @@ const PERM_EDIT = mockPermission({
     old_string: 'export function formatDate(d: Date) {\n  return d.toISOString();\n}',
     new_string: 'export function formatDate(d: Date, locale = "en-US") {\n  return d.toLocaleDateString(locale, {\n    year: "numeric",\n    month: "short",\n    day: "numeric",\n  });\n}',
   },
+  permission_suggestions: [
+    {
+      type: "addRules" as const,
+      rules: [{ toolName: "Edit" }],
+      behavior: "allow" as const,
+      destination: "session" as const,
+    },
+  ],
 });
 
 const PERM_WRITE = mockPermission({
@@ -46,6 +68,20 @@ const PERM_WRITE = mockPermission({
 const PERM_READ = mockPermission({
   tool_name: "Read",
   input: { file_path: "/Users/stan/Dev/project/package.json" },
+  permission_suggestions: [
+    {
+      type: "addRules" as const,
+      rules: [{ toolName: "Read" }],
+      behavior: "allow" as const,
+      destination: "session" as const,
+    },
+    {
+      type: "addRules" as const,
+      rules: [{ toolName: "Read" }],
+      behavior: "allow" as const,
+      destination: "userSettings" as const,
+    },
+  ],
 });
 
 const PERM_GLOB = mockPermission({

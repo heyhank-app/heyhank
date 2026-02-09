@@ -4,6 +4,23 @@ import remarkGfm from "remark-gfm";
 import { useStore } from "../store.js";
 import { sendToSession } from "../ws.js";
 import type { PermissionRequest } from "../types.js";
+import type { PermissionUpdate } from "../../server/session-types.js";
+
+/** Human-readable label for a permission suggestion */
+function suggestionLabel(s: PermissionUpdate): string {
+  if (s.type === "setMode") return `Set mode to "${s.mode}"`;
+  const dest = s.destination;
+  const scope = dest === "session" ? "for session" : "always";
+  if (s.type === "addRules" || s.type === "replaceRules") {
+    const rule = s.rules[0];
+    if (rule?.ruleContent) return `Allow "${rule.ruleContent}" ${scope}`;
+    if (rule?.toolName) return `Allow ${rule.toolName} ${scope}`;
+  }
+  if (s.type === "addDirectories") {
+    return `Trust ${s.directories[0] || "directory"} ${scope}`;
+  }
+  return `Allow ${scope}`;
+}
 
 export function PermissionBanner({
   permission,
@@ -15,13 +32,14 @@ export function PermissionBanner({
   const [loading, setLoading] = useState(false);
   const removePermission = useStore((s) => s.removePermission);
 
-  function handleAllow(updatedInput?: Record<string, unknown>) {
+  function handleAllow(updatedInput?: Record<string, unknown>, updatedPermissions?: PermissionUpdate[]) {
     setLoading(true);
     sendToSession(sessionId, {
       type: "permission_response",
       request_id: permission.request_id,
       behavior: "allow",
       updated_input: updatedInput,
+      ...(updatedPermissions?.length ? { updated_permissions: updatedPermissions } : {}),
     });
     removePermission(sessionId, permission.request_id);
   }
@@ -38,6 +56,7 @@ export function PermissionBanner({
   }
 
   const isAskUser = permission.tool_name === "AskUserQuestion";
+  const suggestions = permission.permission_suggestions;
 
   return (
     <div className="px-4 py-3 border-b border-cc-border animate-[fadeSlideIn_0.2s_ease-out]">
@@ -83,7 +102,7 @@ export function PermissionBanner({
 
             {/* Actions - only for non-AskUserQuestion tools */}
             {!isAskUser && (
-              <div className="flex items-center gap-2 mt-3">
+              <div className="flex items-center gap-2 mt-3 flex-wrap">
                 <button
                   onClick={() => handleAllow()}
                   disabled={loading}
@@ -94,6 +113,23 @@ export function PermissionBanner({
                   </svg>
                   Allow
                 </button>
+
+                {/* Permission suggestion buttons — only when CLI provides them */}
+                {suggestions?.map((suggestion, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleAllow(undefined, [suggestion])}
+                    disabled={loading}
+                    title={`${suggestion.type}: ${JSON.stringify(suggestion)}`}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-cc-primary/10 hover:bg-cc-primary/20 text-cc-primary border border-cc-primary/20 disabled:opacity-50 transition-colors cursor-pointer"
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
+                      <path d="M3 8.5l3.5 3.5 6.5-7" />
+                    </svg>
+                    {suggestionLabel(suggestion)}
+                  </button>
+                ))}
+
                 <button
                   onClick={handleDeny}
                   disabled={loading}

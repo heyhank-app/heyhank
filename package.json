@@ -9,5 +9,8 @@
     "start": "cd web && bun run start"
   },
   "author": "The Vibe Company",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "the-vibe-companion": "^0.2.2"
+  }
 }

@@ -368,6 +368,7 @@ export class WsBridge {
         request_id: msg.request_id,
         tool_name: msg.request.tool_name,
         input: msg.request.input,
+        permission_suggestions: msg.request.permission_suggestions as PermissionRequest["permission_suggestions"],
         description: msg.request.description,
         tool_use_id: msg.request.tool_use_id,
         agent_id: msg.request.agent_id,
@@ -472,22 +473,26 @@ export class WsBridge {
 
   private handlePermissionResponse(
     session: Session,
-    msg: { type: "permission_response"; request_id: string; behavior: "allow" | "deny"; updated_input?: Record<string, unknown>; message?: string }
+    msg: { type: "permission_response"; request_id: string; behavior: "allow" | "deny"; updated_input?: Record<string, unknown>; updated_permissions?: unknown[]; message?: string }
   ) {
     // Remove from pending
     const pending = session.pendingPermissions.get(msg.request_id);
     session.pendingPermissions.delete(msg.request_id);
 
     if (msg.behavior === "allow") {
+      const response: Record<string, unknown> = {
+        behavior: "allow",
+        updatedInput: msg.updated_input ?? pending?.input ?? {},
+      };
+      if (msg.updated_permissions?.length) {
+        response.updatedPermissions = msg.updated_permissions;
+      }
       const ndjson = JSON.stringify({
         type: "control_response",
         response: {
           subtype: "success",
           request_id: msg.request_id,
-          response: {
-            behavior: "allow",
-            updatedInput: msg.updated_input ?? pending?.input ?? {},
-          },
+          response,
         },
       });
       this.sendToCLI(session, ndjson);

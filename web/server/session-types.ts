@@ -160,7 +160,7 @@ export type ContentBlock =
 /** Messages the browser sends to the bridge */
 export type BrowserOutgoingMessage =
   | { type: "user_message"; content: string; session_id?: string; images?: { media_type: string; data: string }[] }
-  | { type: "permission_response"; request_id: string; behavior: "allow" | "deny"; updated_input?: Record<string, unknown>; message?: string }
+  | { type: "permission_response"; request_id: string; behavior: "allow" | "deny"; updated_input?: Record<string, unknown>; updated_permissions?: PermissionUpdate[]; message?: string }
   | { type: "interrupt" }
   | { type: "set_model"; model: string }
   | { type: "set_permission_mode"; mode: string };
@@ -205,10 +205,23 @@ export interface SessionState {
 
 // ─── Permission Request ──────────────────────────────────────────────────────
 
+// ─── Permission Rule Types ───────────────────────────────────────────────────
+
+export type PermissionDestination = "userSettings" | "projectSettings" | "localSettings" | "session" | "cliArg";
+
+export type PermissionUpdate =
+  | { type: "addRules"; rules: { toolName: string; ruleContent?: string }[]; behavior: "allow" | "deny" | "ask"; destination: PermissionDestination }
+  | { type: "replaceRules"; rules: { toolName: string; ruleContent?: string }[]; behavior: "allow" | "deny" | "ask"; destination: PermissionDestination }
+  | { type: "removeRules"; rules: { toolName: string; ruleContent?: string }[]; behavior: "allow" | "deny" | "ask"; destination: PermissionDestination }
+  | { type: "setMode"; mode: string; destination: PermissionDestination }
+  | { type: "addDirectories"; directories: string[]; destination: PermissionDestination }
+  | { type: "removeDirectories"; directories: string[]; destination: PermissionDestination };
+
 export interface PermissionRequest {
   request_id: string;
   tool_name: string;
   input: Record<string, unknown>;
+  permission_suggestions?: PermissionUpdate[];
   description?: string;
   tool_use_id: string;
   agent_id?: string;
