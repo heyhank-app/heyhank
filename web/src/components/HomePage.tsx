@@ -236,6 +236,7 @@ export function HomePage() {
         id: `user-${Date.now()}-${++idCounter}`,
         role: "user",
         content: msg,
+        images: images.length > 0 ? images.map((img) => ({ media_type: img.mediaType, data: img.base64 })) : undefined,
         timestamp: Date.now(),
       });
     } catch (e: unknown) {

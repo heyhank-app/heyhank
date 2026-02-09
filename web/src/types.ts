@@ -13,6 +13,7 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   contentBlocks?: ContentBlock[];
+  images?: { media_type: string; data: string }[];
   timestamp: number;
   parentToolUseId?: string | null;
   isStreaming?: boolean;
