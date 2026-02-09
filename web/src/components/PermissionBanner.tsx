@@ -1,4 +1,6 @@
 import { useState } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useStore } from "../store.js";
 import { sendToSession } from "../ws.js";
 import type { PermissionRequest } from "../types.js";
@@ -137,6 +139,9 @@ function ToolInputDisplay({
   }
   if (toolName === "Grep") {
     return <GrepDisplay input={input} />;
+  }
+  if (toolName === "ExitPlanMode") {
+    return <ExitPlanModeDisplay input={input} />;
   }
 
   // Fallback: formatted key-value display
@@ -397,6 +402,42 @@ function GrepDisplay({ input }: { input: Record<string, unknown> }) {
       <div className="text-cc-fg">{pattern}</div>
       {path && <div className="text-cc-muted">{path}</div>}
       {glob && <div className="text-cc-muted">{glob}</div>}
+    </div>
+  );
+}
+
+function ExitPlanModeDisplay({ input }: { input: Record<string, unknown> }) {
+  const plan = typeof input.plan === "string" ? input.plan : "";
+  const allowedPrompts = Array.isArray(input.allowedPrompts) ? input.allowedPrompts : [];
+
+  return (
+    <div className="space-y-2">
+      {plan && (
+        <div className="rounded-lg border border-cc-border overflow-hidden">
+          <div className="px-2.5 py-1.5 bg-cc-code-bg/10 border-b border-cc-border text-[10px] text-cc-muted font-mono-code uppercase tracking-wider">
+            Plan
+          </div>
+          <div className="px-3 py-2.5 max-h-64 overflow-y-auto text-xs text-cc-fg leading-relaxed markdown-body">
+            <Markdown remarkPlugins={[remarkGfm]}>{plan}</Markdown>
+          </div>
+        </div>
+      )}
+      {allowedPrompts.length > 0 && (
+        <div className="space-y-1">
+          <div className="text-[10px] text-cc-muted uppercase tracking-wider">Requested permissions</div>
+          <div className="space-y-1">
+            {allowedPrompts.map((p: Record<string, unknown>, i: number) => (
+              <div key={i} className="flex items-center gap-2 text-[11px] font-mono-code bg-cc-code-bg/30 rounded-lg px-2.5 py-1.5">
+                <span className="text-cc-muted shrink-0">{String(p.tool || "")}</span>
+                <span className="text-cc-fg">{String(p.prompt || "")}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {!plan && allowedPrompts.length === 0 && (
+        <div className="text-xs text-cc-muted">Plan approval requested</div>
+      )}
     </div>
   );
 }

@@ -1,10 +1,18 @@
-import { useEffect } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useStore } from "./store.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { ChatView } from "./components/ChatView.js";
 import { TopBar } from "./components/TopBar.js";
 import { HomePage } from "./components/HomePage.js";
 import { TaskPanel } from "./components/TaskPanel.js";
+import { Playground } from "./components/Playground.js";
+
+function useHash() {
+  return useSyncExternalStore(
+    (cb) => { window.addEventListener("hashchange", cb); return () => window.removeEventListener("hashchange", cb); },
+    () => window.location.hash,
+  );
+}
 
 export default function App() {
   const darkMode = useStore((s) => s.darkMode);
@@ -12,10 +20,15 @@ export default function App() {
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const taskPanelOpen = useStore((s) => s.taskPanelOpen);
   const homeResetKey = useStore((s) => s.homeResetKey);
+  const hash = useHash();
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
   }, [darkMode]);
+
+  if (hash === "#/playground") {
+    return <Playground />;
+  }
 
   return (
     <div className="h-[100dvh] flex font-sans-ui bg-cc-bg text-cc-fg antialiased">
