@@ -5,14 +5,14 @@ import { Composer } from "./Composer.js";
 import { PermissionBanner } from "./PermissionBanner.js";
 
 export function ChatView({ sessionId }: { sessionId: string }) {
-  const pendingPermissions = useStore((s) => s.pendingPermissions);
+  const sessionPerms = useStore((s) => s.pendingPermissions.get(sessionId));
   const connStatus = useStore(
     (s) => s.connectionStatus.get(sessionId) ?? "disconnected"
   );
 
   const perms = useMemo(
-    () => Array.from(pendingPermissions.values()),
-    [pendingPermissions]
+    () => (sessionPerms ? Array.from(sessionPerms.values()) : []),
+    [sessionPerms]
   );
 
   return (

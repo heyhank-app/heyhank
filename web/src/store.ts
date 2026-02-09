@@ -17,8 +17,8 @@ interface AppState {
   streamingStartedAt: Map<string, number>;
   streamingOutputTokens: Map<string, number>;
 
-  // Pending permissions per session (keyed by request_id)
-  pendingPermissions: Map<string, PermissionRequest>;
+  // Pending permissions per session (outer key = sessionId, inner key = request_id)
+  pendingPermissions: Map<string, Map<string, PermissionRequest>>;
 
   // Connection state per session
   connectionStatus: Map<string, "connecting" | "connected" | "disconnected">;
@@ -64,8 +64,8 @@ interface AppState {
   setStreamingStats: (sessionId: string, stats: { startedAt?: number; outputTokens?: number } | null) => void;
 
   // Permission actions
-  addPermission: (perm: PermissionRequest) => void;
-  removePermission: (requestId: string) => void;
+  addPermission: (sessionId: string, perm: PermissionRequest) => void;
+  removePermission: (sessionId: string, requestId: string) => void;
 
   // Task actions
   addTask: (sessionId: string, task: TaskItem) => void;
@@ -175,6 +175,8 @@ export const useStore = create<AppState>((set) => ({
       sessionStatus.delete(sessionId);
       const previousPermissionMode = new Map(s.previousPermissionMode);
       previousPermissionMode.delete(sessionId);
+      const pendingPermissions = new Map(s.pendingPermissions);
+      pendingPermissions.delete(sessionId);
       const sessionTasks = new Map(s.sessionTasks);
       sessionTasks.delete(sessionId);
       const sessionNames = new Map(s.sessionNames);
@@ -190,6 +192,7 @@ export const useStore = create<AppState>((set) => ({
         cliConnected,
         sessionStatus,
         previousPermissionMode,
+        pendingPermissions,
         sessionTasks,
         sessionNames,
         sdkSessions: s.sdkSessions.filter((sdk) => sdk.sessionId !== sessionId),
@@ -253,17 +256,24 @@ export const useStore = create<AppState>((set) => ({
       return { streamingStartedAt, streamingOutputTokens };
     }),
 
-  addPermission: (perm) =>
+  addPermission: (sessionId, perm) =>
     set((s) => {
       const pendingPermissions = new Map(s.pendingPermissions);
-      pendingPermissions.set(perm.request_id, perm);
+      const sessionPerms = new Map(pendingPermissions.get(sessionId) || []);
+      sessionPerms.set(perm.request_id, perm);
+      pendingPermissions.set(sessionId, sessionPerms);
       return { pendingPermissions };
     }),
 
-  removePermission: (requestId) =>
+  removePermission: (sessionId, requestId) =>
     set((s) => {
       const pendingPermissions = new Map(s.pendingPermissions);
-      pendingPermissions.delete(requestId);
+      const sessionPerms = pendingPermissions.get(sessionId);
+      if (sessionPerms) {
+        const updated = new Map(sessionPerms);
+        updated.delete(requestId);
+        pendingPermissions.set(sessionId, updated);
+      }
       return { pendingPermissions };
     }),
 

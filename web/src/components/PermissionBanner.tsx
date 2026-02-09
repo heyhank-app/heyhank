@@ -21,7 +21,7 @@ export function PermissionBanner({
       behavior: "allow",
       updated_input: updatedInput,
     });
-    removePermission(permission.request_id);
+    removePermission(sessionId, permission.request_id);
   }
 
   function handleDeny() {
@@ -32,7 +32,7 @@ export function PermissionBanner({
       behavior: "deny",
       message: "Denied by user",
     });
-    removePermission(permission.request_id);
+    removePermission(sessionId, permission.request_id);
   }
 
   const isAskUser = permission.tool_name === "AskUserQuestion";

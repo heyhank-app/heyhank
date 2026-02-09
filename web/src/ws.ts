@@ -221,7 +221,7 @@ function handleMessage(sessionId: string, event: MessageEvent) {
     }
 
     case "permission_request": {
-      store.addPermission(data.request);
+      store.addPermission(sessionId, data.request);
       // Also extract tasks from permission requests (tool_name + input available)
       const req = data.request;
       if (req.tool_name && req.input) {
@@ -236,7 +236,7 @@ function handleMessage(sessionId: string, event: MessageEvent) {
     }
 
     case "permission_cancelled": {
-      store.removePermission(data.request_id);
+      store.removePermission(sessionId, data.request_id);
       break;
     }
 
