@@ -1,6 +1,8 @@
+import type { SdkSessionInfo } from "./types.js";
+
 const BASE = "/api";
 
-async function post(path: string, body?: object) {
+async function post<T = unknown>(path: string, body?: object): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -13,39 +15,57 @@ async function post(path: string, body?: object) {
   return res.json();
 }
 
-async function get(path: string) {
+async function get<T = unknown>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
   if (!res.ok) throw new Error(res.statusText);
   return res.json();
 }
 
-export const api = {
-  initSession: (opts?: {
-    teamName?: string;
-    cwd?: string;
-    apiKey?: string;
-    baseUrl?: string;
-    env?: Record<string, string>;
-  }) => post("/session/init", opts),
-  shutdownSession: () => post("/session/shutdown"),
-  getStatus: () => get("/session/status"),
+async function del<T = unknown>(path: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || res.statusText);
+  }
+  return res.json();
+}
 
-  spawnAgent: (opts: {
-    name: string;
-    type?: string;
-    model?: string;
-    cwd?: string;
-    permissions?: string;
-    apiKey?: string;
-    baseUrl?: string;
-    env?: Record<string, string>;
-  }) => post("/agents/spawn", opts),
-  sendMessage: (agent: string, message: string, summary?: string) =>
-    post(`/agents/${encodeURIComponent(agent)}/send`, { message, summary }),
-  killAgent: (agent: string) =>
-    post(`/agents/${encodeURIComponent(agent)}/kill`),
-  shutdownAgent: (agent: string) =>
-    post(`/agents/${encodeURIComponent(agent)}/shutdown`),
-  approve: (agent: string, requestId: string, type: "plan" | "permission", approve: boolean, feedback?: string) =>
-    post(`/agents/${encodeURIComponent(agent)}/approve`, { requestId, type, approve, feedback }),
+export interface CreateSessionOpts {
+  model?: string;
+  permissionMode?: string;
+  cwd?: string;
+  claudeBinary?: string;
+  allowedTools?: string[];
+}
+
+export interface DirEntry {
+  name: string;
+  path: string;
+}
+
+export interface DirListResult {
+  path: string;
+  dirs: DirEntry[];
+  home: string;
+  error?: string;
+}
+
+export const api = {
+  createSession: (opts?: CreateSessionOpts) =>
+    post<{ sessionId: string; state: string; cwd: string }>("/sessions/create", opts),
+
+  listSessions: () =>
+    get<SdkSessionInfo[]>("/sessions"),
+
+  killSession: (sessionId: string) =>
+    post(`/sessions/${encodeURIComponent(sessionId)}/kill`),
+
+  deleteSession: (sessionId: string) =>
+    del(`/sessions/${encodeURIComponent(sessionId)}`),
+
+  listDirs: (path?: string) =>
+    get<DirListResult>(`/fs/list${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+
+  getHome: () =>
+    get<{ home: string; cwd: string }>("/fs/home"),
 };

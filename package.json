@@ -1,71 +1,13 @@
 {
-  "name": "claude-code-controller",
-  "version": "0.6.1",
-  "description": "Programmatic API to pilot Claude Code agents via the internal teams/inbox/tasks filesystem protocol",
-  "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
-    },
-    "./api": {
-      "types": "./dist/api/index.d.ts",
-      "import": "./dist/api/index.js",
-      "require": "./dist/api/index.cjs"
-    }
-  },
-  "files": [
-    "dist"
-  ],
+  "name": "the-vibe-companion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Web UI for Claude Code agents",
   "scripts": {
-    "build": "bun run tsup",
-    "dev": "bun run tsup --watch",
-    "test": "bun test",
-    "test:watch": "bun test --watch",
-    "test:e2e": "E2E=1 bun test tests/e2e.test.ts --timeout 600000",
-    "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "dev": "cd web && bun run dev",
+    "build": "cd web && bun run build",
+    "start": "cd web && bun run start"
   },
-  "keywords": [
-    "claude",
-    "claude-code",
-    "agent",
-    "ai",
-    "automation"
-  ],
   "author": "The Vibe Company",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/The-Vibe-Company/claude-code-controller.git"
-  },
-  "homepage": "https://github.com/The-Vibe-Company/claude-code-controller#readme",
-  "bugs": {
-    "url": "https://github.com/The-Vibe-Company/claude-code-controller/issues"
-  },
-  "engines": {
-    "node": ">=18"
-  },
-  "peerDependencies": {
-    "hono": "^4.0.0"
-  },
-  "peerDependenciesMeta": {
-    "hono": {
-      "optional": true
-    }
-  },
-  "dependencies": {
-    "proper-lockfile": "^4.1.2"
-  },
-  "devDependencies": {
-    "@types/bun": "^1.2.5",
-    "@types/proper-lockfile": "^4.1.4",
-    "hono": "^4.7.0",
-    "tsup": "^8.5.1",
-    "typescript": "^5.9.3"
-  }
+  "license": "MIT"
 }

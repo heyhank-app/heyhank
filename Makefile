@@ -1,13 +1,10 @@
-.PHONY: test e2e build typecheck
+.PHONY: dev build start
 
-test:
-	bun test
-
-e2e:
-	set -a && . ./.env && set +a && E2E=1 bun test tests/e2e.test.ts --timeout 600000
+dev:
+	cd web && bun run dev
 
 build:
-	bun run build
+	cd web && bun run build
 
-typecheck:
-	bun run typecheck
+start:
+	cd web && bun run start

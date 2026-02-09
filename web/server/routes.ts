@@ -1,107 +1,82 @@
 import { Hono } from "hono";
-import { randomUUID } from "node:crypto";
-import type { ControllerBridge } from "./controller-bridge.js";
-import type { Message } from "./types.js";
+import { readdir } from "node:fs/promises";
+import { resolve, join } from "node:path";
+import { homedir } from "node:os";
+import type { CliLauncher } from "./cli-launcher.js";
+import type { WsBridge } from "./ws-bridge.js";
 
-export function createRoutes(bridge: ControllerBridge) {
+export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge) {
   const api = new Hono();
 
-  // ─── Session ──────────────────────────────────────────────────────
+  // ─── SDK Sessions (--sdk-url) ─────────────────────────────────────
 
-  api.post("/session/init", async (c) => {
+  api.post("/sessions/create", async (c) => {
     const body = await c.req.json().catch(() => ({}));
-    const session = await bridge.init({
-      teamName: body.teamName,
-      cwd: body.cwd,
-      claudeBinary: body.claudeBinary,
-      apiKey: body.apiKey,
-      baseUrl: body.baseUrl,
-      env: body.env,
-    });
+    try {
+      const session = launcher.launch({
+        model: body.model,
+        permissionMode: body.permissionMode,
+        cwd: body.cwd,
+        claudeBinary: body.claudeBinary,
+        allowedTools: body.allowedTools,
+        env: body.env,
+      });
+      return c.json(session);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[routes] Failed to create session:", msg);
+      return c.json({ error: msg }, 500);
+    }
+  });
+
+  api.get("/sessions", (c) => {
+    return c.json(launcher.listSessions());
+  });
+
+  api.get("/sessions/:id", (c) => {
+    const id = c.req.param("id");
+    const session = launcher.getSession(id);
+    if (!session) return c.json({ error: "Session not found" }, 404);
     return c.json(session);
   });
 
-  api.post("/session/shutdown", async (c) => {
-    await bridge.shutdown();
+  api.post("/sessions/:id/kill", async (c) => {
+    const id = c.req.param("id");
+    const killed = await launcher.kill(id);
+    if (!killed) return c.json({ error: "Session not found or already exited" }, 404);
     return c.json({ ok: true });
   });
 
-  api.get("/session/status", (c) => {
-    return c.json({
-      ...bridge.sessionInfo,
-      agents: bridge.getAgents(),
-    });
-  });
-
-  // ─── Agents ───────────────────────────────────────────────────────
-
-  api.post("/agents/spawn", async (c) => {
-    const body = await c.req.json();
-    if (!body.name) return c.json({ error: "name is required" }, 400);
-    const agent = await bridge.spawnAgent({
-      name: body.name,
-      type: body.type,
-      model: body.model,
-      cwd: body.cwd,
-      permissions: body.permissions,
-      apiKey: body.apiKey,
-      baseUrl: body.baseUrl,
-      env: body.env,
-    });
-    return c.json(agent);
-  });
-
-  api.post("/agents/:name/send", async (c) => {
-    const name = c.req.param("name");
-    const body = await c.req.json();
-    if (!body.message) return c.json({ error: "message is required" }, 400);
-
-    const ctrl = bridge.getController();
-    await ctrl.send(name, body.message, body.summary);
-
-    // Add user message to buffer
-    const msg: Message = {
-      id: randomUUID(),
-      from: "you",
-      text: body.message,
-      timestamp: new Date().toISOString(),
-    };
-    bridge.addMessage(name, msg);
-    bridge.ws.broadcast({ type: "agent:message", agent: name, message: msg });
-
+  api.delete("/sessions/:id", async (c) => {
+    const id = c.req.param("id");
+    await launcher.kill(id);
+    launcher.removeSession(id);
+    wsBridge.closeSession(id);
     return c.json({ ok: true });
   });
 
-  api.post("/agents/:name/kill", async (c) => {
-    const name = c.req.param("name");
-    const ctrl = bridge.getController();
-    await ctrl.killAgent(name);
-    return c.json({ ok: true });
-  });
+  // ─── Filesystem browsing ─────────────────────────────────────
 
-  api.post("/agents/:name/shutdown", async (c) => {
-    const name = c.req.param("name");
-    const ctrl = bridge.getController();
-    await ctrl.sendShutdownRequest(name);
-    return c.json({ ok: true });
-  });
-
-  api.post("/agents/:name/approve", async (c) => {
-    const name = c.req.param("name");
-    const body = await c.req.json();
-    if (!body.requestId) return c.json({ error: "requestId is required" }, 400);
-    if (!body.type || !["plan", "permission"].includes(body.type)) {
-      return c.json({ error: 'type must be "plan" or "permission"' }, 400);
+  api.get("/fs/list", async (c) => {
+    const rawPath = c.req.query("path") || homedir();
+    const basePath = resolve(rawPath);
+    try {
+      const entries = await readdir(basePath, { withFileTypes: true });
+      const dirs: { name: string; path: string }[] = [];
+      for (const entry of entries) {
+        if (entry.isDirectory() && !entry.name.startsWith(".")) {
+          dirs.push({ name: entry.name, path: join(basePath, entry.name) });
+        }
+      }
+      dirs.sort((a, b) => a.name.localeCompare(b.name));
+      return c.json({ path: basePath, dirs, home: homedir() });
+    } catch {
+      return c.json({ error: "Cannot read directory", path: basePath, dirs: [], home: homedir() }, 400);
     }
+  });
 
-    const ctrl = bridge.getController();
-    if (body.type === "plan") {
-      await ctrl.sendPlanApproval(name, body.requestId, body.approve ?? true, body.feedback);
-    } else {
-      await ctrl.sendPermissionResponse(name, body.requestId, body.approve ?? true);
-    }
-    bridge.removeApproval(body.requestId);
-    return c.json({ ok: true });
+  api.get("/fs/home", (c) => {
+    return c.json({ home: homedir(), cwd: process.cwd() });
   });
 
   return api;

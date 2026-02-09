@@ -1,0 +1,46 @@
+name: Publish to npm
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        working-directory: web
+        run: bun install
+
+      - name: Build frontend
+        working-directory: web
+        run: bun run build
+
+      - name: Verify dist exists
+        working-directory: web
+        run: |
+          test -f dist/index.html || (echo "ERROR: dist/index.html missing" && exit 1)
+          ls -la dist/
+
+      - name: Verify package contents
+        working-directory: web
+        run: npm pack --dry-run
+
+      - name: Publish to npm
+        working-directory: web
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

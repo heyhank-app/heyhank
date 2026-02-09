@@ -8,3 +8,9 @@ The goal is to be able to spawn agents, send messages to them, and get the respo
 You should be able to spawn agents, see their responses, send them more messages, give them permissions, etc.....
 
 This is based on an initial investigation that you can find here https://www.notion.so/Claude-Code-Architecture-Interne-SDK-Agent-2ff324e51ac28139b0cceb77975fa01c
+
+
+## Browser exploration
+
+Always use `agent-browser` CLI command to explore the browser.
+Never use playwright or other browser automation libraries.

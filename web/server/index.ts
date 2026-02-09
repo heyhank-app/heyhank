@@ -1,34 +1,58 @@
 process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1";
 
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { createRoutes } from "./routes.js";
-import { ControllerBridge } from "./controller-bridge.js";
+import { CliLauncher } from "./cli-launcher.js";
+import { WsBridge } from "./ws-bridge.js";
+import type { SocketData } from "./ws-bridge.js";
 import type { ServerWebSocket } from "bun";
 
-const bridge = new ControllerBridge();
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const packageRoot = process.env.__VIBE_PACKAGE_ROOT || resolve(__dirname, "..");
+
+const port = Number(process.env.PORT) || 3456;
+const wsBridge = new WsBridge();
+const launcher = new CliLauncher(port);
+
 const app = new Hono();
 
 app.use("/api/*", cors());
-app.route("/api", createRoutes(bridge));
+app.route("/api", createRoutes(launcher, wsBridge));
 
-// In production, serve built frontend
+// In production, serve built frontend using absolute path (works when installed as npm package)
 if (process.env.NODE_ENV === "production") {
-  app.use("/*", serveStatic({ root: "./dist" }));
-  app.get("/*", serveStatic({ path: "./dist/index.html" }));
+  const distDir = resolve(packageRoot, "dist");
+  app.use("/*", serveStatic({ root: distDir }));
+  app.get("/*", serveStatic({ path: resolve(distDir, "index.html") }));
 }
 
-const port = Number(process.env.PORT) || 3456;
-
-const server = Bun.serve({
+const server = Bun.serve<SocketData>({
   port,
   fetch(req, server) {
     const url = new URL(req.url);
 
-    // WebSocket upgrade
-    if (url.pathname === "/ws") {
-      const upgraded = server.upgrade(req);
+    // ── CLI WebSocket — Claude Code CLI connects here via --sdk-url ────
+    const cliMatch = url.pathname.match(/^\/ws\/cli\/([a-f0-9-]+)$/);
+    if (cliMatch) {
+      const sessionId = cliMatch[1];
+      const upgraded = server.upgrade(req, {
+        data: { kind: "cli" as const, sessionId },
+      });
+      if (upgraded) return undefined;
+      return new Response("WebSocket upgrade failed", { status: 400 });
+    }
+
+    // ── Browser WebSocket — connects to a specific session ─────────────
+    const browserMatch = url.pathname.match(/^\/ws\/browser\/([a-f0-9-]+)$/);
+    if (browserMatch) {
+      const sessionId = browserMatch[1];
+      const upgraded = server.upgrade(req, {
+        data: { kind: "browser" as const, sessionId },
+      });
       if (upgraded) return undefined;
       return new Response("WebSocket upgrade failed", { status: 400 });
     }
@@ -37,27 +61,37 @@ const server = Bun.serve({
     return app.fetch(req, server);
   },
   websocket: {
-    open(ws: ServerWebSocket<unknown>) {
-      bridge.ws.add(ws);
-      // Send snapshot
-      bridge.ws.sendTo(ws, {
-        type: "snapshot",
-        session: bridge.sessionInfo,
-        agents: bridge.getAgents(),
-        messages: bridge.getMessages(),
-        pendingApprovals: bridge.getPendingApprovals(),
-      });
+    open(ws: ServerWebSocket<SocketData>) {
+      const data = ws.data;
+      if (data.kind === "cli") {
+        wsBridge.handleCLIOpen(ws, data.sessionId);
+        launcher.markConnected(data.sessionId);
+      } else if (data.kind === "browser") {
+        wsBridge.handleBrowserOpen(ws, data.sessionId);
+      }
     },
-    message(_ws: ServerWebSocket<unknown>, _msg: string | Buffer) {
-      // Client doesn't send WS messages, all actions via REST
+    message(ws: ServerWebSocket<SocketData>, msg: string | Buffer) {
+      const data = ws.data;
+      if (data.kind === "cli") {
+        wsBridge.handleCLIMessage(ws, msg);
+      } else if (data.kind === "browser") {
+        wsBridge.handleBrowserMessage(ws, msg);
+      }
     },
-    close(ws: ServerWebSocket<unknown>) {
-      bridge.ws.remove(ws);
+    close(ws: ServerWebSocket<SocketData>) {
+      const data = ws.data;
+      if (data.kind === "cli") {
+        wsBridge.handleCLIClose(ws);
+      } else if (data.kind === "browser") {
+        wsBridge.handleBrowserClose(ws);
+      }
     },
   },
 });
 
 console.log(`Server running on http://localhost:${server.port}`);
+console.log(`  CLI WebSocket:     ws://localhost:${server.port}/ws/cli/:sessionId`);
+console.log(`  Browser WebSocket: ws://localhost:${server.port}/ws/browser/:sessionId`);
 
 // In dev mode, log that Vite should be run separately
 if (process.env.NODE_ENV !== "production") {

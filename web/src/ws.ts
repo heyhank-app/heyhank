@@ -1,17 +1,110 @@
 import { useStore } from "./store.js";
+import type { BrowserIncomingMessage, BrowserOutgoingMessage, ContentBlock, ChatMessage, TaskItem } from "./types.js";
+import { generateUniqueSessionName } from "./utils/names.js";
 
-let socket: WebSocket | null = null;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let reconnectDelay = 1000;
+const sockets = new Map<string, WebSocket>();
+const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const taskCounters = new Map<string, number>();
+/** Track processed tool_use IDs to prevent duplicate task creation */
+const processedToolUseIds = new Map<string, Set<string>>();
 
-function getWsUrl() {
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${location.host}/ws`;
+function getProcessedSet(sessionId: string): Set<string> {
+  let set = processedToolUseIds.get(sessionId);
+  if (!set) {
+    set = new Set();
+    processedToolUseIds.set(sessionId, set);
+  }
+  return set;
 }
 
-function handleMessage(event: MessageEvent) {
+function extractTasksFromBlocks(sessionId: string, blocks: ContentBlock[]) {
   const store = useStore.getState();
-  let data: any;
+  const processed = getProcessedSet(sessionId);
+
+  for (const block of blocks) {
+    if (block.type !== "tool_use") continue;
+    const name = (block as { name?: string }).name;
+    const input = (block as { input?: Record<string, unknown> }).input;
+    const toolUseId = (block as { id?: string }).id;
+    if (!name || !input) continue;
+
+    // Deduplicate by tool_use_id
+    if (toolUseId) {
+      if (processed.has(toolUseId)) continue;
+      processed.add(toolUseId);
+    }
+
+    // TodoWrite: full replacement — { todos: [{ content, status, activeForm }] }
+    if (name === "TodoWrite") {
+      const todos = input.todos as { content?: string; status?: string; activeForm?: string }[] | undefined;
+      if (Array.isArray(todos)) {
+        const tasks: TaskItem[] = todos.map((t, i) => ({
+          id: String(i + 1),
+          subject: t.content || "Task",
+          description: "",
+          activeForm: t.activeForm,
+          status: (t.status as TaskItem["status"]) || "pending",
+        }));
+        store.setTasks(sessionId, tasks);
+        taskCounters.set(sessionId, tasks.length);
+      }
+      continue;
+    }
+
+    // TaskCreate: incremental add — { subject, description, activeForm }
+    if (name === "TaskCreate") {
+      const count = (taskCounters.get(sessionId) || 0) + 1;
+      taskCounters.set(sessionId, count);
+      const task = {
+        id: String(count),
+        subject: (input.subject as string) || "Task",
+        description: (input.description as string) || "",
+        activeForm: input.activeForm as string | undefined,
+        status: "pending" as const,
+      };
+      store.addTask(sessionId, task);
+      continue;
+    }
+
+    // TaskUpdate: incremental update — { taskId, status, owner, activeForm, addBlockedBy }
+    if (name === "TaskUpdate") {
+      const taskId = input.taskId as string;
+      if (taskId) {
+        const updates: Partial<TaskItem> = {};
+        if (input.status) updates.status = input.status as TaskItem["status"];
+        if (input.owner) updates.owner = input.owner as string;
+        if (input.activeForm !== undefined) updates.activeForm = input.activeForm as string;
+        if (input.addBlockedBy) updates.blockedBy = input.addBlockedBy as string[];
+        store.updateTask(sessionId, taskId, updates);
+      }
+    }
+  }
+}
+
+let idCounter = 0;
+function nextId(): string {
+  return `msg-${Date.now()}-${++idCounter}`;
+}
+
+function getWsUrl(sessionId: string): string {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${location.host}/ws/browser/${sessionId}`;
+}
+
+function extractTextFromBlocks(blocks: ContentBlock[]): string {
+  return blocks
+    .map((b) => {
+      if (b.type === "text") return b.text;
+      if (b.type === "thinking") return b.thinking;
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function handleMessage(sessionId: string, event: MessageEvent) {
+  const store = useStore.getState();
+  let data: BrowserIncomingMessage;
   try {
     data = JSON.parse(event.data);
   } catch {
@@ -19,79 +112,319 @@ function handleMessage(event: MessageEvent) {
   }
 
   switch (data.type) {
-    case "snapshot":
-      store.applySnapshot(data);
-      break;
-    case "session:initialized":
-      store.setSession({ initialized: true, teamName: data.teamName });
-      break;
-    case "session:shutdown":
-      store.reset();
-      break;
-    case "agent:spawned":
-      store.addAgent(data.agent);
-      break;
-    case "agent:exited":
-      store.updateAgent(data.agent, { status: "exited", exitCode: data.exitCode });
-      break;
-    case "agent:idle":
-      store.updateAgent(data.agent, { status: "idle" });
-      break;
-    case "agent:message":
-      store.appendMessage(data.agent, data.message);
-      // If agent sends a non-system message, mark as running
-      if (!data.message.isSystem) {
-        store.updateAgent(data.agent, { status: "running" });
+    case "session_init": {
+      store.addSession(data.session);
+      store.setCliConnected(sessionId, true);
+      store.setSessionStatus(sessionId, "idle");
+      if (!store.sessionNames.has(sessionId)) {
+        const existingNames = new Set(store.sessionNames.values());
+        const name = generateUniqueSessionName(existingNames);
+        store.setSessionName(sessionId, name);
       }
       break;
-    case "agent:shutdown_approved":
+    }
+
+    case "session_update": {
+      store.updateSession(sessionId, data.session);
       break;
-    case "approval:plan":
-    case "approval:permission":
-      store.addApproval(data.approval);
+    }
+
+    case "assistant": {
+      const msg = data.message;
+      const textContent = extractTextFromBlocks(msg.content);
+      const chatMsg: ChatMessage = {
+        id: msg.id,
+        role: "assistant",
+        content: textContent,
+        contentBlocks: msg.content,
+        timestamp: Date.now(),
+        parentToolUseId: data.parent_tool_use_id,
+        model: msg.model,
+        stopReason: msg.stop_reason,
+      };
+      store.appendMessage(sessionId, chatMsg);
+      store.setStreaming(sessionId, null);
+      store.setSessionStatus(sessionId, "running");
+
+      // Start timer if not already started (for non-streaming tool calls)
+      if (!store.streamingStartedAt.has(sessionId)) {
+        store.setStreamingStats(sessionId, { startedAt: Date.now() });
+      }
+
+      // Extract tasks from tool_use content blocks
+      if (msg.content?.length) {
+        extractTasksFromBlocks(sessionId, msg.content);
+      }
+
       break;
-    case "error":
-      console.error("[ws] Server error:", data.message);
+    }
+
+    case "stream_event": {
+      const evt = data.event as Record<string, unknown>;
+      if (evt && typeof evt === "object") {
+        // message_start → mark generation start time
+        if (evt.type === "message_start") {
+          if (!store.streamingStartedAt.has(sessionId)) {
+            store.setStreamingStats(sessionId, { startedAt: Date.now(), outputTokens: 0 });
+          }
+        }
+
+        // content_block_delta → accumulate streaming text
+        if (evt.type === "content_block_delta") {
+          const delta = evt.delta as Record<string, unknown> | undefined;
+          if (delta?.type === "text_delta" && typeof delta.text === "string") {
+            const current = store.streaming.get(sessionId) || "";
+            store.setStreaming(sessionId, current + delta.text);
+          }
+        }
+
+        // message_delta → extract output token count
+        if (evt.type === "message_delta") {
+          const usage = (evt as { usage?: { output_tokens?: number } }).usage;
+          if (usage?.output_tokens) {
+            store.setStreamingStats(sessionId, { outputTokens: usage.output_tokens });
+          }
+        }
+      }
       break;
+    }
+
+    case "result": {
+      const r = data.data;
+      const sessionUpdates: Partial<{ total_cost_usd: number; num_turns: number; context_used_percent: number }> = {
+        total_cost_usd: r.total_cost_usd,
+        num_turns: r.num_turns,
+      };
+      // Compute context % from modelUsage if available
+      if (r.modelUsage) {
+        for (const usage of Object.values(r.modelUsage)) {
+          if (usage.contextWindow > 0) {
+            sessionUpdates.context_used_percent = Math.round(
+              ((usage.inputTokens + usage.outputTokens) / usage.contextWindow) * 100
+            );
+          }
+        }
+      }
+      store.updateSession(sessionId, sessionUpdates);
+      store.setStreaming(sessionId, null);
+      store.setStreamingStats(sessionId, null);
+      store.setSessionStatus(sessionId, "idle");
+      if (r.is_error && r.errors?.length) {
+        store.appendMessage(sessionId, {
+          id: nextId(),
+          role: "system",
+          content: `Error: ${r.errors.join(", ")}`,
+          timestamp: Date.now(),
+        });
+      }
+      break;
+    }
+
+    case "permission_request": {
+      store.addPermission(data.request);
+      // Also extract tasks from permission requests (tool_name + input available)
+      const req = data.request;
+      if (req.tool_name && req.input) {
+        extractTasksFromBlocks(sessionId, [{
+          type: "tool_use",
+          id: req.tool_use_id,
+          name: req.tool_name,
+          input: req.input,
+        }]);
+      }
+      break;
+    }
+
+    case "permission_cancelled": {
+      store.removePermission(data.request_id);
+      break;
+    }
+
+    case "tool_progress": {
+      // Could be used for progress indicators; ignored for now
+      break;
+    }
+
+    case "tool_use_summary": {
+      // Optional: add as system message
+      break;
+    }
+
+    case "status_change": {
+      if (data.status === "compacting") {
+        store.setSessionStatus(sessionId, "compacting");
+      } else {
+        store.setSessionStatus(sessionId, data.status);
+      }
+      break;
+    }
+
+    case "auth_status": {
+      if (data.error) {
+        store.appendMessage(sessionId, {
+          id: nextId(),
+          role: "system",
+          content: `Auth error: ${data.error}`,
+          timestamp: Date.now(),
+        });
+      }
+      break;
+    }
+
+    case "error": {
+      store.appendMessage(sessionId, {
+        id: nextId(),
+        role: "system",
+        content: data.message,
+        timestamp: Date.now(),
+      });
+      break;
+    }
+
+    case "cli_disconnected": {
+      store.setCliConnected(sessionId, false);
+      store.setSessionStatus(sessionId, null);
+      break;
+    }
+
+    case "cli_connected": {
+      store.setCliConnected(sessionId, true);
+      break;
+    }
+
+    case "message_history": {
+      const chatMessages: ChatMessage[] = [];
+      for (const histMsg of data.messages) {
+        if (histMsg.type === "user_message") {
+          chatMessages.push({
+            id: nextId(),
+            role: "user",
+            content: histMsg.content,
+            timestamp: histMsg.timestamp,
+          });
+        } else if (histMsg.type === "assistant") {
+          const msg = histMsg.message;
+          const textContent = extractTextFromBlocks(msg.content);
+          chatMessages.push({
+            id: msg.id,
+            role: "assistant",
+            content: textContent,
+            contentBlocks: msg.content,
+            timestamp: Date.now(),
+            parentToolUseId: histMsg.parent_tool_use_id,
+            model: msg.model,
+            stopReason: msg.stop_reason,
+          });
+          // Also extract tasks from history
+          if (msg.content?.length) {
+            extractTasksFromBlocks(sessionId, msg.content);
+          }
+        } else if (histMsg.type === "result") {
+          const r = histMsg.data;
+          if (r.is_error && r.errors?.length) {
+            chatMessages.push({
+              id: nextId(),
+              role: "system",
+              content: `Error: ${r.errors.join(", ")}`,
+              timestamp: Date.now(),
+            });
+          }
+        }
+      }
+      if (chatMessages.length > 0) {
+        store.setMessages(sessionId, chatMessages);
+      }
+      break;
+    }
   }
 }
 
-export function connect() {
-  if (socket?.readyState === WebSocket.OPEN) return;
+export function connectSession(sessionId: string) {
+  if (sockets.has(sessionId)) return;
 
-  socket = new WebSocket(getWsUrl());
+  const store = useStore.getState();
+  store.setConnectionStatus(sessionId, "connecting");
 
-  socket.onopen = () => {
-    useStore.getState().setConnected(true);
-    reconnectDelay = 1000;
+  const ws = new WebSocket(getWsUrl(sessionId));
+  sockets.set(sessionId, ws);
+
+  ws.onopen = () => {
+    useStore.getState().setConnectionStatus(sessionId, "connected");
+    // Clear any reconnect timer
+    const timer = reconnectTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      reconnectTimers.delete(sessionId);
+    }
   };
 
-  socket.onmessage = handleMessage;
+  ws.onmessage = (event) => handleMessage(sessionId, event);
 
-  socket.onclose = () => {
-    useStore.getState().setConnected(false);
-    scheduleReconnect();
+  ws.onclose = () => {
+    sockets.delete(sessionId);
+    useStore.getState().setConnectionStatus(sessionId, "disconnected");
+    scheduleReconnect(sessionId);
   };
 
-  socket.onerror = () => {
-    socket?.close();
+  ws.onerror = () => {
+    ws.close();
   };
 }
 
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    reconnectDelay = Math.min(reconnectDelay * 1.5, 5000);
-    connect();
-  }, reconnectDelay);
+function scheduleReconnect(sessionId: string) {
+  if (reconnectTimers.has(sessionId)) return;
+  // Only reconnect if the session is still the current one
+  const timer = setTimeout(() => {
+    reconnectTimers.delete(sessionId);
+    const store = useStore.getState();
+    if (store.currentSessionId === sessionId || store.sessions.has(sessionId)) {
+      connectSession(sessionId);
+    }
+  }, 2000);
+  reconnectTimers.set(sessionId, timer);
 }
 
-export function disconnect() {
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
+export function disconnectSession(sessionId: string) {
+  const timer = reconnectTimers.get(sessionId);
+  if (timer) {
+    clearTimeout(timer);
+    reconnectTimers.delete(sessionId);
   }
-  socket?.close();
-  socket = null;
+  const ws = sockets.get(sessionId);
+  if (ws) {
+    ws.close();
+    sockets.delete(sessionId);
+  }
+  processedToolUseIds.delete(sessionId);
+  taskCounters.delete(sessionId);
+}
+
+export function disconnectAll() {
+  for (const [id] of sockets) {
+    disconnectSession(id);
+  }
+}
+
+export function waitForConnection(sessionId: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const check = setInterval(() => {
+      const ws = sockets.get(sessionId);
+      if (ws?.readyState === WebSocket.OPEN) {
+        clearInterval(check);
+        clearTimeout(timeout);
+        resolve();
+      }
+    }, 50);
+    const timeout = setTimeout(() => {
+      clearInterval(check);
+      reject(new Error("Connection timeout"));
+    }, 10000);
+  });
+}
+
+export function sendToSession(sessionId: string, msg: BrowserOutgoingMessage) {
+  const ws = sockets.get(sessionId);
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(msg));
+  }
 }
