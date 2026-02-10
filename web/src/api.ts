@@ -158,6 +158,8 @@ export const api = {
     post<WorktreeCreateResult>("/git/worktree", { repoRoot, branch, ...opts }),
   removeWorktree: (repoRoot: string, worktreePath: string, force?: boolean) =>
     del<{ removed: boolean; reason?: string }>("/git/worktree", { repoRoot, worktreePath, force }),
+  gitFetch: (repoRoot: string) =>
+    post<{ success: boolean; output: string }>("/git/fetch", { repoRoot }),
   gitPull: (cwd: string) =>
     post<{ success: boolean; output: string; git_ahead: number; git_behind: number }>("/git/pull", { cwd }),
 };

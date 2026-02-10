@@ -261,6 +261,13 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
     return c.json(result);
   });
 
+  api.post("/git/fetch", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const { repoRoot } = body;
+    if (!repoRoot) return c.json({ error: "repoRoot required" }, 400);
+    return c.json(gitUtils.gitFetch(repoRoot));
+  });
+
   api.post("/git/pull", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const { cwd } = body;

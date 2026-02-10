@@ -566,7 +566,11 @@ export function HomePage() {
               <button
                 onClick={() => {
                   if (!showBranchDropdown && gitRepoInfo) {
-                    api.listBranches(gitRepoInfo.repoRoot).then(setBranches).catch(() => setBranches([]));
+                    api.gitFetch(gitRepoInfo.repoRoot)
+                      .catch(() => {})
+                      .finally(() => {
+                        api.listBranches(gitRepoInfo.repoRoot).then(setBranches).catch(() => setBranches([]));
+                      });
                   }
                   setShowBranchDropdown(!showBranchDropdown);
                   setBranchFilter("");
