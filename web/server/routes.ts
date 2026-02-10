@@ -9,6 +9,7 @@ import type { SessionStore } from "./session-store.js";
 import type { WorktreeTracker } from "./worktree-tracker.js";
 import * as envManager from "./env-manager.js";
 import * as gitUtils from "./git-utils.js";
+import * as sessionNames from "./session-names.js";
 
 export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionStore: SessionStore, worktreeTracker: WorktreeTracker) {
   const api = new Hono();
@@ -90,7 +91,13 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
   });
 
   api.get("/sessions", (c) => {
-    return c.json(launcher.listSessions());
+    const sessions = launcher.listSessions();
+    const names = sessionNames.getAllNames();
+    const enriched = sessions.map((s) => ({
+      ...s,
+      name: names[s.sessionId] ?? s.name,
+    }));
+    return c.json(enriched);
   });
 
   api.get("/sessions/:id", (c) => {
@@ -98,6 +105,18 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
     const session = launcher.getSession(id);
     if (!session) return c.json({ error: "Session not found" }, 404);
     return c.json(session);
+  });
+
+  api.patch("/sessions/:id/name", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json().catch(() => ({}));
+    if (typeof body.name !== "string" || !body.name.trim()) {
+      return c.json({ error: "name is required" }, 400);
+    }
+    const session = launcher.getSession(id);
+    if (!session) return c.json({ error: "Session not found" }, 404);
+    sessionNames.setName(id, body.name.trim());
+    return c.json({ ok: true, name: body.name.trim() });
   });
 
   api.post("/sessions/:id/kill", async (c) => {

@@ -29,7 +29,16 @@ export function Sidebar() {
     async function poll() {
       try {
         const list = await api.listSessions();
-        if (active) useStore.getState().setSdkSessions(list);
+        if (active) {
+          useStore.getState().setSdkSessions(list);
+          // Hydrate session names from server (server is source of truth for auto-generated names)
+          const store = useStore.getState();
+          for (const s of list) {
+            if (s.name && (!store.sessionNames.has(s.sessionId) || /^[A-Z][a-z]+ [A-Z][a-z]+$/.test(store.sessionNames.get(s.sessionId)!))) {
+              store.setSessionName(s.sessionId, s.name);
+            }
+          }
+        }
       } catch {
         // server not ready
       }
@@ -77,6 +86,7 @@ export function Sidebar() {
   function confirmRename() {
     if (editingSessionId && editingName.trim()) {
       useStore.getState().setSessionName(editingSessionId, editingName.trim());
+      api.renameSession(editingSessionId, editingName.trim()).catch(() => {});
     }
     setEditingSessionId(null);
     setEditingName("");

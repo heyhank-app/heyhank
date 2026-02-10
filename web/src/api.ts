@@ -34,6 +34,19 @@ async function put<T = unknown>(path: string, body?: object): Promise<T> {
   return res.json();
 }
 
+async function patch<T = unknown>(path: string, body?: object): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || res.statusText);
+  }
+  return res.json();
+}
+
 async function del<T = unknown>(path: string, body?: object): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: "DELETE",
@@ -131,6 +144,9 @@ export const api = {
 
   unarchiveSession: (sessionId: string) =>
     post(`/sessions/${encodeURIComponent(sessionId)}/unarchive`),
+
+  renameSession: (sessionId: string, name: string) =>
+    patch<{ ok: boolean; name: string }>(`/sessions/${encodeURIComponent(sessionId)}/name`, { name }),
 
   listDirs: (path?: string) =>
     get<DirListResult>(`/fs/list${path ? `?path=${encodeURIComponent(path)}` : ""}`),

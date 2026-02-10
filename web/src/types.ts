@@ -45,4 +45,5 @@ export interface SdkSessionInfo {
   repoRoot?: string;
   branch?: string;
   actualBranch?: string;
+  name?: string;
 }

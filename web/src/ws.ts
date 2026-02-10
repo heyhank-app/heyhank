@@ -300,6 +300,16 @@ function handleMessage(sessionId: string, event: MessageEvent) {
       break;
     }
 
+    case "session_name_update": {
+      // Only apply auto-name if user hasn't manually renamed (still has random Adj+Noun name)
+      const currentName = store.sessionNames.get(sessionId);
+      const isRandomName = currentName && /^[A-Z][a-z]+ [A-Z][a-z]+$/.test(currentName);
+      if (!currentName || isRandomName) {
+        store.setSessionName(sessionId, data.name);
+      }
+      break;
+    }
+
     case "message_history": {
       const chatMessages: ChatMessage[] = [];
       for (const histMsg of data.messages) {

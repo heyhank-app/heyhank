@@ -78,6 +78,7 @@ export class WsBridge {
   private store: SessionStore | null = null;
   private onCLISessionId: ((sessionId: string, cliSessionId: string) => void) | null = null;
   private onCLIRelaunchNeeded: ((sessionId: string) => void) | null = null;
+  private onFirstTurnCompleted: ((sessionId: string, firstUserMessage: string) => void) | null = null;
 
   /** Register a callback for when we learn the CLI's internal session ID. */
   onCLISessionIdReceived(cb: (sessionId: string, cliSessionId: string) => void): void {
@@ -87,6 +88,11 @@ export class WsBridge {
   /** Register a callback for when a browser connects but CLI is dead. */
   onCLIRelaunchNeededCallback(cb: (sessionId: string) => void): void {
     this.onCLIRelaunchNeeded = cb;
+  }
+
+  /** Register a callback for when a session completes its first turn. */
+  onFirstTurnCompletedCallback(cb: (sessionId: string, firstUserMessage: string) => void): void {
+    this.onFirstTurnCompleted = cb;
   }
 
   /** Attach a persistent store. Call restoreFromDisk() after. */
@@ -485,6 +491,16 @@ export class WsBridge {
     session.messageHistory.push(browserMsg);
     this.broadcastToBrowsers(session, browserMsg);
     this.persistSession(session);
+
+    // Trigger auto-naming after first turn completes successfully
+    if (msg.num_turns === 1 && !msg.is_error && this.onFirstTurnCompleted) {
+      const firstUserMsg = session.messageHistory.find(
+        (m) => m.type === "user_message",
+      );
+      if (firstUserMsg && firstUserMsg.type === "user_message") {
+        this.onFirstTurnCompleted(session.id, firstUserMsg.content);
+      }
+    }
   }
 
   private handleStreamEvent(session: Session, msg: CLIStreamEventMessage) {
@@ -689,6 +705,13 @@ export class WsBridge {
     } catch (err) {
       console.error(`[ws-bridge] Failed to send to CLI for session ${session.id}:`, err);
     }
+  }
+
+  /** Push a session name update to all connected browsers for a session. */
+  broadcastNameUpdate(sessionId: string, name: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    this.broadcastToBrowsers(session, { type: "session_name_update", name });
   }
 
   private broadcastToBrowsers(session: Session, msg: BrowserIncomingMessage) {

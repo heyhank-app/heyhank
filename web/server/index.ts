@@ -10,6 +10,8 @@ import { CliLauncher } from "./cli-launcher.js";
 import { WsBridge } from "./ws-bridge.js";
 import { SessionStore } from "./session-store.js";
 import { WorktreeTracker } from "./worktree-tracker.js";
+import { generateSessionTitle } from "./auto-namer.js";
+import * as sessionNames from "./session-names.js";
 import type { SocketData } from "./ws-bridge.js";
 import type { ServerWebSocket } from "bun";
 
@@ -47,6 +49,22 @@ wsBridge.onCLIRelaunchNeededCallback(async (sessionId) => {
     } finally {
       setTimeout(() => relaunchingSet.delete(sessionId), 5000);
     }
+  }
+});
+
+// Auto-generate session title after first turn completes
+wsBridge.onFirstTurnCompletedCallback(async (sessionId, firstUserMessage) => {
+  // Don't overwrite a name that was already set (manual rename or prior auto-name)
+  if (sessionNames.getName(sessionId)) return;
+  const info = launcher.getSession(sessionId);
+  const model = info?.model || "claude-sonnet-4-5-20250929";
+  console.log(`[server] Auto-naming session ${sessionId} with model ${model}...`);
+  const title = await generateSessionTitle(firstUserMessage, model);
+  // Re-check: a manual rename may have occurred while we were generating
+  if (title && !sessionNames.getName(sessionId)) {
+    console.log(`[server] Auto-named session ${sessionId}: "${title}"`);
+    sessionNames.setName(sessionId, title);
+    wsBridge.broadcastNameUpdate(sessionId, title);
   }
 });
 

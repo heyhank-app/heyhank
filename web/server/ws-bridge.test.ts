@@ -1837,3 +1837,133 @@ describe("Restore from disk with pendingPermissions", () => {
     expect(session.pendingPermissions.size).toBe(0);
   });
 });
+
+// ─── First turn callback ──────────────────────────────────────────────────────
+
+describe("onFirstTurnCompletedCallback", () => {
+  it("fires after first turn result (num_turns === 1)", () => {
+    const callback = vi.fn();
+    bridge.onFirstTurnCompletedCallback(callback);
+
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleCLIMessage(cli, makeInitMsg());
+
+    // Simulate a browser sending a user message
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "Fix the login bug",
+    }));
+
+    // Simulate the result after first turn
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "Done",
+      duration_ms: 1000,
+      duration_api_ms: 800,
+      num_turns: 1,
+      total_cost_usd: 0.01,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-first",
+      session_id: "s1",
+    }));
+
+    expect(callback).toHaveBeenCalledWith("s1", "Fix the login bug");
+  });
+
+  it("does not fire on subsequent turns (num_turns > 1)", () => {
+    const callback = vi.fn();
+    bridge.onFirstTurnCompletedCallback(callback);
+
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleCLIMessage(cli, makeInitMsg());
+
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "First message",
+    }));
+
+    // Result with num_turns > 1
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      duration_ms: 1000,
+      duration_api_ms: 800,
+      num_turns: 3,
+      total_cost_usd: 0.05,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 500, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-later",
+      session_id: "s1",
+    }));
+
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it("does not fire on error results", () => {
+    const callback = vi.fn();
+    bridge.onFirstTurnCompletedCallback(callback);
+
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleCLIMessage(cli, makeInitMsg());
+
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "Some request",
+    }));
+
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: ["Something went wrong"],
+      duration_ms: 500,
+      duration_api_ms: 400,
+      num_turns: 1,
+      total_cost_usd: 0.005,
+      stop_reason: null,
+      usage: { input_tokens: 50, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-err",
+      session_id: "s1",
+    }));
+
+    expect(callback).not.toHaveBeenCalled();
+  });
+});
+
+// ─── broadcastNameUpdate ──────────────────────────────────────────────────────
+
+describe("broadcastNameUpdate", () => {
+  it("sends session_name_update to connected browsers", () => {
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+
+    const browser1 = makeBrowserSocket("s1");
+    const browser2 = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser1, "s1");
+    bridge.handleBrowserOpen(browser2, "s1");
+
+    bridge.broadcastNameUpdate("s1", "Fix Auth Bug");
+
+    const expected = JSON.stringify({ type: "session_name_update", name: "Fix Auth Bug" });
+    expect(browser1.send).toHaveBeenCalledWith(expected);
+    expect(browser2.send).toHaveBeenCalledWith(expected);
+  });
+
+  it("does nothing for unknown sessions", () => {
+    // Should not throw
+    bridge.broadcastNameUpdate("nonexistent", "Name");
+  });
+});

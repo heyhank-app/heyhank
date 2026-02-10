@@ -18,10 +18,19 @@ vi.mock("./git-utils.js", () => ({
   isWorktreeDirty: vi.fn(() => false),
 }));
 
+vi.mock("./session-names.js", () => ({
+  getName: vi.fn(() => undefined),
+  setName: vi.fn(),
+  getAllNames: vi.fn(() => ({})),
+  removeName: vi.fn(),
+  _resetForTest: vi.fn(),
+}));
+
 import { Hono } from "hono";
 import { createRoutes } from "./routes.js";
 import * as envManager from "./env-manager.js";
 import * as gitUtils from "./git-utils.js";
+import * as sessionNames from "./session-names.js";
 
 // ─── Mock factories ──────────────────────────────────────────────────────────
 
@@ -191,18 +200,22 @@ describe("POST /api/sessions/create", () => {
 });
 
 describe("GET /api/sessions", () => {
-  it("returns the list of sessions", async () => {
+  it("returns the list of sessions enriched with names", async () => {
     const sessions = [
       { sessionId: "s1", state: "running", cwd: "/a" },
       { sessionId: "s2", state: "stopped", cwd: "/b" },
     ];
     launcher.listSessions.mockReturnValue(sessions);
+    vi.mocked(sessionNames.getAllNames).mockReturnValue({ s1: "Fix auth bug" });
 
     const res = await app.request("/api/sessions", { method: "GET" });
 
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json).toEqual(sessions);
+    expect(json).toEqual([
+      { sessionId: "s1", state: "running", cwd: "/a", name: "Fix auth bug" },
+      { sessionId: "s2", state: "stopped", cwd: "/b" },
+    ]);
   });
 });
 
@@ -542,6 +555,76 @@ describe("DELETE /api/git/worktree", () => {
     const json = await res.json();
     expect(json).toEqual({ removed: true });
     expect(gitUtils.removeWorktree).toHaveBeenCalledWith("/repo", "/wt/feat", { force: true });
+  });
+});
+
+// ─── Session Naming ─────────────────────────────────────────────────────────
+
+describe("PATCH /api/sessions/:id/name", () => {
+  it("updates session name and returns ok", async () => {
+    launcher.getSession.mockReturnValue({ sessionId: "s1", state: "running", cwd: "/test" });
+
+    const res = await app.request("/api/sessions/s1/name", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Fix auth bug" }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({ ok: true, name: "Fix auth bug" });
+    expect(sessionNames.setName).toHaveBeenCalledWith("s1", "Fix auth bug");
+  });
+
+  it("trims whitespace from name", async () => {
+    launcher.getSession.mockReturnValue({ sessionId: "s1", state: "running", cwd: "/test" });
+
+    const res = await app.request("/api/sessions/s1/name", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "  My Session  " }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({ ok: true, name: "My Session" });
+    expect(sessionNames.setName).toHaveBeenCalledWith("s1", "My Session");
+  });
+
+  it("returns 404 when session not found", async () => {
+    launcher.getSession.mockReturnValue(undefined);
+
+    const res = await app.request("/api/sessions/nonexistent/name", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Some name" }),
+    });
+
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json).toEqual({ error: "Session not found" });
+  });
+
+  it("returns 400 when name is empty", async () => {
+    const res = await app.request("/api/sessions/s1/name", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "" }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "name is required" });
+  });
+
+  it("returns 400 when name is missing", async () => {
+    const res = await app.request("/api/sessions/s1/name", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(400);
   });
 });
 

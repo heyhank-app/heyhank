@@ -25,6 +25,8 @@ export interface SdkSessionInfo {
   branch?: string;
   /** Actual git branch in the worktree (may differ for -wt-N branches) */
   actualBranch?: string;
+  /** User-facing session name */
+  name?: string;
 }
 
 export interface LaunchOptions {
