@@ -1098,3 +1098,742 @@ describe("Persistence", () => {
     expect(saveSpy).toHaveBeenCalled();
   });
 });
+
+// ─── auth_status message routing ──────────────────────────────────────────────
+
+describe("auth_status message routing", () => {
+  let cli: ReturnType<typeof makeCliSocket>;
+  let browser: ReturnType<typeof makeBrowserSocket>;
+
+  beforeEach(() => {
+    cli = makeCliSocket("s1");
+    browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+  });
+
+  it("broadcasts auth_status with isAuthenticating: true", () => {
+    const msg = JSON.stringify({
+      type: "auth_status",
+      isAuthenticating: true,
+      output: ["Waiting for authentication..."],
+      uuid: "uuid-auth-1",
+      session_id: "s1",
+    });
+
+    bridge.handleCLIMessage(cli, msg);
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const authMsg = calls.find((c: any) => c.type === "auth_status");
+    expect(authMsg).toBeDefined();
+    expect(authMsg.isAuthenticating).toBe(true);
+    expect(authMsg.output).toEqual(["Waiting for authentication..."]);
+    expect(authMsg.error).toBeUndefined();
+  });
+
+  it("broadcasts auth_status with isAuthenticating: false", () => {
+    const msg = JSON.stringify({
+      type: "auth_status",
+      isAuthenticating: false,
+      output: ["Authentication complete"],
+      uuid: "uuid-auth-2",
+      session_id: "s1",
+    });
+
+    bridge.handleCLIMessage(cli, msg);
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const authMsg = calls.find((c: any) => c.type === "auth_status");
+    expect(authMsg).toBeDefined();
+    expect(authMsg.isAuthenticating).toBe(false);
+    expect(authMsg.output).toEqual(["Authentication complete"]);
+  });
+
+  it("broadcasts auth_status with error field", () => {
+    const msg = JSON.stringify({
+      type: "auth_status",
+      isAuthenticating: false,
+      output: ["Failed to authenticate"],
+      error: "Token expired",
+      uuid: "uuid-auth-3",
+      session_id: "s1",
+    });
+
+    bridge.handleCLIMessage(cli, msg);
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const authMsg = calls.find((c: any) => c.type === "auth_status");
+    expect(authMsg).toBeDefined();
+    expect(authMsg.isAuthenticating).toBe(false);
+    expect(authMsg.error).toBe("Token expired");
+    expect(authMsg.output).toEqual(["Failed to authenticate"]);
+  });
+});
+
+// ─── permission_response with updated_permissions ─────────────────────────────
+
+describe("permission_response with updated_permissions", () => {
+  let cli: ReturnType<typeof makeCliSocket>;
+  let browser: ReturnType<typeof makeBrowserSocket>;
+
+  beforeEach(() => {
+    cli = makeCliSocket("s1");
+    browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    cli.send.mockClear();
+    browser.send.mockClear();
+  });
+
+  it("allow with updated_permissions forwards updatedPermissions in control_response", () => {
+    // Create pending permission
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "control_request",
+      request_id: "req-perm-update",
+      request: {
+        subtype: "can_use_tool",
+        tool_name: "Bash",
+        input: { command: "echo hello" },
+        tool_use_id: "tu-perm-update",
+      },
+    }));
+    cli.send.mockClear();
+
+    const updatedPermissions = [
+      { type: "addRules", rules: [{ toolName: "Bash", ruleContent: "echo *" }], behavior: "allow", destination: "session" },
+    ];
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "permission_response",
+      request_id: "req-perm-update",
+      behavior: "allow",
+      updated_permissions: updatedPermissions,
+    }));
+
+    expect(cli.send).toHaveBeenCalledTimes(1);
+    const sentRaw = cli.send.mock.calls[0][0] as string;
+    const sent = JSON.parse(sentRaw.trim());
+    expect(sent.type).toBe("control_response");
+    expect(sent.response.response.behavior).toBe("allow");
+    expect(sent.response.response.updatedPermissions).toEqual(updatedPermissions);
+  });
+
+  it("allow without updated_permissions does not include updatedPermissions key", () => {
+    // Create pending permission
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "control_request",
+      request_id: "req-no-perm",
+      request: {
+        subtype: "can_use_tool",
+        tool_name: "Read",
+        input: { file_path: "/test.ts" },
+        tool_use_id: "tu-no-perm",
+      },
+    }));
+    cli.send.mockClear();
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "permission_response",
+      request_id: "req-no-perm",
+      behavior: "allow",
+    }));
+
+    const sentRaw = cli.send.mock.calls[0][0] as string;
+    const sent = JSON.parse(sentRaw.trim());
+    expect(sent.response.response.updatedPermissions).toBeUndefined();
+  });
+
+  it("allow with empty updated_permissions does not include updatedPermissions key", () => {
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "control_request",
+      request_id: "req-empty-perm",
+      request: {
+        subtype: "can_use_tool",
+        tool_name: "Read",
+        input: { file_path: "/test.ts" },
+        tool_use_id: "tu-empty-perm",
+      },
+    }));
+    cli.send.mockClear();
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "permission_response",
+      request_id: "req-empty-perm",
+      behavior: "allow",
+      updated_permissions: [],
+    }));
+
+    const sentRaw = cli.send.mock.calls[0][0] as string;
+    const sent = JSON.parse(sentRaw.trim());
+    expect(sent.response.response.updatedPermissions).toBeUndefined();
+  });
+});
+
+// ─── Multiple browser sockets ─────────────────────────────────────────────────
+
+describe("Multiple browser sockets", () => {
+  it("broadcasts to ALL connected browsers", () => {
+    const cli = makeCliSocket("s1");
+    const browser1 = makeBrowserSocket("s1");
+    const browser2 = makeBrowserSocket("s1");
+    const browser3 = makeBrowserSocket("s1");
+
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser1, "s1");
+    bridge.handleBrowserOpen(browser2, "s1");
+    bridge.handleBrowserOpen(browser3, "s1");
+    browser1.send.mockClear();
+    browser2.send.mockClear();
+    browser3.send.mockClear();
+
+    const msg = JSON.stringify({
+      type: "tool_progress",
+      tool_use_id: "tu-multi",
+      tool_name: "Bash",
+      parent_tool_use_id: null,
+      elapsed_time_seconds: 1.5,
+      uuid: "uuid-multi",
+      session_id: "s1",
+    });
+    bridge.handleCLIMessage(cli, msg);
+
+    // All three browsers should receive the broadcast
+    for (const browser of [browser1, browser2, browser3]) {
+      expect(browser.send).toHaveBeenCalledTimes(1);
+      const sent = JSON.parse(browser.send.mock.calls[0][0]);
+      expect(sent.type).toBe("tool_progress");
+      expect(sent.tool_use_id).toBe("tu-multi");
+    }
+  });
+
+  it("removes a browser whose send() throws, but others continue to receive", () => {
+    const cli = makeCliSocket("s1");
+    const browser1 = makeBrowserSocket("s1");
+    const browser2 = makeBrowserSocket("s1");
+    const browser3 = makeBrowserSocket("s1");
+
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser1, "s1");
+    bridge.handleBrowserOpen(browser2, "s1");
+    bridge.handleBrowserOpen(browser3, "s1");
+    browser1.send.mockClear();
+    browser2.send.mockClear();
+    browser3.send.mockClear();
+
+    // Make browser2's send throw
+    browser2.send.mockImplementation(() => {
+      throw new Error("WebSocket closed");
+    });
+
+    const msg = JSON.stringify({
+      type: "tool_progress",
+      tool_use_id: "tu-fail",
+      tool_name: "Bash",
+      parent_tool_use_id: null,
+      elapsed_time_seconds: 2,
+      uuid: "uuid-fail",
+      session_id: "s1",
+    });
+    bridge.handleCLIMessage(cli, msg);
+
+    // browser1 and browser3 should have received the message
+    expect(browser1.send).toHaveBeenCalledTimes(1);
+    expect(browser3.send).toHaveBeenCalledTimes(1);
+
+    // browser2 should have been removed from the set
+    const session = bridge.getSession("s1")!;
+    expect(session.browserSockets.has(browser2)).toBe(false);
+    expect(session.browserSockets.has(browser1)).toBe(true);
+    expect(session.browserSockets.has(browser3)).toBe(true);
+    expect(session.browserSockets.size).toBe(2);
+  });
+});
+
+// ─── handleCLIMessage with Buffer ─────────────────────────────────────────────
+
+describe("handleCLIMessage with Buffer", () => {
+  it("parses Buffer input correctly", () => {
+    const cli = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+
+    const jsonStr = JSON.stringify({
+      type: "tool_progress",
+      tool_use_id: "tu-buf",
+      tool_name: "Bash",
+      parent_tool_use_id: null,
+      elapsed_time_seconds: 1,
+      uuid: "uuid-buf",
+      session_id: "s1",
+    });
+
+    // Pass as Buffer instead of string
+    bridge.handleCLIMessage(cli, Buffer.from(jsonStr, "utf-8"));
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const progressMsg = calls.find((c: any) => c.type === "tool_progress");
+    expect(progressMsg).toBeDefined();
+    expect(progressMsg.tool_use_id).toBe("tu-buf");
+    expect(progressMsg.tool_name).toBe("Bash");
+  });
+
+  it("handles multi-line NDJSON as Buffer", () => {
+    const cli = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+
+    const line1 = JSON.stringify({ type: "keep_alive" });
+    const line2 = JSON.stringify({
+      type: "tool_progress",
+      tool_use_id: "tu-buf2",
+      tool_name: "Read",
+      parent_tool_use_id: null,
+      elapsed_time_seconds: 3,
+      uuid: "uuid-buf2",
+      session_id: "s1",
+    });
+    const ndjson = line1 + "\n" + line2;
+
+    bridge.handleCLIMessage(cli, Buffer.from(ndjson, "utf-8"));
+
+    // keep_alive is silently consumed, only tool_progress should be broadcast
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    expect(calls).toHaveLength(1);
+    expect(calls[0].type).toBe("tool_progress");
+    expect(calls[0].tool_use_id).toBe("tu-buf2");
+  });
+});
+
+// ─── handleBrowserMessage with Buffer ─────────────────────────────────────────
+
+describe("handleBrowserMessage with Buffer", () => {
+  it("parses Buffer input and routes user_message correctly", () => {
+    const cli = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    cli.send.mockClear();
+
+    const msgStr = JSON.stringify({
+      type: "user_message",
+      content: "Hello from buffer",
+    });
+
+    bridge.handleBrowserMessage(browser, Buffer.from(msgStr, "utf-8"));
+
+    expect(cli.send).toHaveBeenCalledTimes(1);
+    const sentRaw = cli.send.mock.calls[0][0] as string;
+    const sent = JSON.parse(sentRaw.trim());
+    expect(sent.type).toBe("user");
+    expect(sent.message.content).toBe("Hello from buffer");
+  });
+
+  it("parses Buffer input and routes interrupt correctly", () => {
+    const cli = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    cli.send.mockClear();
+
+    const msgStr = JSON.stringify({ type: "interrupt" });
+    bridge.handleBrowserMessage(browser, Buffer.from(msgStr, "utf-8"));
+
+    expect(cli.send).toHaveBeenCalledTimes(1);
+    const sentRaw = cli.send.mock.calls[0][0] as string;
+    const sent = JSON.parse(sentRaw.trim());
+    expect(sent.type).toBe("control_request");
+    expect(sent.request.subtype).toBe("interrupt");
+  });
+});
+
+// ─── handleBrowserMessage with malformed JSON ─────────────────────────────────
+
+describe("handleBrowserMessage with malformed JSON", () => {
+  it("does not throw on invalid JSON", () => {
+    const cli = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    cli.send.mockClear();
+
+    expect(() => {
+      bridge.handleBrowserMessage(browser, "this is not json {{{");
+    }).not.toThrow();
+
+    // CLI should not receive anything
+    expect(cli.send).not.toHaveBeenCalled();
+  });
+
+  it("does not throw on empty string", () => {
+    const cli = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    cli.send.mockClear();
+
+    expect(() => {
+      bridge.handleBrowserMessage(browser, "");
+    }).not.toThrow();
+
+    expect(cli.send).not.toHaveBeenCalled();
+  });
+
+  it("does not throw on truncated JSON", () => {
+    const cli = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    cli.send.mockClear();
+
+    expect(() => {
+      bridge.handleBrowserMessage(browser, '{"type":"user_message","con');
+    }).not.toThrow();
+
+    expect(cli.send).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Empty NDJSON lines ───────────────────────────────────────────────────────
+
+describe("Empty NDJSON lines", () => {
+  let cli: ReturnType<typeof makeCliSocket>;
+  let browser: ReturnType<typeof makeBrowserSocket>;
+
+  beforeEach(() => {
+    cli = makeCliSocket("s1");
+    browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+  });
+
+  it("skips empty lines between valid NDJSON", () => {
+    const validMsg = JSON.stringify({
+      type: "tool_progress",
+      tool_use_id: "tu-empty-lines",
+      tool_name: "Bash",
+      parent_tool_use_id: null,
+      elapsed_time_seconds: 1,
+      uuid: "uuid-empty-lines",
+      session_id: "s1",
+    });
+
+    // Empty lines, whitespace-only lines interspersed
+    const raw = "\n\n" + validMsg + "\n\n   \n\t\n";
+    bridge.handleCLIMessage(cli, raw);
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    expect(calls).toHaveLength(1);
+    expect(calls[0].type).toBe("tool_progress");
+    expect(calls[0].tool_use_id).toBe("tu-empty-lines");
+  });
+
+  it("handles entirely empty/whitespace input without crashing", () => {
+    expect(() => bridge.handleCLIMessage(cli, "")).not.toThrow();
+    expect(() => bridge.handleCLIMessage(cli, "\n\n\n")).not.toThrow();
+    expect(() => bridge.handleCLIMessage(cli, "   \t  \n  ")).not.toThrow();
+    expect(browser.send).not.toHaveBeenCalled();
+  });
+
+  it("processes valid lines around whitespace-only lines", () => {
+    const line1 = JSON.stringify({
+      type: "tool_progress",
+      tool_use_id: "tu-ws-1",
+      tool_name: "Read",
+      parent_tool_use_id: null,
+      elapsed_time_seconds: 1,
+      uuid: "uuid-ws-1",
+      session_id: "s1",
+    });
+    const line2 = JSON.stringify({
+      type: "tool_progress",
+      tool_use_id: "tu-ws-2",
+      tool_name: "Edit",
+      parent_tool_use_id: null,
+      elapsed_time_seconds: 2,
+      uuid: "uuid-ws-2",
+      session_id: "s1",
+    });
+
+    const raw = line1 + "\n   \n\n" + line2 + "\n";
+    bridge.handleCLIMessage(cli, raw);
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const progressMsgs = calls.filter((c: any) => c.type === "tool_progress");
+    expect(progressMsgs).toHaveLength(2);
+    expect(progressMsgs[0].tool_use_id).toBe("tu-ws-1");
+    expect(progressMsgs[1].tool_use_id).toBe("tu-ws-2");
+  });
+});
+
+// ─── Session not found scenarios ──────────────────────────────────────────────
+
+describe("Session not found scenarios", () => {
+  it("handleCLIMessage does nothing for unknown session", () => {
+    const cli = makeCliSocket("unknown-session");
+    // Do NOT call handleCLIOpen — session does not exist in the bridge
+
+    expect(() => {
+      bridge.handleCLIMessage(cli, JSON.stringify({
+        type: "tool_progress",
+        tool_use_id: "tu-unknown",
+        tool_name: "Bash",
+        parent_tool_use_id: null,
+        elapsed_time_seconds: 1,
+        uuid: "uuid-unknown",
+        session_id: "unknown-session",
+      }));
+    }).not.toThrow();
+
+    // Session should not have been created
+    expect(bridge.getSession("unknown-session")).toBeUndefined();
+  });
+
+  it("handleCLIClose does nothing for unknown session", () => {
+    const cli = makeCliSocket("nonexistent");
+
+    expect(() => {
+      bridge.handleCLIClose(cli);
+    }).not.toThrow();
+
+    expect(bridge.getSession("nonexistent")).toBeUndefined();
+  });
+
+  it("handleBrowserClose does nothing for unknown session", () => {
+    const browser = makeBrowserSocket("nonexistent");
+
+    expect(() => {
+      bridge.handleBrowserClose(browser);
+    }).not.toThrow();
+
+    expect(bridge.getSession("nonexistent")).toBeUndefined();
+  });
+
+  it("handleBrowserMessage does nothing for unknown session", () => {
+    const browser = makeBrowserSocket("nonexistent");
+
+    expect(() => {
+      bridge.handleBrowserMessage(browser, JSON.stringify({
+        type: "user_message",
+        content: "hello",
+      }));
+    }).not.toThrow();
+
+    expect(bridge.getSession("nonexistent")).toBeUndefined();
+  });
+});
+
+// ─── Restore from disk with pendingPermissions ───────────────────────────────
+
+describe("Restore from disk with pendingPermissions", () => {
+  it("restores sessions with pending permissions as a Map", () => {
+    const pendingPerms: [string, any][] = [
+      ["req-restored-1", {
+        request_id: "req-restored-1",
+        tool_name: "Bash",
+        input: { command: "rm -rf /tmp/test" },
+        tool_use_id: "tu-restored-1",
+        timestamp: 1700000000000,
+      }],
+      ["req-restored-2", {
+        request_id: "req-restored-2",
+        tool_name: "Edit",
+        input: { file_path: "/test.ts" },
+        description: "Edit file",
+        tool_use_id: "tu-restored-2",
+        agent_id: "agent-1",
+        timestamp: 1700000001000,
+      }],
+    ];
+
+    store.saveSync({
+      id: "perm-session",
+      state: {
+        session_id: "perm-session",
+        model: "claude-sonnet-4-5-20250929",
+        cwd: "/test",
+        tools: ["Bash", "Edit"],
+        permissionMode: "default",
+        claude_code_version: "1.0",
+        mcp_servers: [],
+        agents: [],
+        slash_commands: [],
+        skills: [],
+        total_cost_usd: 0,
+        num_turns: 0,
+        context_used_percent: 0,
+        is_compacting: false,
+        git_branch: "",
+        is_worktree: false,
+        repo_root: "",
+        git_ahead: 0,
+        git_behind: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+      },
+      messageHistory: [],
+      pendingMessages: [],
+      pendingPermissions: pendingPerms,
+    });
+
+    const count = bridge.restoreFromDisk();
+    expect(count).toBe(1);
+
+    const session = bridge.getSession("perm-session")!;
+    expect(session.pendingPermissions).toBeInstanceOf(Map);
+    expect(session.pendingPermissions.size).toBe(2);
+
+    const perm1 = session.pendingPermissions.get("req-restored-1")!;
+    expect(perm1.tool_name).toBe("Bash");
+    expect(perm1.input).toEqual({ command: "rm -rf /tmp/test" });
+    expect(perm1.tool_use_id).toBe("tu-restored-1");
+    expect(perm1.timestamp).toBe(1700000000000);
+
+    const perm2 = session.pendingPermissions.get("req-restored-2")!;
+    expect(perm2.tool_name).toBe("Edit");
+    expect(perm2.description).toBe("Edit file");
+    expect(perm2.agent_id).toBe("agent-1");
+  });
+
+  it("restored pending permissions are sent to newly connected browsers", () => {
+    store.saveSync({
+      id: "perm-replay",
+      state: {
+        session_id: "perm-replay",
+        model: "claude-sonnet-4-5-20250929",
+        cwd: "/test",
+        tools: ["Bash"],
+        permissionMode: "default",
+        claude_code_version: "1.0",
+        mcp_servers: [],
+        agents: [],
+        slash_commands: [],
+        skills: [],
+        total_cost_usd: 0,
+        num_turns: 0,
+        context_used_percent: 0,
+        is_compacting: false,
+        git_branch: "",
+        is_worktree: false,
+        repo_root: "",
+        git_ahead: 0,
+        git_behind: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+      },
+      messageHistory: [],
+      pendingMessages: [],
+      pendingPermissions: [
+        ["req-replay", {
+          request_id: "req-replay",
+          tool_name: "Bash",
+          input: { command: "echo test" },
+          tool_use_id: "tu-replay",
+          timestamp: 1700000000000,
+        }],
+      ],
+    });
+
+    bridge.restoreFromDisk();
+
+    // Connect a CLI so we don't trigger relaunch
+    const cli = makeCliSocket("perm-replay");
+    bridge.handleCLIOpen(cli, "perm-replay");
+
+    // Now connect a browser
+    const browser = makeBrowserSocket("perm-replay");
+    bridge.handleBrowserOpen(browser, "perm-replay");
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const permMsg = calls.find((c: any) => c.type === "permission_request");
+    expect(permMsg).toBeDefined();
+    expect(permMsg.request.request_id).toBe("req-replay");
+    expect(permMsg.request.tool_name).toBe("Bash");
+    expect(permMsg.request.input).toEqual({ command: "echo test" });
+  });
+
+  it("restores sessions with empty pendingPermissions array", () => {
+    store.saveSync({
+      id: "empty-perms",
+      state: {
+        session_id: "empty-perms",
+        model: "claude-sonnet-4-5-20250929",
+        cwd: "/test",
+        tools: [],
+        permissionMode: "default",
+        claude_code_version: "1.0",
+        mcp_servers: [],
+        agents: [],
+        slash_commands: [],
+        skills: [],
+        total_cost_usd: 0,
+        num_turns: 0,
+        context_used_percent: 0,
+        is_compacting: false,
+        git_branch: "",
+        is_worktree: false,
+        repo_root: "",
+        git_ahead: 0,
+        git_behind: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+      },
+      messageHistory: [],
+      pendingMessages: [],
+      pendingPermissions: [],
+    });
+
+    const count = bridge.restoreFromDisk();
+    expect(count).toBe(1);
+
+    const session = bridge.getSession("empty-perms")!;
+    expect(session.pendingPermissions).toBeInstanceOf(Map);
+    expect(session.pendingPermissions.size).toBe(0);
+  });
+
+  it("restores sessions with undefined pendingPermissions", () => {
+    // Simulate a persisted session from an older version that lacks pendingPermissions
+    store.saveSync({
+      id: "no-perms-field",
+      state: {
+        session_id: "no-perms-field",
+        model: "claude-sonnet-4-5-20250929",
+        cwd: "/test",
+        tools: [],
+        permissionMode: "default",
+        claude_code_version: "1.0",
+        mcp_servers: [],
+        agents: [],
+        slash_commands: [],
+        skills: [],
+        total_cost_usd: 0,
+        num_turns: 0,
+        context_used_percent: 0,
+        is_compacting: false,
+        git_branch: "",
+        is_worktree: false,
+        repo_root: "",
+        git_ahead: 0,
+        git_behind: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+      },
+      messageHistory: [],
+      pendingMessages: [],
+      // Cast to bypass TypeScript — simulating missing field from older persisted data
+      pendingPermissions: undefined as any,
+    });
+
+    const count = bridge.restoreFromDisk();
+    expect(count).toBe(1);
+
+    const session = bridge.getSession("no-perms-field")!;
+    expect(session.pendingPermissions).toBeInstanceOf(Map);
+    expect(session.pendingPermissions.size).toBe(0);
+  });
+});
