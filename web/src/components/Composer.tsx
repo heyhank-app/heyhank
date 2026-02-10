@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useStore } from "../store.js";
 import { sendToSession } from "../ws.js";
+import { api } from "../api.js";
 
 let idCounter = 0;
 
@@ -345,7 +346,25 @@ export function Composer({ sessionId }: { sessionId: string }) {
               {((sessionData.git_ahead || 0) > 0 || (sessionData.git_behind || 0) > 0) && (
                 <span className="flex items-center gap-0.5 text-[10px]">
                   {(sessionData.git_ahead || 0) > 0 && <span className="text-green-500">{sessionData.git_ahead}&#8593;</span>}
-                  {(sessionData.git_behind || 0) > 0 && <span className="text-cc-warning">{sessionData.git_behind}&#8595;</span>}
+                  {(sessionData.git_behind || 0) > 0 && (
+                    <button
+                      className="text-cc-warning hover:text-amber-400 cursor-pointer hover:underline"
+                      title="Pull latest changes"
+                      onClick={() => {
+                        const cwd = sessionData.repo_root || sessionData.cwd;
+                        if (!cwd) return;
+                        api.gitPull(cwd).then((r) => {
+                          useStore.getState().updateSession(sessionId, {
+                            git_ahead: r.git_ahead,
+                            git_behind: r.git_behind,
+                          });
+                          if (!r.success) console.warn("[git pull]", r.output);
+                        }).catch((e) => console.error("[git pull]", e));
+                      }}
+                    >
+                      {sessionData.git_behind}&#8595;
+                    </button>
+                  )}
                 </span>
               )}
               {((sessionData.total_lines_added || 0) > 0 || (sessionData.total_lines_removed || 0) > 0) && (

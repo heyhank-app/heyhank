@@ -31,7 +31,8 @@
     "build": "vite build",
     "start": "NODE_ENV=production bun server/index.ts",
     "prepublishOnly": "bun run build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
   },
   "dependencies": {
     "hono": "^4.7.0"

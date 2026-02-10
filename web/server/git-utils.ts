@@ -115,7 +115,7 @@ export function listBranches(repoRoot: string): GitBranchInfo[] {
 
   // Local branches
   const localRaw = gitSafe(
-    'for-each-ref --format=%(refname:short)%09%(HEAD) refs/heads/',
+    "for-each-ref '--format=%(refname:short)%09%(HEAD)' refs/heads/",
     repoRoot,
   );
   if (localRaw) {
@@ -138,7 +138,7 @@ export function listBranches(repoRoot: string): GitBranchInfo[] {
   // Remote branches (only those without a local counterpart)
   const localNames = new Set(result.map((b) => b.name));
   const remoteRaw = gitSafe(
-    'for-each-ref --format=%(refname:short) refs/remotes/origin/',
+    "for-each-ref '--format=%(refname:short)' refs/remotes/origin/",
     repoRoot,
   );
   if (remoteRaw) {
@@ -282,6 +282,18 @@ export function isWorktreeDirty(worktreePath: string): boolean {
   const status = gitSafe("status --porcelain", worktreePath);
   return status !== null && status.length > 0;
 }
+
+export function gitPull(
+  cwd: string,
+): { success: boolean; output: string } {
+  try {
+    const output = git("pull", cwd);
+    return { success: true, output };
+  } catch (e: unknown) {
+    return { success: false, output: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 
 export function getBranchStatus(
   repoRoot: string,

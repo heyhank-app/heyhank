@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { execSync } from "node:child_process";
 import { readdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { homedir } from "node:os";
@@ -32,24 +33,21 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
       let cwd = body.cwd;
       let worktreeInfo: { isWorktree: boolean; repoRoot: string; branch: string; worktreePath: string } | undefined;
 
-      // If a branch is specified, set up a worktree
-      if (body.branch && cwd) {
+      // If worktree is requested, set up a worktree for the selected branch
+      if (body.useWorktree && body.branch && cwd) {
         const repoInfo = gitUtils.getRepoInfo(cwd);
         if (repoInfo) {
-          // If the requested branch is the default branch, use the original repo dir
-          if (body.branch !== repoInfo.defaultBranch) {
-            const result = gitUtils.ensureWorktree(repoInfo.repoRoot, body.branch, {
-              baseBranch: repoInfo.defaultBranch,
-              createBranch: body.createBranch,
-            });
-            cwd = result.worktreePath;
-            worktreeInfo = {
-              isWorktree: true,
-              repoRoot: repoInfo.repoRoot,
-              branch: body.branch,
-              worktreePath: result.worktreePath,
-            };
-          }
+          const result = gitUtils.ensureWorktree(repoInfo.repoRoot, body.branch, {
+            baseBranch: repoInfo.defaultBranch,
+            createBranch: body.createBranch,
+          });
+          cwd = result.worktreePath;
+          worktreeInfo = {
+            isWorktree: true,
+            repoRoot: repoInfo.repoRoot,
+            branch: body.branch,
+            worktreePath: result.worktreePath,
+          };
         }
       }
 
@@ -256,6 +254,25 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
     const result = gitUtils.removeWorktree(repoRoot, worktreePath, { force });
     return c.json(result);
   });
+
+  api.post("/git/pull", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const { cwd } = body;
+    if (!cwd) return c.json({ error: "cwd required" }, 400);
+    const result = gitUtils.gitPull(cwd);
+    // Return refreshed ahead/behind counts
+    let git_ahead = 0, git_behind = 0;
+    try {
+      const counts = execSync("git rev-list --left-right --count @{upstream}...HEAD", {
+        cwd, encoding: "utf-8", timeout: 3000,
+      }).trim();
+      const [behind, ahead] = counts.split(/\s+/).map(Number);
+      git_ahead = ahead || 0;
+      git_behind = behind || 0;
+    } catch { /* no upstream */ }
+    return c.json({ ...result, git_ahead, git_behind });
+  });
+
 
   // ─── Helper ─────────────────────────────────────────────────────────
 
