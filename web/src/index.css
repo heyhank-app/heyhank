@@ -46,6 +46,27 @@
   100% { background-position: 200% 0; }
 }
 
+@keyframes name-appear {
+  0% {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateY(-2px);
+  }
+  50% {
+    opacity: 0.8;
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+.animate-name-appear {
+  animation: name-appear 0.5s ease-out;
+}
+
 /* Dark mode overrides */
 .dark {
   --color-cc-bg: #2b2a27;

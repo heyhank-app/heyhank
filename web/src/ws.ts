@@ -316,6 +316,7 @@ function handleMessage(sessionId: string, event: MessageEvent) {
       const isRandomName = currentName && /^[A-Z][a-z]+ [A-Z][a-z]+$/.test(currentName);
       if (!currentName || isRandomName) {
         store.setSessionName(sessionId, data.name);
+        store.markRecentlyRenamed(sessionId);
       }
       break;
     }

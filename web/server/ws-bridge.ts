@@ -80,6 +80,7 @@ export class WsBridge {
   private onCLISessionId: ((sessionId: string, cliSessionId: string) => void) | null = null;
   private onCLIRelaunchNeeded: ((sessionId: string) => void) | null = null;
   private onFirstTurnCompleted: ((sessionId: string, firstUserMessage: string) => void) | null = null;
+  private autoNamingAttempted = new Set<string>();
 
   /** Register a callback for when we learn the CLI's internal session ID. */
   onCLISessionIdReceived(cb: (sessionId: string, cliSessionId: string) => void): void {
@@ -118,6 +119,10 @@ export class WsBridge {
         pendingMessages: p.pendingMessages || [],
       };
       this.sessions.set(p.id, session);
+      // Restored sessions with completed turns don't need auto-naming re-triggered
+      if (session.state.num_turns > 0) {
+        this.autoNamingAttempted.add(session.id);
+      }
       count++;
     }
     if (count > 0) {
@@ -171,6 +176,7 @@ export class WsBridge {
 
   removeSession(sessionId: string) {
     this.sessions.delete(sessionId);
+    this.autoNamingAttempted.delete(sessionId);
     this.store?.remove(sessionId);
   }
 
@@ -194,6 +200,7 @@ export class WsBridge {
     session.browserSockets.clear();
 
     this.sessions.delete(sessionId);
+    this.autoNamingAttempted.delete(sessionId);
     this.store?.remove(sessionId);
   }
 
@@ -486,8 +493,15 @@ export class WsBridge {
     this.broadcastToBrowsers(session, browserMsg);
     this.persistSession(session);
 
-    // Trigger auto-naming after first turn completes successfully
-    if (msg.num_turns === 1 && !msg.is_error && this.onFirstTurnCompleted) {
+    // Trigger auto-naming after the first successful result for this session.
+    // Note: num_turns counts all internal tool-use turns, so it's typically > 1
+    // even on the first user interaction. We track per-session instead.
+    if (
+      !msg.is_error &&
+      this.onFirstTurnCompleted &&
+      !this.autoNamingAttempted.has(session.id)
+    ) {
+      this.autoNamingAttempted.add(session.id);
       const firstUserMsg = session.messageHistory.find(
         (m) => m.type === "user_message",
       );

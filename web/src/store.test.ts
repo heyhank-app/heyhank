@@ -408,6 +408,28 @@ describe("Session names", () => {
   });
 });
 
+// ─── Recently renamed (animation tracking) ──────────────────────────────────
+
+describe("recentlyRenamed", () => {
+  it("markRecentlyRenamed: adds session to the set", () => {
+    useStore.getState().markRecentlyRenamed("s1");
+    expect(useStore.getState().recentlyRenamed.has("s1")).toBe(true);
+  });
+
+  it("clearRecentlyRenamed: removes session from the set", () => {
+    useStore.getState().markRecentlyRenamed("s1");
+    useStore.getState().clearRecentlyRenamed("s1");
+    expect(useStore.getState().recentlyRenamed.has("s1")).toBe(false);
+  });
+
+  it("removeSession: also clears recentlyRenamed", () => {
+    useStore.getState().addSession(makeSession("s1"));
+    useStore.getState().markRecentlyRenamed("s1");
+    useStore.getState().removeSession("s1");
+    expect(useStore.getState().recentlyRenamed.has("s1")).toBe(false);
+  });
+});
+
 // ─── UI state ───────────────────────────────────────────────────────────────
 
 describe("UI state", () => {
@@ -448,6 +470,7 @@ describe("reset", () => {
     useStore.getState().addPermission("s1", makePermission());
     useStore.getState().addTask("s1", makeTask());
     useStore.getState().setSessionName("s1", "name");
+    useStore.getState().markRecentlyRenamed("s1");
     useStore.getState().setConnectionStatus("s1", "connected");
     useStore.getState().setCliConnected("s1", true);
     useStore.getState().setSessionStatus("s1", "running");
@@ -473,5 +496,6 @@ describe("reset", () => {
     expect(state.previousPermissionMode.size).toBe(0);
     expect(state.sessionTasks.size).toBe(0);
     expect(state.sessionNames.size).toBe(0);
+    expect(state.recentlyRenamed.size).toBe(0);
   });
 });

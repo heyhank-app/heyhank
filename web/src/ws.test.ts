@@ -691,3 +691,88 @@ describe("task extraction: TaskUpdate", () => {
     expect(tasksAfter[0].status).toBe("completed");
   });
 });
+
+// ===========================================================================
+// handleMessage: session_name_update
+// ===========================================================================
+describe("handleMessage: session_name_update", () => {
+  it("updates session name when current name is a random Adj+Noun name", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    // Current name is "Test Session" from the mock — set a random-style name
+    useStore.getState().setSessionName("s1", "Swift Falcon");
+
+    fireMessage({ type: "session_name_update", name: "Fix Authentication Bug" });
+
+    expect(useStore.getState().sessionNames.get("s1")).toBe("Fix Authentication Bug");
+  });
+
+  it("marks session as recently renamed for animation", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    // Set a random-style name
+    useStore.getState().setSessionName("s1", "Calm River");
+
+    fireMessage({ type: "session_name_update", name: "Deploy Dashboard" });
+
+    expect(useStore.getState().recentlyRenamed.has("s1")).toBe(true);
+  });
+
+  it("does not overwrite a manually-set custom name", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    // Manually renamed — not matching Adj+Noun pattern
+    useStore.getState().setSessionName("s1", "My Custom Project");
+
+    fireMessage({ type: "session_name_update", name: "Auto Generated Title" });
+
+    expect(useStore.getState().sessionNames.get("s1")).toBe("My Custom Project");
+  });
+
+  it("does not mark as recently renamed when name is not updated", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    // Custom name — won't be overwritten
+    useStore.getState().setSessionName("s1", "My Custom Name");
+
+    fireMessage({ type: "session_name_update", name: "Auto Title" });
+
+    expect(useStore.getState().recentlyRenamed.has("s1")).toBe(false);
+  });
+
+  it("updates name when session has no name at all", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    // Clear the name entirely
+    const sessionNames = new Map(useStore.getState().sessionNames);
+    sessionNames.delete("s1");
+    useStore.setState({ sessionNames });
+
+    fireMessage({ type: "session_name_update", name: "Brand New Title" });
+
+    expect(useStore.getState().sessionNames.get("s1")).toBe("Brand New Title");
+    expect(useStore.getState().recentlyRenamed.has("s1")).toBe(true);
+  });
+
+  it("does not overwrite multi-word custom names that happen to start capitalized", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    // This matches the Adj+Noun pattern (two capitalized words)
+    useStore.getState().setSessionName("s1", "Bright Falcon");
+    fireMessage({ type: "session_name_update", name: "Auto Title" });
+    // Should overwrite random names
+    expect(useStore.getState().sessionNames.get("s1")).toBe("Auto Title");
+
+    // But a three-word name should NOT be overwritten
+    useStore.getState().setSessionName("s1", "My Cool Project");
+    useStore.getState().clearRecentlyRenamed("s1");
+    fireMessage({ type: "session_name_update", name: "Another Auto Title" });
+    expect(useStore.getState().sessionNames.get("s1")).toBe("My Cool Project");
+  });
+});

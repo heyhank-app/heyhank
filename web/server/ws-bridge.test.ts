@@ -1841,7 +1841,7 @@ describe("Restore from disk with pendingPermissions", () => {
 // ─── First turn callback ──────────────────────────────────────────────────────
 
 describe("onFirstTurnCompletedCallback", () => {
-  it("fires after first turn result (num_turns === 1)", () => {
+  it("fires on first successful result regardless of num_turns", () => {
     const callback = vi.fn();
     bridge.onFirstTurnCompletedCallback(callback);
 
@@ -1857,7 +1857,7 @@ describe("onFirstTurnCompletedCallback", () => {
       content: "Fix the login bug",
     }));
 
-    // Simulate the result after first turn
+    // Simulate the result — num_turns is 5 because CLI auto-approved tool calls
     bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       subtype: "success",
@@ -1865,7 +1865,7 @@ describe("onFirstTurnCompletedCallback", () => {
       result: "Done",
       duration_ms: 1000,
       duration_api_ms: 800,
-      num_turns: 1,
+      num_turns: 5,
       total_cost_usd: 0.01,
       stop_reason: "end_turn",
       usage: { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
@@ -1876,7 +1876,7 @@ describe("onFirstTurnCompletedCallback", () => {
     expect(callback).toHaveBeenCalledWith("s1", "Fix the login bug");
   });
 
-  it("does not fire on subsequent turns (num_turns > 1)", () => {
+  it("does not fire on subsequent results for the same session", () => {
     const callback = vi.fn();
     bridge.onFirstTurnCompletedCallback(callback);
 
@@ -1891,7 +1891,7 @@ describe("onFirstTurnCompletedCallback", () => {
       content: "First message",
     }));
 
-    // Result with num_turns > 1
+    // First result — triggers callback
     bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       subtype: "success",
@@ -1902,11 +1902,32 @@ describe("onFirstTurnCompletedCallback", () => {
       total_cost_usd: 0.05,
       stop_reason: "end_turn",
       usage: { input_tokens: 500, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
-      uuid: "uuid-later",
+      uuid: "uuid-first",
       session_id: "s1",
     }));
 
-    expect(callback).not.toHaveBeenCalled();
+    expect(callback).toHaveBeenCalledTimes(1);
+
+    // Second user message + result — should NOT trigger callback again
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "Second message",
+    }));
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      duration_ms: 1000,
+      duration_api_ms: 800,
+      num_turns: 6,
+      total_cost_usd: 0.10,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 800, output_tokens: 300, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-second",
+      session_id: "s1",
+    }));
+
+    expect(callback).toHaveBeenCalledTimes(1);
   });
 
   it("does not fire on error results", () => {
@@ -1940,6 +1961,393 @@ describe("onFirstTurnCompletedCallback", () => {
     }));
 
     expect(callback).not.toHaveBeenCalled();
+  });
+
+  it("fires after initial error result followed by a successful result", () => {
+    const callback = vi.fn();
+    bridge.onFirstTurnCompletedCallback(callback);
+
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleCLIMessage(cli, makeInitMsg());
+
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "Fix the bug",
+    }));
+
+    // First result is an error — should NOT trigger
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: ["Oops"],
+      duration_ms: 100,
+      duration_api_ms: 50,
+      num_turns: 1,
+      total_cost_usd: 0.001,
+      stop_reason: null,
+      usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-err",
+      session_id: "s1",
+    }));
+    expect(callback).not.toHaveBeenCalled();
+
+    // Second result is success — should trigger since no successful result yet
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "Done",
+      duration_ms: 500,
+      duration_api_ms: 400,
+      num_turns: 3,
+      total_cost_usd: 0.01,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-ok",
+      session_id: "s1",
+    }));
+    expect(callback).toHaveBeenCalledWith("s1", "Fix the bug");
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fire when there is no user message in history", () => {
+    const callback = vi.fn();
+    bridge.onFirstTurnCompletedCallback(callback);
+
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleCLIMessage(cli, makeInitMsg());
+
+    // Send result without any user message first
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "Done",
+      duration_ms: 100,
+      duration_api_ms: 50,
+      num_turns: 1,
+      total_cost_usd: 0.001,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-1",
+      session_id: "s1",
+    }));
+
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it("fires independently for different sessions", () => {
+    const callback = vi.fn();
+    bridge.onFirstTurnCompletedCallback(callback);
+
+    // Setup session 1
+    const cli1 = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli1, "s1");
+    bridge.handleCLIMessage(cli1, makeInitMsg());
+    const browser1 = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser1, "s1");
+    bridge.handleBrowserMessage(browser1, JSON.stringify({
+      type: "user_message",
+      content: "Message for s1",
+    }));
+
+    // Setup session 2
+    const cli2 = makeCliSocket("s2");
+    bridge.handleCLIOpen(cli2, "s2");
+    bridge.handleCLIMessage(cli2, makeInitMsg());
+    const browser2 = makeBrowserSocket("s2");
+    bridge.handleBrowserOpen(browser2, "s2");
+    bridge.handleBrowserMessage(browser2, JSON.stringify({
+      type: "user_message",
+      content: "Message for s2",
+    }));
+
+    // Result for s1
+    bridge.handleCLIMessage(cli1, JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      duration_ms: 100,
+      duration_api_ms: 50,
+      num_turns: 2,
+      total_cost_usd: 0.01,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 50, output_tokens: 25, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-s1",
+      session_id: "s1",
+    }));
+
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(callback).toHaveBeenCalledWith("s1", "Message for s1");
+
+    // Result for s2 — should also fire (independent session)
+    bridge.handleCLIMessage(cli2, JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      duration_ms: 100,
+      duration_api_ms: 50,
+      num_turns: 4,
+      total_cost_usd: 0.02,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 80, output_tokens: 40, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-s2",
+      session_id: "s2",
+    }));
+
+    expect(callback).toHaveBeenCalledTimes(2);
+    expect(callback).toHaveBeenCalledWith("s2", "Message for s2");
+  });
+
+  it("cleans up auto-naming tracking when session is removed", () => {
+    const callback = vi.fn();
+    bridge.onFirstTurnCompletedCallback(callback);
+
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleCLIMessage(cli, makeInitMsg());
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "Hello",
+    }));
+
+    // First result triggers callback
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      duration_ms: 100,
+      duration_api_ms: 50,
+      num_turns: 1,
+      total_cost_usd: 0.01,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-1",
+      session_id: "s1",
+    }));
+    expect(callback).toHaveBeenCalledTimes(1);
+
+    // Remove and recreate the session
+    bridge.removeSession("s1");
+    const cli2 = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli2, "s1");
+    bridge.handleCLIMessage(cli2, makeInitMsg());
+    const browser2 = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser2, "s1");
+    bridge.handleBrowserMessage(browser2, JSON.stringify({
+      type: "user_message",
+      content: "Hello again",
+    }));
+
+    // Should fire again for the recreated session
+    bridge.handleCLIMessage(cli2, JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      duration_ms: 100,
+      duration_api_ms: 50,
+      num_turns: 2,
+      total_cost_usd: 0.01,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-2",
+      session_id: "s1",
+    }));
+    expect(callback).toHaveBeenCalledTimes(2);
+    expect(callback).toHaveBeenLastCalledWith("s1", "Hello again");
+  });
+
+  it("cleans up auto-naming tracking when session is closed", () => {
+    const callback = vi.fn();
+    bridge.onFirstTurnCompletedCallback(callback);
+
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleCLIMessage(cli, makeInitMsg());
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "First session",
+    }));
+
+    // Trigger callback
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      duration_ms: 100,
+      duration_api_ms: 50,
+      num_turns: 1,
+      total_cost_usd: 0.01,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-1",
+      session_id: "s1",
+    }));
+    expect(callback).toHaveBeenCalledTimes(1);
+
+    // Close session (should clean up tracking)
+    bridge.closeSession("s1");
+
+    // Recreate and verify callback fires again
+    const cli2 = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli2, "s1");
+    bridge.handleCLIMessage(cli2, makeInitMsg());
+    const browser2 = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser2, "s1");
+    bridge.handleBrowserMessage(browser2, JSON.stringify({
+      type: "user_message",
+      content: "Second session",
+    }));
+    bridge.handleCLIMessage(cli2, JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      duration_ms: 100,
+      duration_api_ms: 50,
+      num_turns: 1,
+      total_cost_usd: 0.01,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-2",
+      session_id: "s1",
+    }));
+    expect(callback).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not fire for restored sessions with completed turns", () => {
+    const callback = vi.fn();
+    bridge.onFirstTurnCompletedCallback(callback);
+
+    // Persist a session with num_turns > 0 and a user message in history
+    store.save({
+      id: "restored-1",
+      state: {
+        session_id: "restored-1",
+        model: "claude-sonnet-4-5-20250929",
+        cwd: "/test",
+        tools: [],
+        permissionMode: "default",
+        claude_code_version: "1.0",
+        mcp_servers: [],
+        agents: [],
+        slash_commands: [],
+        skills: [],
+        total_cost_usd: 0.01,
+        num_turns: 3,
+        context_used_percent: 10,
+        is_compacting: false,
+        git_branch: "",
+        is_worktree: false,
+        repo_root: "",
+        git_ahead: 0,
+        git_behind: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+      },
+      messageHistory: [
+        { type: "user_message" as const, content: "Build the app", timestamp: Date.now() },
+      ],
+      pendingMessages: [],
+      pendingPermissions: [],
+    });
+
+    // Restore from disk — this should mark the session as auto-naming attempted
+    bridge.restoreFromDisk();
+
+    // CLI reconnects
+    const cli = makeCliSocket("restored-1");
+    bridge.handleCLIOpen(cli, "restored-1");
+
+    // Another result comes in — should NOT trigger callback
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      duration_ms: 200,
+      duration_api_ms: 150,
+      num_turns: 5,
+      total_cost_usd: 0.02,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 200, output_tokens: 100, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-restored",
+      session_id: "restored-1",
+    }));
+
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it("allows auto-naming for restored sessions with zero turns", () => {
+    const callback = vi.fn();
+    bridge.onFirstTurnCompletedCallback(callback);
+
+    // Persist a session with num_turns === 0 (brand new, never completed a turn)
+    store.save({
+      id: "fresh-restored",
+      state: {
+        session_id: "fresh-restored",
+        model: "claude-sonnet-4-5-20250929",
+        cwd: "/test",
+        tools: [],
+        permissionMode: "default",
+        claude_code_version: "1.0",
+        mcp_servers: [],
+        agents: [],
+        slash_commands: [],
+        skills: [],
+        total_cost_usd: 0,
+        num_turns: 0,
+        context_used_percent: 0,
+        is_compacting: false,
+        git_branch: "",
+        is_worktree: false,
+        repo_root: "",
+        git_ahead: 0,
+        git_behind: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+      },
+      messageHistory: [],
+      pendingMessages: [],
+      pendingPermissions: [],
+    });
+
+    bridge.restoreFromDisk();
+
+    // CLI connects and browser sends message
+    const cli = makeCliSocket("fresh-restored");
+    bridge.handleCLIOpen(cli, "fresh-restored");
+    bridge.handleCLIMessage(cli, makeInitMsg());
+    const browser = makeBrowserSocket("fresh-restored");
+    bridge.handleBrowserOpen(browser, "fresh-restored");
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "Hello world",
+    }));
+
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      duration_ms: 100,
+      duration_api_ms: 50,
+      num_turns: 2,
+      total_cost_usd: 0.01,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 50, output_tokens: 25, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-fresh",
+      session_id: "fresh-restored",
+    }));
+
+    expect(callback).toHaveBeenCalledWith("fresh-restored", "Hello world");
   });
 });
 
