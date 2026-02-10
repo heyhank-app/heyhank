@@ -21,6 +21,19 @@ async function get<T = unknown>(path: string): Promise<T> {
   return res.json();
 }
 
+async function put<T = unknown>(path: string, body?: object): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || res.statusText);
+  }
+  return res.json();
+}
+
 async function del<T = unknown>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { method: "DELETE" });
   if (!res.ok) {
@@ -36,6 +49,15 @@ export interface CreateSessionOpts {
   cwd?: string;
   claudeBinary?: string;
   allowedTools?: string[];
+  envSlug?: string;
+}
+
+export interface CompanionEnv {
+  name: string;
+  slug: string;
+  variables: Record<string, string>;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface DirEntry {
@@ -71,4 +93,13 @@ export const api = {
 
   getHome: () =>
     get<{ home: string; cwd: string }>("/fs/home"),
+
+  // Environments
+  listEnvs: () => get<CompanionEnv[]>("/envs"),
+  getEnv: (slug: string) => get<CompanionEnv>(`/envs/${encodeURIComponent(slug)}`),
+  createEnv: (name: string, variables: Record<string, string>) =>
+    post<CompanionEnv>("/envs", { name, variables }),
+  updateEnv: (slug: string, data: { name?: string; variables?: Record<string, string> }) =>
+    put<CompanionEnv>(`/envs/${encodeURIComponent(slug)}`, data),
+  deleteEnv: (slug: string) => del(`/envs/${encodeURIComponent(slug)}`),
 };

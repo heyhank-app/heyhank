@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useStore } from "../store.js";
-import { api, type DirEntry } from "../api.js";
+import { api, type DirEntry, type CompanionEnv } from "../api.js";
 import { connectSession, waitForConnection, sendToSession } from "../ws.js";
 import { disconnectSession } from "../ws.js";
 import { generateUniqueSessionName } from "../utils/names.js";
+import { EnvManager } from "./EnvManager.js";
 
 interface ImageAttachment {
   name: string;
@@ -62,6 +63,12 @@ export function HomePage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
 
+  // Environment state
+  const [envs, setEnvs] = useState<CompanionEnv[]>([]);
+  const [selectedEnv, setSelectedEnv] = useState(() => localStorage.getItem("cc-selected-env") || "");
+  const [showEnvDropdown, setShowEnvDropdown] = useState(false);
+  const [showEnvManager, setShowEnvManager] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Dropdown states
@@ -78,6 +85,7 @@ export function HomePage() {
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const modeDropdownRef = useRef<HTMLDivElement>(null);
   const dirDropdownRef = useRef<HTMLDivElement>(null);
+  const envDropdownRef = useRef<HTMLDivElement>(null);
 
   const setCurrentSession = useStore((s) => s.setCurrentSession);
   const currentSessionId = useStore((s) => s.currentSessionId);
@@ -94,6 +102,7 @@ export function HomePage() {
         setCwd(serverCwd || home);
       }
     }).catch(() => {});
+    api.listEnvs().then(setEnvs).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close dropdowns on outside click
@@ -108,6 +117,9 @@ export function HomePage() {
       if (dirDropdownRef.current && !dirDropdownRef.current.contains(e.target as Node)) {
         setShowDirDropdown(false);
         setShowDirInput(false);
+      }
+      if (envDropdownRef.current && !envDropdownRef.current.contains(e.target as Node)) {
+        setShowEnvDropdown(false);
       }
     }
     document.addEventListener("mousedown", handleClick);
@@ -202,6 +214,7 @@ export function HomePage() {
         model,
         permissionMode: mode,
         cwd: cwd || undefined,
+        envSlug: selectedEnv || undefined,
       });
       const sessionId = result.sessionId;
 
@@ -502,6 +515,74 @@ export function HomePage() {
             )}
           </div>
 
+          {/* Environment selector */}
+          <div className="relative" ref={envDropdownRef}>
+            <button
+              onClick={() => {
+                if (!showEnvDropdown) {
+                  api.listEnvs().then(setEnvs).catch(() => {});
+                }
+                setShowEnvDropdown(!showEnvDropdown);
+              }}
+              className="flex items-center gap-1.5 px-2 py-1 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
+                <path d="M8 1a2 2 0 012 2v1h2a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h2V3a2 2 0 012-2zm0 1.5a.5.5 0 00-.5.5v1h1V3a.5.5 0 00-.5-.5zM4 5.5a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V6a.5.5 0 00-.5-.5H4z" />
+              </svg>
+              <span className="max-w-[120px] truncate">
+                {selectedEnv ? envs.find((e) => e.slug === selectedEnv)?.name || "Env" : "No env"}
+              </span>
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
+                <path d="M4 6l4 4 4-4" />
+              </svg>
+            </button>
+            {showEnvDropdown && (
+              <div className="absolute left-0 top-full mt-1 w-56 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
+                <button
+                  onClick={() => {
+                    setSelectedEnv("");
+                    localStorage.setItem("cc-selected-env", "");
+                    setShowEnvDropdown(false);
+                  }}
+                  className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
+                    !selectedEnv ? "text-cc-primary font-medium" : "text-cc-fg"
+                  }`}
+                >
+                  No environment
+                </button>
+                {envs.map((env) => (
+                  <button
+                    key={env.slug}
+                    onClick={() => {
+                      setSelectedEnv(env.slug);
+                      localStorage.setItem("cc-selected-env", env.slug);
+                      setShowEnvDropdown(false);
+                    }}
+                    className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-1 ${
+                      env.slug === selectedEnv ? "text-cc-primary font-medium" : "text-cc-fg"
+                    }`}
+                  >
+                    <span className="truncate">{env.name}</span>
+                    <span className="text-cc-muted ml-auto shrink-0">
+                      {Object.keys(env.variables).length} var{Object.keys(env.variables).length !== 1 ? "s" : ""}
+                    </span>
+                  </button>
+                ))}
+                <div className="border-t border-cc-border mt-1 pt-1">
+                  <button
+                    onClick={() => {
+                      setShowEnvManager(true);
+                      setShowEnvDropdown(false);
+                    }}
+                    className="w-full px-3 py-2 text-xs text-left text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+                  >
+                    Manage environments...
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Model selector */}
           <div className="relative" ref={modelDropdownRef}>
             <button
@@ -543,6 +624,16 @@ export function HomePage() {
           </div>
         )}
       </div>
+
+      {/* Environment manager modal */}
+      {showEnvManager && (
+        <EnvManager
+          onClose={() => {
+            setShowEnvManager(false);
+            api.listEnvs().then(setEnvs).catch(() => {});
+          }}
+        />
+      )}
     </div>
   );
 }

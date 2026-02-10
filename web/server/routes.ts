@@ -4,6 +4,7 @@ import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 import type { CliLauncher } from "./cli-launcher.js";
 import type { WsBridge } from "./ws-bridge.js";
+import * as envManager from "./env-manager.js";
 
 export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge) {
   const api = new Hono();
@@ -13,13 +14,25 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge) {
   api.post("/sessions/create", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     try {
+      // Resolve environment variables from envSlug
+      let envVars: Record<string, string> | undefined = body.env;
+      if (body.envSlug) {
+        const companionEnv = envManager.getEnv(body.envSlug);
+        if (companionEnv) {
+          console.log(`[routes] Injecting env "${companionEnv.name}" (${Object.keys(companionEnv.variables).length} vars):`, Object.keys(companionEnv.variables).join(", "));
+          envVars = { ...companionEnv.variables, ...body.env };
+        } else {
+          console.warn(`[routes] Environment "${body.envSlug}" not found, ignoring`);
+        }
+      }
+
       const session = launcher.launch({
         model: body.model,
         permissionMode: body.permissionMode,
         cwd: body.cwd,
         claudeBinary: body.claudeBinary,
         allowedTools: body.allowedTools,
-        env: body.env,
+        env: envVars,
       });
       return c.json(session);
     } catch (e: unknown) {
@@ -84,6 +97,50 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge) {
 
   api.get("/fs/home", (c) => {
     return c.json({ home: homedir(), cwd: process.cwd() });
+  });
+
+  // ─── Environments (~/.companion/envs/) ────────────────────────────
+
+  api.get("/envs", (c) => {
+    try {
+      return c.json(envManager.listEnvs());
+    } catch (e: unknown) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
+    }
+  });
+
+  api.get("/envs/:slug", (c) => {
+    const env = envManager.getEnv(c.req.param("slug"));
+    if (!env) return c.json({ error: "Environment not found" }, 404);
+    return c.json(env);
+  });
+
+  api.post("/envs", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      const env = envManager.createEnv(body.name, body.variables || {});
+      return c.json(env, 201);
+    } catch (e: unknown) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    }
+  });
+
+  api.put("/envs/:slug", async (c) => {
+    const slug = c.req.param("slug");
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      const env = envManager.updateEnv(slug, { name: body.name, variables: body.variables });
+      if (!env) return c.json({ error: "Environment not found" }, 404);
+      return c.json(env);
+    } catch (e: unknown) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    }
+  });
+
+  api.delete("/envs/:slug", (c) => {
+    const deleted = envManager.deleteEnv(c.req.param("slug"));
+    if (!deleted) return c.json({ error: "Environment not found" }, 404);
+    return c.json({ ok: true });
   });
 
   return api;
