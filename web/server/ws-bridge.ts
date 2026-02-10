@@ -16,6 +16,7 @@ import type {
   SessionState,
   PermissionRequest,
 } from "./session-types.js";
+import type { SessionStore } from "./session-store.js";
 
 // ─── WebSocket data tags ──────────────────────────────────────────────────────
 
@@ -70,6 +71,49 @@ function makeDefaultState(sessionId: string): SessionState {
 
 export class WsBridge {
   private sessions = new Map<string, Session>();
+  private store: SessionStore | null = null;
+
+  /** Attach a persistent store. Call restoreFromDisk() after. */
+  setStore(store: SessionStore): void {
+    this.store = store;
+  }
+
+  /** Restore sessions from disk (call once at startup). */
+  restoreFromDisk(): number {
+    if (!this.store) return 0;
+    const persisted = this.store.loadAll();
+    let count = 0;
+    for (const p of persisted) {
+      if (this.sessions.has(p.id)) continue; // don't overwrite live sessions
+      const session: Session = {
+        id: p.id,
+        cliSocket: null,
+        browserSockets: new Set(),
+        state: p.state,
+        pendingPermissions: new Map(p.pendingPermissions || []),
+        messageHistory: p.messageHistory || [],
+        pendingMessages: p.pendingMessages || [],
+      };
+      this.sessions.set(p.id, session);
+      count++;
+    }
+    if (count > 0) {
+      console.log(`[ws-bridge] Restored ${count} session(s) from disk`);
+    }
+    return count;
+  }
+
+  /** Persist a session to disk (debounced). */
+  private persistSession(session: Session): void {
+    if (!this.store) return;
+    this.store.save({
+      id: session.id,
+      state: session.state,
+      messageHistory: session.messageHistory,
+      pendingMessages: session.pendingMessages,
+      pendingPermissions: Array.from(session.pendingPermissions.entries()),
+    });
+  }
 
   // ── Session management ──────────────────────────────────────────────────
 
@@ -100,6 +144,7 @@ export class WsBridge {
 
   removeSession(sessionId: string) {
     this.sessions.delete(sessionId);
+    this.store?.remove(sessionId);
   }
 
   /**
@@ -122,6 +167,7 @@ export class WsBridge {
     session.browserSockets.clear();
 
     this.sessions.delete(sessionId);
+    this.store?.remove(sessionId);
   }
 
   // ── CLI WebSocket handlers ──────────────────────────────────────────────
@@ -320,6 +366,7 @@ export class WsBridge {
         type: "session_init",
         session: session.state,
       });
+      this.persistSession(session);
     } else if (subtype === "status") {
       const status = (msg as { status?: "compacting" | null }).status;
       session.state.is_compacting = status === "compacting";
@@ -345,6 +392,7 @@ export class WsBridge {
     };
     session.messageHistory.push(browserMsg);
     this.broadcastToBrowsers(session, browserMsg);
+    this.persistSession(session);
   }
 
   private handleResultMessage(session: Session, msg: CLIResultMessage) {
@@ -377,6 +425,7 @@ export class WsBridge {
     };
     session.messageHistory.push(browserMsg);
     this.broadcastToBrowsers(session, browserMsg);
+    this.persistSession(session);
   }
 
   private handleStreamEvent(session: Session, msg: CLIStreamEventMessage) {
@@ -405,6 +454,7 @@ export class WsBridge {
         type: "permission_request",
         request: perm,
       });
+      this.persistSession(session);
     }
   }
 
@@ -494,6 +544,7 @@ export class WsBridge {
       session_id: msg.session_id || session.state.session_id || "",
     });
     this.sendToCLI(session, ndjson);
+    this.persistSession(session);
   }
 
   private handlePermissionResponse(

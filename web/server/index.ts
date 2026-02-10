@@ -8,6 +8,7 @@ import { serveStatic } from "hono/bun";
 import { createRoutes } from "./routes.js";
 import { CliLauncher } from "./cli-launcher.js";
 import { WsBridge } from "./ws-bridge.js";
+import { SessionStore } from "./session-store.js";
 import type { SocketData } from "./ws-bridge.js";
 import type { ServerWebSocket } from "bun";
 
@@ -15,8 +16,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageRoot = process.env.__VIBE_PACKAGE_ROOT || resolve(__dirname, "..");
 
 const port = Number(process.env.PORT) || 3456;
+const sessionStore = new SessionStore();
 const wsBridge = new WsBridge();
 const launcher = new CliLauncher(port);
+
+// ── Restore persisted sessions from disk ────────────────────────────────────
+wsBridge.setStore(sessionStore);
+launcher.setStore(sessionStore);
+launcher.restoreFromDisk();
+wsBridge.restoreFromDisk();
+console.log(`[server] Session persistence: ${sessionStore.directory}`);
 
 const app = new Hono();
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execSync } from "node:child_process";
 import type { Subprocess } from "bun";
+import type { SessionStore } from "./session-store.js";
 
 export interface SdkSessionInfo {
   sessionId: string;
@@ -30,9 +31,59 @@ export class CliLauncher {
   private sessions = new Map<string, SdkSessionInfo>();
   private processes = new Map<string, Subprocess>();
   private port: number;
+  private store: SessionStore | null = null;
 
   constructor(port: number) {
     this.port = port;
+  }
+
+  /** Attach a persistent store for surviving server restarts. */
+  setStore(store: SessionStore): void {
+    this.store = store;
+  }
+
+  /** Persist launcher state to disk. */
+  private persistState(): void {
+    if (!this.store) return;
+    const data = Array.from(this.sessions.values());
+    this.store.saveLauncher(data);
+  }
+
+  /**
+   * Restore sessions from disk and check which PIDs are still alive.
+   * Returns the number of recovered sessions.
+   */
+  restoreFromDisk(): number {
+    if (!this.store) return 0;
+    const data = this.store.loadLauncher<SdkSessionInfo[]>();
+    if (!data || !Array.isArray(data)) return 0;
+
+    let recovered = 0;
+    for (const info of data) {
+      if (this.sessions.has(info.sessionId)) continue;
+
+      // Check if the process is still alive
+      if (info.pid && info.state !== "exited") {
+        try {
+          process.kill(info.pid, 0); // signal 0 = just check if alive
+          info.state = "connected"; // assume connected, CLI will reconnect via WS
+          this.sessions.set(info.sessionId, info);
+          recovered++;
+        } catch {
+          // Process is dead
+          info.state = "exited";
+          info.exitCode = -1;
+          this.sessions.set(info.sessionId, info);
+        }
+      } else {
+        // Already exited or no PID
+        this.sessions.set(info.sessionId, info);
+      }
+    }
+    if (recovered > 0) {
+      console.log(`[cli-launcher] Recovered ${recovered} live session(s) from disk`);
+    }
+    return recovered;
   }
 
   /**
@@ -118,8 +169,10 @@ export class CliLauncher {
         session.exitCode = exitCode;
       }
       this.processes.delete(sessionId);
+      this.persistState();
     });
 
+    this.persistState();
     return info;
   }
 
@@ -128,9 +181,10 @@ export class CliLauncher {
    */
   markConnected(sessionId: string): void {
     const session = this.sessions.get(sessionId);
-    if (session && session.state === "starting") {
+    if (session && (session.state === "starting" || session.state === "connected")) {
       session.state = "connected";
       console.log(`[cli-launcher] Session ${sessionId} connected via WebSocket`);
+      this.persistState();
     }
   }
 
@@ -160,6 +214,7 @@ export class CliLauncher {
       session.exitCode = -1;
     }
     this.processes.delete(sessionId);
+    this.persistState();
     return true;
   }
 
@@ -191,6 +246,7 @@ export class CliLauncher {
   removeSession(sessionId: string) {
     this.sessions.delete(sessionId);
     this.processes.delete(sessionId);
+    this.persistState();
   }
 
   /**
