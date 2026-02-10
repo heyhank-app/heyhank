@@ -9,6 +9,7 @@ export function Sidebar() {
   const [editingName, setEditingName] = useState("");
   const [showEnvManager, setShowEnvManager] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const sessions = useStore((s) => s.sessions);
   const sdkSessions = useStore((s) => s.sdkSessions);
@@ -97,11 +98,23 @@ export function Sidebar() {
     removeSession(sessionId);
   }, [removeSession]);
 
-  const handleArchiveSession = useCallback(async (e: React.MouseEvent, sessionId: string) => {
+  const handleArchiveSession = useCallback((e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
+    // Check if session uses a worktree — if so, ask for confirmation
+    const sdkInfo = sdkSessions.find((s) => s.sessionId === sessionId);
+    const bridgeState = sessions.get(sessionId);
+    const isWorktree = bridgeState?.is_worktree || sdkInfo?.isWorktree || false;
+    if (isWorktree) {
+      setConfirmArchiveId(sessionId);
+      return;
+    }
+    doArchive(sessionId);
+  }, [sdkSessions, sessions]);
+
+  const doArchive = useCallback(async (sessionId: string, force?: boolean) => {
     try {
       disconnectSession(sessionId);
-      await api.archiveSession(sessionId);
+      await api.archiveSession(sessionId, force ? { force: true } : undefined);
     } catch {
       // best-effort
     }
@@ -114,6 +127,17 @@ export function Sidebar() {
     } catch {
       // best-effort
     }
+  }, []);
+
+  const confirmArchive = useCallback(() => {
+    if (confirmArchiveId) {
+      doArchive(confirmArchiveId, true);
+      setConfirmArchiveId(null);
+    }
+  }, [confirmArchiveId, doArchive]);
+
+  const cancelArchive = useCallback(() => {
+    setConfirmArchiveId(null);
   }, []);
 
   const handleUnarchiveSession = useCallback(async (e: React.MouseEvent, sessionId: string) => {
@@ -144,6 +168,9 @@ export function Sidebar() {
       model: bridgeState?.model || sdkInfo?.model || "",
       cwd: bridgeState?.cwd || sdkInfo?.cwd || "",
       gitBranch: bridgeState?.git_branch || "",
+      isWorktree: bridgeState?.is_worktree || sdkInfo?.isWorktree || false,
+      gitAhead: bridgeState?.git_ahead || 0,
+      gitBehind: bridgeState?.git_behind || 0,
       linesAdded: bridgeState?.total_lines_added || 0,
       linesRemoved: bridgeState?.total_lines_removed || 0,
       isConnected: cliConnected.get(id) ?? false,
@@ -244,11 +271,26 @@ export function Sidebar() {
           {s.gitBranch && (
             <div className="flex items-center gap-1.5 mt-0.5 ml-4 text-[11px] text-cc-muted">
               <span className="flex items-center gap-1 truncate">
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0 opacity-60">
-                  <path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.116.862a2.25 2.25 0 10-.862.862A4.48 4.48 0 007.25 7.5h-1.5A2.25 2.25 0 003.5 9.75v.318a2.25 2.25 0 101.5 0V9.75a.75.75 0 01.75-.75h1.5a5.98 5.98 0 003.884-1.435A2.25 2.25 0 109.634 3.362zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
-                </svg>
+                {s.isWorktree ? (
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0 opacity-60">
+                    <path d="M5 3.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm0 2.122a2.25 2.25 0 10-1.5 0v5.256a2.25 2.25 0 101.5 0V5.372zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5zm7.5-9.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122V7A2.5 2.5 0 0110 9.5H6a1 1 0 000 2h4a2.5 2.5 0 012.5 2.5v.628a2.25 2.25 0 11-1.5 0V14a1 1 0 00-1-1H6a2.5 2.5 0 01-2.5-2.5V10a2.5 2.5 0 012.5-2.5h4a1 1 0 001-1V5.372a2.25 2.25 0 01-1.5-2.122z" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0 opacity-60">
+                    <path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.116.862a2.25 2.25 0 10-.862.862A4.48 4.48 0 007.25 7.5h-1.5A2.25 2.25 0 003.5 9.75v.318a2.25 2.25 0 101.5 0V9.75a.75.75 0 01.75-.75h1.5a5.98 5.98 0 003.884-1.435A2.25 2.25 0 109.634 3.362zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
+                  </svg>
+                )}
                 <span className="truncate">{s.gitBranch}</span>
+                {s.isWorktree && (
+                  <span className="text-[9px] bg-cc-primary/10 text-cc-primary px-0.5 rounded">wt</span>
+                )}
               </span>
+              {(s.gitAhead > 0 || s.gitBehind > 0) && (
+                <span className="flex items-center gap-0.5 text-[10px]">
+                  {s.gitAhead > 0 && <span className="text-green-500">{s.gitAhead}&#8593;</span>}
+                  {s.gitBehind > 0 && <span className="text-cc-warning">{s.gitBehind}&#8595;</span>}
+                </span>
+              )}
               {(s.linesAdded > 0 || s.linesRemoved > 0) && (
                 <span className="flex items-center gap-1 shrink-0">
                   <span className="text-green-500">+{s.linesAdded}</span>
@@ -326,6 +368,36 @@ export function Sidebar() {
           New Session
         </button>
       </div>
+
+      {/* Worktree archive confirmation */}
+      {confirmArchiveId && (
+        <div className="mx-2 mb-1 p-2.5 rounded-[10px] bg-amber-500/10 border border-amber-500/20">
+          <div className="flex items-start gap-2">
+            <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-amber-500 shrink-0 mt-0.5">
+              <path d="M8.982 1.566a1.13 1.13 0 00-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 01-1.1 0L7.1 5.995A.905.905 0 018 5zm.002 6a1 1 0 110 2 1 1 0 010-2z" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] text-cc-fg leading-snug">
+                Archiving will <strong>delete the worktree</strong> and any uncommitted changes.
+              </p>
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={cancelArchive}
+                  className="px-2.5 py-1 text-[11px] font-medium rounded-md bg-cc-hover text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmArchive}
+                  className="px-2.5 py-1 text-[11px] font-medium rounded-md bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors cursor-pointer"
+                >
+                  Archive
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Session list */}
       <div className="flex-1 overflow-y-auto px-2 pb-2">

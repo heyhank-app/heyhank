@@ -204,6 +204,10 @@ export interface SessionState {
   context_used_percent: number;
   is_compacting: boolean;
   git_branch: string;
+  is_worktree: boolean;
+  repo_root: string;
+  git_ahead: number;
+  git_behind: number;
   total_lines_added: number;
   total_lines_removed: number;
 }

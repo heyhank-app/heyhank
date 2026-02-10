@@ -41,4 +41,7 @@ export interface SdkSessionInfo {
   cwd: string;
   createdAt: number;
   archived?: boolean;
+  isWorktree?: boolean;
+  repoRoot?: string;
+  branch?: string;
 }

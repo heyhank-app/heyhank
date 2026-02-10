@@ -62,6 +62,10 @@ function makeDefaultState(sessionId: string): SessionState {
     context_used_percent: 0,
     is_compacting: false,
     git_branch: "",
+    is_worktree: false,
+    repo_root: "",
+    git_ahead: 0,
+    git_behind: 0,
     total_lines_added: 0,
     total_lines_removed: 0,
   };
@@ -375,7 +379,7 @@ export class WsBridge {
       session.state.slash_commands = init.slash_commands ?? [];
       session.state.skills = init.skills ?? [];
 
-      // Resolve git branch from session cwd
+      // Resolve git info from session cwd
       if (session.state.cwd) {
         try {
           session.state.git_branch = execSync("git rev-parse --abbrev-ref HEAD", {
@@ -383,6 +387,35 @@ export class WsBridge {
             encoding: "utf-8",
             timeout: 3000,
           }).trim();
+
+          // Detect if in a worktree
+          try {
+            const gitDir = execSync("git rev-parse --git-dir", {
+              cwd: session.state.cwd, encoding: "utf-8", timeout: 3000,
+            }).trim();
+            session.state.is_worktree = gitDir.includes("/worktrees/");
+          } catch { /* ignore */ }
+
+          // Get repo root
+          try {
+            session.state.repo_root = execSync("git rev-parse --show-toplevel", {
+              cwd: session.state.cwd, encoding: "utf-8", timeout: 3000,
+            }).trim();
+          } catch { /* ignore */ }
+
+          // Ahead/behind remote
+          try {
+            const counts = execSync(
+              "git rev-list --left-right --count @{upstream}...HEAD",
+              { cwd: session.state.cwd, encoding: "utf-8", timeout: 3000 },
+            ).trim();
+            const [behind, ahead] = counts.split(/\s+/).map(Number);
+            session.state.git_ahead = ahead || 0;
+            session.state.git_behind = behind || 0;
+          } catch {
+            session.state.git_ahead = 0;
+            session.state.git_behind = 0;
+          }
         } catch {
           // Not a git repo or git not available
         }

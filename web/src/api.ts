@@ -34,8 +34,12 @@ async function put<T = unknown>(path: string, body?: object): Promise<T> {
   return res.json();
 }
 
-async function del<T = unknown>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: "DELETE" });
+async function del<T = unknown>(path: string, body?: object): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "DELETE",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || res.statusText);
@@ -50,6 +54,39 @@ export interface CreateSessionOpts {
   claudeBinary?: string;
   allowedTools?: string[];
   envSlug?: string;
+  branch?: string;
+  createBranch?: boolean;
+}
+
+export interface GitRepoInfo {
+  repoRoot: string;
+  repoName: string;
+  currentBranch: string;
+  defaultBranch: string;
+  isWorktree: boolean;
+}
+
+export interface GitBranchInfo {
+  name: string;
+  isCurrent: boolean;
+  isRemote: boolean;
+  worktreePath: string | null;
+  ahead: number;
+  behind: number;
+}
+
+export interface GitWorktreeInfo {
+  path: string;
+  branch: string;
+  head: string;
+  isMainWorktree: boolean;
+  isDirty: boolean;
+}
+
+export interface WorktreeCreateResult {
+  worktreePath: string;
+  branch: string;
+  isNew: boolean;
 }
 
 export interface CompanionEnv {
@@ -88,8 +125,8 @@ export const api = {
   relaunchSession: (sessionId: string) =>
     post(`/sessions/${encodeURIComponent(sessionId)}/relaunch`),
 
-  archiveSession: (sessionId: string) =>
-    post(`/sessions/${encodeURIComponent(sessionId)}/archive`),
+  archiveSession: (sessionId: string, opts?: { force?: boolean }) =>
+    post(`/sessions/${encodeURIComponent(sessionId)}/archive`, opts),
 
   unarchiveSession: (sessionId: string) =>
     post(`/sessions/${encodeURIComponent(sessionId)}/unarchive`),
@@ -108,4 +145,16 @@ export const api = {
   updateEnv: (slug: string, data: { name?: string; variables?: Record<string, string> }) =>
     put<CompanionEnv>(`/envs/${encodeURIComponent(slug)}`, data),
   deleteEnv: (slug: string) => del(`/envs/${encodeURIComponent(slug)}`),
+
+  // Git operations
+  getRepoInfo: (path: string) =>
+    get<GitRepoInfo>(`/git/repo-info?path=${encodeURIComponent(path)}`),
+  listBranches: (repoRoot: string) =>
+    get<GitBranchInfo[]>(`/git/branches?repoRoot=${encodeURIComponent(repoRoot)}`),
+  listWorktrees: (repoRoot: string) =>
+    get<GitWorktreeInfo[]>(`/git/worktrees?repoRoot=${encodeURIComponent(repoRoot)}`),
+  createWorktree: (repoRoot: string, branch: string, opts?: { baseBranch?: string; createBranch?: boolean }) =>
+    post<WorktreeCreateResult>("/git/worktree", { repoRoot, branch, ...opts }),
+  removeWorktree: (repoRoot: string, worktreePath: string, force?: boolean) =>
+    del<{ removed: boolean; reason?: string }>("/git/worktree", { repoRoot, worktreePath, force }),
 };

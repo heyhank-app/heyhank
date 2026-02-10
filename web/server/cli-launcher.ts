@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execSync } from "node:child_process";
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Subprocess } from "bun";
 import type { SessionStore } from "./session-store.js";
 
@@ -15,6 +17,12 @@ export interface SdkSessionInfo {
   /** The CLI's internal session ID (from system.init), used for --resume */
   cliSessionId?: string;
   archived?: boolean;
+  /** Whether this session uses a git worktree */
+  isWorktree?: boolean;
+  /** The original repo root path */
+  repoRoot?: string;
+  /** Branch this session is working on */
+  branch?: string;
 }
 
 export interface LaunchOptions {
@@ -24,6 +32,13 @@ export interface LaunchOptions {
   claudeBinary?: string;
   allowedTools?: string[];
   env?: Record<string, string>;
+  /** Pre-resolved worktree info from the session creation flow */
+  worktreeInfo?: {
+    isWorktree: boolean;
+    repoRoot: string;
+    branch: string;
+    worktreePath: string;
+  };
 }
 
 /**
@@ -106,6 +121,13 @@ export class CliLauncher {
       createdAt: Date.now(),
     };
 
+    // Store worktree metadata if provided
+    if (options.worktreeInfo) {
+      info.isWorktree = options.worktreeInfo.isWorktree;
+      info.repoRoot = options.worktreeInfo.repoRoot;
+      info.branch = options.worktreeInfo.branch;
+    }
+
     this.sessions.set(sessionId, info);
     this.spawnCLI(sessionId, info, options);
     return info;
@@ -185,6 +207,11 @@ export class CliLauncher {
       }
     }
 
+    // Inject CLAUDE.md guardrails for worktree sessions
+    if (info.isWorktree && info.branch) {
+      this.injectWorktreeGuardrails(info.cwd, info.branch, info.repoRoot || "");
+    }
+
     // Always pass -p "" for headless mode. When relaunching, also pass --resume
     // to restore the CLI's conversation context.
     if (options.resumeSessionId) {
@@ -235,6 +262,52 @@ export class CliLauncher {
     });
 
     this.persistState();
+  }
+
+  /**
+   * Inject a CLAUDE.md file into the worktree with branch guardrails.
+   * Appends a marked section if CLAUDE.md already exists, or creates it.
+   */
+  private injectWorktreeGuardrails(worktreePath: string, branch: string, repoRoot: string): void {
+    const MARKER_START = "<!-- WORKTREE_GUARDRAILS_START -->";
+    const MARKER_END = "<!-- WORKTREE_GUARDRAILS_END -->";
+    const guardrails = `${MARKER_START}
+# Worktree Session — Branch Guardrails
+
+You are working on branch: \`${branch}\`
+This is a git worktree. The main repository is at: \`${repoRoot}\`
+
+**Rules:**
+1. DO NOT run \`git checkout\`, \`git switch\`, or any command that changes the current branch
+2. All your work MUST stay on the \`${branch}\` branch
+3. When committing, commit to \`${branch}\` only
+4. If you need to reference code from another branch, use \`git show other-branch:path/to/file\`
+${MARKER_END}`;
+
+    const claudeDir = join(worktreePath, ".claude");
+    const claudeMdPath = join(claudeDir, "CLAUDE.md");
+
+    try {
+      mkdirSync(claudeDir, { recursive: true });
+
+      if (existsSync(claudeMdPath)) {
+        const existing = readFileSync(claudeMdPath, "utf-8");
+        // Replace existing guardrails section or append
+        if (existing.includes(MARKER_START)) {
+          const before = existing.substring(0, existing.indexOf(MARKER_START));
+          const afterIdx = existing.indexOf(MARKER_END);
+          const after = afterIdx >= 0 ? existing.substring(afterIdx + MARKER_END.length) : "";
+          writeFileSync(claudeMdPath, before + guardrails + after, "utf-8");
+        } else {
+          writeFileSync(claudeMdPath, existing + "\n\n" + guardrails, "utf-8");
+        }
+      } else {
+        writeFileSync(claudeMdPath, guardrails, "utf-8");
+      }
+      console.log(`[cli-launcher] Injected worktree guardrails for branch ${branch}`);
+    } catch (e) {
+      console.warn(`[cli-launcher] Failed to inject worktree guardrails:`, e);
+    }
   }
 
   /**

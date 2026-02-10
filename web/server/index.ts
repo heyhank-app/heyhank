@@ -9,6 +9,7 @@ import { createRoutes } from "./routes.js";
 import { CliLauncher } from "./cli-launcher.js";
 import { WsBridge } from "./ws-bridge.js";
 import { SessionStore } from "./session-store.js";
+import { WorktreeTracker } from "./worktree-tracker.js";
 import type { SocketData } from "./ws-bridge.js";
 import type { ServerWebSocket } from "bun";
 
@@ -19,6 +20,7 @@ const port = Number(process.env.PORT) || 3456;
 const sessionStore = new SessionStore();
 const wsBridge = new WsBridge();
 const launcher = new CliLauncher(port);
+const worktreeTracker = new WorktreeTracker();
 
 // ── Restore persisted sessions from disk ────────────────────────────────────
 wsBridge.setStore(sessionStore);
@@ -53,7 +55,7 @@ console.log(`[server] Session persistence: ${sessionStore.directory}`);
 const app = new Hono();
 
 app.use("/api/*", cors());
-app.route("/api", createRoutes(launcher, wsBridge, sessionStore));
+app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker));
 
 // In production, serve built frontend using absolute path (works when installed as npm package)
 if (process.env.NODE_ENV === "production") {

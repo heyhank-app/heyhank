@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useStore } from "../store.js";
-import { api, type DirEntry, type CompanionEnv } from "../api.js";
+import { api, type DirEntry, type CompanionEnv, type GitRepoInfo } from "../api.js";
 import { connectSession, waitForConnection, sendToSession } from "../ws.js";
 import { disconnectSession } from "../ws.js";
 import { generateUniqueSessionName } from "../utils/names.js";
@@ -81,6 +81,11 @@ export function HomePage() {
   const [dirInput, setDirInput] = useState("");
   const [showDirInput, setShowDirInput] = useState(false);
 
+  // Worktree state
+  const [gitRepoInfo, setGitRepoInfo] = useState<GitRepoInfo | null>(null);
+  const [useWorktree, setUseWorktree] = useState(false);
+  const [worktreeBranch, setWorktreeBranch] = useState("");
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const modeDropdownRef = useRef<HTMLDivElement>(null);
@@ -138,6 +143,21 @@ export function HomePage() {
       setBrowseLoading(false);
     }
   }, []);
+
+  // Detect git repo when cwd changes
+  useEffect(() => {
+    if (!cwd) {
+      setGitRepoInfo(null);
+      return;
+    }
+    api.getRepoInfo(cwd).then((info) => {
+      setGitRepoInfo(info);
+      setUseWorktree(false);
+      setWorktreeBranch("");
+    }).catch(() => {
+      setGitRepoInfo(null);
+    });
+  }, [cwd]);
 
   const selectedModel = MODELS.find((m) => m.value === model) || MODELS[0];
   const selectedMode = MODES.find((m) => m.value === mode) || MODES[0];
@@ -209,12 +229,15 @@ export function HomePage() {
         disconnectSession(currentSessionId);
       }
 
-      // Create session
+      // Create session (with optional worktree)
+      const branchName = useWorktree && worktreeBranch.trim() ? worktreeBranch.trim() : undefined;
       const result = await api.createSession({
         model,
         permissionMode: mode,
         cwd: cwd || undefined,
         envSlug: selectedEnv || undefined,
+        branch: branchName,
+        createBranch: branchName ? true : undefined,
       });
       const sessionId = result.sessionId;
 
@@ -382,8 +405,20 @@ export function HomePage() {
           </div>
         </div>
 
+        {/* Branch warning */}
+        {gitRepoInfo && gitRepoInfo.currentBranch !== gitRepoInfo.defaultBranch && (
+          <div className="flex items-center gap-1.5 mt-2 px-2 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+            <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 text-amber-500 shrink-0">
+              <path fillRule="evenodd" d="M8.22 1.754a.25.25 0 00-.44 0L1.698 13.132a.25.25 0 00.22.368h12.164a.25.25 0 00.22-.368L8.22 1.754zm-1.763-.707c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0114.082 15H1.918a1.75 1.75 0 01-1.543-2.575L6.457 1.047zM9 11a1 1 0 11-2 0 1 1 0 012 0zm-.25-5.25a.75.75 0 00-1.5 0v2.5a.75.75 0 001.5 0v-2.5z" clipRule="evenodd" />
+            </svg>
+            <span className="text-[11px] text-amber-600 dark:text-amber-400">
+              On branch <span className="font-mono-code font-medium">{gitRepoInfo.currentBranch}</span>, not <span className="font-mono-code">{gitRepoInfo.defaultBranch}</span>
+            </span>
+          </div>
+        )}
+
         {/* Below-card selectors */}
-        <div className="flex items-center gap-1 sm:gap-3 mt-2 sm:mt-3 px-1 flex-nowrap">
+        <div className="flex items-center gap-1 sm:gap-3 mt-2 sm:mt-3 px-1 flex-wrap">
           {/* Folder selector */}
           <div className="relative" ref={dirDropdownRef}>
             <button
@@ -514,6 +549,35 @@ export function HomePage() {
               </div>
             )}
           </div>
+
+          {/* Worktree toggle (only when cwd is a git repo) */}
+          {gitRepoInfo && (
+            <>
+              <button
+                onClick={() => setUseWorktree(!useWorktree)}
+                className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded-md transition-colors cursor-pointer ${
+                  useWorktree
+                    ? "bg-cc-primary/15 text-cc-primary font-medium"
+                    : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+                }`}
+                title="Create an isolated worktree for this session"
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-70">
+                  <path d="M5 3.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm0 2.122a2.25 2.25 0 10-1.5 0v5.256a2.25 2.25 0 101.5 0V5.372zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5zm7.5-9.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122V7A2.5 2.5 0 0110 9.5H6a1 1 0 000 2h4a2.5 2.5 0 012.5 2.5v.628a2.25 2.25 0 11-1.5 0V14a1 1 0 00-1-1H6a2.5 2.5 0 01-2.5-2.5V10a2.5 2.5 0 012.5-2.5h4a1 1 0 001-1V5.372a2.25 2.25 0 01-1.5-2.122z" />
+                </svg>
+                <span>Worktree</span>
+              </button>
+              {useWorktree && (
+                <input
+                  type="text"
+                  value={worktreeBranch}
+                  onChange={(e) => setWorktreeBranch(e.target.value)}
+                  placeholder="branch name..."
+                  className="px-2 py-1 text-xs bg-cc-input-bg border border-cc-border rounded-md text-cc-fg font-mono-code placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50 w-36"
+                />
+              )}
+            </>
+          )}
 
           {/* Environment selector */}
           <div className="relative" ref={envDropdownRef}>
