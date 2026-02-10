@@ -222,13 +222,15 @@ export function ensureWorktree(
     }
   }
 
-  // Find a unique path: append -2, -3, etc. if the base path is taken
+  // Find a unique path: append random 4-digit suffix if the base path is taken
   const basePath = worktreeDir(repoName, branchName);
   let targetPath = basePath;
-  let suffix = 1;
-  while (existsSync(targetPath)) {
-    suffix++;
+  for (let attempt = 0; attempt < 100 && existsSync(targetPath); attempt++) {
+    const suffix = Math.floor(1000 + Math.random() * 9000);
     targetPath = `${basePath}-${suffix}`;
+  }
+  if (existsSync(targetPath)) {
+    targetPath = `${basePath}-${Date.now()}`;
   }
 
   // Ensure parent directory exists
@@ -273,18 +275,19 @@ export function ensureWorktree(
 
 /**
  * Generate a unique branch name for a companion-managed worktree.
- * Pattern: `{branch}-wt-2`, `{branch}-wt-3`, etc.
- * Increments until a name is found that doesn't already exist as a local branch.
+ * Pattern: `{branch}-wt-{random4digit}` (e.g. `main-wt-8374`).
+ * Uses random suffixes to avoid collisions with leftover branches.
  */
 export function generateUniqueWorktreeBranch(repoRoot: string, baseBranch: string): string {
-  let suffix = 2;
-  while (true) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const suffix = Math.floor(1000 + Math.random() * 9000);
     const candidate = `${baseBranch}-wt-${suffix}`;
     if (gitSafe(`rev-parse --verify refs/heads/${candidate}`, repoRoot) === null) {
       return candidate;
     }
-    suffix++;
   }
+  // Fallback: use timestamp if all random attempts collide (extremely unlikely)
+  return `${baseBranch}-wt-${Date.now()}`;
 }
 
 export function removeWorktree(

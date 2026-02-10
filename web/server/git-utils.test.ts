@@ -502,8 +502,8 @@ describe("ensureWorktree", () => {
       if (cmd.includes("worktree list --porcelain")) return porcelain;
       if (cmd.includes("status --porcelain")) return "";
       if (cmd.includes("rev-parse HEAD")) return "abc123";
-      // generateUniqueWorktreeBranch checks for existing branches
-      if (cmd.includes("rev-parse --verify refs/heads/main-wt-2")) throw new Error("not found");
+      // generateUniqueWorktreeBranch checks for existing branches (random suffix)
+      if (/rev-parse --verify refs\/heads\/main-wt-\d{4}/.test(cmd)) throw new Error("not found");
       if (cmd.includes("worktree add -b")) return "";
       throw new Error(`Unmocked: ${cmd}`);
     });
@@ -515,17 +515,17 @@ describe("ensureWorktree", () => {
     expect(result.worktreePath).not.toBe("/repo");
     expect(result.worktreePath).toBe("/fake/home/.companion/worktrees/repo/main");
     expect(result.branch).toBe("main");
-    expect(result.actualBranch).toBe("main-wt-2");
+    expect(result.actualBranch).toMatch(/^main-wt-\d{4}$/);
     // Should create a branch-tracking worktree
     const addCall = mockExecSync.mock.calls.find((c: unknown[]) =>
       (c[0] as string).includes("worktree add -b"),
     );
     expect(addCall).toBeDefined();
-    expect((addCall![0] as string)).toContain("main-wt-2");
+    expect((addCall![0] as string)).toMatch(/main-wt-\d{4}/);
     expect((addCall![0] as string)).toContain("abc123");
   });
 
-  it("creates unique paths with suffix when base path exists", () => {
+  it("creates unique paths with random suffix when base path exists", () => {
     mockExecSync.mockImplementation((cmd: string) => {
       if (cmd.includes("worktree list --porcelain")) {
         return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
@@ -535,16 +535,15 @@ describe("ensureWorktree", () => {
       if (cmd.includes("worktree add")) return "";
       throw new Error(`Unmocked: ${cmd}`);
     });
-    // Base path exists, -2 also exists, -3 does not
+    // Base path exists, random suffix path does not
     const basePath = "/fake/home/.companion/worktrees/repo/feat--x";
     mockExistsSync.mockImplementation((path: string) => {
       if (path === basePath) return true;
-      if (path === `${basePath}-2`) return true;
-      return false;
+      return false; // Any random-suffixed path is free
     });
 
     const result = gitUtils.ensureWorktree("/repo", "feat/x");
-    expect(result.worktreePath).toBe(`${basePath}-3`);
+    expect(result.worktreePath).toMatch(new RegExp(`^${basePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-\\d{4}$`));
   });
 
   it("creates branch-tracking worktree when forceNew=true and worktree already exists", () => {
@@ -563,8 +562,8 @@ describe("ensureWorktree", () => {
       if (cmd.includes("worktree list --porcelain")) return porcelain;
       if (cmd.includes("status --porcelain")) return "";
       if (cmd.includes("rev-parse HEAD")) return "def456";
-      // generateUniqueWorktreeBranch checks
-      if (cmd.includes("rev-parse --verify refs/heads/feat/existing-wt-2")) throw new Error("not found");
+      // generateUniqueWorktreeBranch checks (random suffix)
+      if (/rev-parse --verify refs\/heads\/feat\/existing-wt-\d{4}/.test(cmd)) throw new Error("not found");
       if (cmd.includes("worktree add -b")) return "";
       throw new Error(`Unmocked: ${cmd}`);
     });
@@ -574,40 +573,48 @@ describe("ensureWorktree", () => {
     const result = gitUtils.ensureWorktree("/repo", "feat/existing", { forceNew: true });
     expect(result.worktreePath).toBe("/fake/home/.companion/worktrees/repo/feat--existing");
     expect(result.branch).toBe("feat/existing");
-    expect(result.actualBranch).toBe("feat/existing-wt-2");
+    expect(result.actualBranch).toMatch(/^feat\/existing-wt-\d{4}$/);
 
     const addCall = mockExecSync.mock.calls.find((c: unknown[]) =>
       (c[0] as string).includes("worktree add -b"),
     );
     expect(addCall).toBeDefined();
-    expect((addCall![0] as string)).toContain("feat/existing-wt-2");
+    expect((addCall![0] as string)).toMatch(/feat\/existing-wt-\d{4}/);
   });
 });
 
 // ─── generateUniqueWorktreeBranch ────────────────────────────────────────────
 
 describe("generateUniqueWorktreeBranch", () => {
-  it("returns -wt-2 when no suffixed branches exist", () => {
+  it("returns branch-wt-{random4digit} when no suffixed branches exist", () => {
     mockExecSync.mockImplementation((cmd: string) => {
-      if (cmd.includes("rev-parse --verify refs/heads/main-wt-2")) throw new Error("not found");
+      if (cmd.includes("rev-parse --verify refs/heads/main-wt-")) throw new Error("not found");
       throw new Error(`Unmocked: ${cmd}`);
     });
 
     const result = gitUtils.generateUniqueWorktreeBranch("/repo", "main");
-    expect(result).toBe("main-wt-2");
+    expect(result).toMatch(/^main-wt-\d{4}$/);
   });
 
-  it("increments suffix until a unique name is found", () => {
+  it("retries with a new random suffix on collision", () => {
+    // Mock Math.random to return deterministic values
+    const origRandom = Math.random;
+    const randomValues = [0.5, 0.7]; // → suffixes 5500, 7300
+    let callIdx = 0;
+    Math.random = () => randomValues[callIdx++] ?? origRandom();
+
     mockExecSync.mockImplementation((cmd: string) => {
-      // -wt-2 and -wt-3 already exist
-      if (cmd.includes("rev-parse --verify refs/heads/feat/x-wt-2")) return "abc";
-      if (cmd.includes("rev-parse --verify refs/heads/feat/x-wt-3")) return "def";
-      if (cmd.includes("rev-parse --verify refs/heads/feat/x-wt-4")) throw new Error("not found");
+      // First candidate (5500) already exists
+      if (cmd.includes("rev-parse --verify refs/heads/feat/x-wt-5500")) return "abc";
+      // Second candidate (7300) is free
+      if (cmd.includes("rev-parse --verify refs/heads/feat/x-wt-7300")) throw new Error("not found");
       throw new Error(`Unmocked: ${cmd}`);
     });
 
     const result = gitUtils.generateUniqueWorktreeBranch("/repo", "feat/x");
-    expect(result).toBe("feat/x-wt-4");
+    expect(result).toBe("feat/x-wt-7300");
+
+    Math.random = origRandom;
   });
 });
 
