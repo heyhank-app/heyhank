@@ -1,0 +1,591 @@
+import { vi, describe, it, expect, beforeEach } from "vitest";
+
+// ─── Hoisted mocks ───────────────────────────────────────────────────────────
+
+const mockHomedir = vi.hoisted(() => {
+  let dir = "/fake/home";
+  return { get: () => dir, set: (d: string) => { dir = d; } };
+});
+
+const mockExecSync = vi.hoisted(() => vi.fn());
+const mockExistsSync = vi.hoisted(() => vi.fn());
+const mockMkdirSync = vi.hoisted(() => vi.fn());
+
+vi.mock("node:os", () => ({ homedir: () => mockHomedir.get() }));
+vi.mock("node:child_process", () => ({ execSync: mockExecSync }));
+vi.mock("node:fs", () => ({
+  existsSync: mockExistsSync,
+  mkdirSync: mockMkdirSync,
+}));
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function mockGitCommand(pattern: string | RegExp, result: string) {
+  mockExecSync.mockImplementation((cmd: string) => {
+    if (typeof pattern === "string" ? cmd.includes(pattern) : pattern.test(cmd)) {
+      return result;
+    }
+    throw new Error(`Unexpected git command: ${cmd}`);
+  });
+}
+
+function mockGitCommands(map: Record<string, string | Error>) {
+  mockExecSync.mockImplementation((cmd: string) => {
+    for (const [pattern, result] of Object.entries(map)) {
+      if (cmd.includes(pattern)) {
+        if (result instanceof Error) throw result;
+        return result;
+      }
+    }
+    throw new Error(`Unmocked git command: ${cmd}`);
+  });
+}
+
+// ─── Dynamic import with module reset ────────────────────────────────────────
+
+let gitUtils: typeof import("./git-utils.js");
+
+beforeEach(async () => {
+  vi.resetModules();
+  mockExecSync.mockReset();
+  mockExistsSync.mockReset();
+  mockMkdirSync.mockReset();
+  mockHomedir.set("/fake/home");
+  gitUtils = await import("./git-utils.js");
+});
+
+// ─── getRepoInfo ─────────────────────────────────────────────────────────────
+
+describe("getRepoInfo", () => {
+  it("returns null for a non-git directory", () => {
+    mockExecSync.mockImplementation(() => {
+      throw new Error("fatal: not a git repository");
+    });
+
+    const result = gitUtils.getRepoInfo("/tmp/not-a-repo");
+    expect(result).toBeNull();
+  });
+
+  it("returns correct repo info for a standard git repo", () => {
+    mockGitCommands({
+      "rev-parse --show-toplevel": "/home/user/my-project",
+      "rev-parse --abbrev-ref HEAD": "feat/cool-feature",
+      "rev-parse --git-dir": ".git",
+      "symbolic-ref refs/remotes/origin/HEAD": "refs/remotes/origin/main",
+    });
+
+    const result = gitUtils.getRepoInfo("/home/user/my-project");
+    expect(result).toEqual({
+      repoRoot: "/home/user/my-project",
+      repoName: "my-project",
+      currentBranch: "feat/cool-feature",
+      defaultBranch: "main",
+      isWorktree: false,
+    });
+  });
+
+  it("detects worktree when git-dir contains /worktrees/", () => {
+    mockGitCommands({
+      "rev-parse --show-toplevel": "/fake/home/.companion/worktrees/proj/feat--x",
+      "rev-parse --abbrev-ref HEAD": "feat/x",
+      "rev-parse --git-dir": "/home/user/proj/.git/worktrees/feat--x",
+      "symbolic-ref refs/remotes/origin/HEAD": "refs/remotes/origin/main",
+    });
+
+    const result = gitUtils.getRepoInfo("/fake/home/.companion/worktrees/proj/feat--x");
+    expect(result).not.toBeNull();
+    expect(result!.isWorktree).toBe(true);
+  });
+
+  it("falls back to 'HEAD' when branch detection fails", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return "/repo";
+      if (cmd.includes("rev-parse --abbrev-ref HEAD")) throw new Error("detached HEAD");
+      if (cmd.includes("rev-parse --git-dir")) return ".git";
+      if (cmd.includes("symbolic-ref refs/remotes/origin/HEAD")) return "refs/remotes/origin/main";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+
+    const result = gitUtils.getRepoInfo("/repo");
+    expect(result).not.toBeNull();
+    expect(result!.currentBranch).toBe("HEAD");
+  });
+
+  it("resolves default branch via origin HEAD", () => {
+    mockGitCommands({
+      "rev-parse --show-toplevel": "/repo",
+      "rev-parse --abbrev-ref HEAD": "develop",
+      "rev-parse --git-dir": ".git",
+      "symbolic-ref refs/remotes/origin/HEAD": "refs/remotes/origin/develop",
+    });
+
+    const result = gitUtils.getRepoInfo("/repo");
+    expect(result!.defaultBranch).toBe("develop");
+  });
+
+  it("falls back to 'main' when origin HEAD and master are unavailable", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return "/repo";
+      if (cmd.includes("rev-parse --abbrev-ref HEAD")) return "feature";
+      if (cmd.includes("rev-parse --git-dir")) return ".git";
+      if (cmd.includes("symbolic-ref refs/remotes/origin/HEAD")) throw new Error("no origin");
+      if (cmd.includes("branch --list main master")) return "";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+
+    const result = gitUtils.getRepoInfo("/repo");
+    expect(result!.defaultBranch).toBe("main");
+  });
+
+  it("falls back to 'master' when origin HEAD fails and only master exists", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return "/repo";
+      if (cmd.includes("rev-parse --abbrev-ref HEAD")) return "feature";
+      if (cmd.includes("rev-parse --git-dir")) return ".git";
+      if (cmd.includes("symbolic-ref refs/remotes/origin/HEAD")) throw new Error("no origin");
+      if (cmd.includes("branch --list main master")) return "  master";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+
+    const result = gitUtils.getRepoInfo("/repo");
+    expect(result!.defaultBranch).toBe("master");
+  });
+});
+
+// ─── listBranches ────────────────────────────────────────────────────────────
+
+describe("listBranches", () => {
+  it("parses local branches with current marker", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("worktree list --porcelain")) return "";
+      if (cmd.includes("for-each-ref") && cmd.includes("refs/heads/")) {
+        return "main\t*\nfeat/login\t ";
+      }
+      if (cmd.includes("for-each-ref") && cmd.includes("refs/remotes/origin/")) return "";
+      if (cmd.includes("rev-list --left-right --count")) return "0\t0";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+
+    const branches = gitUtils.listBranches("/repo");
+    const main = branches.find((b) => b.name === "main");
+    const feat = branches.find((b) => b.name === "feat/login");
+
+    expect(main).toBeDefined();
+    expect(main!.isCurrent).toBe(true);
+    expect(main!.isRemote).toBe(false);
+
+    expect(feat).toBeDefined();
+    expect(feat!.isCurrent).toBe(false);
+  });
+
+  it("includes remote-only branches", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("worktree list --porcelain")) return "";
+      if (cmd.includes("for-each-ref") && cmd.includes("refs/heads/")) {
+        return "main\t*";
+      }
+      if (cmd.includes("for-each-ref") && cmd.includes("refs/remotes/origin/")) {
+        return "origin/feat/remote-branch";
+      }
+      if (cmd.includes("rev-list --left-right --count")) return "0\t0";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+
+    const branches = gitUtils.listBranches("/repo");
+    const remote = branches.find((b) => b.name === "feat/remote-branch");
+
+    expect(remote).toBeDefined();
+    expect(remote!.isRemote).toBe(true);
+    expect(remote!.isCurrent).toBe(false);
+    expect(remote!.ahead).toBe(0);
+    expect(remote!.behind).toBe(0);
+  });
+
+  it("excludes origin/HEAD from remote branches", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("worktree list --porcelain")) return "";
+      if (cmd.includes("for-each-ref") && cmd.includes("refs/heads/")) return "";
+      if (cmd.includes("for-each-ref") && cmd.includes("refs/remotes/origin/")) {
+        return "origin/HEAD\norigin/main";
+      }
+      if (cmd.includes("rev-list --left-right --count")) return "0\t0";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+
+    const branches = gitUtils.listBranches("/repo");
+    expect(branches.find((b) => b.name === "HEAD")).toBeUndefined();
+    expect(branches.find((b) => b.name === "main")).toBeDefined();
+  });
+
+  it("includes ahead/behind counts for local branches", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("worktree list --porcelain")) return "";
+      if (cmd.includes("for-each-ref") && cmd.includes("refs/heads/")) {
+        return "dev\t ";
+      }
+      if (cmd.includes("for-each-ref") && cmd.includes("refs/remotes/origin/")) return "";
+      if (cmd.includes("rev-list --left-right --count")) return "3\t5";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+
+    const branches = gitUtils.listBranches("/repo");
+    const dev = branches.find((b) => b.name === "dev");
+    expect(dev).toBeDefined();
+    // In the source: [behind, ahead] = raw.split(...).map(Number)
+    expect(dev!.ahead).toBe(5);
+    expect(dev!.behind).toBe(3);
+  });
+
+  it("returns empty array on git failure", () => {
+    mockExecSync.mockImplementation(() => {
+      throw new Error("git failed");
+    });
+
+    const branches = gitUtils.listBranches("/repo");
+    expect(branches).toEqual([]);
+  });
+});
+
+// ─── listWorktrees ───────────────────────────────────────────────────────────
+
+describe("listWorktrees", () => {
+  it("parses porcelain output correctly", () => {
+    const porcelain = [
+      "worktree /home/user/project",
+      "HEAD abc1234567890abcdef1234567890abcdef123456",
+      "branch refs/heads/main",
+      "",
+      "worktree /fake/home/.companion/worktrees/project/feat--x",
+      "HEAD def4567890abcdef1234567890abcdef12345678",
+      "branch refs/heads/feat/x",
+      "",
+    ].join("\n");
+
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("worktree list --porcelain")) return porcelain;
+      // isWorktreeDirty calls
+      if (cmd.includes("status --porcelain")) return "";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+    mockExistsSync.mockReturnValue(true);
+
+    const worktrees = gitUtils.listWorktrees("/home/user/project");
+    expect(worktrees).toHaveLength(2);
+    expect(worktrees[0].path).toBe("/home/user/project");
+    expect(worktrees[1].path).toBe("/fake/home/.companion/worktrees/project/feat--x");
+  });
+
+  it("marks first worktree as main", () => {
+    const porcelain = [
+      "worktree /home/user/project",
+      "HEAD abc123",
+      "branch refs/heads/main",
+      "",
+      "worktree /tmp/wt",
+      "HEAD def456",
+      "branch refs/heads/other",
+      "",
+    ].join("\n");
+
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("worktree list --porcelain")) return porcelain;
+      if (cmd.includes("status --porcelain")) return "";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+    mockExistsSync.mockReturnValue(true);
+
+    const worktrees = gitUtils.listWorktrees("/home/user/project");
+    expect(worktrees[0].isMainWorktree).toBe(true);
+    expect(worktrees[1].isMainWorktree).toBe(false);
+  });
+
+  it("strips refs/heads/ from branch names", () => {
+    const porcelain = [
+      "worktree /repo",
+      "HEAD abc123",
+      "branch refs/heads/feat/something",
+      "",
+    ].join("\n");
+
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("worktree list --porcelain")) return porcelain;
+      if (cmd.includes("status --porcelain")) return "";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+    mockExistsSync.mockReturnValue(true);
+
+    const worktrees = gitUtils.listWorktrees("/repo");
+    expect(worktrees[0].branch).toBe("feat/something");
+  });
+
+  it("returns empty array on failure", () => {
+    mockExecSync.mockImplementation(() => {
+      throw new Error("git failed");
+    });
+
+    const worktrees = gitUtils.listWorktrees("/repo");
+    expect(worktrees).toEqual([]);
+  });
+});
+
+// ─── ensureWorktree ──────────────────────────────────────────────────────────
+
+describe("ensureWorktree", () => {
+  it("returns existing worktree without creating a new one", () => {
+    const porcelain = [
+      "worktree /repo",
+      "HEAD abc123",
+      "branch refs/heads/main",
+      "",
+      "worktree /existing/path",
+      "HEAD def456",
+      "branch refs/heads/feat/existing",
+      "",
+    ].join("\n");
+
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("worktree list --porcelain")) return porcelain;
+      if (cmd.includes("status --porcelain")) return "";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+    mockExistsSync.mockReturnValue(true);
+
+    const result = gitUtils.ensureWorktree("/repo", "feat/existing");
+    expect(result.worktreePath).toBe("/existing/path");
+    expect(result.branch).toBe("feat/existing");
+    expect(result.isNew).toBe(false);
+    // Should NOT have called worktree add
+    const addCalls = mockExecSync.mock.calls.filter((c: unknown[]) =>
+      (c[0] as string).includes("worktree add"),
+    );
+    expect(addCalls).toHaveLength(0);
+  });
+
+  it("creates worktree for an existing local branch", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      // listWorktrees
+      if (cmd.includes("worktree list --porcelain")) {
+        return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
+      }
+      if (cmd.includes("status --porcelain")) return "";
+      // Branch exists locally
+      if (cmd.includes("rev-parse --verify refs/heads/feat/local")) return "abc123";
+      // worktree add
+      if (cmd.includes("worktree add")) return "";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+    mockExistsSync.mockReturnValue(true);
+
+    const result = gitUtils.ensureWorktree("/repo", "feat/local");
+    expect(result.worktreePath).toBe("/fake/home/.companion/worktrees/repo/feat--local");
+    expect(result.isNew).toBe(false);
+
+    const addCall = mockExecSync.mock.calls.find((c: unknown[]) =>
+      (c[0] as string).includes("worktree add"),
+    );
+    expect(addCall).toBeDefined();
+    // Should NOT have -b flag for existing branch
+    expect((addCall![0] as string)).not.toContain("-b ");
+  });
+
+  it("creates tracking branch from remote", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("worktree list --porcelain")) {
+        return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
+      }
+      if (cmd.includes("status --porcelain")) return "";
+      // Local branch does NOT exist
+      if (cmd.includes("rev-parse --verify refs/heads/feat/remote"))
+        throw new Error("not found");
+      // Remote branch exists
+      if (cmd.includes("rev-parse --verify refs/remotes/origin/feat/remote"))
+        return "def456";
+      // worktree add -b
+      if (cmd.includes("worktree add -b")) return "";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+    mockExistsSync.mockReturnValue(true);
+
+    const result = gitUtils.ensureWorktree("/repo", "feat/remote");
+    expect(result.isNew).toBe(false);
+
+    const addCall = mockExecSync.mock.calls.find((c: unknown[]) =>
+      (c[0] as string).includes("worktree add -b"),
+    );
+    expect(addCall).toBeDefined();
+    expect((addCall![0] as string)).toContain("origin/feat/remote");
+  });
+
+  it("creates new branch from base when branch does not exist anywhere", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("worktree list --porcelain")) {
+        return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
+      }
+      if (cmd.includes("status --porcelain")) return "";
+      // Neither local nor remote branch exists
+      if (cmd.includes("rev-parse --verify")) throw new Error("not found");
+      // resolveDefaultBranch
+      if (cmd.includes("symbolic-ref refs/remotes/origin/HEAD"))
+        return "refs/remotes/origin/main";
+      // worktree add -b
+      if (cmd.includes("worktree add -b")) return "";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+    mockExistsSync.mockReturnValue(true);
+
+    const result = gitUtils.ensureWorktree("/repo", "feat/new", { baseBranch: "develop" });
+    expect(result.isNew).toBe(true);
+    expect(result.branch).toBe("feat/new");
+
+    const addCall = mockExecSync.mock.calls.find((c: unknown[]) =>
+      (c[0] as string).includes("worktree add -b"),
+    );
+    expect(addCall).toBeDefined();
+    expect((addCall![0] as string)).toContain("develop");
+  });
+
+  it("throws when createBranch=false and branch does not exist", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("worktree list --porcelain")) {
+        return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
+      }
+      if (cmd.includes("status --porcelain")) return "";
+      if (cmd.includes("rev-parse --verify")) throw new Error("not found");
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+    mockExistsSync.mockReturnValue(true);
+
+    expect(() =>
+      gitUtils.ensureWorktree("/repo", "feat/missing", { createBranch: false }),
+    ).toThrow('Branch "feat/missing" does not exist and createBranch is false');
+  });
+
+  it("calls mkdirSync with recursive option when creating worktree", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("worktree list --porcelain")) {
+        return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
+      }
+      if (cmd.includes("status --porcelain")) return "";
+      if (cmd.includes("rev-parse --verify refs/heads/feat/new")) return "abc";
+      if (cmd.includes("worktree add")) return "";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+    mockExistsSync.mockReturnValue(true);
+
+    gitUtils.ensureWorktree("/repo", "feat/new");
+
+    expect(mockMkdirSync).toHaveBeenCalledWith(
+      "/fake/home/.companion/worktrees/repo",
+      { recursive: true },
+    );
+  });
+});
+
+// ─── removeWorktree ──────────────────────────────────────────────────────────
+
+describe("removeWorktree", () => {
+  it("prunes when worktree path does not exist on disk", () => {
+    mockExistsSync.mockReturnValue(false);
+    mockGitCommand("worktree prune", "");
+
+    const result = gitUtils.removeWorktree("/repo", "/gone/path");
+    expect(result.removed).toBe(true);
+    expect(result.reason).toBeUndefined();
+
+    const pruneCalls = mockExecSync.mock.calls.filter((c: unknown[]) =>
+      (c[0] as string).includes("worktree prune"),
+    );
+    expect(pruneCalls).toHaveLength(1);
+  });
+
+  it("refuses to remove dirty worktree without force", () => {
+    mockExistsSync.mockReturnValue(true);
+    mockGitCommand("status --porcelain", " M dirty-file.ts");
+
+    const result = gitUtils.removeWorktree("/repo", "/wt/path");
+    expect(result.removed).toBe(false);
+    expect(result.reason).toContain("uncommitted changes");
+  });
+
+  it("force-removes dirty worktree", () => {
+    // existsSync: first call for removeWorktree check, second for isWorktreeDirty
+    mockExistsSync.mockReturnValue(true);
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("status --porcelain")) return " M dirty.ts";
+      if (cmd.includes("worktree remove") && cmd.includes("--force")) return "";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+
+    const result = gitUtils.removeWorktree("/repo", "/wt/path", { force: true });
+    expect(result.removed).toBe(true);
+  });
+
+  it("returns reason on error during removal", () => {
+    mockExistsSync.mockReturnValue(true);
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("status --porcelain")) return "";
+      if (cmd.includes("worktree remove"))
+        throw new Error("worktree is locked");
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+
+    const result = gitUtils.removeWorktree("/repo", "/wt/path");
+    expect(result.removed).toBe(false);
+    expect(result.reason).toContain("worktree is locked");
+  });
+});
+
+// ─── isWorktreeDirty ─────────────────────────────────────────────────────────
+
+describe("isWorktreeDirty", () => {
+  it("returns false when path does not exist", () => {
+    mockExistsSync.mockReturnValue(false);
+
+    expect(gitUtils.isWorktreeDirty("/nonexistent")).toBe(false);
+  });
+
+  it("returns false when status is empty", () => {
+    mockExistsSync.mockReturnValue(true);
+    mockGitCommand("status --porcelain", "");
+
+    expect(gitUtils.isWorktreeDirty("/clean/repo")).toBe(false);
+  });
+
+  it("returns true when status has output", () => {
+    mockExistsSync.mockReturnValue(true);
+    mockGitCommand("status --porcelain", " M file.ts\n?? new-file.ts");
+
+    expect(gitUtils.isWorktreeDirty("/dirty/repo")).toBe(true);
+  });
+});
+
+// ─── getBranchStatus ─────────────────────────────────────────────────────────
+
+describe("getBranchStatus", () => {
+  it("parses ahead/behind counts correctly", () => {
+    mockGitCommand("rev-list --left-right --count", "7\t12");
+
+    const status = gitUtils.getBranchStatus("/repo", "feat/branch");
+    // Source: [behind, ahead] = raw.split(...).map(Number)
+    expect(status.ahead).toBe(12);
+    expect(status.behind).toBe(7);
+  });
+
+  it("returns 0/0 when there is no upstream", () => {
+    mockExecSync.mockImplementation(() => {
+      throw new Error("no upstream configured");
+    });
+
+    const status = gitUtils.getBranchStatus("/repo", "local-only");
+    expect(status.ahead).toBe(0);
+    expect(status.behind).toBe(0);
+  });
+
+  it("handles zero ahead/behind", () => {
+    mockGitCommand("rev-list --left-right --count", "0\t0");
+
+    const status = gitUtils.getBranchStatus("/repo", "main");
+    expect(status.ahead).toBe(0);
+    expect(status.behind).toBe(0);
+  });
+});

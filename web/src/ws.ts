@@ -196,7 +196,7 @@ function handleMessage(sessionId: string, event: MessageEvent) {
         num_turns: r.num_turns,
       };
       // Forward lines changed if present
-      const raw = r as Record<string, unknown>;
+      const raw = r as unknown as Record<string, unknown>;
       if (typeof raw.total_lines_added === "number") {
         sessionUpdates.total_lines_added = raw.total_lines_added;
       }
