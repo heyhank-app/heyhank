@@ -134,6 +134,7 @@ describe("POST /api/sessions/create", () => {
     vi.mocked(gitUtils.ensureWorktree).mockReturnValue({
       worktreePath: "/home/.companion/worktrees/my-repo/feat-branch",
       branch: "feat-branch",
+      actualBranch: "feat-branch",
       isNew: true,
     });
 
@@ -148,6 +149,7 @@ describe("POST /api/sessions/create", () => {
     expect(gitUtils.ensureWorktree).toHaveBeenCalledWith("/repo", "feat-branch", {
       baseBranch: "main",
       createBranch: undefined,
+      forceNew: true,
     });
     expect(launcher.launch).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -156,6 +158,7 @@ describe("POST /api/sessions/create", () => {
           isWorktree: true,
           repoRoot: "/repo",
           branch: "feat-branch",
+          actualBranch: "feat-branch",
           worktreePath: "/home/.companion/worktrees/my-repo/feat-branch",
         }),
       }),
@@ -165,6 +168,7 @@ describe("POST /api/sessions/create", () => {
         sessionId: "session-1",
         repoRoot: "/repo",
         branch: "feat-branch",
+        actualBranch: "feat-branch",
       }),
     );
   });
@@ -283,6 +287,34 @@ describe("DELETE /api/sessions/:id", () => {
     expect(launcher.kill).toHaveBeenCalledWith("s1");
     expect(launcher.removeSession).toHaveBeenCalledWith("s1");
     expect(bridge.closeSession).toHaveBeenCalledWith("s1");
+    expect(tracker.removeBySession).toHaveBeenCalledWith("s1");
+    // No branchToDelete when actualBranch is not set
+    expect(gitUtils.removeWorktree).toHaveBeenCalledWith("/repo", "/wt/feat", {
+      force: false,
+      branchToDelete: undefined,
+    });
+  });
+
+  it("passes branchToDelete when actualBranch differs from branch", async () => {
+    tracker.getBySession.mockReturnValue({
+      sessionId: "s1",
+      repoRoot: "/repo",
+      branch: "main",
+      actualBranch: "main-wt-2",
+      worktreePath: "/wt/main",
+      createdAt: 1000,
+    });
+    tracker.isWorktreeInUse.mockReturnValue(false);
+    vi.mocked(gitUtils.isWorktreeDirty).mockReturnValue(false);
+    vi.mocked(gitUtils.removeWorktree).mockReturnValue({ removed: true });
+
+    const res = await app.request("/api/sessions/s1", { method: "DELETE" });
+
+    expect(res.status).toBe(200);
+    expect(gitUtils.removeWorktree).toHaveBeenCalledWith("/repo", "/wt/main", {
+      force: false,
+      branchToDelete: "main-wt-2",
+    });
     expect(tracker.removeBySession).toHaveBeenCalledWith("s1");
   });
 });
@@ -475,6 +507,7 @@ describe("POST /api/git/worktree", () => {
     const result = {
       worktreePath: "/home/.companion/worktrees/repo/feat",
       branch: "feat",
+      actualBranch: "feat",
       isNew: true,
     };
     vi.mocked(gitUtils.ensureWorktree).mockReturnValue(result);

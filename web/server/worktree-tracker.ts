@@ -13,6 +13,8 @@ export interface WorktreeMapping {
   sessionId: string;
   repoRoot: string;
   branch: string;
+  /** Actual git branch in the worktree (may differ from `branch` for -wt-N branches) */
+  actualBranch?: string;
   worktreePath: string;
   createdAt: number;
 }

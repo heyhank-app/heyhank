@@ -32,7 +32,10 @@ export interface GitWorktreeInfo {
 
 export interface WorktreeCreateResult {
   worktreePath: string;
+  /** The conceptual branch the user selected */
   branch: string;
+  /** The actual git branch in the worktree (may be e.g. `main-wt-2` for duplicate sessions) */
+  actualBranch: string;
   isNew: boolean;
 }
 
@@ -204,20 +207,41 @@ export function listWorktrees(repoRoot: string): GitWorktreeInfo[] {
 export function ensureWorktree(
   repoRoot: string,
   branchName: string,
-  options?: { baseBranch?: string; createBranch?: boolean },
+  options?: { baseBranch?: string; createBranch?: boolean; forceNew?: boolean },
 ): WorktreeCreateResult {
   const repoName = basename(repoRoot);
-  const targetPath = worktreeDir(repoName, branchName);
 
   // Check if a worktree already exists for this branch
   const existing = listWorktrees(repoRoot);
   const found = existing.find((wt) => wt.branch === branchName);
-  if (found) {
-    return { worktreePath: found.path, branch: branchName, isNew: false };
+
+  if (found && !options?.forceNew) {
+    // Don't reuse the main worktree — it's the original repo checkout
+    if (!found.isMainWorktree) {
+      return { worktreePath: found.path, branch: branchName, actualBranch: branchName, isNew: false };
+    }
+  }
+
+  // Find a unique path: append -2, -3, etc. if the base path is taken
+  const basePath = worktreeDir(repoName, branchName);
+  let targetPath = basePath;
+  let suffix = 1;
+  while (existsSync(targetPath)) {
+    suffix++;
+    targetPath = `${basePath}-${suffix}`;
   }
 
   // Ensure parent directory exists
   mkdirSync(join(WORKTREES_BASE, repoName), { recursive: true });
+
+  // A worktree already exists for this branch — create a new uniquely-named
+  // branch so multiple sessions can work on the same branch independently.
+  if (found) {
+    const commitHash = git("rev-parse HEAD", found.path);
+    const uniqueBranch = generateUniqueWorktreeBranch(repoRoot, branchName);
+    git(`worktree add -b ${uniqueBranch} "${targetPath}" ${commitHash}`, repoRoot);
+    return { worktreePath: targetPath, branch: branchName, actualBranch: uniqueBranch, isNew: false };
+  }
 
   // Check if branch already exists locally or on remote
   const branchExists =
@@ -228,33 +252,52 @@ export function ensureWorktree(
   if (branchExists) {
     // Worktree add with existing local branch
     git(`worktree add "${targetPath}" ${branchName}`, repoRoot);
-    return { worktreePath: targetPath, branch: branchName, isNew: false };
+    return { worktreePath: targetPath, branch: branchName, actualBranch: branchName, isNew: false };
   }
 
   if (remoteBranchExists) {
     // Create local tracking branch from remote
     git(`worktree add -b ${branchName} "${targetPath}" origin/${branchName}`, repoRoot);
-    return { worktreePath: targetPath, branch: branchName, isNew: false };
+    return { worktreePath: targetPath, branch: branchName, actualBranch: branchName, isNew: false };
   }
 
   if (options?.createBranch !== false) {
     // Create new branch from base
     const base = options?.baseBranch || resolveDefaultBranch(repoRoot);
     git(`worktree add -b ${branchName} "${targetPath}" ${base}`, repoRoot);
-    return { worktreePath: targetPath, branch: branchName, isNew: true };
+    return { worktreePath: targetPath, branch: branchName, actualBranch: branchName, isNew: true };
   }
 
   throw new Error(`Branch "${branchName}" does not exist and createBranch is false`);
 }
 
+/**
+ * Generate a unique branch name for a companion-managed worktree.
+ * Pattern: `{branch}-wt-2`, `{branch}-wt-3`, etc.
+ * Increments until a name is found that doesn't already exist as a local branch.
+ */
+export function generateUniqueWorktreeBranch(repoRoot: string, baseBranch: string): string {
+  let suffix = 2;
+  while (true) {
+    const candidate = `${baseBranch}-wt-${suffix}`;
+    if (gitSafe(`rev-parse --verify refs/heads/${candidate}`, repoRoot) === null) {
+      return candidate;
+    }
+    suffix++;
+  }
+}
+
 export function removeWorktree(
   repoRoot: string,
   worktreePath: string,
-  options?: { force?: boolean },
+  options?: { force?: boolean; branchToDelete?: string },
 ): { removed: boolean; reason?: string } {
   if (!existsSync(worktreePath)) {
     // Already gone, clean up git's reference
     gitSafe("worktree prune", repoRoot);
+    if (options?.branchToDelete) {
+      gitSafe(`branch -D ${options.branchToDelete}`, repoRoot);
+    }
     return { removed: true };
   }
 
@@ -268,6 +311,10 @@ export function removeWorktree(
   try {
     const forceFlag = options?.force ? " --force" : "";
     git(`worktree remove "${worktreePath}"${forceFlag}`, repoRoot);
+    // Clean up the companion-managed branch after worktree removal
+    if (options?.branchToDelete) {
+      gitSafe(`branch -D ${options.branchToDelete}`, repoRoot);
+    }
     return { removed: true };
   } catch (e: unknown) {
     return {

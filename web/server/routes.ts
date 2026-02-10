@@ -31,7 +31,7 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
       }
 
       let cwd = body.cwd;
-      let worktreeInfo: { isWorktree: boolean; repoRoot: string; branch: string; worktreePath: string } | undefined;
+      let worktreeInfo: { isWorktree: boolean; repoRoot: string; branch: string; actualBranch: string; worktreePath: string } | undefined;
 
       // If worktree is requested, set up a worktree for the selected branch
       if (body.useWorktree && body.branch && cwd) {
@@ -40,12 +40,14 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
           const result = gitUtils.ensureWorktree(repoInfo.repoRoot, body.branch, {
             baseBranch: repoInfo.defaultBranch,
             createBranch: body.createBranch,
+            forceNew: true,
           });
           cwd = result.worktreePath;
           worktreeInfo = {
             isWorktree: true,
             repoRoot: repoInfo.repoRoot,
             branch: body.branch,
+            actualBranch: result.actualBranch,
             worktreePath: result.worktreePath,
           };
         }
@@ -73,6 +75,7 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
           sessionId: session.sessionId,
           repoRoot: worktreeInfo.repoRoot,
           branch: worktreeInfo.branch,
+          actualBranch: worktreeInfo.actualBranch,
           worktreePath: worktreeInfo.worktreePath,
           createdAt: Date.now(),
         });
@@ -307,7 +310,11 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
       return { cleaned: false, dirty: true, path: mapping.worktreePath };
     }
 
-    const result = gitUtils.removeWorktree(mapping.repoRoot, mapping.worktreePath, { force: dirty });
+    // Delete the companion-managed branch if it differs from the conceptual branch
+    const branchToDelete = mapping.actualBranch && mapping.actualBranch !== mapping.branch
+      ? mapping.actualBranch
+      : undefined;
+    const result = gitUtils.removeWorktree(mapping.repoRoot, mapping.worktreePath, { force: dirty, branchToDelete });
     if (result.removed) {
       // Only remove the mapping after successful cleanup
       worktreeTracker.removeBySession(sessionId);

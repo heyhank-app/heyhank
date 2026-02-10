@@ -44,4 +44,5 @@ export interface SdkSessionInfo {
   isWorktree?: boolean;
   repoRoot?: string;
   branch?: string;
+  actualBranch?: string;
 }

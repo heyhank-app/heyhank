@@ -21,8 +21,10 @@ export interface SdkSessionInfo {
   isWorktree?: boolean;
   /** The original repo root path */
   repoRoot?: string;
-  /** Branch this session is working on */
+  /** Conceptual branch this session is working on (what user selected) */
   branch?: string;
+  /** Actual git branch in the worktree (may differ for -wt-N branches) */
+  actualBranch?: string;
 }
 
 export interface LaunchOptions {
@@ -37,6 +39,7 @@ export interface LaunchOptions {
     isWorktree: boolean;
     repoRoot: string;
     branch: string;
+    actualBranch: string;
     worktreePath: string;
   };
 }
@@ -126,6 +129,7 @@ export class CliLauncher {
       info.isWorktree = options.worktreeInfo.isWorktree;
       info.repoRoot = options.worktreeInfo.repoRoot;
       info.branch = options.worktreeInfo.branch;
+      info.actualBranch = options.worktreeInfo.actualBranch;
     }
 
     this.sessions.set(sessionId, info);
@@ -209,7 +213,12 @@ export class CliLauncher {
 
     // Inject CLAUDE.md guardrails for worktree sessions
     if (info.isWorktree && info.branch) {
-      this.injectWorktreeGuardrails(info.cwd, info.branch, info.repoRoot || "");
+      this.injectWorktreeGuardrails(
+        info.cwd,
+        info.actualBranch || info.branch,
+        info.repoRoot || "",
+        info.actualBranch && info.actualBranch !== info.branch ? info.branch : undefined,
+      );
     }
 
     // Always pass -p "" for headless mode. When relaunching, also pass --resume
@@ -266,15 +275,31 @@ export class CliLauncher {
 
   /**
    * Inject a CLAUDE.md file into the worktree with branch guardrails.
-   * Appends a marked section if CLAUDE.md already exists, or creates it.
+   * Only injects into actual worktree directories, never the main repo.
    */
-  private injectWorktreeGuardrails(worktreePath: string, branch: string, repoRoot: string): void {
+  private injectWorktreeGuardrails(worktreePath: string, branch: string, repoRoot: string, parentBranch?: string): void {
+    // Safety: never inject guardrails into the main repository itself
+    if (worktreePath === repoRoot) {
+      console.warn(`[cli-launcher] Skipping guardrails injection: worktree path is the main repo (${repoRoot})`);
+      return;
+    }
+
+    // Safety: only inject if the worktree directory actually exists (created by git worktree add)
+    if (!existsSync(worktreePath)) {
+      console.warn(`[cli-launcher] Skipping guardrails injection: worktree path does not exist (${worktreePath})`);
+      return;
+    }
+
+    const branchLabel = parentBranch
+      ? `\`${branch}\` (created from \`${parentBranch}\`)`
+      : `\`${branch}\``;
+
     const MARKER_START = "<!-- WORKTREE_GUARDRAILS_START -->";
     const MARKER_END = "<!-- WORKTREE_GUARDRAILS_END -->";
     const guardrails = `${MARKER_START}
 # Worktree Session — Branch Guardrails
 
-You are working on branch: \`${branch}\`
+You are working on branch: ${branchLabel}
 This is a git worktree. The main repository is at: \`${repoRoot}\`
 
 **Rules:**
