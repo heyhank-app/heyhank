@@ -370,7 +370,7 @@ export function HomePage() {
         </div>
 
         {/* Below-card selectors */}
-        <div className="flex items-center gap-2 sm:gap-3 mt-2 sm:mt-3 px-1 flex-wrap">
+        <div className="flex items-center gap-1 sm:gap-3 mt-2 sm:mt-3 px-1 flex-nowrap">
           {/* Folder selector */}
           <div className="relative" ref={dirDropdownRef}>
             <button
@@ -394,7 +394,7 @@ export function HomePage() {
               </svg>
             </button>
             {showDirDropdown && (
-              <div className="absolute left-0 top-full mt-1 w-80 max-w-[calc(100vw-2rem)] max-h-[400px] flex flex-col bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 overflow-hidden">
+              <div className="absolute left-0 top-full mt-1 w-80 max-w-[calc(100vw-2rem)] max-h-[min(400px,60vh)] flex flex-col bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 overflow-hidden">
                 {/* Current path display + manual input toggle */}
                 <div className="px-3 py-2 border-b border-cc-border flex items-center gap-2 shrink-0">
                   {showDirInput ? (

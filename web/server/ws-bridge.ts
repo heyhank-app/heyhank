@@ -1,5 +1,6 @@
 import type { ServerWebSocket } from "bun";
 import { randomUUID } from "node:crypto";
+import { execSync } from "node:child_process";
 import type {
   CLIMessage,
   CLISystemInitMessage,
@@ -59,6 +60,9 @@ function makeDefaultState(sessionId: string): SessionState {
     num_turns: 0,
     context_used_percent: 0,
     is_compacting: false,
+    git_branch: "",
+    total_lines_added: 0,
+    total_lines_removed: 0,
   };
 }
 
@@ -299,6 +303,19 @@ export class WsBridge {
       session.state.slash_commands = init.slash_commands ?? [];
       session.state.skills = init.skills ?? [];
 
+      // Resolve git branch from session cwd
+      if (session.state.cwd) {
+        try {
+          session.state.git_branch = execSync("git rev-parse --abbrev-ref HEAD", {
+            cwd: session.state.cwd,
+            encoding: "utf-8",
+            timeout: 3000,
+          }).trim();
+        } catch {
+          // Not a git repo or git not available
+        }
+      }
+
       this.broadcastToBrowsers(session, {
         type: "session_init",
         session: session.state,
@@ -334,6 +351,14 @@ export class WsBridge {
     // Update session cost/turns
     session.state.total_cost_usd = msg.total_cost_usd;
     session.state.num_turns = msg.num_turns;
+
+    // Update lines changed (CLI may send these in result)
+    if (typeof msg.total_lines_added === "number") {
+      session.state.total_lines_added = msg.total_lines_added;
+    }
+    if (typeof msg.total_lines_removed === "number") {
+      session.state.total_lines_removed = msg.total_lines_removed;
+    }
 
     // Compute context usage from modelUsage
     if (msg.modelUsage) {

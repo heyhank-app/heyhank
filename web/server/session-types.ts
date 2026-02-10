@@ -77,6 +77,8 @@ export interface CLIResultMessage {
     maxOutputTokens: number;
     costUSD: number;
   }>;
+  total_lines_added?: number;
+  total_lines_removed?: number;
   uuid: string;
   session_id: string;
 }
@@ -201,6 +203,9 @@ export interface SessionState {
   num_turns: number;
   context_used_percent: number;
   is_compacting: boolean;
+  git_branch: string;
+  total_lines_added: number;
+  total_lines_removed: number;
 }
 
 // ─── Permission Request ──────────────────────────────────────────────────────

@@ -25,7 +25,8 @@
     "vibe-coding"
   ],
   "scripts": {
-    "dev": "bun --watch server/index.ts",
+    "dev": "bun dev.ts",
+    "dev:api": "bun --watch server/index.ts",
     "dev:vite": "vite",
     "build": "vite build",
     "start": "NODE_ENV=production bun server/index.ts",

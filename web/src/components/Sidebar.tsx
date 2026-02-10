@@ -106,6 +106,9 @@ export function Sidebar() {
       id,
       model: bridgeState?.model || sdkInfo?.model || "",
       cwd: bridgeState?.cwd || sdkInfo?.cwd || "",
+      gitBranch: bridgeState?.git_branch || "",
+      linesAdded: bridgeState?.total_lines_added || 0,
+      linesRemoved: bridgeState?.total_lines_removed || 0,
       isConnected: cliConnected.get(id) ?? false,
       status: sessionStatus.get(id) ?? null,
       sdkState: sdkInfo?.state ?? null,
@@ -225,6 +228,22 @@ export function Sidebar() {
                       <p className="text-[11px] text-cc-muted truncate mt-0.5 ml-4">
                         {dirName}
                       </p>
+                    )}
+                    {s.gitBranch && (
+                      <div className="flex items-center gap-1.5 mt-0.5 ml-4 text-[11px] text-cc-muted">
+                        <span className="flex items-center gap-1 truncate">
+                          <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0 opacity-60">
+                            <path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.116.862a2.25 2.25 0 10-.862.862A4.48 4.48 0 007.25 7.5h-1.5A2.25 2.25 0 003.5 9.75v.318a2.25 2.25 0 101.5 0V9.75a.75.75 0 01.75-.75h1.5a5.98 5.98 0 003.884-1.435A2.25 2.25 0 109.634 3.362zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
+                          </svg>
+                          <span className="truncate">{s.gitBranch}</span>
+                        </span>
+                        {(s.linesAdded > 0 || s.linesRemoved > 0) && (
+                          <span className="flex items-center gap-1 shrink-0">
+                            <span className="text-green-500">+{s.linesAdded}</span>
+                            <span className="text-red-400">-{s.linesRemoved}</span>
+                          </span>
+                        )}
+                      </div>
                     )}
                   </button>
                   {permCount > 0 && (

@@ -93,7 +93,6 @@ console.log(`Server running on http://localhost:${server.port}`);
 console.log(`  CLI WebSocket:     ws://localhost:${server.port}/ws/cli/:sessionId`);
 console.log(`  Browser WebSocket: ws://localhost:${server.port}/ws/browser/:sessionId`);
 
-// In dev mode, log that Vite should be run separately
 if (process.env.NODE_ENV !== "production") {
-  console.log("Dev mode: run 'bun run dev:vite' in another terminal for the frontend");
+  console.log("Dev mode: frontend at http://localhost:5174");
 }

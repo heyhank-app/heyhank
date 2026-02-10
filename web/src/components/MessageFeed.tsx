@@ -423,9 +423,9 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="h-full overflow-y-auto scroll-smooth px-4 py-6"
+        className="h-full overflow-y-auto scroll-smooth px-3 sm:px-4 py-4 sm:py-6"
       >
-        <div className="max-w-3xl mx-auto space-y-5">
+        <div className="max-w-3xl mx-auto space-y-3 sm:space-y-5">
           <FeedEntries entries={grouped} />
 
           {/* Streaming indicator */}

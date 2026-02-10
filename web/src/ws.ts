@@ -191,10 +191,18 @@ function handleMessage(sessionId: string, event: MessageEvent) {
 
     case "result": {
       const r = data.data;
-      const sessionUpdates: Partial<{ total_cost_usd: number; num_turns: number; context_used_percent: number }> = {
+      const sessionUpdates: Partial<{ total_cost_usd: number; num_turns: number; context_used_percent: number; total_lines_added: number; total_lines_removed: number }> = {
         total_cost_usd: r.total_cost_usd,
         num_turns: r.num_turns,
       };
+      // Forward lines changed if present
+      const raw = r as Record<string, unknown>;
+      if (typeof raw.total_lines_added === "number") {
+        sessionUpdates.total_lines_added = raw.total_lines_added;
+      }
+      if (typeof raw.total_lines_removed === "number") {
+        sessionUpdates.total_lines_removed = raw.total_lines_removed;
+      }
       // Compute context % from modelUsage if available
       if (r.modelUsage) {
         for (const usage of Object.values(r.modelUsage)) {

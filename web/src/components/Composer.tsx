@@ -330,6 +330,24 @@ export function Composer({ sessionId }: { sessionId: string }) {
             style={{ minHeight: "36px", maxHeight: "200px" }}
           />
 
+          {/* Git branch + lines info */}
+          {sessionData?.git_branch && (
+            <div className="flex items-center gap-2 px-4 pb-1 text-[11px] text-cc-muted">
+              <span className="flex items-center gap-1 truncate">
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0 opacity-60">
+                  <path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.116.862a2.25 2.25 0 10-.862.862A4.48 4.48 0 007.25 7.5h-1.5A2.25 2.25 0 003.5 9.75v.318a2.25 2.25 0 101.5 0V9.75a.75.75 0 01.75-.75h1.5a5.98 5.98 0 003.884-1.435A2.25 2.25 0 109.634 3.362zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
+                </svg>
+                <span className="truncate max-w-[160px]">{sessionData.git_branch}</span>
+              </span>
+              {((sessionData.total_lines_added || 0) > 0 || (sessionData.total_lines_removed || 0) > 0) && (
+                <span className="flex items-center gap-1 shrink-0">
+                  <span className="text-green-500">+{sessionData.total_lines_added || 0}</span>
+                  <span className="text-red-400">-{sessionData.total_lines_removed || 0}</span>
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Bottom toolbar */}
           <div className="flex items-center justify-between px-2.5 pb-2.5">
             {/* Left: mode indicator */}
