@@ -350,11 +350,7 @@ export function Sidebar() {
       {/* Header */}
       <div className="p-4 pb-3">
         <div className="flex items-center gap-2 mb-4">
-          <div className="w-7 h-7 rounded-lg bg-cc-primary flex items-center justify-center">
-            <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 text-white">
-              <path d="M8 9h8M8 13h5M21 12c0 4.97-4.03 9-9 9a8.96 8.96 0 01-4.57-1.24L3 21l1.24-4.43A8.96 8.96 0 013 12c0-4.97 4.03-9 9-9s9 4.03 9 9z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
+          <img src="/logo.svg" alt="" className="w-7 h-7" />
           <span className="text-sm font-semibold text-cc-fg tracking-tight">The Vibe Companion</span>
         </div>
 

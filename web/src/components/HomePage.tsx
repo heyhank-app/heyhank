@@ -305,10 +305,13 @@ export function HomePage() {
   return (
     <div className="flex-1 h-full flex items-center justify-center px-3 sm:px-4">
       <div className="w-full max-w-2xl">
-        {/* Title */}
-        <h1 className="text-xl sm:text-2xl font-semibold text-cc-fg text-center mb-4 sm:mb-6">
-          The Vibe Companion
-        </h1>
+        {/* Logo + Title */}
+        <div className="flex items-center justify-center gap-3 mb-4 sm:mb-6">
+          <img src="/logo.svg" alt="The Vibe Companion" className="w-9 h-9 sm:w-10 sm:h-10" />
+          <h1 className="text-xl sm:text-2xl font-semibold text-cc-fg">
+            The Vibe Companion
+          </h1>
+        </div>
 
         {/* Image thumbnails */}
         {images.length > 0 && (
