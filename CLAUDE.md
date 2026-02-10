@@ -22,7 +22,20 @@ cd web && bun run typecheck
 cd web && bun run build && bun run start
 ```
 
-There are no tests in this repo currently.
+## Testing
+
+```bash
+# Run tests
+cd web && bun run test
+
+# Watch mode
+cd web && bun run test:watch
+```
+
+- All new backend (`web/server/`) and frontend (`web/src/`) code **must** include tests when possible.
+- Tests use Vitest. Server tests live alongside source files (e.g. `routes.test.ts` next to `routes.ts`).
+- A husky pre-commit hook runs typecheck and tests automatically before each commit.
+- **Never remove or delete existing tests.** If a test is failing, fix the code or the test. If you believe a test should be removed, you must first explain to the user why and get explicit approval before removing it.
 
 ## Architecture
 
