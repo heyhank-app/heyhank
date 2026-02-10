@@ -49,6 +49,12 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
             worktreePath: result.worktreePath,
           };
         }
+      } else if (body.branch && cwd) {
+        // Non-worktree: checkout the selected branch in-place
+        const repoInfo = gitUtils.getRepoInfo(cwd);
+        if (repoInfo && repoInfo.currentBranch !== body.branch) {
+          gitUtils.checkoutBranch(repoInfo.repoRoot, body.branch);
+        }
       }
 
       const session = launcher.launch({

@@ -295,6 +295,10 @@ export function gitPull(
 }
 
 
+export function checkoutBranch(cwd: string, branchName: string): void {
+  git(`checkout ${branchName}`, cwd);
+}
+
 export function getBranchStatus(
   repoRoot: string,
   branchName: string,
