@@ -81,6 +81,19 @@ function extractTasksFromBlocks(sessionId: string, blocks: ContentBlock[]) {
   }
 }
 
+function extractChangedFilesFromBlocks(sessionId: string, blocks: ContentBlock[]) {
+  const store = useStore.getState();
+  for (const block of blocks) {
+    if (block.type !== "tool_use") continue;
+    const name = (block as { name?: string }).name;
+    const input = (block as { input?: Record<string, unknown> }).input;
+    if (!name || !input) continue;
+    if ((name === "Edit" || name === "Write") && typeof input.file_path === "string") {
+      store.addChangedFile(sessionId, input.file_path);
+    }
+  }
+}
+
 let idCounter = 0;
 function nextId(): string {
   return `msg-${Date.now()}-${++idCounter}`;
@@ -151,9 +164,10 @@ function handleMessage(sessionId: string, event: MessageEvent) {
         store.setStreamingStats(sessionId, { startedAt: Date.now() });
       }
 
-      // Extract tasks from tool_use content blocks
+      // Extract tasks and changed files from tool_use content blocks
       if (msg.content?.length) {
         extractTasksFromBlocks(sessionId, msg.content);
+        extractChangedFilesFromBlocks(sessionId, msg.content);
       }
 
       break;
@@ -230,15 +244,17 @@ function handleMessage(sessionId: string, event: MessageEvent) {
 
     case "permission_request": {
       store.addPermission(sessionId, data.request);
-      // Also extract tasks from permission requests (tool_name + input available)
+      // Also extract tasks and changed files from permission requests
       const req = data.request;
       if (req.tool_name && req.input) {
-        extractTasksFromBlocks(sessionId, [{
-          type: "tool_use",
+        const permBlocks = [{
+          type: "tool_use" as const,
           id: req.tool_use_id,
           name: req.tool_name,
           input: req.input,
-        }]);
+        }];
+        extractTasksFromBlocks(sessionId, permBlocks);
+        extractChangedFilesFromBlocks(sessionId, permBlocks);
       }
       break;
     }
@@ -333,9 +349,10 @@ function handleMessage(sessionId: string, event: MessageEvent) {
             model: msg.model,
             stopReason: msg.stop_reason,
           });
-          // Also extract tasks from history
+          // Also extract tasks and changed files from history
           if (msg.content?.length) {
             extractTasksFromBlocks(sessionId, msg.content);
+            extractChangedFilesFromBlocks(sessionId, msg.content);
           }
         } else if (histMsg.type === "result") {
           const r = histMsg.data;

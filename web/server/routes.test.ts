@@ -9,6 +9,10 @@ vi.mock("./env-manager.js", () => ({
   deleteEnv: vi.fn(),
 }));
 
+vi.mock("node:child_process", () => ({
+  execSync: vi.fn(() => ""),
+}));
+
 vi.mock("./git-utils.js", () => ({
   getRepoInfo: vi.fn(() => null),
   listBranches: vi.fn(() => []),
@@ -27,6 +31,7 @@ vi.mock("./session-names.js", () => ({
 }));
 
 import { Hono } from "hono";
+import { execSync } from "node:child_process";
 import { createRoutes } from "./routes.js";
 import * as envManager from "./env-manager.js";
 import * as gitUtils from "./git-utils.js";
@@ -640,5 +645,51 @@ describe("GET /api/fs/home", () => {
     expect(json).toHaveProperty("cwd");
     expect(typeof json.home).toBe("string");
     expect(typeof json.cwd).toBe("string");
+  });
+});
+
+describe("GET /api/fs/diff", () => {
+  it("returns 400 when path is missing", async () => {
+    const res = await app.request("/api/fs/diff", { method: "GET" });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "path required" });
+  });
+
+  it("returns unified diff for a file", async () => {
+    const diffOutput = `diff --git a/file.ts b/file.ts
+--- a/file.ts
++++ b/file.ts
+@@ -1,3 +1,3 @@
+ line1
+-old line
++new line
+ line3`;
+    vi.mocked(execSync).mockReturnValueOnce(diffOutput);
+
+    const res = await app.request("/api/fs/diff?path=/repo/file.ts", { method: "GET" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.diff).toBe(diffOutput);
+    expect(json.path).toContain("file.ts");
+    expect(vi.mocked(execSync)).toHaveBeenCalledWith(
+      expect.stringContaining("git diff HEAD"),
+      expect.objectContaining({ encoding: "utf-8", timeout: 5000 }),
+    );
+  });
+
+  it("returns empty diff when git command fails", async () => {
+    vi.mocked(execSync).mockImplementationOnce(() => {
+      throw new Error("not a git repository");
+    });
+
+    const res = await app.request("/api/fs/diff?path=/not-a-repo/file.ts", { method: "GET" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.diff).toBe("");
+    expect(json.path).toContain("file.ts");
   });
 });

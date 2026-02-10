@@ -208,3 +208,19 @@ describe("removeWorktree", () => {
     expect(JSON.parse(opts.body)).toEqual({ repoRoot: "/repo", worktreePath: "/repo-wt", force: true });
   });
 });
+
+// ===========================================================================
+// getFileDiff
+// ===========================================================================
+describe("getFileDiff", () => {
+  it("sends GET with encoded path query param", async () => {
+    const diffData = { path: "/repo/file.ts", diff: "+new line\n-old line" };
+    mockFetch.mockResolvedValueOnce(mockResponse(diffData));
+
+    const result = await api.getFileDiff("/repo/file.ts");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/fs/diff?path=${encodeURIComponent("/repo/file.ts")}`);
+    expect(result).toEqual(diffData);
+  });
+});

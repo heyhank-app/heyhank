@@ -84,7 +84,7 @@ if (process.env.NODE_ENV === "production") {
 
 const server = Bun.serve<SocketData>({
   port,
-  fetch(req, server) {
+  async fetch(req, server) {
     const url = new URL(req.url);
 
     // ── CLI WebSocket — Claude Code CLI connects here via --sdk-url ────

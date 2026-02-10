@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { execSync } from "node:child_process";
-import { readdir } from "node:fs/promises";
-import { resolve, join } from "node:path";
+import { readdir, readFile, writeFile, stat } from "node:fs/promises";
+import { resolve, join, dirname } from "node:path";
 import { homedir } from "node:os";
 import type { CliLauncher } from "./cli-launcher.js";
 import type { WsBridge } from "./ws-bridge.js";
@@ -123,6 +123,7 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
     const id = c.req.param("id");
     const killed = await launcher.kill(id);
     if (!killed) return c.json({ error: "Session not found or already exited" }, 404);
+
     return c.json({ ok: true });
   });
 
@@ -137,6 +138,7 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
     const id = c.req.param("id");
     await launcher.kill(id);
 
+
     // Clean up worktree if no other sessions use it (force: delete is destructive)
     const worktreeResult = cleanupWorktree(id, true);
 
@@ -149,6 +151,7 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
     const id = c.req.param("id");
     const body = await c.req.json().catch(() => ({}));
     await launcher.kill(id);
+
 
     // Clean up worktree if no other sessions use it
     const worktreeResult = cleanupWorktree(id, body.force);
@@ -187,6 +190,100 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
 
   api.get("/fs/home", (c) => {
     return c.json({ home: homedir(), cwd: process.cwd() });
+  });
+
+  // ─── Editor filesystem APIs ─────────────────────────────────────
+
+  /** Recursive directory tree for the editor file explorer */
+  api.get("/fs/tree", async (c) => {
+    const rawPath = c.req.query("path");
+    if (!rawPath) return c.json({ error: "path required" }, 400);
+    const basePath = resolve(rawPath);
+
+    interface TreeNode {
+      name: string;
+      path: string;
+      type: "file" | "directory";
+      children?: TreeNode[];
+    }
+
+    async function buildTree(dir: string, depth: number): Promise<TreeNode[]> {
+      if (depth > 10) return []; // Safety limit
+      try {
+        const entries = await readdir(dir, { withFileTypes: true });
+        const nodes: TreeNode[] = [];
+        for (const entry of entries) {
+          if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+          const fullPath = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            const children = await buildTree(fullPath, depth + 1);
+            nodes.push({ name: entry.name, path: fullPath, type: "directory", children });
+          } else if (entry.isFile()) {
+            nodes.push({ name: entry.name, path: fullPath, type: "file" });
+          }
+        }
+        nodes.sort((a, b) => {
+          if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+        return nodes;
+      } catch {
+        return [];
+      }
+    }
+
+    const tree = await buildTree(basePath, 0);
+    return c.json({ path: basePath, tree });
+  });
+
+  /** Read a single file */
+  api.get("/fs/read", async (c) => {
+    const filePath = c.req.query("path");
+    if (!filePath) return c.json({ error: "path required" }, 400);
+    const absPath = resolve(filePath);
+    try {
+      const info = await stat(absPath);
+      if (info.size > 2 * 1024 * 1024) {
+        return c.json({ error: "File too large (>2MB)" }, 413);
+      }
+      const content = await readFile(absPath, "utf-8");
+      return c.json({ path: absPath, content });
+    } catch (e: unknown) {
+      return c.json({ error: e instanceof Error ? e.message : "Cannot read file" }, 404);
+    }
+  });
+
+  /** Write a single file */
+  api.put("/fs/write", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const { path: filePath, content } = body;
+    if (!filePath || typeof content !== "string") {
+      return c.json({ error: "path and content required" }, 400);
+    }
+    const absPath = resolve(filePath);
+    try {
+      await writeFile(absPath, content, "utf-8");
+      return c.json({ ok: true, path: absPath });
+    } catch (e: unknown) {
+      return c.json({ error: e instanceof Error ? e.message : "Cannot write file" }, 500);
+    }
+  });
+
+  /** Git diff for a single file (unified diff) */
+  api.get("/fs/diff", (c) => {
+    const filePath = c.req.query("path");
+    if (!filePath) return c.json({ error: "path required" }, 400);
+    const absPath = resolve(filePath);
+    try {
+      const diff = execSync(`git diff HEAD -- "${absPath}"`, {
+        cwd: dirname(absPath),
+        encoding: "utf-8",
+        timeout: 5000,
+      });
+      return c.json({ path: absPath, diff });
+    } catch {
+      return c.json({ path: absPath, diff: "" });
+    }
   });
 
   // ─── Environments (~/.companion/envs/) ────────────────────────────

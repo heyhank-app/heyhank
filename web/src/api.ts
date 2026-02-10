@@ -123,6 +123,13 @@ export interface DirListResult {
   error?: string;
 }
 
+export interface TreeNode {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  children?: TreeNode[];
+}
+
 export const api = {
   createSession: (opts?: CreateSessionOpts) =>
     post<{ sessionId: string; state: string; cwd: string }>("/sessions/create", opts),
@@ -178,4 +185,18 @@ export const api = {
     post<{ success: boolean; output: string }>("/git/fetch", { repoRoot }),
   gitPull: (cwd: string) =>
     post<{ success: boolean; output: string; git_ahead: number; git_behind: number }>("/git/pull", { cwd }),
+
+  // Editor
+  startEditor: (sessionId: string) =>
+    post<{ url: string }>(`/sessions/${encodeURIComponent(sessionId)}/editor/start`),
+
+  // Editor filesystem
+  getFileTree: (path: string) =>
+    get<{ path: string; tree: TreeNode[] }>(`/fs/tree?path=${encodeURIComponent(path)}`),
+  readFile: (path: string) =>
+    get<{ path: string; content: string }>(`/fs/read?path=${encodeURIComponent(path)}`),
+  writeFile: (path: string, content: string) =>
+    put<{ ok: boolean; path: string }>("/fs/write", { path, content }),
+  getFileDiff: (path: string) =>
+    get<{ path: string; diff: string }>(`/fs/diff?path=${encodeURIComponent(path)}`),
 };

@@ -9,6 +9,8 @@ export function TopBar() {
   const setSidebarOpen = useStore((s) => s.setSidebarOpen);
   const taskPanelOpen = useStore((s) => s.taskPanelOpen);
   const setTaskPanelOpen = useStore((s) => s.setTaskPanelOpen);
+  const activeTab = useStore((s) => s.activeTab);
+  const setActiveTab = useStore((s) => s.setActiveTab);
 
   const isConnected = currentSessionId ? (cliConnected.get(currentSessionId) ?? false) : false;
   const status = currentSessionId ? (sessionStatus.get(currentSessionId) ?? null) : null;
@@ -61,6 +63,30 @@ export function TopBar() {
               <span className="text-cc-primary font-medium">Thinking</span>
             </div>
           )}
+
+          {/* Chat / Editor tab toggle */}
+          <div className="flex items-center bg-cc-hover rounded-lg p-0.5">
+            <button
+              onClick={() => setActiveTab("chat")}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                activeTab === "chat"
+                  ? "bg-cc-card text-cc-fg shadow-sm"
+                  : "text-cc-muted hover:text-cc-fg"
+              }`}
+            >
+              Chat
+            </button>
+            <button
+              onClick={() => setActiveTab("editor")}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                activeTab === "editor"
+                  ? "bg-cc-card text-cc-fg shadow-sm"
+                  : "text-cc-muted hover:text-cc-fg"
+              }`}
+            >
+              Editor
+            </button>
+          </div>
 
           <button
             onClick={() => setTaskPanelOpen(!taskPanelOpen)}
