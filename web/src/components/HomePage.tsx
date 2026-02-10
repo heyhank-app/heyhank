@@ -1,10 +1,12 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useStore } from "../store.js";
-import { api, type DirEntry, type CompanionEnv, type GitRepoInfo, type GitBranchInfo } from "../api.js";
+import { api, type CompanionEnv, type GitRepoInfo, type GitBranchInfo } from "../api.js";
 import { connectSession, waitForConnection, sendToSession } from "../ws.js";
 import { disconnectSession } from "../ws.js";
 import { generateUniqueSessionName } from "../utils/names.js";
+import { getRecentDirs, addRecentDir } from "../utils/recent-dirs.js";
 import { EnvManager } from "./EnvManager.js";
+import { FolderPicker } from "./FolderPicker.js";
 
 interface ImageAttachment {
   name: string;
@@ -36,22 +38,6 @@ const MODES = [
   { value: "plan", label: "Plan" },
 ];
 
-const RECENT_DIRS_KEY = "cc-recent-dirs";
-
-function getRecentDirs(): string[] {
-  try {
-    return JSON.parse(localStorage.getItem(RECENT_DIRS_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function addRecentDir(dir: string) {
-  const dirs = getRecentDirs().filter((d) => d !== dir);
-  dirs.unshift(dir);
-  localStorage.setItem(RECENT_DIRS_KEY, JSON.stringify(dirs.slice(0, 5)));
-}
-
 let idCounter = 0;
 
 export function HomePage() {
@@ -74,12 +60,7 @@ export function HomePage() {
   // Dropdown states
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showModeDropdown, setShowModeDropdown] = useState(false);
-  const [showDirDropdown, setShowDirDropdown] = useState(false);
-  const [browsePath, setBrowsePath] = useState("");
-  const [browseDirs, setBrowseDirs] = useState<DirEntry[]>([]);
-  const [browseLoading, setBrowseLoading] = useState(false);
-  const [dirInput, setDirInput] = useState("");
-  const [showDirInput, setShowDirInput] = useState(false);
+  const [showFolderPicker, setShowFolderPicker] = useState(false);
 
   // Worktree state
   const [gitRepoInfo, setGitRepoInfo] = useState<GitRepoInfo | null>(null);
@@ -93,7 +74,6 @@ export function HomePage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const modeDropdownRef = useRef<HTMLDivElement>(null);
-  const dirDropdownRef = useRef<HTMLDivElement>(null);
   const envDropdownRef = useRef<HTMLDivElement>(null);
   const branchDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -124,10 +104,6 @@ export function HomePage() {
       if (modeDropdownRef.current && !modeDropdownRef.current.contains(e.target as Node)) {
         setShowModeDropdown(false);
       }
-      if (dirDropdownRef.current && !dirDropdownRef.current.contains(e.target as Node)) {
-        setShowDirDropdown(false);
-        setShowDirInput(false);
-      }
       if (envDropdownRef.current && !envDropdownRef.current.contains(e.target as Node)) {
         setShowEnvDropdown(false);
       }
@@ -137,19 +113,6 @@ export function HomePage() {
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  const loadDirs = useCallback(async (path?: string) => {
-    setBrowseLoading(true);
-    try {
-      const result = await api.listDirs(path);
-      setBrowsePath(result.path);
-      setBrowseDirs(result.dirs);
-    } catch {
-      setBrowseDirs([]);
-    } finally {
-      setBrowseLoading(false);
-    }
   }, []);
 
   // Detect git repo when cwd changes
@@ -430,17 +393,9 @@ export function HomePage() {
         {/* Below-card selectors */}
         <div className="flex items-center gap-1 sm:gap-3 mt-2 sm:mt-3 px-1 flex-wrap">
           {/* Folder selector */}
-          <div className="relative" ref={dirDropdownRef}>
+          <div>
             <button
-              onClick={() => {
-                if (!showDirDropdown) {
-                  setShowDirDropdown(true);
-                  setShowDirInput(false);
-                  loadDirs(cwd || undefined);
-                } else {
-                  setShowDirDropdown(false);
-                }
-              }}
+              onClick={() => setShowFolderPicker(true)}
               className="flex items-center gap-1.5 px-2 py-1 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
             >
               <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
@@ -451,112 +406,12 @@ export function HomePage() {
                 <path d="M4 6l4 4 4-4" />
               </svg>
             </button>
-            {showDirDropdown && (
-              <div className="absolute left-0 top-full mt-1 w-80 max-w-[calc(100vw-2rem)] max-h-[min(400px,60vh)] flex flex-col bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 overflow-hidden">
-                {/* Current path display + manual input toggle */}
-                <div className="px-3 py-2 border-b border-cc-border flex items-center gap-2 shrink-0">
-                  {showDirInput ? (
-                    <input
-                      type="text"
-                      value={dirInput}
-                      onChange={(e) => setDirInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && dirInput.trim()) {
-                          setCwd(dirInput.trim());
-                          addRecentDir(dirInput.trim());
-                          setShowDirDropdown(false);
-                          setShowDirInput(false);
-                        }
-                        if (e.key === "Escape") {
-                          setShowDirInput(false);
-                        }
-                      }}
-                      placeholder="/path/to/project"
-                      className="flex-1 px-2 py-1 text-xs bg-cc-input-bg border border-cc-border rounded-md text-cc-fg font-mono-code placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50"
-                      autoFocus
-                    />
-                  ) : (
-                    <>
-                      <span className="text-[10px] text-cc-muted font-mono-code truncate flex-1">{browsePath}</span>
-                      <button
-                        onClick={() => { setShowDirInput(true); setDirInput(cwd); }}
-                        className="text-[10px] text-cc-muted hover:text-cc-fg shrink-0 cursor-pointer"
-                        title="Type path manually"
-                      >
-                        <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
-                          <path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 01-.927-.928l.929-3.25a1.75 1.75 0 01.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 00-.354 0L3.463 11.098a.25.25 0 00-.064.108l-.563 1.97 1.971-.564a.25.25 0 00.108-.064l8.61-8.61a.25.25 0 000-.354l-1.098-1.097z" />
-                        </svg>
-                      </button>
-                    </>
-                  )}
-                </div>
-
-                {/* Directory browser */}
-                {!showDirInput && (
-                  <>
-                    {/* Go up button */}
-                    {browsePath && browsePath !== "/" && (
-                      <button
-                        onClick={() => {
-                          const parent = browsePath.split("/").slice(0, -1).join("/") || "/";
-                          loadDirs(parent);
-                        }}
-                        className="w-full px-3 py-1.5 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-2 text-cc-muted"
-                      >
-                        <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-60">
-                          <path d="M8 12l-4-4h2.5V4h3v4H12L8 12z" transform="rotate(180 8 8)" />
-                        </svg>
-                        <span>..</span>
-                      </button>
-                    )}
-
-                    {/* Select current directory */}
-                    <button
-                      onClick={() => {
-                        setCwd(browsePath);
-                        addRecentDir(browsePath);
-                        setShowDirDropdown(false);
-                      }}
-                      className="w-full px-3 py-1.5 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-2 text-cc-primary font-medium border-b border-cc-border"
-                    >
-                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0">
-                        <path d="M12.416 3.376a.75.75 0 01.208 1.04l-5 7.5a.75.75 0 01-1.154.114l-3-3a.75.75 0 011.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 011.04-.207z" />
-                      </svg>
-                      <span className="truncate font-mono-code">Select: {browsePath.split("/").pop() || "/"}</span>
-                    </button>
-
-                    {/* Subdirectories */}
-                    <div className="flex-1 min-h-0 overflow-y-auto">
-                      {browseLoading ? (
-                        <div className="px-3 py-3 text-xs text-cc-muted text-center">Loading...</div>
-                      ) : browseDirs.length === 0 ? (
-                        <div className="px-3 py-3 text-xs text-cc-muted text-center">No subdirectories</div>
-                      ) : (
-                        browseDirs.map((d) => (
-                          <button
-                            key={d.path}
-                            onClick={() => loadDirs(d.path)}
-                            onDoubleClick={() => {
-                              setCwd(d.path);
-                              addRecentDir(d.path);
-                              setShowDirDropdown(false);
-                            }}
-                            className="w-full px-3 py-1.5 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer truncate font-mono-code flex items-center gap-2 text-cc-fg"
-                          >
-                            <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-40 shrink-0">
-                              <path d="M1 3.5A1.5 1.5 0 012.5 2h3.379a1.5 1.5 0 011.06.44l.622.621a.5.5 0 00.353.146H13.5A1.5 1.5 0 0115 4.707V12.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" />
-                            </svg>
-                            <span className="truncate">{d.name}</span>
-                            <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-30 shrink-0 ml-auto">
-                              <path d="M6 4l4 4-4 4" />
-                            </svg>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
+            {showFolderPicker && (
+              <FolderPicker
+                initialPath={cwd || ""}
+                onSelect={(path) => { setCwd(path); }}
+                onClose={() => setShowFolderPicker(false)}
+              />
             )}
           </div>
 
@@ -588,7 +443,7 @@ export function HomePage() {
                 </svg>
               </button>
               {showBranchDropdown && (
-                <div className="absolute left-0 top-full mt-1 w-72 max-w-[calc(100vw-2rem)] bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 overflow-hidden">
+                <div className="absolute left-0 bottom-full mb-1 w-72 max-w-[calc(100vw-2rem)] bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 overflow-hidden">
                   {/* Search/filter input */}
                   <div className="px-2 py-2 border-b border-cc-border">
                     <input
@@ -738,7 +593,7 @@ export function HomePage() {
               </svg>
             </button>
             {showEnvDropdown && (
-              <div className="absolute left-0 top-full mt-1 w-56 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
+              <div className="absolute left-0 bottom-full mb-1 w-56 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
                 <button
                   onClick={() => {
                     setSelectedEnv("");
@@ -797,7 +652,7 @@ export function HomePage() {
               </svg>
             </button>
             {showModelDropdown && (
-              <div className="absolute left-0 top-full mt-1 w-44 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
+              <div className="absolute left-0 bottom-full mb-1 w-44 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
                 {MODELS.map((m) => (
                   <button
                     key={m.value}
