@@ -8,6 +8,7 @@ export function Sidebar() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [showEnvManager, setShowEnvManager] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const editInputRef = useRef<HTMLInputElement>(null);
   const sessions = useStore((s) => s.sessions);
   const sdkSessions = useStore((s) => s.sdkSessions);
@@ -96,12 +97,46 @@ export function Sidebar() {
     removeSession(sessionId);
   }, [removeSession]);
 
+  const handleArchiveSession = useCallback(async (e: React.MouseEvent, sessionId: string) => {
+    e.stopPropagation();
+    try {
+      disconnectSession(sessionId);
+      await api.archiveSession(sessionId);
+    } catch {
+      // best-effort
+    }
+    if (useStore.getState().currentSessionId === sessionId) {
+      useStore.getState().newSession();
+    }
+    try {
+      const list = await api.listSessions();
+      useStore.getState().setSdkSessions(list);
+    } catch {
+      // best-effort
+    }
+  }, []);
+
+  const handleUnarchiveSession = useCallback(async (e: React.MouseEvent, sessionId: string) => {
+    e.stopPropagation();
+    try {
+      await api.unarchiveSession(sessionId);
+    } catch {
+      // best-effort
+    }
+    try {
+      const list = await api.listSessions();
+      useStore.getState().setSdkSessions(list);
+    } catch {
+      // best-effort
+    }
+  }, []);
+
   // Combine sessions from WsBridge state + SDK sessions list
   const allSessionIds = new Set<string>();
   for (const id of sessions.keys()) allSessionIds.add(id);
   for (const s of sdkSessions) allSessionIds.add(s.sessionId);
 
-  const sessionList = Array.from(allSessionIds).map((id) => {
+  const allSessionList = Array.from(allSessionIds).map((id) => {
     const bridgeState = sessions.get(id);
     const sdkInfo = sdkSessions.find((s) => s.sessionId === id);
     return {
@@ -115,8 +150,158 @@ export function Sidebar() {
       status: sessionStatus.get(id) ?? null,
       sdkState: sdkInfo?.state ?? null,
       createdAt: sdkInfo?.createdAt ?? 0,
+      archived: sdkInfo?.archived ?? false,
     };
   }).sort((a, b) => b.createdAt - a.createdAt);
+
+  const activeSessions = allSessionList.filter((s) => !s.archived);
+  const archivedSessions = allSessionList.filter((s) => s.archived);
+
+  function renderSessionItem(s: typeof allSessionList[number], options?: { isArchived?: boolean }) {
+    const isActive = currentSessionId === s.id;
+    const name = sessionNames.get(s.id);
+    const shortId = s.id.slice(0, 8);
+    const label = name || s.model || shortId;
+    const dirName = s.cwd ? s.cwd.split("/").pop() : "";
+    const isRunning = s.status === "running";
+    const isCompacting = s.status === "compacting";
+    const isEditing = editingSessionId === s.id;
+    const permCount = pendingPermissions.get(s.id)?.size ?? 0;
+    const archived = options?.isArchived;
+
+    return (
+      <div key={s.id} className={`relative group ${archived ? "opacity-60" : ""}`}>
+        <button
+          onClick={() => handleSelectSession(s.id)}
+          onDoubleClick={(e) => {
+            e.preventDefault();
+            setEditingSessionId(s.id);
+            setEditingName(label);
+          }}
+          className={`w-full px-3 py-2.5 ${archived ? "pr-14" : "pr-8"} text-left rounded-[10px] transition-all duration-100 cursor-pointer ${
+            isActive
+              ? "bg-cc-active"
+              : "hover:bg-cc-hover"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <span className="relative flex shrink-0">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  archived
+                    ? "bg-cc-muted opacity-40"
+                    : permCount > 0
+                    ? "bg-cc-warning"
+                    : s.sdkState === "exited"
+                    ? "bg-cc-muted opacity-40"
+                    : s.isConnected
+                    ? isRunning
+                      ? "bg-cc-success"
+                      : isCompacting
+                      ? "bg-cc-warning"
+                      : "bg-cc-success opacity-60"
+                    : "bg-cc-muted opacity-40"
+                }`}
+              />
+              {!archived && permCount > 0 && (
+                <span className="absolute inset-0 w-2 h-2 rounded-full bg-cc-warning/40 animate-[pulse-dot_1.5s_ease-in-out_infinite]" />
+              )}
+              {!archived && permCount === 0 && isRunning && s.isConnected && (
+                <span className="absolute inset-0 w-2 h-2 rounded-full bg-cc-success/40 animate-[pulse-dot_1.5s_ease-in-out_infinite]" />
+              )}
+            </span>
+            {isEditing ? (
+              <input
+                ref={editInputRef}
+                value={editingName}
+                onChange={(e) => setEditingName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    confirmRename();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    cancelRename();
+                  }
+                  e.stopPropagation();
+                }}
+                onBlur={confirmRename}
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+                className="text-[13px] font-medium flex-1 text-cc-fg bg-transparent border border-cc-border rounded-md px-1 py-0 outline-none focus:border-cc-primary/50 min-w-0"
+              />
+            ) : (
+              <span className="text-[13px] font-medium truncate flex-1 text-cc-fg">
+                {label}
+              </span>
+            )}
+          </div>
+          {dirName && (
+            <p className="text-[11px] text-cc-muted truncate mt-0.5 ml-4">
+              {dirName}
+            </p>
+          )}
+          {s.gitBranch && (
+            <div className="flex items-center gap-1.5 mt-0.5 ml-4 text-[11px] text-cc-muted">
+              <span className="flex items-center gap-1 truncate">
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0 opacity-60">
+                  <path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.116.862a2.25 2.25 0 10-.862.862A4.48 4.48 0 007.25 7.5h-1.5A2.25 2.25 0 003.5 9.75v.318a2.25 2.25 0 101.5 0V9.75a.75.75 0 01.75-.75h1.5a5.98 5.98 0 003.884-1.435A2.25 2.25 0 109.634 3.362zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
+                </svg>
+                <span className="truncate">{s.gitBranch}</span>
+              </span>
+              {(s.linesAdded > 0 || s.linesRemoved > 0) && (
+                <span className="flex items-center gap-1 shrink-0">
+                  <span className="text-green-500">+{s.linesAdded}</span>
+                  <span className="text-red-400">-{s.linesRemoved}</span>
+                </span>
+              )}
+            </div>
+          )}
+        </button>
+        {!archived && permCount > 0 && (
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-cc-warning text-white text-[10px] font-bold leading-none px-1 group-hover:opacity-0 transition-opacity pointer-events-none">
+            {permCount}
+          </span>
+        )}
+        {archived ? (
+          <>
+            {/* Unarchive button */}
+            <button
+              onClick={(e) => handleUnarchiveSession(e, s.id)}
+              className="absolute right-8 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-cc-border text-cc-muted hover:text-cc-fg transition-all cursor-pointer"
+              title="Restore session"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
+                <path d="M8 10V3M5 5l3-3 3 3" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M3 13h10" strokeLinecap="round" />
+              </svg>
+            </button>
+            {/* Delete button */}
+            <button
+              onClick={(e) => handleDeleteSession(e, s.id)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-cc-border text-cc-muted hover:text-red-400 transition-all cursor-pointer"
+              title="Delete permanently"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
+                <path d="M4 4l8 8M12 4l-8 8" />
+              </svg>
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={(e) => handleArchiveSession(e, s.id)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-cc-border text-cc-muted hover:text-cc-fg transition-all cursor-pointer"
+            title="Archive session"
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
+              <path d="M3 3h10v2H3zM4 5v7a1 1 0 001 1h6a1 1 0 001-1V5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M6.5 8h3" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <aside className="w-[260px] h-full flex flex-col bg-cc-sidebar border-r border-cc-border">
@@ -144,128 +329,35 @@ export function Sidebar() {
 
       {/* Session list */}
       <div className="flex-1 overflow-y-auto px-2 pb-2">
-        {sessionList.length === 0 ? (
+        {activeSessions.length === 0 && archivedSessions.length === 0 ? (
           <p className="px-3 py-8 text-xs text-cc-muted text-center leading-relaxed">
             No sessions yet.
           </p>
         ) : (
-          <div className="space-y-0.5">
-            {sessionList.map((s) => {
-              const isActive = currentSessionId === s.id;
-              const name = sessionNames.get(s.id);
-              const shortId = s.id.slice(0, 8);
-              const label = name || s.model || shortId;
-              const dirName = s.cwd ? s.cwd.split("/").pop() : "";
-              const isRunning = s.status === "running";
-              const isCompacting = s.status === "compacting";
-              const isEditing = editingSessionId === s.id;
-              const permCount = pendingPermissions.get(s.id)?.size ?? 0;
+          <>
+            <div className="space-y-0.5">
+              {activeSessions.map((s) => renderSessionItem(s))}
+            </div>
 
-              return (
-                <div key={s.id} className="relative group">
-                  <button
-                    onClick={() => handleSelectSession(s.id)}
-                    onDoubleClick={(e) => {
-                      e.preventDefault();
-                      setEditingSessionId(s.id);
-                      setEditingName(label);
-                    }}
-                    className={`w-full px-3 py-2.5 pr-8 text-left rounded-[10px] transition-all duration-100 cursor-pointer ${
-                      isActive
-                        ? "bg-cc-active"
-                        : "hover:bg-cc-hover"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="relative flex shrink-0">
-                        <span
-                          className={`w-2 h-2 rounded-full ${
-                            permCount > 0
-                              ? "bg-cc-warning"
-                              : s.sdkState === "exited"
-                              ? "bg-cc-muted opacity-40"
-                              : s.isConnected
-                              ? isRunning
-                                ? "bg-cc-success"
-                                : isCompacting
-                                ? "bg-cc-warning"
-                                : "bg-cc-success opacity-60"
-                              : "bg-cc-muted opacity-40"
-                          }`}
-                        />
-                        {permCount > 0 && (
-                          <span className="absolute inset-0 w-2 h-2 rounded-full bg-cc-warning/40 animate-[pulse-dot_1.5s_ease-in-out_infinite]" />
-                        )}
-                        {permCount === 0 && isRunning && s.isConnected && (
-                          <span className="absolute inset-0 w-2 h-2 rounded-full bg-cc-success/40 animate-[pulse-dot_1.5s_ease-in-out_infinite]" />
-                        )}
-                      </span>
-                      {isEditing ? (
-                        <input
-                          ref={editInputRef}
-                          value={editingName}
-                          onChange={(e) => setEditingName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              confirmRename();
-                            } else if (e.key === "Escape") {
-                              e.preventDefault();
-                              cancelRename();
-                            }
-                            e.stopPropagation();
-                          }}
-                          onBlur={confirmRename}
-                          onClick={(e) => e.stopPropagation()}
-                          onDoubleClick={(e) => e.stopPropagation()}
-                          className="text-[13px] font-medium flex-1 text-cc-fg bg-transparent border border-cc-border rounded-md px-1 py-0 outline-none focus:border-cc-primary/50 min-w-0"
-                        />
-                      ) : (
-                        <span className="text-[13px] font-medium truncate flex-1 text-cc-fg">
-                          {label}
-                        </span>
-                      )}
-                    </div>
-                    {dirName && (
-                      <p className="text-[11px] text-cc-muted truncate mt-0.5 ml-4">
-                        {dirName}
-                      </p>
-                    )}
-                    {s.gitBranch && (
-                      <div className="flex items-center gap-1.5 mt-0.5 ml-4 text-[11px] text-cc-muted">
-                        <span className="flex items-center gap-1 truncate">
-                          <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0 opacity-60">
-                            <path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.116.862a2.25 2.25 0 10-.862.862A4.48 4.48 0 007.25 7.5h-1.5A2.25 2.25 0 003.5 9.75v.318a2.25 2.25 0 101.5 0V9.75a.75.75 0 01.75-.75h1.5a5.98 5.98 0 003.884-1.435A2.25 2.25 0 109.634 3.362zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
-                          </svg>
-                          <span className="truncate">{s.gitBranch}</span>
-                        </span>
-                        {(s.linesAdded > 0 || s.linesRemoved > 0) && (
-                          <span className="flex items-center gap-1 shrink-0">
-                            <span className="text-green-500">+{s.linesAdded}</span>
-                            <span className="text-red-400">-{s.linesRemoved}</span>
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </button>
-                  {permCount > 0 && (
-                    <span className="absolute right-2 top-1/2 -translate-y-1/2 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-cc-warning text-white text-[10px] font-bold leading-none px-1 group-hover:opacity-0 transition-opacity pointer-events-none">
-                      {permCount}
-                    </span>
-                  )}
-                  <button
-                    onClick={(e) => handleDeleteSession(e, s.id)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-cc-border text-cc-muted hover:text-cc-fg transition-all cursor-pointer"
-                    title="Delete session"
-                  >
-                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
-                      <path d="M4 4l8 8M12 4l-8 8" />
-                    </svg>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+            {archivedSessions.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-cc-border">
+                <button
+                  onClick={() => setShowArchived(!showArchived)}
+                  className="w-full px-3 py-1.5 text-[11px] font-medium text-cc-muted uppercase tracking-wider flex items-center gap-1.5 hover:text-cc-fg transition-colors cursor-pointer"
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className={`w-3 h-3 transition-transform ${showArchived ? "rotate-90" : ""}`}>
+                    <path d="M6 4l4 4-4 4" />
+                  </svg>
+                  Archived ({archivedSessions.length})
+                </button>
+                {showArchived && (
+                  <div className="space-y-0.5 mt-1">
+                    {archivedSessions.map((s) => renderSessionItem(s, { isArchived: true }))}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
 

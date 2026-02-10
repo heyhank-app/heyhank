@@ -11,6 +11,7 @@ export interface PersistedSession {
   messageHistory: BrowserIncomingMessage[];
   pendingMessages: string[];
   pendingPermissions: [string, PermissionRequest][];
+  archived?: boolean;
 }
 
 // ─── Store ──────────────────────────────────────────────────────────────────
@@ -78,6 +79,15 @@ export class SessionStore {
       // Dir doesn't exist yet
     }
     return sessions;
+  }
+
+  /** Set the archived flag on a persisted session. */
+  setArchived(sessionId: string, archived: boolean): boolean {
+    const session = this.load(sessionId);
+    if (!session) return false;
+    session.archived = archived;
+    this.saveSync(session);
+    return true;
   }
 
   /** Remove a session file from disk. */

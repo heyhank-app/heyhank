@@ -40,4 +40,5 @@ export interface SdkSessionInfo {
   permissionMode?: string;
   cwd: string;
   createdAt: number;
+  archived?: boolean;
 }

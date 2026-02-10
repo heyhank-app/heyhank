@@ -4,9 +4,10 @@ import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 import type { CliLauncher } from "./cli-launcher.js";
 import type { WsBridge } from "./ws-bridge.js";
+import type { SessionStore } from "./session-store.js";
 import * as envManager from "./env-manager.js";
 
-export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge) {
+export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionStore: SessionStore) {
   const api = new Hono();
 
   // ─── SDK Sessions (--sdk-url) ─────────────────────────────────────
@@ -72,6 +73,21 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge) {
     await launcher.kill(id);
     launcher.removeSession(id);
     wsBridge.closeSession(id);
+    return c.json({ ok: true });
+  });
+
+  api.post("/sessions/:id/archive", async (c) => {
+    const id = c.req.param("id");
+    await launcher.kill(id);
+    launcher.setArchived(id, true);
+    sessionStore.setArchived(id, true);
+    return c.json({ ok: true });
+  });
+
+  api.post("/sessions/:id/unarchive", (c) => {
+    const id = c.req.param("id");
+    launcher.setArchived(id, false);
+    sessionStore.setArchived(id, false);
     return c.json({ ok: true });
   });
 

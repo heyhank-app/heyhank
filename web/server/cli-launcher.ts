@@ -14,6 +14,7 @@ export interface SdkSessionInfo {
   createdAt: number;
   /** The CLI's internal session ID (from system.init), used for --resume */
   cliSessionId?: string;
+  archived?: boolean;
 }
 
 export interface LaunchOptions {
@@ -310,6 +311,17 @@ export class CliLauncher {
   isAlive(sessionId: string): boolean {
     const session = this.sessions.get(sessionId);
     return !!session && session.state !== "exited";
+  }
+
+  /**
+   * Set the archived flag on a session.
+   */
+  setArchived(sessionId: string, archived: boolean): void {
+    const info = this.sessions.get(sessionId);
+    if (info) {
+      info.archived = archived;
+      this.persistState();
+    }
   }
 
   /**

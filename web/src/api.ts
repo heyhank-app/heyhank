@@ -88,6 +88,12 @@ export const api = {
   relaunchSession: (sessionId: string) =>
     post(`/sessions/${encodeURIComponent(sessionId)}/relaunch`),
 
+  archiveSession: (sessionId: string) =>
+    post(`/sessions/${encodeURIComponent(sessionId)}/archive`),
+
+  unarchiveSession: (sessionId: string) =>
+    post(`/sessions/${encodeURIComponent(sessionId)}/unarchive`),
+
   listDirs: (path?: string) =>
     get<DirListResult>(`/fs/list${path ? `?path=${encodeURIComponent(path)}` : ""}`),
 

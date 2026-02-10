@@ -36,6 +36,7 @@ const relaunchingSet = new Set<string>();
 wsBridge.onCLIRelaunchNeededCallback(async (sessionId) => {
   if (relaunchingSet.has(sessionId)) return;
   const info = launcher.getSession(sessionId);
+  if (info?.archived) return;
   if (info && info.state !== "starting") {
     relaunchingSet.add(sessionId);
     console.log(`[server] Auto-relaunching CLI for session ${sessionId}`);
@@ -52,7 +53,7 @@ console.log(`[server] Session persistence: ${sessionStore.directory}`);
 const app = new Hono();
 
 app.use("/api/*", cors());
-app.route("/api", createRoutes(launcher, wsBridge));
+app.route("/api", createRoutes(launcher, wsBridge, sessionStore));
 
 // In production, serve built frontend using absolute path (works when installed as npm package)
 if (process.env.NODE_ENV === "production") {
@@ -139,6 +140,7 @@ if (starting.length > 0) {
   setTimeout(async () => {
     const stale = launcher.getStartingSessions();
     for (const info of stale) {
+      if (info.archived) continue;
       console.log(`[server] CLI for session ${info.sessionId} did not reconnect, relaunching...`);
       await launcher.relaunch(info.sessionId);
     }
