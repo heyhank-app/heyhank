@@ -8,14 +8,14 @@
   --color-cc-primary: #ae5630;
   --color-cc-primary-hover: #c4643a;
   --color-cc-user-bubble: #DDD9CE;
-  --color-cc-border: rgba(0,0,0,0.08);
-  --color-cc-muted: #B1ADA1;
+  --color-cc-border: rgba(0,0,0,0.15);
+  --color-cc-muted: #7d796e;
   --color-cc-sidebar: #EDEAE2;
   --color-cc-input-bg: #FFFFFF;
   --color-cc-code-bg: #1e1e1e;
   --color-cc-code-fg: #d4d4d4;
-  --color-cc-hover: rgba(0,0,0,0.04);
-  --color-cc-active: rgba(0,0,0,0.07);
+  --color-cc-hover: rgba(0,0,0,0.07);
+  --color-cc-active: rgba(0,0,0,0.12);
   --color-cc-success: #2d7d46;
   --color-cc-error: #c53030;
   --color-cc-warning: #b7791f;
