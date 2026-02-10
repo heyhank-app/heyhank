@@ -1,5 +1,6 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useStore } from "./store.js";
+import { connectSession } from "./ws.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { ChatView } from "./components/ChatView.js";
 import { TopBar } from "./components/TopBar.js";
@@ -25,6 +26,14 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
   }, [darkMode]);
+
+  // Auto-connect to restored session on mount
+  useEffect(() => {
+    const restoredId = useStore.getState().currentSessionId;
+    if (restoredId) {
+      connectSession(restoredId);
+    }
+  }, []);
 
   if (hash === "#/playground") {
     return <Playground />;

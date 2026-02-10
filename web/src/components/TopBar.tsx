@@ -1,4 +1,5 @@
 import { useStore } from "../store.js";
+import { api } from "../api.js";
 
 export function TopBar() {
   const currentSessionId = useStore((s) => s.currentSessionId);
@@ -33,9 +34,16 @@ export function TopBar() {
                 isConnected ? "bg-cc-success" : "bg-cc-muted opacity-40"
               }`}
             />
-            <span className="text-[11px] text-cc-muted hidden sm:inline">
-              {isConnected ? "Connected" : "Disconnected"}
-            </span>
+            {isConnected ? (
+              <span className="text-[11px] text-cc-muted hidden sm:inline">Connected</span>
+            ) : (
+              <button
+                onClick={() => currentSessionId && api.relaunchSession(currentSessionId).catch(console.error)}
+                className="text-[11px] text-cc-warning hover:text-cc-warning/80 font-medium cursor-pointer hidden sm:inline"
+              >
+                Reconnect
+              </button>
+            )}
           </div>
         )}
       </div>

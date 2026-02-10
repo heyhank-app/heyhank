@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useStore } from "../store.js";
+import { api } from "../api.js";
 import { MessageFeed } from "./MessageFeed.js";
 import { Composer } from "./Composer.js";
 import { PermissionBanner } from "./PermissionBanner.js";
@@ -9,6 +10,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   const connStatus = useStore(
     (s) => s.connectionStatus.get(sessionId) ?? "disconnected"
   );
+  const cliConnected = useStore((s) => s.cliConnected.get(sessionId) ?? false);
 
   const perms = useMemo(
     () => (sessionPerms ? Array.from(sessionPerms.values()) : []),
@@ -17,7 +19,22 @@ export function ChatView({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Connection warning */}
+      {/* CLI disconnected banner */}
+      {connStatus === "connected" && !cliConnected && (
+        <div className="px-4 py-2 bg-cc-warning/10 border-b border-cc-warning/20 text-center flex items-center justify-center gap-3">
+          <span className="text-xs text-cc-warning font-medium">
+            CLI disconnected
+          </span>
+          <button
+            onClick={() => api.relaunchSession(sessionId).catch(console.error)}
+            className="text-xs font-medium px-3 py-1 rounded-md bg-cc-warning/20 hover:bg-cc-warning/30 text-cc-warning transition-colors cursor-pointer"
+          >
+            Reconnect
+          </button>
+        </div>
+      )}
+
+      {/* WebSocket disconnected banner */}
       {connStatus === "disconnected" && (
         <div className="px-4 py-2 bg-cc-warning/10 border-b border-cc-warning/20 text-center">
           <span className="text-xs text-cc-warning font-medium">

@@ -30,6 +30,23 @@ wsBridge.restoreFromDisk();
 wsBridge.onCLISessionIdReceived((sessionId, cliSessionId) => {
   launcher.setCLISessionId(sessionId, cliSessionId);
 });
+
+// Auto-relaunch CLI when a browser connects to a session with no CLI
+const relaunchingSet = new Set<string>();
+wsBridge.onCLIRelaunchNeededCallback(async (sessionId) => {
+  if (relaunchingSet.has(sessionId)) return;
+  const info = launcher.getSession(sessionId);
+  if (info && info.state !== "starting") {
+    relaunchingSet.add(sessionId);
+    console.log(`[server] Auto-relaunching CLI for session ${sessionId}`);
+    try {
+      await launcher.relaunch(sessionId);
+    } finally {
+      setTimeout(() => relaunchingSet.delete(sessionId), 5000);
+    }
+  }
+});
+
 console.log(`[server] Session persistence: ${sessionStore.directory}`);
 
 const app = new Hono();

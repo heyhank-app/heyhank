@@ -95,6 +95,11 @@ function getInitialSessionNames(): Map<string, string> {
   }
 }
 
+function getInitialSessionId(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("cc-current-session") || null;
+}
+
 function getInitialDarkMode(): boolean {
   if (typeof window === "undefined") return false;
   const stored = localStorage.getItem("cc-dark-mode");
@@ -105,7 +110,7 @@ function getInitialDarkMode(): boolean {
 export const useStore = create<AppState>((set) => ({
   sessions: new Map(),
   sdkSessions: [],
-  currentSessionId: null,
+  currentSessionId: getInitialSessionId(),
   messages: new Map(),
   streaming: new Map(),
   streamingStartedAt: new Map(),
@@ -134,9 +139,19 @@ export const useStore = create<AppState>((set) => ({
     }),
   setSidebarOpen: (v) => set({ sidebarOpen: v }),
   setTaskPanelOpen: (open) => set({ taskPanelOpen: open }),
-  newSession: () => set((s) => ({ currentSessionId: null, homeResetKey: s.homeResetKey + 1 })),
+  newSession: () => {
+    localStorage.removeItem("cc-current-session");
+    set((s) => ({ currentSessionId: null, homeResetKey: s.homeResetKey + 1 }));
+  },
 
-  setCurrentSession: (id) => set({ currentSessionId: id }),
+  setCurrentSession: (id) => {
+    if (id) {
+      localStorage.setItem("cc-current-session", id);
+    } else {
+      localStorage.removeItem("cc-current-session");
+    }
+    set({ currentSessionId: id });
+  },
 
   addSession: (session) =>
     set((s) => {
@@ -182,6 +197,9 @@ export const useStore = create<AppState>((set) => ({
       const sessionNames = new Map(s.sessionNames);
       sessionNames.delete(sessionId);
       localStorage.setItem("cc-session-names", JSON.stringify(Array.from(sessionNames.entries())));
+      if (s.currentSessionId === sessionId) {
+        localStorage.removeItem("cc-current-session");
+      }
       return {
         sessions,
         messages,

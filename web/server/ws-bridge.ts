@@ -73,10 +73,16 @@ export class WsBridge {
   private sessions = new Map<string, Session>();
   private store: SessionStore | null = null;
   private onCLISessionId: ((sessionId: string, cliSessionId: string) => void) | null = null;
+  private onCLIRelaunchNeeded: ((sessionId: string) => void) | null = null;
 
   /** Register a callback for when we learn the CLI's internal session ID. */
   onCLISessionIdReceived(cb: (sessionId: string, cliSessionId: string) => void): void {
     this.onCLISessionId = cb;
+  }
+
+  /** Register a callback for when a browser connects but CLI is dead. */
+  onCLIRelaunchNeededCallback(cb: (sessionId: string) => void): void {
+    this.onCLIRelaunchNeeded = cb;
   }
 
   /** Attach a persistent store. Call restoreFromDisk() after. */
@@ -146,6 +152,10 @@ export class WsBridge {
 
   getAllSessions(): SessionState[] {
     return Array.from(this.sessions.values()).map((s) => s.state);
+  }
+
+  isCliConnected(sessionId: string): boolean {
+    return !!this.sessions.get(sessionId)?.cliSocket;
   }
 
   removeSession(sessionId: string) {
@@ -257,9 +267,13 @@ export class WsBridge {
       this.sendToBrowser(ws, { type: "permission_request", request: perm });
     }
 
-    // Notify if CLI is not connected
+    // Notify if CLI is not connected and request relaunch
     if (!session.cliSocket) {
       this.sendToBrowser(ws, { type: "cli_disconnected" });
+      if (this.onCLIRelaunchNeeded) {
+        console.log(`[ws-bridge] Browser connected but CLI is dead for session ${sessionId}, requesting relaunch`);
+        this.onCLIRelaunchNeeded(sessionId);
+      }
     }
   }
 

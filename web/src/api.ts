@@ -63,6 +63,9 @@ export const api = {
   deleteSession: (sessionId: string) =>
     del(`/sessions/${encodeURIComponent(sessionId)}`),
 
+  relaunchSession: (sessionId: string) =>
+    post(`/sessions/${encodeURIComponent(sessionId)}/relaunch`),
+
   listDirs: (path?: string) =>
     get<DirListResult>(`/fs/list${path ? `?path=${encodeURIComponent(path)}` : ""}`),
 

@@ -184,13 +184,12 @@ export class CliLauncher {
       }
     }
 
-    // When relaunching, use --resume to restore the CLI's conversation context.
-    // Otherwise use -p "" for headless mode on fresh sessions.
+    // Always pass -p "" for headless mode. When relaunching, also pass --resume
+    // to restore the CLI's conversation context.
     if (options.resumeSessionId) {
       args.push("--resume", options.resumeSessionId);
-    } else {
-      args.push("-p", "");
     }
+    args.push("-p", "");
 
     const env: Record<string, string> = {
       ...process.env as Record<string, string>,
@@ -214,12 +213,21 @@ export class CliLauncher {
     this.pipeOutput(sessionId, proc);
 
     // Monitor process exit
+    const spawnedAt = Date.now();
     proc.exited.then((exitCode) => {
       console.log(`[cli-launcher] Session ${sessionId} exited (code=${exitCode})`);
       const session = this.sessions.get(sessionId);
       if (session) {
         session.state = "exited";
         session.exitCode = exitCode;
+
+        // If the process exited almost immediately with --resume, the resume likely failed.
+        // Clear cliSessionId so the next relaunch starts fresh.
+        const uptime = Date.now() - spawnedAt;
+        if (uptime < 5000 && options.resumeSessionId) {
+          console.error(`[cli-launcher] Session ${sessionId} exited immediately after --resume (${uptime}ms). Clearing cliSessionId for fresh start.`);
+          session.cliSessionId = undefined;
+        }
       }
       this.processes.delete(sessionId);
       this.persistState();
