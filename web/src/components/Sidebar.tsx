@@ -198,11 +198,14 @@ export function Sidebar() {
       sdkState: sdkInfo?.state ?? null,
       createdAt: sdkInfo?.createdAt ?? 0,
       archived: sdkInfo?.archived ?? false,
+      backendType: bridgeState?.backend_type || sdkInfo?.backendType || "claude",
     };
   }).sort((a, b) => b.createdAt - a.createdAt);
 
   const activeSessions = allSessionList.filter((s) => !s.archived);
   const archivedSessions = allSessionList.filter((s) => s.archived);
+  const currentSession = currentSessionId ? allSessionList.find((s) => s.id === currentSessionId) : null;
+  const logoSrc = currentSession?.backendType === "codex" ? "/logo-codex.svg" : "/logo.svg";
 
   function renderSessionItem(s: typeof allSessionList[number], options?: { isArchived?: boolean }) {
     const isActive = currentSessionId === s.id;
@@ -279,10 +282,13 @@ export function Sidebar() {
               />
             ) : (
               <span
-                className={`text-[13px] font-medium truncate flex-1 text-cc-fg ${recentlyRenamed.has(s.id) ? "animate-name-appear" : ""}`}
+                className={`text-[13px] font-medium truncate flex-1 text-cc-fg ${recentlyRenamed.has(s.id) ? "animate-name-appear" : ""} flex items-center gap-1.5`}
                 onAnimationEnd={() => useStore.getState().clearRecentlyRenamed(s.id)}
               >
-                {label}
+                <span className="truncate">{label}</span>
+                {s.backendType === "codex" && (
+                  <span className="text-[9px] px-1 py-0.5 rounded bg-purple-500/15 text-purple-600 dark:text-purple-400 shrink-0">codex</span>
+                )}
               </span>
             )}
           </div>
@@ -373,7 +379,7 @@ export function Sidebar() {
       {/* Header */}
       <div className="p-4 pb-3">
         <div className="flex items-center gap-2 mb-4">
-          <img src="/logo.svg" alt="" className="w-7 h-7" />
+          <img src={logoSrc} alt="" className="w-7 h-7" />
           <span className="text-sm font-semibold text-cc-fg tracking-tight">The Vibe Companion</span>
         </div>
 

@@ -216,9 +216,10 @@ function handleMessage(sessionId: string, event: MessageEvent) {
       if (r.modelUsage) {
         for (const usage of Object.values(r.modelUsage)) {
           if (usage.contextWindow > 0) {
-            sessionUpdates.context_used_percent = Math.round(
+            const pct = Math.round(
               ((usage.inputTokens + usage.outputTokens) / usage.contextWindow) * 100
             );
+            sessionUpdates.context_used_percent = Math.max(0, Math.min(pct, 100));
           }
         }
       }
@@ -367,7 +368,13 @@ function handleMessage(sessionId: string, event: MessageEvent) {
         }
       }
       if (chatMessages.length > 0) {
-        store.setMessages(sessionId, chatMessages);
+        const existing = store.messages.get(sessionId) || [];
+        // Only replace if history has at least as many messages as current state,
+        // or if the current state is empty (initial connect). This prevents a race
+        // condition where live messages (e.g., tool_use) are lost by a stale history replay.
+        if (existing.length === 0 || chatMessages.length >= existing.length) {
+          store.setMessages(sessionId, chatMessages);
+        }
       }
       break;
     }
