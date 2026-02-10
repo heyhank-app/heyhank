@@ -391,7 +391,7 @@ export function HomePage() {
         </div>
 
         {/* Below-card selectors */}
-        <div className="flex items-center gap-1 sm:gap-3 mt-2 sm:mt-3 px-1 flex-wrap">
+        <div className="flex items-center gap-1 sm:gap-2 mt-2 sm:mt-3 px-1 flex-wrap overflow-x-auto">
           {/* Folder selector */}
           <div>
             <button
@@ -401,7 +401,7 @@ export function HomePage() {
               <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
                 <path d="M1 3.5A1.5 1.5 0 012.5 2h3.379a1.5 1.5 0 011.06.44l.622.621a.5.5 0 00.353.146H13.5A1.5 1.5 0 0115 4.707V12.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" />
               </svg>
-              <span className="max-w-[200px] truncate font-mono-code">{dirLabel}</span>
+              <span className="max-w-[120px] sm:max-w-[200px] truncate font-mono-code">{dirLabel}</span>
               <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
                 <path d="M4 6l4 4 4-4" />
               </svg>
@@ -435,7 +435,7 @@ export function HomePage() {
                 <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-60">
                   <path d="M5 3.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm0 2.122a2.25 2.25 0 10-1.5 0v.378A2.5 2.5 0 007.5 8h1a1 1 0 010 2h-1A2.5 2.5 0 005 12.5v.128a2.25 2.25 0 101.5 0V12.5a1 1 0 011-1h1a2.5 2.5 0 000-5h-1a1 1 0 01-1-1V5.372zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
                 </svg>
-                <span className="max-w-[160px] truncate font-mono-code">
+                <span className="max-w-[100px] sm:max-w-[160px] truncate font-mono-code">
                   {worktreeBranch || gitRepoInfo.currentBranch}
                 </span>
                 <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">

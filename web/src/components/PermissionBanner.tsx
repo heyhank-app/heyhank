@@ -59,11 +59,11 @@ export function PermissionBanner({
   const suggestions = permission.permission_suggestions;
 
   return (
-    <div className="px-4 py-3 border-b border-cc-border animate-[fadeSlideIn_0.2s_ease-out]">
+    <div className="px-2 sm:px-4 py-3 border-b border-cc-border animate-[fadeSlideIn_0.2s_ease-out]">
       <div className="max-w-3xl mx-auto">
-        <div className="flex items-start gap-3">
+        <div className="flex items-start gap-2 sm:gap-3">
           {/* Icon */}
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+          <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
             isAskUser
               ? "bg-cc-primary/10 border border-cc-primary/20"
               : "bg-cc-warning/10 border border-cc-warning/20"
@@ -191,7 +191,7 @@ function BashDisplay({ input }: { input: Record<string, unknown> }) {
   return (
     <div className="space-y-1.5">
       {desc && <div className="text-xs text-cc-muted">{desc}</div>}
-      <pre className="text-xs text-cc-fg font-mono-code bg-cc-code-bg/30 rounded-lg px-3 py-2 max-h-32 overflow-y-auto whitespace-pre-wrap break-words">
+      <pre className="text-xs text-cc-fg font-mono-code bg-cc-code-bg/30 rounded-lg px-2 sm:px-3 py-2 max-h-32 overflow-y-auto overflow-x-auto whitespace-pre-wrap break-words">
         <span className="text-cc-muted select-none">$ </span>{command}
       </pre>
     </div>

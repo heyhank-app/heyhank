@@ -20,7 +20,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end animate-[fadeSlideIn_0.2s_ease-out]">
-        <div className="max-w-[80%] px-4 py-2.5 rounded-[14px] rounded-br-[4px] bg-cc-user-bubble text-cc-fg">
+        <div className="max-w-[85%] sm:max-w-[80%] px-3 sm:px-4 py-2.5 rounded-[14px] rounded-br-[4px] bg-cc-user-bubble text-cc-fg">
           {message.images && message.images.length > 0 && (
             <div className="flex gap-2 flex-wrap mb-2">
               {message.images.map((img, i) => (
@@ -28,12 +28,12 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
                   key={i}
                   src={`data:${img.media_type};base64,${img.data}`}
                   alt="attachment"
-                  className="max-w-[200px] max-h-[150px] rounded-lg object-cover"
+                  className="max-w-[150px] sm:max-w-[200px] max-h-[120px] sm:max-h-[150px] rounded-lg object-cover"
                 />
               ))}
             </div>
           )}
-          <pre className="text-[14px] whitespace-pre-wrap break-words font-sans-ui leading-relaxed">
+          <pre className="text-[13px] sm:text-[14px] whitespace-pre-wrap break-words font-sans-ui leading-relaxed">
             {message.content}
           </pre>
         </div>
@@ -131,7 +131,7 @@ function AssistantAvatar() {
 
 function MarkdownContent({ text }: { text: string }) {
   return (
-    <div className="markdown-body text-[15px] text-cc-fg leading-relaxed">
+    <div className="markdown-body text-[14px] sm:text-[15px] text-cc-fg leading-relaxed overflow-hidden">
       <Markdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -189,7 +189,7 @@ function MarkdownContent({ text }: { text: string }) {
                       {lang}
                     </div>
                   )}
-                  <pre className="px-3 py-2.5 bg-cc-code-bg text-cc-code-fg text-[13px] font-mono-code leading-relaxed overflow-x-auto">
+                  <pre className="px-2 sm:px-3 py-2 sm:py-2.5 bg-cc-code-bg text-cc-code-fg text-[12px] sm:text-[13px] font-mono-code leading-relaxed overflow-x-auto">
                     <code>{children}</code>
                   </pre>
                 </div>

@@ -94,13 +94,13 @@ export function EnvManager({ onClose }: Props) {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50" onClick={onClose}>
       <div
-        className="w-full max-w-lg max-h-[80vh] flex flex-col bg-cc-bg border border-cc-border rounded-[14px] shadow-2xl overflow-hidden"
+        className="w-full max-w-lg max-h-[90vh] sm:max-h-[80vh] mx-0 sm:mx-4 flex flex-col bg-cc-bg border border-cc-border rounded-t-[14px] sm:rounded-[14px] shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-cc-border">
+        <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 border-b border-cc-border">
           <h2 className="text-sm font-semibold text-cc-fg">Manage Environments</h2>
           <button
             onClick={onClose}
@@ -113,7 +113,7 @@ export function EnvManager({ onClose }: Props) {
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-3 sm:py-4 space-y-4">
           {/* Error */}
           {error && (
             <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">

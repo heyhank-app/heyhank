@@ -189,6 +189,7 @@ export function EditorPanel({ sessionId }: { sessionId: string }) {
   const sdkSession = useStore((s) => s.sdkSessions.find((sdk) => sdk.sessionId === sessionId));
   const openFilePath = useStore((s) => s.editorOpenFile.get(sessionId) ?? null);
   const setEditorOpenFile = useStore((s) => s.setEditorOpenFile);
+  const [fileTreeOpen, setFileTreeOpen] = useState(() => typeof window !== "undefined" ? window.innerWidth >= 640 : true);
 
   const changedFilesSet = useStore((s) => s.changedFiles.get(sessionId));
 
@@ -284,6 +285,10 @@ export function EditorPanel({ sessionId }: { sessionId: string }) {
 
   const handleFileSelect = useCallback((path: string) => {
     setEditorOpenFile(sessionId, path);
+    // Close file tree on mobile after selecting a file
+    if (typeof window !== "undefined" && window.innerWidth < 640) {
+      setFileTreeOpen(false);
+    }
   }, [sessionId, setEditorOpenFile]);
 
   const fileName = openFilePath?.split("/").pop() ?? null;
@@ -307,11 +312,32 @@ export function EditorPanel({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <div className="h-full flex bg-cc-bg">
-      {/* File Tree — fixed width sidebar */}
-      <div className="w-[220px] shrink-0 h-full flex flex-col bg-cc-sidebar border-r border-cc-border">
-        <div className="px-4 py-3 text-[11px] font-semibold text-cc-fg uppercase tracking-wider border-b border-cc-border shrink-0">
-          Explorer
+    <div className="h-full flex bg-cc-bg relative">
+      {/* Mobile backdrop */}
+      {fileTreeOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 z-20 sm:hidden"
+          onClick={() => setFileTreeOpen(false)}
+        />
+      )}
+
+      {/* File Tree — overlay on mobile, inline on desktop */}
+      <div className={`
+        ${fileTreeOpen ? "w-[220px] translate-x-0" : "w-0 -translate-x-full"}
+        fixed sm:relative z-30 sm:z-auto
+        ${fileTreeOpen ? "sm:w-[220px]" : "sm:w-0 sm:-translate-x-full"}
+        shrink-0 h-full flex flex-col bg-cc-sidebar border-r border-cc-border transition-all duration-200 overflow-hidden
+      `}>
+        <div className="w-[220px] px-4 py-3 text-[11px] font-semibold text-cc-fg uppercase tracking-wider border-b border-cc-border shrink-0 flex items-center justify-between">
+          <span>Explorer</span>
+          <button
+            onClick={() => setFileTreeOpen(false)}
+            className="w-5 h-5 flex items-center justify-center rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer sm:hidden"
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
+              <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+            </svg>
+          </button>
         </div>
 
         {/* Changed Files section */}
@@ -367,12 +393,24 @@ export function EditorPanel({ sessionId }: { sessionId: string }) {
       <div className="flex-1 min-w-0 h-full flex flex-col">
         {/* Tab bar */}
         {openFilePath && (
-          <div className="shrink-0 flex items-center gap-2.5 px-4 py-2.5 bg-cc-card border-b border-cc-border">
-            <div className="flex items-center gap-2">
-              {isDirty && <span className="w-2 h-2 rounded-full bg-cc-warning" title="Unsaved changes" />}
-              <span className="text-cc-fg text-[13px] font-medium">{fileName}</span>
+          <div className="shrink-0 flex items-center gap-2 sm:gap-2.5 px-2 sm:px-4 py-2.5 bg-cc-card border-b border-cc-border">
+            {/* File tree toggle button */}
+            {!fileTreeOpen && (
+              <button
+                onClick={() => setFileTreeOpen(true)}
+                className="flex items-center justify-center w-6 h-6 rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer shrink-0"
+                title="Show file tree"
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                  <path d="M1 3.5A1.5 1.5 0 012.5 2h3.379a1.5 1.5 0 011.06.44l.622.621a.5.5 0 00.353.146H13.5A1.5 1.5 0 0115 4.707V12.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" />
+                </svg>
+              </button>
+            )}
+            <div className="flex items-center gap-2 min-w-0">
+              {isDirty && <span className="w-2 h-2 rounded-full bg-cc-warning shrink-0" title="Unsaved changes" />}
+              <span className="text-cc-fg text-[13px] font-medium truncate">{fileName}</span>
             </div>
-            <span className="text-cc-muted truncate text-[11px]">{openFilePath}</span>
+            <span className="text-cc-muted truncate text-[11px] hidden sm:inline">{openFilePath}</span>
             {saveStatus === "saving" && <span className="text-cc-muted text-[11px]">Saving...</span>}
             {saveStatus === "saved" && <span className="text-cc-success text-[11px]">Saved</span>}
             {changedFiles.has(openFilePath) && (
@@ -401,7 +439,18 @@ export function EditorPanel({ sessionId }: { sessionId: string }) {
         {/* Editor content */}
         <div className="flex-1 overflow-hidden">
           {!openFilePath ? (
-            <div className="h-full flex items-center justify-center">
+            <div className="h-full flex flex-col items-center justify-center">
+              {!fileTreeOpen && (
+                <button
+                  onClick={() => setFileTreeOpen(true)}
+                  className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                    <path d="M1 3.5A1.5 1.5 0 012.5 2h3.379a1.5 1.5 0 011.06.44l.622.621a.5.5 0 00.353.146H13.5A1.5 1.5 0 0115 4.707V12.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" />
+                  </svg>
+                  Show file tree
+                </button>
+              )}
               <div className="text-center space-y-3">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-12 h-12 text-cc-muted/30 mx-auto" strokeWidth={1}>
                   <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z" />
