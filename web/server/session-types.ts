@@ -116,7 +116,7 @@ export interface CLIControlRequestMessage {
     subtype: "can_use_tool";
     tool_name: string;
     input: Record<string, unknown>;
-    permission_suggestions?: unknown[];
+    permission_suggestions?: PermissionUpdate[];
     description?: string;
     tool_use_id: string;
     agent_id?: string;
@@ -146,8 +146,7 @@ export type CLIMessage =
   | CLIToolUseSummaryMessage
   | CLIControlRequestMessage
   | CLIKeepAliveMessage
-  | CLIAuthStatusMessage
-  | { type: string; subtype?: string; [key: string]: unknown };
+  | CLIAuthStatusMessage;
 
 // ─── Content Block Types ──────────────────────────────────────────────────────
 

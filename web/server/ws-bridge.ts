@@ -4,6 +4,7 @@ import { execSync } from "node:child_process";
 import type {
   CLIMessage,
   CLISystemInitMessage,
+  CLISystemStatusMessage,
   CLIAssistantMessage,
   CLIResultMessage,
   CLIStreamEventMessage,
@@ -322,31 +323,31 @@ export class WsBridge {
         break;
 
       case "assistant":
-        this.handleAssistantMessage(session, msg as CLIAssistantMessage);
+        this.handleAssistantMessage(session, msg);
         break;
 
       case "result":
-        this.handleResultMessage(session, msg as CLIResultMessage);
+        this.handleResultMessage(session, msg);
         break;
 
       case "stream_event":
-        this.handleStreamEvent(session, msg as CLIStreamEventMessage);
+        this.handleStreamEvent(session, msg);
         break;
 
       case "control_request":
-        this.handleControlRequest(session, msg as CLIControlRequestMessage);
+        this.handleControlRequest(session, msg);
         break;
 
       case "tool_progress":
-        this.handleToolProgress(session, msg as CLIToolProgressMessage);
+        this.handleToolProgress(session, msg);
         break;
 
       case "tool_use_summary":
-        this.handleToolUseSummary(session, msg as CLIToolUseSummaryMessage);
+        this.handleToolUseSummary(session, msg);
         break;
 
       case "auth_status":
-        this.handleAuthStatus(session, msg as CLIAuthStatusMessage);
+        this.handleAuthStatus(session, msg);
         break;
 
       case "keep_alive":
@@ -359,31 +360,26 @@ export class WsBridge {
     }
   }
 
-  private handleSystemMessage(session: Session, msg: CLIMessage) {
-    if (msg.type !== "system") return;
-
-    const subtype = (msg as { subtype?: string }).subtype;
-
-    if (subtype === "init") {
-      const init = msg as unknown as CLISystemInitMessage;
+  private handleSystemMessage(session: Session, msg: CLISystemInitMessage | CLISystemStatusMessage) {
+    if (msg.subtype === "init") {
       // Keep the launcher-assigned session_id as the canonical ID.
       // The CLI may report its own internal session_id which differs
       // from the launcher UUID, causing duplicate entries in the sidebar.
 
       // Store the CLI's internal session_id so we can --resume on relaunch
-      if (init.session_id && this.onCLISessionId) {
-        this.onCLISessionId(session.id, init.session_id);
+      if (msg.session_id && this.onCLISessionId) {
+        this.onCLISessionId(session.id, msg.session_id);
       }
 
-      session.state.model = init.model;
-      session.state.cwd = init.cwd;
-      session.state.tools = init.tools;
-      session.state.permissionMode = init.permissionMode;
-      session.state.claude_code_version = init.claude_code_version;
-      session.state.mcp_servers = init.mcp_servers;
-      session.state.agents = init.agents ?? [];
-      session.state.slash_commands = init.slash_commands ?? [];
-      session.state.skills = init.skills ?? [];
+      session.state.model = msg.model;
+      session.state.cwd = msg.cwd;
+      session.state.tools = msg.tools;
+      session.state.permissionMode = msg.permissionMode;
+      session.state.claude_code_version = msg.claude_code_version;
+      session.state.mcp_servers = msg.mcp_servers;
+      session.state.agents = msg.agents ?? [];
+      session.state.slash_commands = msg.slash_commands ?? [];
+      session.state.skills = msg.skills ?? [];
 
       // Resolve git info from session cwd
       if (session.state.cwd) {
@@ -432,18 +428,16 @@ export class WsBridge {
         session: session.state,
       });
       this.persistSession(session);
-    } else if (subtype === "status") {
-      const status = (msg as { status?: "compacting" | null }).status;
-      session.state.is_compacting = status === "compacting";
+    } else if (msg.subtype === "status") {
+      session.state.is_compacting = msg.status === "compacting";
 
-      const permMode = (msg as { permissionMode?: string }).permissionMode;
-      if (permMode) {
-        session.state.permissionMode = permMode;
+      if (msg.permissionMode) {
+        session.state.permissionMode = msg.permissionMode;
       }
 
       this.broadcastToBrowsers(session, {
         type: "status_change",
-        status: status ?? null,
+        status: msg.status ?? null,
       });
     }
     // Other system subtypes (compact_boundary, task_notification, etc.) can be forwarded as needed
@@ -517,7 +511,7 @@ export class WsBridge {
         request_id: msg.request_id,
         tool_name: msg.request.tool_name,
         input: msg.request.input,
-        permission_suggestions: msg.request.permission_suggestions as PermissionRequest["permission_suggestions"],
+        permission_suggestions: msg.request.permission_suggestions,
         description: msg.request.description,
         tool_use_id: msg.request.tool_use_id,
         agent_id: msg.request.agent_id,

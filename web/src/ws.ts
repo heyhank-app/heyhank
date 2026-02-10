@@ -23,10 +23,7 @@ function extractTasksFromBlocks(sessionId: string, blocks: ContentBlock[]) {
 
   for (const block of blocks) {
     if (block.type !== "tool_use") continue;
-    const name = (block as { name?: string }).name;
-    const input = (block as { input?: Record<string, unknown> }).input;
-    const toolUseId = (block as { id?: string }).id;
-    if (!name || !input) continue;
+    const { name, input, id: toolUseId } = block;
 
     // Deduplicate by tool_use_id
     if (toolUseId) {
@@ -85,9 +82,7 @@ function extractChangedFilesFromBlocks(sessionId: string, blocks: ContentBlock[]
   const store = useStore.getState();
   for (const block of blocks) {
     if (block.type !== "tool_use") continue;
-    const name = (block as { name?: string }).name;
-    const input = (block as { input?: Record<string, unknown> }).input;
-    if (!name || !input) continue;
+    const { name, input } = block;
     if ((name === "Edit" || name === "Write") && typeof input.file_path === "string") {
       store.addChangedFile(sessionId, input.file_path);
     }
@@ -210,12 +205,11 @@ function handleMessage(sessionId: string, event: MessageEvent) {
         num_turns: r.num_turns,
       };
       // Forward lines changed if present
-      const raw = r as unknown as Record<string, unknown>;
-      if (typeof raw.total_lines_added === "number") {
-        sessionUpdates.total_lines_added = raw.total_lines_added;
+      if (typeof r.total_lines_added === "number") {
+        sessionUpdates.total_lines_added = r.total_lines_added;
       }
-      if (typeof raw.total_lines_removed === "number") {
-        sessionUpdates.total_lines_removed = raw.total_lines_removed;
+      if (typeof r.total_lines_removed === "number") {
+        sessionUpdates.total_lines_removed = r.total_lines_removed;
       }
       // Compute context % from modelUsage if available
       if (r.modelUsage) {

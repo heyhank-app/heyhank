@@ -40,7 +40,7 @@ export async function generateSessionTitle(
       {
         stdout: "pipe",
         stderr: "pipe",
-        env: process.env as Record<string, string>,
+        env: process.env,
       },
     );
 

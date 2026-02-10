@@ -76,8 +76,9 @@ function getTaskIdsFromEntry(entry: FeedEntry): string[] {
   if (entry.kind === "message") {
     const blocks = entry.msg.contentBlocks || [];
     return blocks
-      .filter(b => b.type === "tool_use" && (b as { name?: string }).name === "Task")
-      .map(b => (b as { id: string }).id);
+      .filter((b): b is Extract<ContentBlock, { type: "tool_use" }> => b.type === "tool_use")
+      .filter(b => b.name === "Task")
+      .map(b => b.id);
   }
   if (entry.kind === "tool_msg_group" && entry.toolName === "Task") {
     return entry.items.map(item => item.id);
@@ -151,9 +152,8 @@ function groupMessages(messages: ChatMessage[]): FeedEntry[] {
   for (const msg of messages) {
     if (!msg.contentBlocks) continue;
     for (const b of msg.contentBlocks) {
-      if (b.type === "tool_use" && (b as { name?: string }).name === "Task") {
-        const input = (b as { id: string; input: Record<string, unknown> }).input;
-        const id = (b as { id: string }).id;
+      if (b.type === "tool_use" && b.name === "Task") {
+        const { input, id } = b;
         taskInfo.set(id, {
           description: String(input?.description || "Subagent"),
           agentType: String(input?.subagent_type || ""),
@@ -303,8 +303,10 @@ function SubagentContainer({ group }: { group: SubagentGroup }) {
     if (lastEntry.kind === "message" && lastEntry.msg.role === "assistant") {
       const text = lastEntry.msg.content?.trim();
       if (text) return text.length > 60 ? text.slice(0, 60) + "..." : text;
-      const toolBlock = lastEntry.msg.contentBlocks?.find(b => b.type === "tool_use");
-      if (toolBlock) return getToolLabel((toolBlock as { name: string }).name);
+      const toolBlock = lastEntry.msg.contentBlocks?.find(
+        (b): b is Extract<ContentBlock, { type: "tool_use" }> => b.type === "tool_use"
+      );
+      if (toolBlock) return getToolLabel(toolBlock.name);
     }
     return "";
   }, [lastEntry]);

@@ -230,8 +230,8 @@ export class CliLauncher {
     }
     args.push("-p", "");
 
-    const env: Record<string, string> = {
-      ...process.env as Record<string, string>,
+    const env: Record<string, string | undefined> = {
+      ...process.env,
       CLAUDECODE: "1",
       ...options.env,
     };
