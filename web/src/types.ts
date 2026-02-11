@@ -48,4 +48,9 @@ export interface SdkSessionInfo {
   actualBranch?: string;
   name?: string;
   backendType?: BackendType;
+  gitBranch?: string;
+  gitAhead?: number;
+  gitBehind?: number;
+  totalLinesAdded?: number;
+  totalLinesRemoved?: number;
 }

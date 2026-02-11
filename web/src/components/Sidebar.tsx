@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useStore } from "../store.js";
 import { api } from "../api.js";
-import { connectSession, disconnectSession } from "../ws.js";
+import { connectSession, connectAllSessions, disconnectSession } from "../ws.js";
 import { EnvManager } from "./EnvManager.js";
 
 export function Sidebar() {
@@ -34,6 +34,8 @@ export function Sidebar() {
         const list = await api.listSessions();
         if (active) {
           useStore.getState().setSdkSessions(list);
+          // Connect all active sessions so we receive notifications for all of them
+          connectAllSessions(list);
           // Hydrate session names from server (server is source of truth for auto-generated names)
           const store = useStore.getState();
           for (const s of list) {
@@ -63,11 +65,8 @@ export function Sidebar() {
 
   function handleSelectSession(sessionId: string) {
     if (currentSessionId === sessionId) return;
-    // Disconnect from old session, connect to new
-    if (currentSessionId) {
-      disconnectSession(currentSessionId);
-    }
     setCurrentSession(sessionId);
+    // Ensure connected (idempotent — no-op if already connected)
     connectSession(sessionId);
     // Close sidebar on mobile
     if (window.innerWidth < 768) {
@@ -76,9 +75,6 @@ export function Sidebar() {
   }
 
   function handleNewSession() {
-    if (currentSessionId) {
-      disconnectSession(currentSessionId);
-    }
     useStore.getState().newSession();
     if (window.innerWidth < 768) {
       useStore.getState().setSidebarOpen(false);
@@ -187,12 +183,12 @@ export function Sidebar() {
       id,
       model: bridgeState?.model || sdkInfo?.model || "",
       cwd: bridgeState?.cwd || sdkInfo?.cwd || "",
-      gitBranch: bridgeState?.git_branch || "",
+      gitBranch: bridgeState?.git_branch || sdkInfo?.gitBranch || "",
       isWorktree: bridgeState?.is_worktree || sdkInfo?.isWorktree || false,
-      gitAhead: bridgeState?.git_ahead || 0,
-      gitBehind: bridgeState?.git_behind || 0,
-      linesAdded: bridgeState?.total_lines_added || 0,
-      linesRemoved: bridgeState?.total_lines_removed || 0,
+      gitAhead: bridgeState?.git_ahead || sdkInfo?.gitAhead || 0,
+      gitBehind: bridgeState?.git_behind || sdkInfo?.gitBehind || 0,
+      linesAdded: bridgeState?.total_lines_added || sdkInfo?.totalLinesAdded || 0,
+      linesRemoved: bridgeState?.total_lines_removed || sdkInfo?.totalLinesRemoved || 0,
       isConnected: cliConnected.get(id) ?? false,
       status: sessionStatus.get(id) ?? null,
       sdkState: sdkInfo?.state ?? null,
@@ -218,9 +214,31 @@ export function Sidebar() {
     const isEditing = editingSessionId === s.id;
     const permCount = pendingPermissions.get(s.id)?.size ?? 0;
     const archived = options?.isArchived;
+    const avatarSrc = s.backendType === "codex" ? "/logo-codex.svg" : "/logo.svg";
+
+    // Status dot class
+    const statusDotClass = archived
+      ? "bg-cc-muted/40"
+      : permCount > 0
+      ? "bg-cc-warning"
+      : s.sdkState === "exited"
+      ? "bg-cc-muted/40"
+      : isRunning
+      ? "bg-cc-success"
+      : isCompacting
+      ? "bg-cc-warning"
+      : "bg-cc-success/60";
+
+    // Pulse animation for running or permissions
+    const showPulse = !archived && (
+      permCount > 0 || (isRunning && s.isConnected)
+    );
+    const pulseClass = permCount > 0
+      ? "bg-cc-warning/40"
+      : "bg-cc-success/40";
 
     return (
-      <div key={s.id} className={`relative group ${archived ? "opacity-60" : ""}`}>
+      <div key={s.id} className={`relative group ${archived ? "opacity-50" : ""}`}>
         <button
           onClick={() => handleSelectSession(s.id)}
           onDoubleClick={(e) => {
@@ -228,115 +246,131 @@ export function Sidebar() {
             setEditingSessionId(s.id);
             setEditingName(label);
           }}
-          className={`w-full px-3 py-2.5 ${archived ? "pr-14" : "pr-8"} text-left rounded-[10px] transition-all duration-100 cursor-pointer ${
+          className={`w-full pl-3.5 pr-8 py-2 ${archived ? "pr-14" : ""} text-left rounded-lg transition-all duration-100 cursor-pointer ${
             isActive
               ? "bg-cc-active"
               : "hover:bg-cc-hover"
           }`}
         >
-          <div className="flex items-center gap-2">
-            <span className="relative flex shrink-0">
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  archived
-                    ? "bg-cc-muted opacity-40"
-                    : permCount > 0
-                    ? "bg-cc-warning"
-                    : s.sdkState === "exited"
-                    ? "bg-cc-muted opacity-40"
-                    : s.isConnected
-                    ? isRunning
-                      ? "bg-cc-success"
-                      : isCompacting
-                      ? "bg-cc-warning"
-                      : "bg-cc-success opacity-60"
-                    : "bg-cc-muted opacity-40"
-                }`}
+          {/* Left accent border */}
+          <span
+            className={`absolute left-0 top-2 bottom-2 w-[2px] rounded-full ${
+              s.backendType === "codex"
+                ? "bg-blue-500"
+                : "bg-[#5BA8A0]"
+            } ${isActive ? "opacity-100" : "opacity-40 group-hover:opacity-70"} transition-opacity`}
+          />
+
+          <div className="flex items-start gap-2.5">
+            {/* Avatar with status dot overlay */}
+            <div className="relative shrink-0 w-6 h-6 mt-0.5">
+              <img
+                src={avatarSrc}
+                alt=""
+                className="w-6 h-6 rounded-[5px]"
               />
-              {!archived && permCount > 0 && (
-                <span className="absolute inset-0 w-2 h-2 rounded-full bg-cc-warning/40 animate-[pulse-dot_1.5s_ease-in-out_infinite]" />
-              )}
-              {!archived && permCount === 0 && isRunning && s.isConnected && (
-                <span className="absolute inset-0 w-2 h-2 rounded-full bg-cc-success/40 animate-[pulse-dot_1.5s_ease-in-out_infinite]" />
-              )}
-            </span>
-            {isEditing ? (
-              <input
-                ref={editInputRef}
-                value={editingName}
-                onChange={(e) => setEditingName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    confirmRename();
-                  } else if (e.key === "Escape") {
-                    e.preventDefault();
-                    cancelRename();
-                  }
-                  e.stopPropagation();
-                }}
-                onBlur={confirmRename}
-                onClick={(e) => e.stopPropagation()}
-                onDoubleClick={(e) => e.stopPropagation()}
-                className="text-[13px] font-medium flex-1 text-cc-fg bg-transparent border border-cc-border rounded-md px-1 py-0 outline-none focus:border-cc-primary/50 min-w-0"
-              />
-            ) : (
               <span
-                className={`text-[13px] font-medium truncate flex-1 text-cc-fg ${recentlyRenamed.has(s.id) ? "animate-name-appear" : ""} flex items-center gap-1.5`}
-                onAnimationEnd={() => useStore.getState().clearRecentlyRenamed(s.id)}
-              >
-                <span className="truncate">{label}</span>
-                {s.backendType === "codex" && (
-                  <span className="text-[9px] px-1 py-0.5 rounded bg-purple-500/15 text-purple-600 dark:text-purple-400 shrink-0">codex</span>
-                )}
-              </span>
-            )}
-          </div>
-          {dirName && (
-            <p className="text-[11px] text-cc-muted truncate mt-0.5 ml-4">
-              {dirName}
-            </p>
-          )}
-          {s.gitBranch && (
-            <div className="flex items-center gap-1.5 mt-0.5 ml-4 text-[11px] text-cc-muted">
-              <span className="flex items-center gap-1 truncate">
-                {s.isWorktree ? (
-                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0 opacity-60">
-                    <path d="M5 3.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm0 2.122a2.25 2.25 0 10-1.5 0v5.256a2.25 2.25 0 101.5 0V5.372zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5zm7.5-9.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122V7A2.5 2.5 0 0110 9.5H6a1 1 0 000 2h4a2.5 2.5 0 012.5 2.5v.628a2.25 2.25 0 11-1.5 0V14a1 1 0 00-1-1H6a2.5 2.5 0 01-2.5-2.5V10a2.5 2.5 0 012.5-2.5h4a1 1 0 001-1V5.372a2.25 2.25 0 01-1.5-2.122z" />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0 opacity-60">
-                    <path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.116.862a2.25 2.25 0 10-.862.862A4.48 4.48 0 007.25 7.5h-1.5A2.25 2.25 0 003.5 9.75v.318a2.25 2.25 0 101.5 0V9.75a.75.75 0 01.75-.75h1.5a5.98 5.98 0 003.884-1.435A2.25 2.25 0 109.634 3.362zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
-                  </svg>
-                )}
-                <span className="truncate">{s.gitBranch}</span>
-                {s.isWorktree && (
-                  <span className="text-[9px] bg-cc-primary/10 text-cc-primary px-0.5 rounded">wt</span>
-                )}
-              </span>
-              {(s.gitAhead > 0 || s.gitBehind > 0) && (
-                <span className="flex items-center gap-0.5 text-[10px]">
-                  {s.gitAhead > 0 && <span className="text-green-500">{s.gitAhead}&#8593;</span>}
-                  {s.gitBehind > 0 && <span className="text-cc-warning">{s.gitBehind}&#8595;</span>}
-                </span>
-              )}
-              {(s.linesAdded > 0 || s.linesRemoved > 0) && (
-                <span className="flex items-center gap-1 shrink-0">
-                  <span className="text-green-500">+{s.linesAdded}</span>
-                  <span className="text-red-400">-{s.linesRemoved}</span>
-                </span>
+                className={`absolute -bottom-0.5 -right-0.5 w-[7px] h-[7px] rounded-full ring-[1.5px] ring-cc-sidebar ${statusDotClass}`}
+              />
+              {showPulse && (
+                <span className={`absolute -bottom-0.5 -right-0.5 w-[7px] h-[7px] rounded-full ${pulseClass} animate-[pulse-dot_1.5s_ease-in-out_infinite]`} />
               )}
             </div>
-          )}
+
+            {/* Content */}
+            <div className="flex-1 min-w-0">
+              {/* Row 1: Name */}
+              {isEditing ? (
+                <input
+                  ref={editInputRef}
+                  value={editingName}
+                  onChange={(e) => setEditingName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      confirmRename();
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      cancelRename();
+                    }
+                    e.stopPropagation();
+                  }}
+                  onBlur={confirmRename}
+                  onClick={(e) => e.stopPropagation()}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                  className="text-[13px] font-medium w-full text-cc-fg bg-transparent border border-cc-border rounded px-1 py-0 outline-none focus:border-cc-primary/50 min-w-0"
+                />
+              ) : (
+                <span
+                  className={`text-[13px] font-medium truncate block text-cc-fg leading-snug ${
+                    recentlyRenamed.has(s.id) ? "animate-name-appear" : ""
+                  }`}
+                  onAnimationEnd={() => useStore.getState().clearRecentlyRenamed(s.id)}
+                >
+                  {label}
+                </span>
+              )}
+
+              {/* Row 2: Directory + Branch inline */}
+              {(dirName || s.gitBranch) && (
+                <div className="flex items-center gap-1 mt-0.5 text-[10.5px] text-cc-muted leading-tight truncate">
+                  {dirName && (
+                    <span className="truncate shrink-0 max-w-[80px]">{dirName}</span>
+                  )}
+                  {dirName && s.gitBranch && (
+                    <span className="text-cc-muted/40 shrink-0">/</span>
+                  )}
+                  {s.gitBranch && (
+                    <>
+                      {s.isWorktree ? (
+                        <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 shrink-0 opacity-50">
+                          <path d="M5 3.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm0 2.122a2.25 2.25 0 10-1.5 0v5.256a2.25 2.25 0 101.5 0V5.372zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5zm7.5-9.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122V7A2.5 2.5 0 0110 9.5H6a1 1 0 000 2h4a2.5 2.5 0 012.5 2.5v.628a2.25 2.25 0 11-1.5 0V14a1 1 0 00-1-1H6a2.5 2.5 0 01-2.5-2.5V10a2.5 2.5 0 012.5-2.5h4a1 1 0 001-1V5.372a2.25 2.25 0 01-1.5-2.122z" />
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 shrink-0 opacity-50">
+                          <path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.116.862a2.25 2.25 0 10-.862.862A4.48 4.48 0 007.25 7.5h-1.5A2.25 2.25 0 003.5 9.75v.318a2.25 2.25 0 101.5 0V9.75a.75.75 0 01.75-.75h1.5a5.98 5.98 0 003.884-1.435A2.25 2.25 0 109.634 3.362zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
+                        </svg>
+                      )}
+                      <span className="truncate">{s.gitBranch}</span>
+                      {s.isWorktree && (
+                        <span className="text-[8px] bg-cc-primary/10 text-cc-primary px-0.5 rounded shrink-0">wt</span>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Row 3: Git stats (conditional) */}
+              {(s.gitAhead > 0 || s.gitBehind > 0 || s.linesAdded > 0 || s.linesRemoved > 0) && (
+                <div className="flex items-center gap-1.5 mt-px text-[10px] text-cc-muted">
+                  {(s.gitAhead > 0 || s.gitBehind > 0) && (
+                    <span className="flex items-center gap-0.5">
+                      {s.gitAhead > 0 && <span className="text-green-500">{s.gitAhead}&#8593;</span>}
+                      {s.gitBehind > 0 && <span className="text-cc-warning">{s.gitBehind}&#8595;</span>}
+                    </span>
+                  )}
+                  {(s.linesAdded > 0 || s.linesRemoved > 0) && (
+                    <span className="flex items-center gap-1 shrink-0">
+                      <span className="text-green-500">+{s.linesAdded}</span>
+                      <span className="text-red-400">-{s.linesRemoved}</span>
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </button>
+
+        {/* Permission badge */}
         {!archived && permCount > 0 && (
           <span className="absolute right-2 top-1/2 -translate-y-1/2 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-cc-warning text-white text-[10px] font-bold leading-none px-1 group-hover:opacity-0 transition-opacity pointer-events-none">
             {permCount}
           </span>
         )}
+
+        {/* Action buttons */}
         {archived ? (
           <>
-            {/* Unarchive button */}
             <button
               onClick={(e) => handleUnarchiveSession(e, s.id)}
               className="absolute right-8 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-cc-border text-cc-muted hover:text-cc-fg transition-all cursor-pointer"
@@ -347,7 +381,6 @@ export function Sidebar() {
                 <path d="M3 13h10" strokeLinecap="round" />
               </svg>
             </button>
-            {/* Delete button */}
             <button
               onClick={(e) => handleDeleteSession(e, s.id)}
               className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-cc-border text-cc-muted hover:text-red-400 transition-all cursor-pointer"

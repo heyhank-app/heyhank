@@ -1,5 +1,5 @@
 import { useStore } from "./store.js";
-import type { BrowserIncomingMessage, BrowserOutgoingMessage, ContentBlock, ChatMessage, TaskItem } from "./types.js";
+import type { BrowserIncomingMessage, BrowserOutgoingMessage, ContentBlock, ChatMessage, TaskItem, SdkSessionInfo } from "./types.js";
 import { generateUniqueSessionName } from "./utils/names.js";
 import { playNotificationSound } from "./utils/notification-sound.js";
 
@@ -415,11 +415,12 @@ export function connectSession(sessionId: string) {
 
 function scheduleReconnect(sessionId: string) {
   if (reconnectTimers.has(sessionId)) return;
-  // Only reconnect if the session is still the current one
   const timer = setTimeout(() => {
     reconnectTimers.delete(sessionId);
     const store = useStore.getState();
-    if (store.currentSessionId === sessionId || store.sessions.has(sessionId)) {
+    // Reconnect any active (non-archived) session
+    const sdkSession = store.sdkSessions.find((s) => s.sessionId === sessionId);
+    if (sdkSession && !sdkSession.archived) {
       connectSession(sessionId);
     }
   }, 2000);
@@ -444,6 +445,14 @@ export function disconnectSession(sessionId: string) {
 export function disconnectAll() {
   for (const [id] of sockets) {
     disconnectSession(id);
+  }
+}
+
+export function connectAllSessions(sessions: SdkSessionInfo[]) {
+  for (const s of sessions) {
+    if (!s.archived) {
+      connectSession(s.sessionId);
+    }
   }
 }
 

@@ -75,6 +75,7 @@ function createMockBridge() {
   return {
     closeSession: vi.fn(),
     getSession: vi.fn(() => null),
+    getAllSessions: vi.fn(() => []),
     getCodexRateLimits: vi.fn(() => null),
   } as any;
 }
@@ -248,9 +249,57 @@ describe("GET /api/sessions", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json).toEqual([
-      { sessionId: "s1", state: "running", cwd: "/a", name: "Fix auth bug" },
-      { sessionId: "s2", state: "stopped", cwd: "/b" },
+      {
+        sessionId: "s1", state: "running", cwd: "/a", name: "Fix auth bug",
+        gitBranch: "", gitAhead: 0, gitBehind: 0, totalLinesAdded: 0, totalLinesRemoved: 0,
+      },
+      {
+        sessionId: "s2", state: "stopped", cwd: "/b",
+        gitBranch: "", gitAhead: 0, gitBehind: 0, totalLinesAdded: 0, totalLinesRemoved: 0,
+      },
     ]);
+  });
+
+  it("enriches sessions with git data from bridge state", async () => {
+    const sessions = [
+      { sessionId: "s1", state: "running", cwd: "/a" },
+      { sessionId: "s2", state: "running", cwd: "/b" },
+    ];
+    launcher.listSessions.mockReturnValue(sessions);
+    vi.mocked(sessionNames.getAllNames).mockReturnValue({});
+    bridge.getAllSessions.mockReturnValue([
+      {
+        session_id: "s1",
+        git_branch: "feature/auth",
+        git_ahead: 3,
+        git_behind: 1,
+        total_lines_added: 42,
+        total_lines_removed: 7,
+      },
+    ]);
+
+    const res = await app.request("/api/sessions", { method: "GET" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // s1 should have bridge git data
+    expect(json[0]).toMatchObject({
+      sessionId: "s1",
+      gitBranch: "feature/auth",
+      gitAhead: 3,
+      gitBehind: 1,
+      totalLinesAdded: 42,
+      totalLinesRemoved: 7,
+    });
+    // s2 has no bridge data — defaults to empty/zero
+    expect(json[1]).toMatchObject({
+      sessionId: "s2",
+      gitBranch: "",
+      gitAhead: 0,
+      gitBehind: 0,
+      totalLinesAdded: 0,
+      totalLinesRemoved: 0,
+    });
   });
 });
 

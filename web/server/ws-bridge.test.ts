@@ -101,6 +101,34 @@ describe("Session management", () => {
     expect(second.state.model).toBe("modified");
   });
 
+  it("getOrCreateSession: sets backendType when creating a new session", () => {
+    const session = bridge.getOrCreateSession("s1", "codex");
+    expect(session.backendType).toBe("codex");
+    expect(session.state.backend_type).toBe("codex");
+  });
+
+  it("getOrCreateSession: does NOT overwrite backendType when called without explicit type", () => {
+    // Simulate: attachCodexAdapter creates session as "codex"
+    const session = bridge.getOrCreateSession("s1", "codex");
+    expect(session.backendType).toBe("codex");
+    expect(session.state.backend_type).toBe("codex");
+
+    // Simulate: handleBrowserOpen calls getOrCreateSession without backendType
+    const same = bridge.getOrCreateSession("s1");
+    expect(same.backendType).toBe("codex");
+    expect(same.state.backend_type).toBe("codex");
+  });
+
+  it("getOrCreateSession: overwrites backendType when explicitly provided on existing session", () => {
+    const session = bridge.getOrCreateSession("s1");
+    expect(session.backendType).toBe("claude");
+
+    // Explicit override (e.g. attachCodexAdapter)
+    bridge.getOrCreateSession("s1", "codex");
+    expect(session.backendType).toBe("codex");
+    expect(session.state.backend_type).toBe("codex");
+  });
+
   it("getSession: returns undefined for unknown session", () => {
     expect(bridge.getSession("nonexistent")).toBeUndefined();
   });

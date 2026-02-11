@@ -31,6 +31,16 @@ export interface SdkSessionInfo {
   name?: string;
   /** Which backend this session uses */
   backendType?: BackendType;
+  /** Git branch from bridge state (enriched by REST API) */
+  gitBranch?: string;
+  /** Git ahead count (enriched by REST API) */
+  gitAhead?: number;
+  /** Git behind count (enriched by REST API) */
+  gitBehind?: number;
+  /** Total lines added (enriched by REST API) */
+  totalLinesAdded?: number;
+  /** Total lines removed (enriched by REST API) */
+  totalLinesRemoved?: number;
 }
 
 export interface LaunchOptions {

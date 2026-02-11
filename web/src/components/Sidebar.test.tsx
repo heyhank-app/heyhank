@@ -6,10 +6,12 @@ import type { SessionState, SdkSessionInfo } from "../types.js";
 // ─── Mock setup ──────────────────────────────────────────────────────────────
 
 const mockConnectSession = vi.fn();
+const mockConnectAllSessions = vi.fn();
 const mockDisconnectSession = vi.fn();
 
 vi.mock("../ws.js", () => ({
   connectSession: (...args: unknown[]) => mockConnectSession(...args),
+  connectAllSessions: (...args: unknown[]) => mockConnectAllSessions(...args),
   disconnectSession: (...args: unknown[]) => mockDisconnectSession(...args),
 }));
 
@@ -243,10 +245,10 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    // The component renders "3↑" and "2↓" using HTML entities
-    const container = screen.getByText("main").closest("div")!;
-    expect(container.textContent).toContain("3");
-    expect(container.textContent).toContain("2");
+    // The component renders "3↑" and "2↓" using HTML entities in a stats row
+    const sessionButton = screen.getByText("main").closest("button")!;
+    expect(sessionButton.textContent).toContain("3");
+    expect(sessionButton.textContent).toContain("2");
   });
 
   it("session items show lines added/removed", () => {
@@ -467,5 +469,80 @@ describe("Sidebar", () => {
     render(<Sidebar />);
     // The permission count badge shows "2"
     expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
+  it("session shows git branch from sdkInfo when bridgeState is unavailable", () => {
+    // No bridgeState — only sdkInfo (REST API) data available
+    const sdk = makeSdkSession("s1", {
+      gitBranch: "feature/from-rest",
+      gitAhead: 5,
+      gitBehind: 2,
+      totalLinesAdded: 100,
+      totalLinesRemoved: 20,
+    });
+    mockState = createMockState({
+      sessions: new Map(), // no bridge state
+      sdkSessions: [sdk],
+    });
+
+    render(<Sidebar />);
+    expect(screen.getByText("feature/from-rest")).toBeInTheDocument();
+    const sessionButton = screen.getByText("feature/from-rest").closest("button")!;
+    expect(sessionButton.textContent).toContain("5");
+    expect(sessionButton.textContent).toContain("2");
+    expect(sessionButton.textContent).toContain("+100");
+    expect(sessionButton.textContent).toContain("-20");
+  });
+
+  it("session prefers bridgeState git data over sdkInfo", () => {
+    const session = makeSession("s1", {
+      git_branch: "from-bridge",
+      git_ahead: 1,
+    });
+    const sdk = makeSdkSession("s1", {
+      gitBranch: "from-rest",
+      gitAhead: 99,
+    });
+    mockState = createMockState({
+      sessions: new Map([["s1", session]]),
+      sdkSessions: [sdk],
+    });
+
+    render(<Sidebar />);
+    // Bridge data should win over REST API data
+    expect(screen.getByText("from-bridge")).toBeInTheDocument();
+    expect(screen.queryByText("from-rest")).not.toBeInTheDocument();
+  });
+
+  it("codex session preserves backendType when bridgeState is missing", () => {
+    // Only sdkInfo available (no WS session_init received yet)
+    const sdk = makeSdkSession("s1", { backendType: "codex" });
+    mockState = createMockState({
+      sessions: new Map(), // no bridge state
+      sdkSessions: [sdk],
+    });
+
+    const { container } = render(<Sidebar />);
+    const avatar = container.querySelector("button img");
+    expect(avatar?.getAttribute("src")).toBe("/logo-codex.svg");
+  });
+
+  it("session avatar shows correct logo based on backendType", () => {
+    const session1 = makeSession("s1", { backend_type: "claude" });
+    const session2 = makeSession("s2", { backend_type: "codex" });
+    const sdk1 = makeSdkSession("s1", { backendType: "claude" });
+    const sdk2 = makeSdkSession("s2", { backendType: "codex" });
+    mockState = createMockState({
+      sessions: new Map([["s1", session1], ["s2", session2]]),
+      sdkSessions: [sdk1, sdk2],
+    });
+
+    const { container } = render(<Sidebar />);
+    // Find avatar images inside session buttons
+    const avatars = container.querySelectorAll("button img");
+    expect(avatars).toHaveLength(2);
+    const srcs = Array.from(avatars).map((img) => img.getAttribute("src"));
+    expect(srcs).toContain("/logo.svg");
+    expect(srcs).toContain("/logo-codex.svg");
   });
 });

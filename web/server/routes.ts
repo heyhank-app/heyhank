@@ -127,10 +127,20 @@ export function createRoutes(
   api.get("/sessions", (c) => {
     const sessions = launcher.listSessions();
     const names = sessionNames.getAllNames();
-    const enriched = sessions.map((s) => ({
-      ...s,
-      name: names[s.sessionId] ?? s.name,
-    }));
+    const bridgeStates = wsBridge.getAllSessions();
+    const bridgeMap = new Map(bridgeStates.map((s) => [s.session_id, s]));
+    const enriched = sessions.map((s) => {
+      const bridge = bridgeMap.get(s.sessionId);
+      return {
+        ...s,
+        name: names[s.sessionId] ?? s.name,
+        gitBranch: bridge?.git_branch || "",
+        gitAhead: bridge?.git_ahead || 0,
+        gitBehind: bridge?.git_behind || 0,
+        totalLinesAdded: bridge?.total_lines_added || 0,
+        totalLinesRemoved: bridge?.total_lines_removed || 0,
+      };
+    });
     return c.json(enriched);
   });
 
