@@ -77,6 +77,11 @@ export function HomePage() {
   const [branchFilter, setBranchFilter] = useState("");
   const [isNewBranch, setIsNewBranch] = useState(false);
 
+  // Branch freshness check state
+  const [pullPrompt, setPullPrompt] = useState<{ behind: number; branchName: string } | null>(null);
+  const [pulling, setPulling] = useState(false);
+  const [pullError, setPullError] = useState("");
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const modeDropdownRef = useRef<HTMLDivElement>(null);
@@ -243,6 +248,30 @@ export function HomePage() {
 
     setSending(true);
     setError("");
+    setPullError("");
+
+    // Branch freshness check: warn if behind remote
+    // Only offer pull when the effective branch is the currently checked-out branch,
+    // since git pull operates on the checked-out branch
+    if (gitRepoInfo) {
+      const effectiveBranch = useWorktree ? worktreeBranch : gitRepoInfo.currentBranch;
+      if (effectiveBranch && effectiveBranch === gitRepoInfo.currentBranch) {
+        const branchInfo = branches.find(b => b.name === effectiveBranch && !b.isRemote);
+        if (branchInfo && branchInfo.behind > 0) {
+          setPullPrompt({ behind: branchInfo.behind, branchName: effectiveBranch });
+          return; // Pause — user must choose pull/skip/cancel
+        }
+      }
+    }
+
+    await doCreateSession(msg);
+  }
+
+  async function doCreateSession(msg: string) {
+    if (!msg) {
+      setSending(false);
+      return;
+    }
 
     try {
       // Disconnect current session if any
@@ -303,6 +332,50 @@ export function HomePage() {
       setError(e instanceof Error ? e.message : String(e));
       setSending(false);
     }
+  }
+
+  async function handlePullAndContinue() {
+    if (!pullPrompt) return;
+    setPulling(true);
+    setPullError("");
+
+    try {
+      const pullCwd = cwd || gitRepoInfo?.repoRoot;
+      if (!pullCwd) throw new Error("No working directory");
+
+      const result = await api.gitPull(pullCwd);
+      if (!result.success) {
+        setPullError(result.output || "Pull failed");
+        setPulling(false);
+        setSending(false);
+        return;
+      }
+
+      // Refresh branch data after successful pull
+      if (gitRepoInfo) {
+        api.listBranches(gitRepoInfo.repoRoot).then(setBranches).catch(() => {});
+      }
+
+      setPullPrompt(null);
+      setPulling(false);
+      await doCreateSession(text.trim());
+    } catch (e: unknown) {
+      setPullError(e instanceof Error ? e.message : String(e));
+      setPulling(false);
+    }
+  }
+
+  function handleSkipPull() {
+    const msg = text.trim();
+    setPullPrompt(null);
+    setPullError("");
+    doCreateSession(msg);
+  }
+
+  function handleCancelPull() {
+    setPullPrompt(null);
+    setPullError("");
+    setSending(false);
   }
 
   const canSend = text.trim().length > 0 && !sending;
@@ -582,6 +655,12 @@ export function HomePage() {
                                 >
                                   <span className="truncate font-mono-code">{b.name}</span>
                                   <span className="ml-auto flex items-center gap-1.5 shrink-0">
+                                    {b.ahead > 0 && (
+                                      <span className="text-[9px] text-green-500">{b.ahead}&#8593;</span>
+                                    )}
+                                    {b.behind > 0 && (
+                                      <span className="text-[9px] text-amber-500">{b.behind}&#8595;</span>
+                                    )}
                                     {b.isCurrent && (
                                       <span className="text-[9px] px-1 py-0.5 rounded bg-green-500/15 text-green-600 dark:text-green-400">current</span>
                                     )}
@@ -762,6 +841,59 @@ export function HomePage() {
             )}
           </div>
         </div>
+
+        {/* Branch behind remote warning */}
+        {pullPrompt && (
+          <div className="mt-3 p-3 rounded-[10px] bg-amber-500/10 border border-amber-500/20">
+            <div className="flex items-start gap-2.5">
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-amber-500 shrink-0 mt-0.5">
+                <path d="M8.982 1.566a1.13 1.13 0 00-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 01-1.1 0L7.1 5.995A.905.905 0 018 5zm.002 6a1 1 0 110 2 1 1 0 010-2z" />
+              </svg>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-cc-fg leading-snug">
+                  <span className="font-mono-code font-medium">{pullPrompt.branchName}</span> is{" "}
+                  <span className="font-semibold text-amber-500">{pullPrompt.behind} commit{pullPrompt.behind !== 1 ? "s" : ""} behind</span>{" "}
+                  remote. Pull before starting?
+                </p>
+                {pullError && (
+                  <div className="mt-2 px-2 py-1.5 rounded-md bg-cc-error/10 border border-cc-error/20 text-[11px] text-cc-error font-mono-code whitespace-pre-wrap">
+                    {pullError}
+                  </div>
+                )}
+                <div className="flex gap-2 mt-2.5">
+                  <button
+                    onClick={handleCancelPull}
+                    disabled={pulling}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded-md bg-cc-hover text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSkipPull}
+                    disabled={pulling}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded-md bg-cc-hover text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                  >
+                    Continue anyway
+                  </button>
+                  <button
+                    onClick={handlePullAndContinue}
+                    disabled={pulling}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded-md bg-cc-primary/15 text-cc-primary hover:bg-cc-primary/25 transition-colors cursor-pointer flex items-center gap-1.5"
+                  >
+                    {pulling ? (
+                      <>
+                        <span className="w-3 h-3 border-2 border-cc-primary/30 border-t-cc-primary rounded-full animate-spin" />
+                        Pulling...
+                      </>
+                    ) : (
+                      "Pull and continue"
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Error message */}
         {error && (
