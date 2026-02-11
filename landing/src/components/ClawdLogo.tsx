@@ -16,8 +16,8 @@ export function ClawdLogo({ size = 28 }: { size?: number }) {
       <rect x="5.08" y="9.94" width="37.5" height="4.57" fill="#2D2D2D" />
       <rect x="5.08" y="9.94" width="12.6" height="4.57" fill="#1A1A1A" />
       <rect x="29.99" y="9.94" width="12.6" height="4.57" fill="#1A1A1A" />
-      <rect x="6.3" y="10.5" width="3.1" height="1.5" fill="#444" />
-      <rect x="31.2" y="10.5" width="3.1" height="1.5" fill="#444" />
+      <rect className="clawd-eye clawd-eye-left" x="6.3" y="10.5" width="3.1" height="1.5" fill="#444" />
+      <rect className="clawd-eye clawd-eye-right" x="31.2" y="10.5" width="3.1" height="1.5" fill="#444" />
     </svg>
   );
 }

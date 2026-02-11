@@ -69,21 +69,24 @@ const features = [
 
 export function Features() {
   return (
-    <section className="py-24 px-6">
-      <div className="max-w-[960px] mx-auto">
-        <h2 className="font-serif-display text-[clamp(24px,4vw,32px)] font-bold text-center mb-12 tracking-tight">
-          Everything you need
+    <section className="py-24 px-5 sm:px-7">
+      <div className="max-w-[1060px] mx-auto">
+        <div className="cc-label mb-3">Feature Stack</div>
+        <h2 className="font-condensed text-[clamp(40px,6vw,72px)] uppercase leading-[0.92] mb-10 tracking-tight">
+          Everything
+          <br />
+          You Need
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {features.map((f) => (
             <FadeIn key={f.title}>
-              <div className="bg-cc-card border border-cc-border rounded-[14px] p-7 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md h-full">
-                <div className="w-9 h-9 rounded-[10px] bg-cc-primary/12 flex items-center justify-center mb-4">
+              <div className="cc-card bg-cc-card rounded-[16px] p-6 sm:p-7 transition-all duration-200 hover:-translate-y-1 hover:shadow-[0_16px_24px_rgba(34,25,17,0.14)] h-full">
+                <div className="w-10 h-10 rounded-[10px] bg-[color-mix(in_srgb,var(--color-cc-primary)_14%,white)] flex items-center justify-center mb-4">
                   <div className="w-[18px] h-[18px] text-cc-primary">{f.icon}</div>
                 </div>
-                <h3 className="text-[15px] font-semibold mb-1.5">{f.title}</h3>
-                <p className="text-sm text-cc-muted leading-relaxed">{f.description}</p>
+                <h3 className="font-condensed text-[26px] uppercase tracking-wide leading-none mb-2">{f.title}</h3>
+                <p className="text-[15px] text-cc-muted leading-relaxed">{f.description}</p>
               </div>
             </FadeIn>
           ))}
