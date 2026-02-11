@@ -41,6 +41,9 @@ interface AppState {
   // Track sessions that were just renamed (for animation)
   recentlyRenamed: Set<string>;
 
+  // Sidebar project grouping
+  collapsedProjects: Set<string>;
+
   // UI
   darkMode: boolean;
   notificationSound: boolean;
@@ -93,6 +96,9 @@ interface AppState {
   markRecentlyRenamed: (sessionId: string) => void;
   clearRecentlyRenamed: (sessionId: string) => void;
 
+  // Sidebar project grouping actions
+  toggleProjectCollapse: (projectKey: string) => void;
+
   // Plan mode actions
   setPreviousPermissionMode: (sessionId: string, mode: string) => void;
 
@@ -138,6 +144,15 @@ function getInitialNotificationSound(): boolean {
   return true;
 }
 
+function getInitialCollapsedProjects(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    return new Set(JSON.parse(localStorage.getItem("cc-collapsed-projects") || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
 export const useStore = create<AppState>((set) => ({
   sessions: new Map(),
   sdkSessions: [],
@@ -155,6 +170,7 @@ export const useStore = create<AppState>((set) => ({
   changedFiles: new Map(),
   sessionNames: getInitialSessionNames(),
   recentlyRenamed: new Set(),
+  collapsedProjects: getInitialCollapsedProjects(),
   darkMode: getInitialDarkMode(),
   notificationSound: getInitialNotificationSound(),
   sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 768 : true,
@@ -422,6 +438,18 @@ export const useStore = create<AppState>((set) => ({
       const recentlyRenamed = new Set(s.recentlyRenamed);
       recentlyRenamed.delete(sessionId);
       return { recentlyRenamed };
+    }),
+
+  toggleProjectCollapse: (projectKey) =>
+    set((s) => {
+      const collapsedProjects = new Set(s.collapsedProjects);
+      if (collapsedProjects.has(projectKey)) {
+        collapsedProjects.delete(projectKey);
+      } else {
+        collapsedProjects.add(projectKey);
+      }
+      localStorage.setItem("cc-collapsed-projects", JSON.stringify(Array.from(collapsedProjects)));
+      return { collapsedProjects };
     }),
 
   setPreviousPermissionMode: (sessionId, mode) =>
