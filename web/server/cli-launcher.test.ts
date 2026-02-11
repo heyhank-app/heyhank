@@ -76,6 +76,22 @@ function createMockProc(pid = 12345) {
   };
 }
 
+function createMockCodexProc(pid = 12345) {
+  let resolve: (code: number) => void;
+  const exitedPromise = new Promise<number>((r) => {
+    resolve = r;
+  });
+  exitResolve = resolve!;
+  return {
+    pid,
+    kill: vi.fn(),
+    exited: exitedPromise,
+    stdin: new WritableStream<Uint8Array>(),
+    stdout: new ReadableStream<Uint8Array>(),
+    stderr: new ReadableStream<Uint8Array>(),
+  };
+}
+
 const mockSpawn = vi.fn();
 vi.stubGlobal("Bun", { spawn: mockSpawn });
 
@@ -337,6 +353,42 @@ describe("launch", () => {
     const [, options] = mockSpawn.mock.calls[0];
     expect(options.env.MY_VAR).toBe("hello");
     expect(options.env.CLAUDECODE).toBe("1");
+  });
+
+  it("enables Codex web search when codexInternetAccess=true", () => {
+    mockExecSync.mockReturnValue("/usr/bin/codex");
+    mockSpawn.mockReturnValueOnce(createMockCodexProc());
+
+    launcher.launch({
+      backendType: "codex",
+      cwd: "/tmp/project",
+      codexInternetAccess: true,
+      codexSandbox: "danger-full-access",
+    });
+
+    const [cmdAndArgs, options] = mockSpawn.mock.calls[0];
+    expect(cmdAndArgs[0]).toBe("/usr/bin/codex");
+    expect(cmdAndArgs).toContain("app-server");
+    expect(cmdAndArgs).toContain("-c");
+    expect(cmdAndArgs).toContain("tools.webSearch=true");
+    expect(options.cwd).toBe("/tmp/project");
+  });
+
+  it("disables Codex web search when codexInternetAccess=false", () => {
+    mockExecSync.mockReturnValue("/usr/bin/codex");
+    mockSpawn.mockReturnValueOnce(createMockCodexProc());
+
+    launcher.launch({
+      backendType: "codex",
+      cwd: "/tmp/project",
+      codexInternetAccess: false,
+      codexSandbox: "workspace-write",
+    });
+
+    const [cmdAndArgs] = mockSpawn.mock.calls[0];
+    expect(cmdAndArgs).toContain("app-server");
+    expect(cmdAndArgs).toContain("-c");
+    expect(cmdAndArgs).toContain("tools.webSearch=false");
   });
 });
 
