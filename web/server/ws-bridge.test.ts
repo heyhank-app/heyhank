@@ -297,11 +297,11 @@ describe("CLI handlers", () => {
     expect(state.skills).toEqual(["pdf"]);
   });
 
-  it("handleCLIMessage: system.init resolves git info via execSync", () => {
+  it("handleCLIMessage: system.init resolves git info via execSync (worktree)", () => {
     mockExecSync.mockImplementation((cmd: string) => {
       if (cmd.includes("--abbrev-ref HEAD")) return "feat/test-branch\n";
       if (cmd.includes("--git-dir")) return "/repo/.git/worktrees/feat-test\n";
-      if (cmd.includes("--show-toplevel")) return "/repo\n";
+      if (cmd.includes("--git-common-dir")) return "/repo/.git\n";
       if (cmd.includes("--left-right --count")) return "2\t5\n";
       throw new Error("unknown git cmd");
     });
@@ -316,6 +316,43 @@ describe("CLI handlers", () => {
     expect(state.repo_root).toBe("/repo");
     expect(state.git_ahead).toBe(5);
     expect(state.git_behind).toBe(2);
+  });
+
+  it("handleCLIMessage: system.init resolves repo_root via --show-toplevel for non-worktree", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("--abbrev-ref HEAD")) return "main\n";
+      if (cmd.includes("--git-dir")) return ".git\n";
+      if (cmd.includes("--show-toplevel")) return "/home/user/myproject\n";
+      if (cmd.includes("--left-right --count")) return "0\t0\n";
+      throw new Error("unknown git cmd");
+    });
+
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/home/user/myproject" }));
+
+    const state = bridge.getSession("s1")!.state;
+    expect(state.is_worktree).toBe(false);
+    expect(state.repo_root).toBe("/home/user/myproject");
+  });
+
+  it("handleCLIMessage: system.init resolves repo_root from relative --git-common-dir in worktree", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("--abbrev-ref HEAD")) return "feat/branch\n";
+      if (cmd.includes("--git-dir")) return "/original/.git/worktrees/branch\n";
+      if (cmd.includes("--git-common-dir")) return "../../original/.git\n";
+      if (cmd.includes("--left-right --count")) return "0\t0\n";
+      throw new Error("unknown git cmd");
+    });
+
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleCLIMessage(cli, makeInitMsg());
+
+    const state = bridge.getSession("s1")!.state;
+    expect(state.is_worktree).toBe(true);
+    // cwd is "/test" (default), resolve("/test", "../../original/.git", "..") = "/original"
+    expect(state.repo_root).toBe("/original");
   });
 
   it("handleCLIMessage: system.status updates compacting and permissionMode", () => {

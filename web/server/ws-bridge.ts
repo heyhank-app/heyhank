@@ -1,6 +1,7 @@
 import type { ServerWebSocket } from "bun";
 import { randomUUID } from "node:crypto";
 import { execSync } from "node:child_process";
+import { resolve } from "node:path";
 import type {
   CLIMessage,
   CLISystemInitMessage,
@@ -94,9 +95,18 @@ function resolveGitInfo(state: SessionState): void {
     } catch { /* ignore */ }
 
     try {
-      state.repo_root = execSync("git rev-parse --show-toplevel", {
-        cwd: state.cwd, encoding: "utf-8", timeout: 3000,
-      }).trim();
+      if (state.is_worktree) {
+        // For worktrees, --show-toplevel returns the worktree dir, not the original repo.
+        // Use --git-common-dir to find the shared .git dir, then derive the repo root.
+        const commonDir = execSync("git rev-parse --git-common-dir", {
+          cwd: state.cwd, encoding: "utf-8", timeout: 3000,
+        }).trim();
+        state.repo_root = resolve(state.cwd, commonDir, "..");
+      } else {
+        state.repo_root = execSync("git rev-parse --show-toplevel", {
+          cwd: state.cwd, encoding: "utf-8", timeout: 3000,
+        }).trim();
+      }
     } catch { /* ignore */ }
 
     try {
