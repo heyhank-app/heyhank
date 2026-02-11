@@ -1105,9 +1105,8 @@ export class CodexAdapter {
         const exitCode = typeof cmd.exitCode === "number" ? cmd.exitCode : 0;
         const failed = cmd.status === "failed" || cmd.status === "declined" || exitCode !== 0;
 
-        // Always emit tool_result so the browser shows a complete tool block.
+        // Keep successful no-output commands silent in the chat feed.
         if (!combinedOutput && !failed) {
-          this.emitToolResult(item.id, "Command completed successfully.", false);
           break;
         }
 

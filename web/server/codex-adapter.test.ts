@@ -1363,7 +1363,7 @@ describe("CodexAdapter", () => {
     expect(toolResultMsg).toBeDefined();
   });
 
-  it("emits tool_result for successful command with no output", async () => {
+  it("does not emit tool_result for successful command with no output", async () => {
     const messages: BrowserIncomingMessage[] = [];
     const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
     adapter.onBrowserMessage((msg) => messages.push(msg));
@@ -1389,17 +1389,21 @@ describe("CodexAdapter", () => {
     }) + "\n");
     await new Promise((r) => setTimeout(r, 50));
 
-    // Should emit a tool_result (not skip it)
+    // Should still emit tool_use so the command is visible
+    const toolUseMsg = messages.find((m) => {
+      if (m.type !== "assistant") return false;
+      const content = (m as { message: { content: Array<{ type: string; id?: string }> } }).message.content;
+      return content.some((b) => b.type === "tool_use" && b.id === "cmd_silent");
+    });
+    expect(toolUseMsg).toBeDefined();
+
+    // But should not emit a synthetic success tool_result
     const toolResultMsg = messages.find((m) => {
       if (m.type !== "assistant") return false;
-      const content = (m as { message: { content: Array<{ type: string; tool_use_id?: string; content?: string }> } }).message.content;
+      const content = (m as { message: { content: Array<{ type: string; tool_use_id?: string }> } }).message.content;
       return content.some((b) => b.type === "tool_result" && b.tool_use_id === "cmd_silent");
     });
-    expect(toolResultMsg).toBeDefined();
-
-    const resultContent = (toolResultMsg as { message: { content: Array<{ type: string; content?: string }> } })
-      .message.content.find((b) => b.type === "tool_result");
-    expect(resultContent?.content).toBe("Command completed successfully.");
+    expect(toolResultMsg).toBeUndefined();
   });
 
   it("fetches rate limits after initialization via account/rateLimits/read", async () => {
