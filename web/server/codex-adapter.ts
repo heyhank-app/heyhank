@@ -1166,7 +1166,7 @@ export class CodexAdapter {
       case "acceptEdits":
       case "default":
       default:
-        return "unless-trusted";
+        return "untrusted";
     }
   }
 }

@@ -651,7 +651,7 @@ describe("CodexAdapter", () => {
   // The Codex CLI uses camelCase for JSON-RPC field names (approvalPolicy, sandbox)
   // but kebab-case for enum VALUES. These tests ensure we never regress to camelCase values.
   // Valid sandbox values: "read-only", "workspace-write", "danger-full-access"
-  // Valid approvalPolicy values: "never", "unless-trusted", "on-failure", "on-request"
+  // Valid approvalPolicy values: "never", "untrusted", "on-failure", "on-request"
 
   it("sends kebab-case sandbox value, never camelCase", async () => {
     new CodexAdapter(proc as never, "test-session", { model: "gpt-5.3-codex", cwd: "/tmp" });
@@ -670,10 +670,10 @@ describe("CodexAdapter", () => {
 
   it.each([
     { approvalMode: "bypassPermissions", expected: "never" },
-    { approvalMode: "plan", expected: "unless-trusted" },
-    { approvalMode: "acceptEdits", expected: "unless-trusted" },
-    { approvalMode: "default", expected: "unless-trusted" },
-    { approvalMode: undefined, expected: "unless-trusted" },
+    { approvalMode: "plan", expected: "untrusted" },
+    { approvalMode: "acceptEdits", expected: "untrusted" },
+    { approvalMode: "default", expected: "untrusted" },
+    { approvalMode: undefined, expected: "untrusted" },
   ])("maps approvalMode=$approvalMode to kebab-case approvalPolicy=$expected", async ({ approvalMode, expected }) => {
     const mock = createMockProcess();
 
