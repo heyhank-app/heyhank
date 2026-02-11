@@ -84,8 +84,20 @@ export function createRoutes(
       } else if (body.branch && cwd) {
         // Non-worktree: checkout the selected branch in-place
         const repoInfo = gitUtils.getRepoInfo(cwd);
-        if (repoInfo && repoInfo.currentBranch !== body.branch) {
-          gitUtils.checkoutBranch(repoInfo.repoRoot, body.branch);
+        if (repoInfo) {
+          const fetchResult = gitUtils.gitFetch(repoInfo.repoRoot);
+          if (!fetchResult.success) {
+            throw new Error(`git fetch failed before session create: ${fetchResult.output}`);
+          }
+
+          if (repoInfo.currentBranch !== body.branch) {
+            gitUtils.checkoutBranch(repoInfo.repoRoot, body.branch);
+          }
+
+          const pullResult = gitUtils.gitPull(repoInfo.repoRoot);
+          if (!pullResult.success) {
+            throw new Error(`git pull failed before session create: ${pullResult.output}`);
+          }
         }
       }
 
