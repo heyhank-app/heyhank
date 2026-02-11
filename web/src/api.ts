@@ -66,6 +66,7 @@ export interface CreateSessionOpts {
   cwd?: string;
   claudeBinary?: string;
   codexBinary?: string;
+  codexInternetAccess?: boolean;
   allowedTools?: string[];
   envSlug?: string;
   branch?: string;
@@ -266,4 +267,6 @@ export const api = {
 
   // Usage limits
   getUsageLimits: () => get<UsageLimits>("/usage-limits"),
+  getSessionUsageLimits: (sessionId: string) =>
+    get<UsageLimits>(`/sessions/${encodeURIComponent(sessionId)}/usage-limits`),
 };

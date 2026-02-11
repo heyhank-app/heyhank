@@ -6,6 +6,9 @@ import type { TaskItem } from "../types.js";
 const EMPTY_TASKS: TaskItem[] = [];
 const POLL_INTERVAL = 60_000;
 
+// Module-level cache — survives session switches so limits don't flash empty
+const limitsCache = new Map<string, UsageLimits>();
+
 function formatResetTime(resetsAt: string): string {
   try {
     const diffMs = new Date(resetsAt).getTime() - Date.now();
@@ -27,17 +30,25 @@ function barColor(pct: number): string {
   return "bg-cc-primary";
 }
 
-function UsageLimitsSection() {
-  const [limits, setLimits] = useState<UsageLimits | null>(null);
+function UsageLimitsSection({ sessionId }: { sessionId: string }) {
+  const [limits, setLimits] = useState<UsageLimits | null>(
+    limitsCache.get(sessionId) ?? null,
+  );
 
   const fetchLimits = useCallback(async () => {
     try {
-      const data = await api.getUsageLimits();
+      const data = await api.getSessionUsageLimits(sessionId);
+      limitsCache.set(sessionId, data);
       setLimits(data);
     } catch {
       // silent
     }
-  }, []);
+  }, [sessionId]);
+
+  // When sessionId changes, show cached value immediately
+  useEffect(() => {
+    setLimits(limitsCache.get(sessionId) ?? null);
+  }, [sessionId]);
 
   useEffect(() => {
     fetchLimits();
@@ -156,10 +167,6 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
   const completedCount = tasks.filter((t) => t.status === "completed").length;
   const isCodex = (session?.backend_type || sdkBackendType) === "codex";
   const showTasks = !!session && !isCodex;
-  const rawContextPct = session?.context_used_percent ?? 0;
-  const contextPct = Number.isFinite(rawContextPct)
-    ? Math.max(0, Math.min(Math.round(rawContextPct), 100))
-    : 0;
 
   return (
     <aside className="w-[280px] h-full flex flex-col bg-cc-card border-l border-cc-border">
@@ -184,57 +191,8 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
         </button>
       </div>
 
-      {/* Session stats */}
-      {session && (
-        <div className="shrink-0 px-4 py-3 border-b border-cc-border space-y-2.5">
-          {/* Cost */}
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-cc-muted uppercase tracking-wider">
-              Cost
-            </span>
-            <span className="text-[13px] font-medium text-cc-fg tabular-nums">
-              ${session.total_cost_usd.toFixed(4)}
-            </span>
-          </div>
-
-          {/* Context usage */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] text-cc-muted uppercase tracking-wider">
-                Context
-              </span>
-              <span className="text-[11px] text-cc-muted tabular-nums">
-                {`${contextPct}%`}
-              </span>
-            </div>
-            <div className="w-full h-1.5 rounded-full bg-cc-hover overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${
-                  contextPct > 80
-                    ? "bg-cc-error"
-                    : contextPct > 50
-                      ? "bg-cc-warning"
-                      : "bg-cc-primary"
-                }`}
-                style={{ width: `${Math.min(contextPct, 100)}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Turns */}
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-cc-muted uppercase tracking-wider">
-              Turns
-            </span>
-            <span className="text-[13px] font-medium text-cc-fg tabular-nums">
-              {session.num_turns}
-            </span>
-          </div>
-        </div>
-      )}
-
       {/* Usage limits */}
-      <UsageLimitsSection />
+      <UsageLimitsSection sessionId={sessionId} />
 
       {showTasks && (
         <>

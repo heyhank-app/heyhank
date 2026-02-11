@@ -8,9 +8,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // ---------------------------------------------------------------------------
 
 const mockExecSync = vi.hoisted(() => vi.fn());
+const mockExecFileSync = vi.hoisted(() => vi.fn());
 
 vi.mock("node:child_process", () => ({
   execSync: mockExecSync,
+  execFileSync: mockExecFileSync,
 }));
 
 // Mock global fetch at the module level (persists across tests)
@@ -26,6 +28,7 @@ const originalPlatform = process.platform;
 beforeEach(async () => {
   vi.resetModules();
   mockExecSync.mockReset();
+  mockExecFileSync.mockReset();
   mockFetch.mockReset();
   mod = await import("./usage-limits.js");
 });
@@ -40,8 +43,14 @@ afterEach(() => {
 
 const SAMPLE_TOKEN = "sk-ant-fake-token-123";
 
-function makeCredentialsJson(token: string): string {
-  return JSON.stringify({ claudeAiOauth: { accessToken: token } });
+function makeCredentialsJson(token: string, opts?: { expired?: boolean }): string {
+  return JSON.stringify({
+    claudeAiOauth: {
+      accessToken: token,
+      refreshToken: "sk-ant-ort01-fake-refresh-token",
+      expiresAt: opts?.expired ? Date.now() - 1000 : Date.now() + 3_600_000,
+    },
+  });
 }
 
 function makeCredentialsHex(token: string): string {
@@ -87,11 +96,11 @@ describe("getCredentials", () => {
     expect(mod.getCredentials()).toBeNull();
   });
 
-  it("returns null when token format doesn't match sk-ant-*", () => {
+  it("returns token even when format doesn't match sk-ant-*", () => {
     mockExecSync.mockReturnValue(
       JSON.stringify({ claudeAiOauth: { accessToken: "not-a-valid-token" } }),
     );
-    expect(mod.getCredentials()).toBeNull();
+    expect(mod.getCredentials()).toBe("not-a-valid-token");
   });
 });
 
@@ -121,6 +130,7 @@ describe("getCredentials (Windows)", () => {
 
     // Re-import to pick up the mocked platform
     vi.resetModules();
+    mockFetch.mockReset();
     const winMod = await import("./usage-limits.js");
     expect(winMod.getCredentials()).toBe(SAMPLE_TOKEN);
 
@@ -255,5 +265,77 @@ describe("getUsageLimits", () => {
 
     const result = await mod.getUsageLimits();
     expect(result).toEqual(EMPTY);
+  });
+});
+
+// ===========================================================================
+// Token refresh flow (via getUsageLimits → getValidAccessToken)
+// ===========================================================================
+describe("token refresh", () => {
+  const EMPTY = { five_hour: null, seven_day: null, extra_usage: null };
+
+  it("refreshes an expired token and uses the new one", async () => {
+    // Provide an expired token
+    mockExecSync.mockReturnValue(makeCredentialsJson(SAMPLE_TOKEN, { expired: true }));
+
+    // First call = token refresh, second call = usage API
+    mockFetch
+      .mockReturnValueOnce(
+        makeFetchResponse({
+          access_token: "sk-ant-new-token",
+          refresh_token: "sk-ant-new-refresh",
+          expires_in: 3600,
+        }),
+      )
+      .mockReturnValueOnce(makeFetchResponse(SAMPLE_LIMITS));
+
+    const result = await mod.getUsageLimits();
+    expect(result).toEqual(SAMPLE_LIMITS);
+
+    // First fetch = refresh call to platform.claude.com
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const [refreshUrl, refreshOpts] = mockFetch.mock.calls[0];
+    expect(refreshUrl).toContain("oauth/token");
+    expect(refreshOpts.method).toBe("POST");
+
+    // Second fetch = usage API with refreshed token
+    const [usageUrl, usageOpts] = mockFetch.mock.calls[1];
+    expect(usageUrl).toContain("oauth/usage");
+    expect(usageOpts.headers.Authorization).toBe("Bearer sk-ant-new-token");
+
+    // Credentials should have been written back via execFileSync
+    expect(mockExecFileSync).toHaveBeenCalled();
+  });
+
+  it("returns empty when token is expired and refresh fails", async () => {
+    mockExecSync.mockReturnValue(makeCredentialsJson(SAMPLE_TOKEN, { expired: true }));
+    // Refresh call fails
+    mockFetch.mockReturnValueOnce(makeFetchResponse({}, false));
+
+    const result = await mod.getUsageLimits();
+    expect(result).toEqual(EMPTY);
+    // Only the refresh call, no usage call
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns empty when token is expired and refresh throws", async () => {
+    mockExecSync.mockReturnValue(makeCredentialsJson(SAMPLE_TOKEN, { expired: true }));
+    mockFetch.mockRejectedValueOnce(new Error("network error"));
+
+    const result = await mod.getUsageLimits();
+    expect(result).toEqual(EMPTY);
+  });
+
+  it("uses valid (non-expired) token without refreshing", async () => {
+    // Token has a future expiry (default in makeCredentialsJson)
+    mockExecSync.mockReturnValue(makeCredentialsJson(SAMPLE_TOKEN));
+    mockFetch.mockReturnValueOnce(makeFetchResponse(SAMPLE_LIMITS));
+
+    const result = await mod.getUsageLimits();
+    expect(result).toEqual(SAMPLE_LIMITS);
+    // Only one fetch call (usage API), no refresh call
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain("oauth/usage");
   });
 });

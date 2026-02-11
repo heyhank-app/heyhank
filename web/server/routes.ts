@@ -95,6 +95,9 @@ export function createRoutes(
         cwd,
         claudeBinary: body.claudeBinary,
         codexBinary: body.codexBinary,
+        codexSandbox: backend === "codex" && body.codexInternetAccess === true
+          ? "danger-full-access"
+          : "workspace-write",
         allowedTools: body.allowedTools,
         env: envVars,
         backendType: backend,
@@ -537,6 +540,33 @@ export function createRoutes(
   // ─── Usage Limits ─────────────────────────────────────────────────────
 
   api.get("/usage-limits", async (c) => {
+    const limits = await getUsageLimits();
+    return c.json(limits);
+  });
+
+  api.get("/sessions/:id/usage-limits", async (c) => {
+    const sessionId = c.req.param("id");
+    const session = wsBridge.getSession(sessionId);
+    const empty = { five_hour: null, seven_day: null, extra_usage: null };
+
+    if (session?.backendType === "codex") {
+      const rl = wsBridge.getCodexRateLimits(sessionId);
+      if (!rl) return c.json(empty);
+      const mapLimit = (l: { usedPercent: number; windowDurationMins: number; resetsAt: number } | null) => {
+        if (!l) return null;
+        return {
+          utilization: l.usedPercent,
+          resets_at: l.resetsAt ? new Date(l.resetsAt * 1000).toISOString() : null,
+        };
+      };
+      return c.json({
+        five_hour: mapLimit(rl.primary),
+        seven_day: mapLimit(rl.secondary),
+        extra_usage: null,
+      });
+    }
+
+    // Claude sessions: use existing logic
     const limits = await getUsageLimits();
     return c.json(limits);
   });
