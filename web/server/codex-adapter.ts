@@ -111,7 +111,7 @@ class JsonRpcTransport {
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private notificationHandler: ((method: string, params: Record<string, unknown>) => void) | null = null;
   private requestHandler: ((method: string, id: number, params: Record<string, unknown>) => void) | null = null;
-  private writer: WritableStream<Uint8Array>;
+  private writer: WritableStreamDefaultWriter<Uint8Array>;
   private connected = true;
   private buffer = "";
 
@@ -120,16 +120,20 @@ class JsonRpcTransport {
     stdout: ReadableStream<Uint8Array>,
   ) {
     // Handle both Bun subprocess stdin types
+    let writable: WritableStream<Uint8Array>;
     if ("write" in stdin && typeof stdin.write === "function") {
       // Bun's subprocess stdin has a .write() method directly
-      this.writer = new WritableStream({
+      writable = new WritableStream({
         write(chunk) {
           (stdin as { write(data: Uint8Array): number }).write(chunk);
         },
       });
     } else {
-      this.writer = stdin as WritableStream<Uint8Array>;
+      writable = stdin as WritableStream<Uint8Array>;
     }
+    // Acquire writer once and hold it — avoids "WritableStream is locked" race
+    // when concurrent async calls (e.g. rateLimits + turn/start) overlap.
+    this.writer = writable.getWriter();
 
     this.readStdout(stdout);
   }
@@ -233,13 +237,7 @@ class JsonRpcTransport {
   }
 
   private async writeRaw(data: string): Promise<void> {
-    const encoder = new TextEncoder();
-    const writer = this.writer.getWriter();
-    try {
-      await writer.write(encoder.encode(data));
-    } finally {
-      writer.releaseLock();
-    }
+    await this.writer.write(new TextEncoder().encode(data));
   }
 }
 
