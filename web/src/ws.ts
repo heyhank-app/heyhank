@@ -9,6 +9,33 @@ const taskCounters = new Map<string, number>();
 /** Track processed tool_use IDs to prevent duplicate task creation */
 const processedToolUseIds = new Map<string, Set<string>>();
 
+function normalizePath(path: string): string {
+  const isAbs = path.startsWith("/");
+  const parts = path.split("/");
+  const out: string[] = [];
+  for (const part of parts) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (out.length > 0) out.pop();
+      continue;
+    }
+    out.push(part);
+  }
+  return `${isAbs ? "/" : ""}${out.join("/")}`;
+}
+
+export function resolveSessionFilePath(filePath: string, cwd?: string): string {
+  if (filePath.startsWith("/")) return normalizePath(filePath);
+  if (!cwd) return normalizePath(filePath);
+  return normalizePath(`${cwd}/${filePath}`);
+}
+
+function isPathInSessionScope(filePath: string, cwd?: string): boolean {
+  if (!cwd) return true;
+  const normalizedCwd = normalizePath(cwd);
+  return filePath === normalizedCwd || filePath.startsWith(`${normalizedCwd}/`);
+}
+
 function getProcessedSet(sessionId: string): Set<string> {
   let set = processedToolUseIds.get(sessionId);
   if (!set) {
@@ -81,11 +108,17 @@ function extractTasksFromBlocks(sessionId: string, blocks: ContentBlock[]) {
 
 function extractChangedFilesFromBlocks(sessionId: string, blocks: ContentBlock[]) {
   const store = useStore.getState();
+  const sessionCwd =
+    store.sessions.get(sessionId)?.cwd ||
+    store.sdkSessions.find((sdk) => sdk.sessionId === sessionId)?.cwd;
   for (const block of blocks) {
     if (block.type !== "tool_use") continue;
     const { name, input } = block;
     if ((name === "Edit" || name === "Write") && typeof input.file_path === "string") {
-      store.addChangedFile(sessionId, input.file_path);
+      const resolvedPath = resolveSessionFilePath(input.file_path, sessionCwd);
+      if (isPathInSessionScope(resolvedPath, sessionCwd)) {
+        store.addChangedFile(sessionId, resolvedPath);
+      }
     }
   }
 }

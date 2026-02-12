@@ -11,7 +11,17 @@ export function TopBar() {
   const setTaskPanelOpen = useStore((s) => s.setTaskPanelOpen);
   const activeTab = useStore((s) => s.activeTab);
   const setActiveTab = useStore((s) => s.setActiveTab);
-  const changedFilesCount = useStore((s) => currentSessionId ? (s.changedFiles.get(currentSessionId)?.size ?? 0) : 0);
+  const changedFilesCount = useStore((s) => {
+    if (!currentSessionId) return 0;
+    const cwd =
+      s.sessions.get(currentSessionId)?.cwd ||
+      s.sdkSessions.find((sdk) => sdk.sessionId === currentSessionId)?.cwd;
+    const files = s.changedFiles.get(currentSessionId);
+    if (!files) return 0;
+    if (!cwd) return files.size;
+    const prefix = `${cwd}/`;
+    return [...files].filter((fp) => fp === cwd || fp.startsWith(prefix)).length;
+  });
 
   const isConnected = currentSessionId ? (cliConnected.get(currentSessionId) ?? false) : false;
   const status = currentSessionId ? (sessionStatus.get(currentSessionId) ?? null) : null;

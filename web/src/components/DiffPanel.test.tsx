@@ -52,7 +52,7 @@ beforeEach(() => {
 
 describe("DiffPanel", () => {
   it("shows empty state when no files changed", () => {
-    render(<DiffPanel sessionId="s1" />);
+    const { container } = render(<DiffPanel sessionId="s1" />);
     expect(screen.getByText("No changes yet")).toBeInTheDocument();
   });
 
@@ -61,10 +61,23 @@ describe("DiffPanel", () => {
       changedFiles: new Map([["s1", new Set(["/repo/src/app.ts", "/repo/src/utils.ts"])]]),
     });
 
-    render(<DiffPanel sessionId="s1" />);
+    const { container } = render(<DiffPanel sessionId="s1" />);
     expect(screen.getByText("Changed (2)")).toBeInTheDocument();
     expect(screen.getByText("src/app.ts")).toBeInTheDocument();
     expect(screen.getByText("src/utils.ts")).toBeInTheDocument();
+  });
+
+  it("hides changed files outside the session cwd", () => {
+    resetStore({
+      changedFiles: new Map([
+        ["s1", new Set(["/repo/src/app.ts", "/Users/stan/.claude/plans/plan.md"])],
+      ]),
+    });
+
+    const { container } = render(<DiffPanel sessionId="s1" />);
+    expect(screen.getByText("Changed (1)")).toBeInTheDocument();
+    expect(screen.getByText("src/app.ts")).toBeInTheDocument();
+    expect(screen.queryByText("/Users/stan/.claude/plans/plan.md")).not.toBeInTheDocument();
   });
 
   it("fetches diff when a file is selected", async () => {
@@ -84,7 +97,7 @@ describe("DiffPanel", () => {
       diffPanelSelectedFile: new Map([["s1", "/repo/src/app.ts"]]),
     });
 
-    render(<DiffPanel sessionId="s1" />);
+    const { container } = render(<DiffPanel sessionId="s1" />);
 
     await waitFor(() => {
       expect(mockApi.getFileDiff).toHaveBeenCalledWith("/repo/src/app.ts");
@@ -92,7 +105,7 @@ describe("DiffPanel", () => {
 
     // DiffViewer should render the diff content
     await waitFor(() => {
-      expect(screen.getByText("src/app.ts")).toBeInTheDocument();
+      expect(container.querySelector(".diff-line-add")).toBeTruthy();
     });
   });
 
@@ -118,5 +131,17 @@ describe("DiffPanel", () => {
 
     render(<DiffPanel sessionId="s1" />);
     expect(screen.getByText("Waiting for session to initialize...")).toBeInTheDocument();
+  });
+
+  it("reselects when selected file is outside cwd scope", async () => {
+    resetStore({
+      changedFiles: new Map([["s1", new Set(["/repo/src/inside.ts"])]]),
+      diffPanelSelectedFile: new Map([["s1", "/Users/stan/.claude/plans/plan.md"]]),
+    });
+
+    render(<DiffPanel sessionId="s1" />);
+    await waitFor(() => {
+      expect(storeState.setDiffPanelSelectedFile).toHaveBeenCalledWith("s1", "/repo/src/inside.ts");
+    });
   });
 });

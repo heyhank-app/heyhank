@@ -22,7 +22,9 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
 
   const relativeChangedFiles = useMemo(() => {
     if (!changedFiles.size || !cwd) return [];
+    const cwdPrefix = `${cwd}/`;
     return [...changedFiles]
+      .filter((fp) => fp === cwd || fp.startsWith(cwdPrefix))
       .map((fp) => ({ abs: fp, rel: fp.startsWith(cwd + "/") ? fp.slice(cwd.length + 1) : fp }))
       .sort((a, b) => a.rel.localeCompare(b.rel));
   }, [changedFiles, cwd]);
@@ -32,6 +34,13 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
     if (!selectedFile && relativeChangedFiles.length > 0) {
       setSelectedFile(sessionId, relativeChangedFiles[0].abs);
     }
+  }, [selectedFile, relativeChangedFiles, sessionId, setSelectedFile]);
+
+  // If the selected file falls out of scope, clear or reselect.
+  useEffect(() => {
+    if (!selectedFile) return;
+    if (relativeChangedFiles.some((f) => f.abs === selectedFile)) return;
+    setSelectedFile(sessionId, relativeChangedFiles[0]?.abs ?? null);
   }, [selectedFile, relativeChangedFiles, sessionId, setSelectedFile]);
 
   // Fetch diff when selected file changes

@@ -926,7 +926,10 @@ describe("GET /api/fs/diff", () => {
 -old line
 +new line
  line3`;
-    vi.mocked(execSync).mockReturnValueOnce(diffOutput);
+    vi.mocked(execSync)
+      .mockReturnValueOnce("/repo\n") // rev-parse --show-toplevel
+      .mockReturnValueOnce("file.ts\n") // ls-files --full-name
+      .mockReturnValueOnce(diffOutput); // git diff HEAD
 
     const res = await app.request("/api/fs/diff?path=/repo/file.ts", { method: "GET" });
 
@@ -936,6 +939,37 @@ describe("GET /api/fs/diff", () => {
     expect(json.path).toContain("file.ts");
     expect(vi.mocked(execSync)).toHaveBeenCalledWith(
       expect.stringContaining("git diff HEAD"),
+      expect.objectContaining({ encoding: "utf-8", timeout: 5000 }),
+    );
+  });
+
+  it("returns no-index diff for untracked files", async () => {
+    const untrackedDiff = `diff --git a/new.txt b/new.txt
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/new.txt
+@@ -0,0 +1 @@
++hello`;
+
+    vi.mocked(execSync)
+      .mockReturnValueOnce("/repo\n") // rev-parse --show-toplevel
+      .mockReturnValueOnce("new.txt\n") // ls-files --full-name
+      .mockReturnValueOnce("") // git diff HEAD -> empty for untracked
+      .mockReturnValueOnce("new.txt\n") // ls-files --others --exclude-standard
+      .mockImplementationOnce(() => {
+        const err = new Error("diff exits with 1 for differences") as Error & { stdout: string };
+        err.stdout = untrackedDiff;
+        throw err;
+      }); // git diff --no-index
+
+    const res = await app.request("/api/fs/diff?path=/repo/new.txt", { method: "GET" });
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.diff).toContain("new file mode");
+    expect(vi.mocked(execSync)).toHaveBeenCalledWith(
+      expect.stringContaining("git diff --no-index -- /dev/null"),
       expect.objectContaining({ encoding: "utf-8", timeout: 5000 }),
     );
   });
