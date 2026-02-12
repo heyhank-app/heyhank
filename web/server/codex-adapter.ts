@@ -163,6 +163,12 @@ class JsonRpcTransport {
       console.error("[codex-adapter] stdout reader error:", err);
     } finally {
       this.connected = false;
+      // Reject all pending promises so callers don't hang indefinitely
+      // when the Codex process crashes or exits unexpectedly.
+      for (const [id, { reject }] of this.pending) {
+        reject(new Error("Transport closed"));
+      }
+      this.pending.clear();
     }
   }
 
@@ -274,9 +280,6 @@ export class CodexAdapter {
   // Streaming accumulator for agent messages
   private streamingText = "";
   private streamingItemId: string | null = null;
-
-  // Track message counter for synthesized IDs
-  private msgCounter = 0;
 
   // Accumulate reasoning text by item ID so we can emit final thinking blocks.
   private reasoningTextByItemId = new Map<string, string>();
@@ -438,7 +441,7 @@ export class CodexAdapter {
           model: this.options.model,
           cwd: this.options.cwd,
           approvalPolicy: this.mapApprovalPolicy(this.options.approvalMode),
-          sandbox: this.options.sandbox || "workspace-write",
+          sandbox: this.options.sandbox || this.mapSandboxPolicy(this.options.approvalMode),
         }) as { thread: { id: string } };
         this.threadId = resumeResult.thread.id;
       } else {
@@ -447,7 +450,7 @@ export class CodexAdapter {
           model: this.options.model,
           cwd: this.options.cwd,
           approvalPolicy: this.mapApprovalPolicy(this.options.approvalMode),
-          sandbox: this.options.sandbox || "workspace-write",
+          sandbox: this.options.sandbox || this.mapSandboxPolicy(this.options.approvalMode),
         }) as { thread: { id: string } };
         this.threadId = threadResult.thread.id;
       }
@@ -678,6 +681,21 @@ export class CodexAdapter {
       case "account/rateLimits/updated":
         this.updateRateLimits(params);
         break;
+      case "codex/event/stream_error": {
+        const msg = params.msg as { message?: string } | undefined;
+        if (msg?.message) {
+          console.log(`[codex-adapter] Stream error: ${msg.message}`);
+        }
+        break;
+      }
+      case "codex/event/error": {
+        const msg = params.msg as { message?: string } | undefined;
+        if (msg?.message) {
+          console.error(`[codex-adapter] Codex error: ${msg.message}`);
+          this.emit({ type: "error", message: msg.message });
+        }
+        break;
+      }
       default:
         // Unknown notification, log for debugging
         if (!method.startsWith("account/") && !method.startsWith("codex/event/")) {
@@ -920,7 +938,7 @@ export class CodexAdapter {
           event: {
             type: "message_start",
             message: {
-              id: `codex-msg-${++this.msgCounter}`,
+              id: this.makeMessageId("agent", item.id),
               type: "message",
               role: "assistant",
               model: this.options.model || "",
@@ -1076,7 +1094,7 @@ export class CodexAdapter {
         this.emit({
           type: "assistant",
           message: {
-            id: `codex-msg-${++this.msgCounter}`,
+            id: this.makeMessageId("agent", item.id),
             type: "message",
             role: "assistant",
             model: this.options.model || "",
@@ -1166,7 +1184,7 @@ export class CodexAdapter {
           this.emit({
             type: "assistant",
             message: {
-              id: `codex-msg-${++this.msgCounter}`,
+              id: this.makeMessageId("reasoning", item.id),
               type: "message",
               role: "assistant",
               model: this.options.model || "",
@@ -1280,7 +1298,7 @@ export class CodexAdapter {
     this.emit({
       type: "assistant",
       message: {
-        id: `codex-msg-${++this.msgCounter}`,
+        id: this.makeMessageId("tool_use", toolUseId),
         type: "message",
         role: "assistant",
         model: this.options.model || "",
@@ -1339,7 +1357,7 @@ export class CodexAdapter {
     this.emit({
       type: "assistant",
       message: {
-        id: `codex-msg-${++this.msgCounter}`,
+        id: this.makeMessageId("tool_result", toolUseId),
         type: "message",
         role: "assistant",
         model: this.options.model || "",
@@ -1359,6 +1377,11 @@ export class CodexAdapter {
     });
   }
 
+  private makeMessageId(kind: string, sourceId?: string): string {
+    if (sourceId) return `codex-${kind}-${sourceId}`;
+    return `codex-${kind}-${randomUUID()}`;
+  }
+
   private mapApprovalPolicy(mode?: string): string {
     switch (mode) {
       case "bypassPermissions":
@@ -1368,6 +1391,15 @@ export class CodexAdapter {
       case "default":
       default:
         return "untrusted";
+    }
+  }
+
+  private mapSandboxPolicy(mode?: string): string {
+    switch (mode) {
+      case "bypassPermissions":
+        return "danger-full-access";
+      default:
+        return "workspace-write";
     }
   }
 }

@@ -481,7 +481,10 @@ export class WsBridge {
 
     // Notify if backend is not connected and request relaunch
     const backendConnected = session.backendType === "codex"
-      ? session.codexAdapter?.isConnected()
+      // Treat an attached adapter as "alive" during init.
+      // `isConnected()` flips true only after initialize/thread start, and
+      // relaunching during that window can kill a healthy startup.
+      ? !!session.codexAdapter
       : !!session.cliSocket;
 
     if (!backendConnected) {

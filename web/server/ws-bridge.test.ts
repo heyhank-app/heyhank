@@ -529,6 +529,23 @@ describe("Browser handlers", () => {
     expect(disconnectedMsg).toBeDefined();
   });
 
+  it("handleBrowserOpen: does NOT relaunch when Codex adapter is attached but still initializing", () => {
+    const relaunchCb = vi.fn();
+    bridge.onCLIRelaunchNeededCallback(relaunchCb);
+
+    const session = bridge.getOrCreateSession("s1", "codex");
+    session.codexAdapter = { isConnected: () => false } as any;
+
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+
+    expect(relaunchCb).not.toHaveBeenCalled();
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const disconnectedMsg = calls.find((c: any) => c.type === "cli_disconnected");
+    expect(disconnectedMsg).toBeUndefined();
+  });
+
   it("handleBrowserClose: removes from set", () => {
     const browser = makeBrowserSocket("s1");
     bridge.handleBrowserOpen(browser, "s1");
