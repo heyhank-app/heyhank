@@ -417,3 +417,82 @@ describe("fetchPRInfo", () => {
     expect(result).toBeNull();
   });
 });
+
+// ===========================================================================
+// computeAdaptiveTTL
+// ===========================================================================
+describe("computeAdaptiveTTL", () => {
+  function makePR(overrides?: Partial<import("./github-pr.js").GitHubPRInfo>): import("./github-pr.js").GitHubPRInfo {
+    return {
+      number: 1,
+      title: "test",
+      url: "https://github.com/o/r/pull/1",
+      state: "OPEN",
+      isDraft: false,
+      reviewDecision: null,
+      additions: 0,
+      deletions: 0,
+      changedFiles: 0,
+      checks: [],
+      checksSummary: { total: 0, success: 0, failure: 0, pending: 0 },
+      reviewThreads: { total: 0, resolved: 0, unresolved: 0 },
+      ...overrides,
+    };
+  }
+
+  it("returns 60s for null (no PR)", () => {
+    expect(mod.computeAdaptiveTTL(null)).toBe(60_000);
+  });
+
+  it("returns 300s (5 min) for merged PR", () => {
+    expect(mod.computeAdaptiveTTL(makePR({ state: "MERGED" }))).toBe(300_000);
+  });
+
+  it("returns 300s (5 min) for closed PR", () => {
+    expect(mod.computeAdaptiveTTL(makePR({ state: "CLOSED" }))).toBe(300_000);
+  });
+
+  it("returns 10s for CI pending", () => {
+    expect(mod.computeAdaptiveTTL(makePR({
+      checksSummary: { total: 3, success: 1, failure: 0, pending: 2 },
+    }))).toBe(10_000);
+  });
+
+  it("returns 30s for CI failed", () => {
+    expect(mod.computeAdaptiveTTL(makePR({
+      checksSummary: { total: 3, success: 2, failure: 1, pending: 0 },
+    }))).toBe(30_000);
+  });
+
+  it("returns 30s for changes requested", () => {
+    expect(mod.computeAdaptiveTTL(makePR({
+      reviewDecision: "CHANGES_REQUESTED",
+    }))).toBe(30_000);
+  });
+
+  it("returns 120s for approved with no pending checks", () => {
+    expect(mod.computeAdaptiveTTL(makePR({
+      reviewDecision: "APPROVED",
+      checksSummary: { total: 2, success: 2, failure: 0, pending: 0 },
+    }))).toBe(120_000);
+  });
+
+  it("returns 45s for review required", () => {
+    expect(mod.computeAdaptiveTTL(makePR({
+      reviewDecision: "REVIEW_REQUIRED",
+    }))).toBe(45_000);
+  });
+
+  it("returns 45s for null reviewDecision (open PR)", () => {
+    expect(mod.computeAdaptiveTTL(makePR({
+      reviewDecision: null,
+    }))).toBe(45_000);
+  });
+
+  it("pending checks take priority over review state", () => {
+    expect(mod.computeAdaptiveTTL(makePR({
+      reviewDecision: "CHANGES_REQUESTED",
+      checksSummary: { total: 3, success: 1, failure: 0, pending: 2 },
+    }))).toBe(10_000);
+  });
+});

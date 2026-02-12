@@ -360,6 +360,11 @@ function handleMessage(sessionId: string, event: MessageEvent) {
       break;
     }
 
+    case "pr_status_update": {
+      store.setPRStatus(sessionId, { available: data.available, pr: data.pr });
+      break;
+    }
+
     case "message_history": {
       const chatMessages: ChatMessage[] = [];
       for (let i = 0; i < data.messages.length; i++) {

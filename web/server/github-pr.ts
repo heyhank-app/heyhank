@@ -84,16 +84,71 @@ function getRepoSlug(cwd: string): string | null {
   }
 }
 
+async function getRepoSlugAsync(cwd: string): Promise<string | null> {
+  const cached = repoSlugCache.get(cwd);
+  if (cached && Date.now() - cached.timestamp < REPO_SLUG_TTL) {
+    return cached.slug;
+  }
+  try {
+    const proc = Bun.spawn(
+      ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+      { cwd, stdout: "pipe", stderr: "pipe" },
+    );
+    const timeout = setTimeout(() => proc.kill(), 10_000);
+    const exitCode = await proc.exited;
+    clearTimeout(timeout);
+    if (exitCode !== 0) {
+      repoSlugCache.set(cwd, { slug: null, timestamp: Date.now() });
+      return null;
+    }
+    const slug = (await new Response(proc.stdout).text()).trim();
+    const result = slug || null;
+    repoSlugCache.set(cwd, { slug: result, timestamp: Date.now() });
+    return result;
+  } catch {
+    repoSlugCache.set(cwd, { slug: null, timestamp: Date.now() });
+    return null;
+  }
+}
+
 // ─── PR Data Cache ───────────────────────────────────────────────────────────
 
-const prCache = new Map<string, { data: GitHubPRInfo | null; timestamp: number }>();
-const PR_CACHE_TTL = 30_000; // 30 seconds
+const prCache = new Map<string, { data: GitHubPRInfo | null; timestamp: number; ttl: number }>();
+const PR_CACHE_TTL = 30_000; // 30 seconds (default / legacy)
 
 // Exported for testing
 export function _clearCaches() {
   prCache.clear();
   repoSlugCache.clear();
   _ghAvailable = null;
+}
+
+// ─── Adaptive TTL ───────────────────────────────────────────────────────────
+
+/** Compute polling interval based on PR state. */
+export function computeAdaptiveTTL(pr: GitHubPRInfo | null): number {
+  if (!pr) return 60_000; // No PR found — check again in 60s
+
+  // Merged or closed — terminal state, rarely changes
+  if (pr.state === "MERGED" || pr.state === "CLOSED") return 300_000; // 5 minutes
+
+  // CI actively running (pending checks) — user is watching
+  if (pr.checksSummary.pending > 0) return 10_000; // 10 seconds
+
+  // CI failed — user likely pushing fixes
+  if (pr.checksSummary.failure > 0) return 30_000; // 30 seconds
+
+  // Changes requested — moderate frequency
+  if (pr.reviewDecision === "CHANGES_REQUESTED") return 30_000; // 30 seconds
+
+  // Approved, all checks passed — stable
+  if (pr.reviewDecision === "APPROVED" && pr.checksSummary.pending === 0) return 120_000; // 2 minutes
+
+  // Review pending, checks passed — waiting on human reviewer
+  if (pr.reviewDecision === "REVIEW_REQUIRED" || pr.reviewDecision === null) return 45_000; // 45 seconds
+
+  // Default fallback
+  return 30_000;
 }
 
 // ─── GraphQL Query ───────────────────────────────────────────────────────────
@@ -237,20 +292,20 @@ export function parseGraphQLResponse(data: unknown): GitHubPRInfo | null {
   }
 }
 
-// ─── Main Fetch Function ─────────────────────────────────────────────────────
+// ─── Main Fetch Function (sync — legacy, used by tests) ─────────────────────
 
 export async function fetchPRInfo(cwd: string, branch: string): Promise<GitHubPRInfo | null> {
   if (!isGhAvailable()) return null;
 
   const cacheKey = `${cwd}:${branch}`;
   const cached = prCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < PR_CACHE_TTL) {
+  if (cached && Date.now() - cached.timestamp < cached.ttl) {
     return cached.data;
   }
 
   const slug = getRepoSlug(cwd);
   if (!slug) {
-    prCache.set(cacheKey, { data: null, timestamp: Date.now() });
+    prCache.set(cacheKey, { data: null, timestamp: Date.now(), ttl: PR_CACHE_TTL });
     return null;
   }
 
@@ -268,10 +323,57 @@ export async function fetchPRInfo(cwd: string, branch: string): Promise<GitHubPR
 
     const parsed = JSON.parse(result);
     const prInfo = parseGraphQLResponse(parsed);
-    prCache.set(cacheKey, { data: prInfo, timestamp: Date.now() });
+    const ttl = computeAdaptiveTTL(prInfo);
+    prCache.set(cacheKey, { data: prInfo, timestamp: Date.now(), ttl });
     return prInfo;
   } catch {
-    prCache.set(cacheKey, { data: null, timestamp: Date.now() });
+    prCache.set(cacheKey, { data: null, timestamp: Date.now(), ttl: PR_CACHE_TTL });
+    return null;
+  }
+}
+
+// ─── Async Fetch Function (non-blocking, uses Bun.spawn) ────────────────────
+
+export async function fetchPRInfoAsync(cwd: string, branch: string): Promise<GitHubPRInfo | null> {
+  if (!isGhAvailable()) return null;
+
+  const cacheKey = `${cwd}:${branch}`;
+  const cached = prCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < cached.ttl) {
+    return cached.data;
+  }
+
+  const slug = await getRepoSlugAsync(cwd);
+  if (!slug) {
+    prCache.set(cacheKey, { data: null, timestamp: Date.now(), ttl: 60_000 });
+    return null;
+  }
+
+  const [owner, name] = slug.split("/");
+  if (!owner || !name) return null;
+
+  try {
+    const proc = Bun.spawn(
+      ["gh", "api", "graphql", "-f", `query=${PR_QUERY}`, "-f", `owner=${owner}`, "-f", `name=${name}`, "-f", `branch=${branch}`],
+      { cwd, stdout: "pipe", stderr: "pipe" },
+    );
+    const timeout = setTimeout(() => proc.kill(), 15_000);
+    const exitCode = await proc.exited;
+    clearTimeout(timeout);
+
+    if (exitCode !== 0) {
+      prCache.set(cacheKey, { data: null, timestamp: Date.now(), ttl: PR_CACHE_TTL });
+      return null;
+    }
+
+    const stdout = (await new Response(proc.stdout).text()).trim();
+    const parsed = JSON.parse(stdout);
+    const prInfo = parseGraphQLResponse(parsed);
+    const ttl = computeAdaptiveTTL(prInfo);
+    prCache.set(cacheKey, { data: prInfo, timestamp: Date.now(), ttl });
+    return prInfo;
+  } catch {
+    prCache.set(cacheKey, { data: null, timestamp: Date.now(), ttl: PR_CACHE_TTL });
     return null;
   }
 }

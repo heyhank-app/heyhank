@@ -141,6 +141,7 @@ export class WsBridge {
   private onFirstTurnCompleted: ((sessionId: string, firstUserMessage: string) => void) | null = null;
   private autoNamingAttempted = new Set<string>();
   private userMsgCounter = 0;
+  private onGitInfoReady: ((sessionId: string, cwd: string, branch: string) => void) | null = null;
 
   /** Register a callback for when we learn the CLI's internal session ID. */
   onCLISessionIdReceived(cb: (sessionId: string, cliSessionId: string) => void): void {
@@ -155,6 +156,18 @@ export class WsBridge {
   /** Register a callback for when a session completes its first turn. */
   onFirstTurnCompletedCallback(cb: (sessionId: string, firstUserMessage: string) => void): void {
     this.onFirstTurnCompleted = cb;
+  }
+
+  /** Register a callback for when git info is resolved and branch is known. */
+  onSessionGitInfoReadyCallback(cb: (sessionId: string, cwd: string, branch: string) => void): void {
+    this.onGitInfoReady = cb;
+  }
+
+  /** Push a message to all connected browsers for a session (public, for PRPoller etc.). */
+  broadcastToSession(sessionId: string, msg: BrowserIncomingMessage): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    this.broadcastToBrowsers(session, msg);
   }
 
   /** Attach a persistent store. Call restoreFromDisk() after. */
@@ -484,6 +497,11 @@ export class WsBridge {
       this.sendToBrowser(ws, { type: "permission_request", request: perm });
     }
 
+    // Notify PR poller when a browser connects to a session with known git info
+    if (session.state.git_branch && session.state.cwd && this.onGitInfoReady) {
+      this.onGitInfoReady(session.id, session.state.cwd, session.state.git_branch);
+    }
+
     // Notify if backend is not connected and request relaunch
     const backendConnected = session.backendType === "codex"
       // Treat an attached adapter as "alive" during init.
@@ -596,6 +614,11 @@ export class WsBridge {
 
       // Resolve git info from session cwd
       resolveGitInfo(session.state);
+
+      // Notify PR poller when git branch is known
+      if (session.state.git_branch && this.onGitInfoReady) {
+        this.onGitInfoReady(session.id, session.state.cwd, session.state.git_branch);
+      }
 
       this.broadcastToBrowsers(session, {
         type: "session_init",

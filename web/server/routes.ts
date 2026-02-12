@@ -44,6 +44,7 @@ export function createRoutes(
   sessionStore: SessionStore,
   worktreeTracker: WorktreeTracker,
   terminalManager: TerminalManager,
+  prPoller?: import("./pr-poller.js").PRPoller,
 ) {
   const api = new Hono();
 
@@ -253,6 +254,7 @@ export function createRoutes(
     // Clean up worktree if no other sessions use it (force: delete is destructive)
     const worktreeResult = cleanupWorktree(id, true);
 
+    prPoller?.unwatch(id);
     launcher.removeSession(id);
     wsBridge.closeSession(id);
     return c.json({ ok: true, worktree: worktreeResult });
@@ -265,6 +267,9 @@ export function createRoutes(
 
     // Clean up container if any
     containerManager.removeContainer(id);
+
+    // Stop PR polling for this session
+    prPoller?.unwatch(id);
 
     // Clean up worktree if no other sessions use it
     const worktreeResult = cleanupWorktree(id, body.force);
@@ -768,12 +773,18 @@ export function createRoutes(
     const branch = c.req.query("branch");
     if (!cwd || !branch) return c.json({ error: "cwd and branch required" }, 400);
 
-    const { isGhAvailable, fetchPRInfo } = await import("./github-pr.js");
+    // Check poller cache first for instant response
+    if (prPoller) {
+      const cached = prPoller.getCached(cwd, branch);
+      if (cached) return c.json(cached);
+    }
+
+    const { isGhAvailable, fetchPRInfoAsync } = await import("./github-pr.js");
     if (!isGhAvailable()) {
       return c.json({ available: false, pr: null });
     }
 
-    const pr = await fetchPRInfo(cwd, branch);
+    const pr = await fetchPRInfoAsync(cwd, branch);
     return c.json({ available: true, pr });
   });
 

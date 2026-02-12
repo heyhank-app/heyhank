@@ -14,6 +14,7 @@ import { TerminalManager } from "./terminal-manager.js";
 import { generateSessionTitle } from "./auto-namer.js";
 import * as sessionNames from "./session-names.js";
 import { getSettings } from "./settings-manager.js";
+import { PRPoller } from "./pr-poller.js";
 import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
 import { isRunningAsService } from "./service.js";
 import type { SocketData } from "./ws-bridge.js";
@@ -31,6 +32,7 @@ const wsBridge = new WsBridge();
 const launcher = new CliLauncher(port);
 const worktreeTracker = new WorktreeTracker();
 const terminalManager = new TerminalManager();
+const prPoller = new PRPoller(wsBridge);
 
 // ── Restore persisted sessions from disk ────────────────────────────────────
 wsBridge.setStore(sessionStore);
@@ -46,6 +48,11 @@ wsBridge.onCLISessionIdReceived((sessionId, cliSessionId) => {
 // When a Codex adapter is created, attach it to the WsBridge
 launcher.onCodexAdapterCreated((sessionId, adapter) => {
   wsBridge.attachCodexAdapter(sessionId, adapter);
+});
+
+// Start watching PRs when git info is resolved for a session
+wsBridge.onSessionGitInfoReadyCallback((sessionId, cwd, branch) => {
+  prPoller.watch(sessionId, cwd, branch);
 });
 
 // Auto-relaunch CLI when a browser connects to a session with no CLI
@@ -87,7 +94,7 @@ console.log(`[server] Session persistence: ${sessionStore.directory}`);
 const app = new Hono();
 
 app.use("/api/*", cors());
-app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager));
+app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller));
 
 // In production, serve built frontend using absolute path (works when installed as npm package)
 if (process.env.NODE_ENV === "production") {

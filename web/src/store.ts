@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { SessionState, PermissionRequest, ChatMessage, SdkSessionInfo, TaskItem } from "./types.js";
-import type { UpdateInfo } from "./api.js";
+import type { UpdateInfo, PRStatusResponse } from "./api.js";
 
 interface AppState {
   // Sessions
@@ -41,6 +41,9 @@ interface AppState {
   sessionNames: Map<string, string>;
   // Track sessions that were just renamed (for animation)
   recentlyRenamed: Set<string>;
+
+  // PR status per session (pushed by server via WebSocket)
+  prStatus: Map<string, PRStatusResponse>;
 
   // Sidebar project grouping
   collapsedProjects: Set<string>;
@@ -98,6 +101,9 @@ interface AppState {
   setSessionName: (sessionId: string, name: string) => void;
   markRecentlyRenamed: (sessionId: string) => void;
   clearRecentlyRenamed: (sessionId: string) => void;
+
+  // PR status action
+  setPRStatus: (sessionId: string, status: PRStatusResponse) => void;
 
   // Sidebar project grouping actions
   toggleProjectCollapse: (projectKey: string) => void;
@@ -192,6 +198,7 @@ export const useStore = create<AppState>((set) => ({
   changedFiles: new Map(),
   sessionNames: getInitialSessionNames(),
   recentlyRenamed: new Set(),
+  prStatus: new Map(),
   collapsedProjects: getInitialCollapsedProjects(),
   updateInfo: null,
   updateDismissedVersion: getInitialDismissedVersion(),
@@ -291,6 +298,8 @@ export const useStore = create<AppState>((set) => ({
       recentlyRenamed.delete(sessionId);
       const diffPanelSelectedFile = new Map(s.diffPanelSelectedFile);
       diffPanelSelectedFile.delete(sessionId);
+      const prStatus = new Map(s.prStatus);
+      prStatus.delete(sessionId);
       localStorage.setItem("cc-session-names", JSON.stringify(Array.from(sessionNames.entries())));
       if (s.currentSessionId === sessionId) {
         localStorage.removeItem("cc-current-session");
@@ -311,6 +320,7 @@ export const useStore = create<AppState>((set) => ({
         sessionNames,
         recentlyRenamed,
         diffPanelSelectedFile,
+        prStatus,
         sdkSessions: s.sdkSessions.filter((sdk) => sdk.sessionId !== sessionId),
         currentSessionId: s.currentSessionId === sessionId ? null : s.currentSessionId,
       };
@@ -463,6 +473,13 @@ export const useStore = create<AppState>((set) => ({
       return { recentlyRenamed };
     }),
 
+  setPRStatus: (sessionId, status) =>
+    set((s) => {
+      const prStatus = new Map(s.prStatus);
+      prStatus.set(sessionId, status);
+      return { prStatus };
+    }),
+
   toggleProjectCollapse: (projectKey) =>
     set((s) => {
       const collapsedProjects = new Set(s.collapsedProjects);
@@ -546,6 +563,7 @@ export const useStore = create<AppState>((set) => ({
       changedFiles: new Map(),
       sessionNames: new Map(),
       recentlyRenamed: new Set(),
+      prStatus: new Map(),
       activeTab: "chat" as const,
       diffPanelSelectedFile: new Map(),
       terminalOpen: false,

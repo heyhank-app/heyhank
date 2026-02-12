@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useStore } from "../store.js";
-import { api, type UsageLimits, type GitHubPRInfo, type PRStatusResponse } from "../api.js";
+import { api, type UsageLimits, type GitHubPRInfo } from "../api.js";
 import type { TaskItem } from "../types.js";
 
 const EMPTY_TASKS: TaskItem[] = [];
@@ -157,9 +157,6 @@ function UsageLimitsSection({ sessionId }: { sessionId: string }) {
 
 // ─── GitHub PR Status ────────────────────────────────────────────────────────
 
-const PR_POLL_INTERVAL = 30_000;
-const prCache = new Map<string, PRStatusResponse>();
-
 function prStatePill(state: GitHubPRInfo["state"], isDraft: boolean) {
   if (isDraft) return { label: "Draft", cls: "text-cc-muted bg-cc-hover" };
   switch (state) {
@@ -286,33 +283,18 @@ export function GitHubPRDisplay({ pr }: { pr: GitHubPRInfo }) {
 function GitHubPRSection({ sessionId }: { sessionId: string }) {
   const session = useStore((s) => s.sessions.get(sessionId));
   const sdk = useStore((s) => s.sdkSessions.find((x) => x.sessionId === sessionId));
-  const [prStatus, setPrStatus] = useState<PRStatusResponse | null>(
-    prCache.get(sessionId) ?? null,
-  );
+  const prStatus = useStore((s) => s.prStatus.get(sessionId));
 
   const cwd = session?.cwd || sdk?.cwd;
   const branch = session?.git_branch || sdk?.gitBranch;
 
-  const fetchPR = useCallback(async () => {
-    if (!cwd || !branch) return;
-    try {
-      const data = await api.getPRStatus(cwd, branch);
-      prCache.set(sessionId, data);
-      setPrStatus(data);
-    } catch {
-      // silent
-    }
-  }, [sessionId, cwd, branch]);
-
+  // One-time REST fallback on mount if no pushed data yet
   useEffect(() => {
-    setPrStatus(prCache.get(sessionId) ?? null);
-  }, [sessionId]);
-
-  useEffect(() => {
-    fetchPR();
-    const id = setInterval(fetchPR, PR_POLL_INTERVAL);
-    return () => clearInterval(id);
-  }, [fetchPR]);
+    if (prStatus || !cwd || !branch) return;
+    api.getPRStatus(cwd, branch).then((data) => {
+      useStore.getState().setPRStatus(sessionId, data);
+    }).catch(() => {});
+  }, [sessionId, cwd, branch, prStatus]);
 
   if (!prStatus?.available || !prStatus.pr) return null;
 
