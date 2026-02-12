@@ -118,6 +118,18 @@ interface AppState {
   setActiveTab: (tab: "chat" | "diff") => void;
   setDiffPanelSelectedFile: (sessionId: string, filePath: string | null) => void;
 
+  // Terminal state
+  terminalOpen: boolean;
+  terminalCwd: string | null;
+  terminalId: string | null;
+
+  // Terminal actions
+  setTerminalOpen: (open: boolean) => void;
+  setTerminalCwd: (cwd: string | null) => void;
+  setTerminalId: (id: string | null) => void;
+  openTerminal: (cwd: string) => void;
+  closeTerminal: () => void;
+
   reset: () => void;
 }
 
@@ -190,6 +202,9 @@ export const useStore = create<AppState>((set) => ({
   homeResetKey: 0,
   activeTab: "chat",
   diffPanelSelectedFile: new Map(),
+  terminalOpen: false,
+  terminalCwd: null,
+  terminalId: null,
 
   setDarkMode: (v) => {
     localStorage.setItem("cc-dark-mode", String(v));
@@ -507,6 +522,12 @@ export const useStore = create<AppState>((set) => ({
       return { diffPanelSelectedFile };
     }),
 
+  setTerminalOpen: (open) => set({ terminalOpen: open }),
+  setTerminalCwd: (cwd) => set({ terminalCwd: cwd }),
+  setTerminalId: (id) => set({ terminalId: id }),
+  openTerminal: (cwd) => set({ terminalOpen: true, terminalCwd: cwd }),
+  closeTerminal: () => set({ terminalOpen: false, terminalCwd: null, terminalId: null }),
+
   reset: () =>
     set({
       sessions: new Map(),
@@ -527,5 +548,8 @@ export const useStore = create<AppState>((set) => ({
       recentlyRenamed: new Set(),
       activeTab: "chat" as const,
       diffPanelSelectedFile: new Map(),
+      terminalOpen: false,
+      terminalCwd: null,
+      terminalId: null,
     }),
 }));

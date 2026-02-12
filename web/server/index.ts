@@ -10,6 +10,7 @@ import { CliLauncher } from "./cli-launcher.js";
 import { WsBridge } from "./ws-bridge.js";
 import { SessionStore } from "./session-store.js";
 import { WorktreeTracker } from "./worktree-tracker.js";
+import { TerminalManager } from "./terminal-manager.js";
 import { generateSessionTitle } from "./auto-namer.js";
 import * as sessionNames from "./session-names.js";
 import { getSettings } from "./settings-manager.js";
@@ -29,6 +30,7 @@ const sessionStore = new SessionStore();
 const wsBridge = new WsBridge();
 const launcher = new CliLauncher(port);
 const worktreeTracker = new WorktreeTracker();
+const terminalManager = new TerminalManager();
 
 // ── Restore persisted sessions from disk ────────────────────────────────────
 wsBridge.setStore(sessionStore);
@@ -85,7 +87,7 @@ console.log(`[server] Session persistence: ${sessionStore.directory}`);
 const app = new Hono();
 
 app.use("/api/*", cors());
-app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker));
+app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager));
 
 // In production, serve built frontend using absolute path (works when installed as npm package)
 if (process.env.NODE_ENV === "production") {
@@ -121,6 +123,17 @@ const server = Bun.serve<SocketData>({
       return new Response("WebSocket upgrade failed", { status: 400 });
     }
 
+    // ── Terminal WebSocket — embedded terminal PTY connection ─────────
+    const termMatch = url.pathname.match(/^\/ws\/terminal\/([a-f0-9-]+)$/);
+    if (termMatch) {
+      const terminalId = termMatch[1];
+      const upgraded = server.upgrade(req, {
+        data: { kind: "terminal" as const, terminalId },
+      });
+      if (upgraded) return undefined;
+      return new Response("WebSocket upgrade failed", { status: 400 });
+    }
+
     // Hono handles the rest
     return app.fetch(req, server);
   },
@@ -132,6 +145,8 @@ const server = Bun.serve<SocketData>({
         launcher.markConnected(data.sessionId);
       } else if (data.kind === "browser") {
         wsBridge.handleBrowserOpen(ws, data.sessionId);
+      } else if (data.kind === "terminal") {
+        terminalManager.addBrowserSocket(ws);
       }
     },
     message(ws: ServerWebSocket<SocketData>, msg: string | Buffer) {
@@ -140,6 +155,8 @@ const server = Bun.serve<SocketData>({
         wsBridge.handleCLIMessage(ws, msg);
       } else if (data.kind === "browser") {
         wsBridge.handleBrowserMessage(ws, msg);
+      } else if (data.kind === "terminal") {
+        terminalManager.handleBrowserMessage(ws, msg);
       }
     },
     close(ws: ServerWebSocket<SocketData>) {
@@ -148,6 +165,8 @@ const server = Bun.serve<SocketData>({
         wsBridge.handleCLIClose(ws);
       } else if (data.kind === "browser") {
         wsBridge.handleBrowserClose(ws);
+      } else if (data.kind === "terminal") {
+        terminalManager.removeBrowserSocket(ws);
       }
     },
   },

@@ -8,6 +8,7 @@ import type { CliLauncher } from "./cli-launcher.js";
 import type { WsBridge } from "./ws-bridge.js";
 import type { SessionStore } from "./session-store.js";
 import type { WorktreeTracker } from "./worktree-tracker.js";
+import type { TerminalManager } from "./terminal-manager.js";
 import * as envManager from "./env-manager.js";
 import * as gitUtils from "./git-utils.js";
 import * as sessionNames from "./session-names.js";
@@ -42,6 +43,7 @@ export function createRoutes(
   wsBridge: WsBridge,
   sessionStore: SessionStore,
   worktreeTracker: WorktreeTracker,
+  terminalManager: TerminalManager,
 ) {
   const api = new Hono();
 
@@ -934,6 +936,26 @@ export function createRoutes(
     }
     return { cleaned: result.removed, path: mapping.worktreePath };
   }
+
+  // ─── Terminal ──────────────────────────────────────────────────────
+
+  api.get("/terminal", (c) => {
+    const info = terminalManager.getInfo();
+    if (!info) return c.json({ active: false });
+    return c.json({ active: true, terminalId: info.id, cwd: info.cwd });
+  });
+
+  api.post("/terminal/spawn", async (c) => {
+    const body = await c.req.json<{ cwd: string; cols?: number; rows?: number }>();
+    if (!body.cwd) return c.json({ error: "cwd is required" }, 400);
+    const terminalId = terminalManager.spawn(body.cwd, body.cols, body.rows);
+    return c.json({ terminalId });
+  });
+
+  api.post("/terminal/kill", (c) => {
+    terminalManager.kill();
+    return c.json({ ok: true });
+  });
 
   return api;
 }

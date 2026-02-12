@@ -142,7 +142,8 @@ beforeEach(() => {
   sessionStore = createMockStore();
   tracker = createMockTracker();
   app = new Hono();
-  app.route("/api", createRoutes(launcher, bridge, sessionStore, tracker));
+  const terminalManager = { getInfo: () => null, spawn: () => "", kill: () => {} } as any;
+  app.route("/api", createRoutes(launcher, bridge, sessionStore, tracker, terminalManager));
 });
 
 // ─── Sessions ────────────────────────────────────────────────────────────────

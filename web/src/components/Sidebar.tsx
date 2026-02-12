@@ -3,6 +3,7 @@ import { useStore } from "../store.js";
 import { api } from "../api.js";
 import { connectSession, connectAllSessions, disconnectSession } from "../ws.js";
 import { EnvManager } from "./EnvManager.js";
+import { FolderPicker } from "./FolderPicker.js";
 import { ProjectGroup } from "./ProjectGroup.js";
 import { SessionItem } from "./SessionItem.js";
 import { groupSessionsByProject, type SessionItem as SessionItemType } from "../utils/project-grouping.js";
@@ -11,6 +12,7 @@ export function Sidebar() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [showEnvManager, setShowEnvManager] = useState(false);
+  const [showTerminalPicker, setShowTerminalPicker] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -30,6 +32,7 @@ export function Sidebar() {
   const pendingPermissions = useStore((s) => s.pendingPermissions);
   const collapsedProjects = useStore((s) => s.collapsedProjects);
   const toggleProjectCollapse = useStore((s) => s.toggleProjectCollapse);
+  const terminalOpen = useStore((s) => s.terminalOpen);
 
   // Poll for SDK sessions on mount
   useEffect(() => {
@@ -345,6 +348,21 @@ export function Sidebar() {
       {/* Footer */}
       <div className="p-3 border-t border-cc-border space-y-0.5">
         <button
+          onClick={() => {
+            if (terminalOpen) {
+              useStore.getState().closeTerminal();
+            } else {
+              setShowTerminalPicker(true);
+            }
+          }}
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
+            <path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3zm2 1.5l3 2.5-3 2.5V4.5zM8.5 10h3v1h-3v-1z" />
+          </svg>
+          <span>{terminalOpen ? "Close Terminal" : "Terminal"}</span>
+        </button>
+        <button
           onClick={() => setShowEnvManager(true)}
           className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
         >
@@ -399,6 +417,18 @@ export function Sidebar() {
       {/* Environment manager modal */}
       {showEnvManager && (
         <EnvManager onClose={() => setShowEnvManager(false)} />
+      )}
+
+      {/* Terminal folder picker */}
+      {showTerminalPicker && (
+        <FolderPicker
+          initialPath=""
+          onSelect={(path) => {
+            useStore.getState().openTerminal(path);
+            setShowTerminalPicker(false);
+          }}
+          onClose={() => setShowTerminalPicker(false)}
+        />
       )}
     </aside>
   );

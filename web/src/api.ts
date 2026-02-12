@@ -338,6 +338,14 @@ export const api = {
   getSessionUsageLimits: (sessionId: string) =>
     get<UsageLimits>(`/sessions/${encodeURIComponent(sessionId)}/usage-limits`),
 
+  // Terminal
+  spawnTerminal: (cwd: string, cols?: number, rows?: number) =>
+    post<{ terminalId: string }>("/terminal/spawn", { cwd, cols, rows }),
+  killTerminal: () =>
+    post<{ ok: boolean }>("/terminal/kill"),
+  getTerminal: () =>
+    get<{ active: boolean; terminalId?: string; cwd?: string }>("/terminal"),
+
   // Update checking
   checkForUpdate: () => get<UpdateInfo>("/update-check"),
   forceCheckForUpdate: () => post<UpdateInfo>("/update-check"),
