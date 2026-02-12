@@ -66,6 +66,27 @@ bun run dev       # backend + Vite HMR on :5174
 
 Production: `bun run build && bun run start` serves everything on `:3456`.
 
+## Run as a background service (macOS)
+
+Install as a launchd service that starts on login and restarts on crash:
+
+```bash
+bun install -g the-vibe-companion
+the-vibe-companion install
+```
+
+Other commands:
+
+```bash
+the-vibe-companion status      # check if the service is running
+the-vibe-companion logs        # tail stdout/stderr logs
+the-vibe-companion uninstall   # remove the service
+```
+
+Use `--port <n>` with `install` to override the default port (3456).
+
+Dev uses port 3457 for the backend and 5174 for Vite HMR, so both dev and prod can run simultaneously.
+
 ## Tech stack
 
 Bun runtime, Hono server, React 19, Zustand, Tailwind v4, Vite.

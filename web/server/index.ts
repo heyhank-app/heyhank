@@ -18,7 +18,10 @@ import type { ServerWebSocket } from "bun";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageRoot = process.env.__VIBE_PACKAGE_ROOT || resolve(__dirname, "..");
 
-const port = Number(process.env.PORT) || 3456;
+import { DEFAULT_PORT_DEV, DEFAULT_PORT_PROD } from "./constants.js";
+
+const defaultPort = process.env.NODE_ENV === "production" ? DEFAULT_PORT_PROD : DEFAULT_PORT_DEV;
+const port = Number(process.env.PORT) || defaultPort;
 const sessionStore = new SessionStore();
 const wsBridge = new WsBridge();
 const launcher = new CliLauncher(port);
