@@ -326,6 +326,12 @@ export const api = {
     get<{ path: string; diff: string }>(
       `/fs/diff?path=${encodeURIComponent(path)}`,
     ),
+  getClaudeMdFiles: (cwd: string) =>
+    get<{ cwd: string; files: { path: string; content: string }[] }>(
+      `/fs/claude-md?cwd=${encodeURIComponent(cwd)}`,
+    ),
+  saveClaudeMd: (path: string, content: string) =>
+    put<{ ok: boolean; path: string }>("/fs/claude-md", { path, content }),
 
   // Usage limits
   getUsageLimits: () => get<UsageLimits>("/usage-limits"),
