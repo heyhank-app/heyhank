@@ -10,6 +10,7 @@ import { TaskPanel } from "./components/TaskPanel.js";
 import { DiffPanel } from "./components/DiffPanel.js";
 import { Playground } from "./components/Playground.js";
 import { UpdateBanner } from "./components/UpdateBanner.js";
+import { SettingsPage } from "./components/SettingsPage.js";
 
 function useHash() {
   return useSyncExternalStore(
@@ -53,6 +54,9 @@ export default function App() {
 
   if (hash === "#/playground") {
     return <Playground />;
+  }
+  if (hash === "#/settings") {
+    return <SettingsPage />;
   }
 
   return (

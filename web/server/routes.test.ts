@@ -42,6 +42,20 @@ vi.mock("./session-names.js", () => ({
   _resetForTest: vi.fn(),
 }));
 
+vi.mock("./settings-manager.js", () => ({
+  DEFAULT_OPENROUTER_MODEL: "openrouter/free",
+  getSettings: vi.fn(() => ({
+    openrouterApiKey: "",
+    openrouterModel: "openrouter/free",
+    updatedAt: 0,
+  })),
+  updateSettings: vi.fn((patch) => ({
+    openrouterApiKey: patch.openrouterApiKey ?? "",
+    openrouterModel: patch.openrouterModel ?? "openrouter/free",
+    updatedAt: Date.now(),
+  })),
+}));
+
 const mockGetUsageLimits = vi.hoisted(() => vi.fn());
 vi.mock("./usage-limits.js", () => ({
   getUsageLimits: mockGetUsageLimits,
@@ -68,6 +82,7 @@ import { createRoutes } from "./routes.js";
 import * as envManager from "./env-manager.js";
 import * as gitUtils from "./git-utils.js";
 import * as sessionNames from "./session-names.js";
+import * as settingsManager from "./settings-manager.js";
 
 // ─── Mock factories ──────────────────────────────────────────────────────────
 
@@ -669,6 +684,147 @@ describe("DELETE /api/envs/:slug", () => {
     expect(res.status).toBe(404);
     const json = await res.json();
     expect(json).toEqual({ error: "Environment not found" });
+  });
+});
+
+// ─── Settings ────────────────────────────────────────────────────────────────
+
+describe("GET /api/settings", () => {
+  it("returns settings status without exposing the key", async () => {
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      openrouterApiKey: "or-secret",
+      openrouterModel: "openrouter/free",
+      updatedAt: 123,
+    });
+
+    const res = await app.request("/api/settings", { method: "GET" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({
+      openrouterApiKeyConfigured: true,
+      openrouterModel: "openrouter/free",
+    });
+  });
+
+  it("reports key as not configured when empty", async () => {
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      openrouterApiKey: "",
+      openrouterModel: "openai/gpt-4o-mini",
+      updatedAt: 123,
+    });
+
+    const res = await app.request("/api/settings", { method: "GET" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({
+      openrouterApiKeyConfigured: false,
+      openrouterModel: "openai/gpt-4o-mini",
+    });
+  });
+});
+
+describe("PUT /api/settings", () => {
+  it("updates settings", async () => {
+    vi.mocked(settingsManager.updateSettings).mockReturnValue({
+      openrouterApiKey: "new-key",
+      openrouterModel: "openrouter/free",
+      updatedAt: 456,
+    });
+
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ openrouterApiKey: "new-key" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(settingsManager.updateSettings).toHaveBeenCalledWith({
+      openrouterApiKey: "new-key",
+      openrouterModel: undefined,
+    });
+    const json = await res.json();
+    expect(json).toEqual({
+      openrouterApiKeyConfigured: true,
+      openrouterModel: "openrouter/free",
+    });
+  });
+
+  it("trims key and falls back to default model for blank value", async () => {
+    vi.mocked(settingsManager.updateSettings).mockReturnValue({
+      openrouterApiKey: "trimmed-key",
+      openrouterModel: "openrouter/free",
+      updatedAt: 789,
+    });
+
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ openrouterApiKey: "  trimmed-key  ", openrouterModel: "   " }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(settingsManager.updateSettings).toHaveBeenCalledWith({
+      openrouterApiKey: "trimmed-key",
+      openrouterModel: "openrouter/free",
+    });
+  });
+
+  it("updates only model without overriding key", async () => {
+    vi.mocked(settingsManager.updateSettings).mockReturnValue({
+      openrouterApiKey: "existing-key",
+      openrouterModel: "openai/gpt-4o-mini",
+      updatedAt: 999,
+    });
+
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ openrouterModel: "openai/gpt-4o-mini" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(settingsManager.updateSettings).toHaveBeenCalledWith({
+      openrouterApiKey: undefined,
+      openrouterModel: "openai/gpt-4o-mini",
+    });
+  });
+
+  it("returns 400 for non-string model", async () => {
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ openrouterApiKey: "new-key", openrouterModel: 123 }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "openrouterModel must be a string" });
+  });
+
+  it("returns 400 for non-string key", async () => {
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ openrouterApiKey: 123 }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "openrouterApiKey must be a string" });
+  });
+
+  it("returns 400 when no settings fields are provided", async () => {
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "At least one settings field is required" });
   });
 });
 

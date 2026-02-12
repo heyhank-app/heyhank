@@ -195,6 +195,34 @@ describe("updateEnv", () => {
 });
 
 // ===========================================================================
+// settings
+// ===========================================================================
+describe("settings", () => {
+  it("sends GET to /api/settings", async () => {
+    const settings = { openrouterApiKeyConfigured: true, openrouterModel: "openrouter/free" };
+    mockFetch.mockResolvedValueOnce(mockResponse(settings));
+
+    const result = await api.getSettings();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/settings");
+    expect(result).toEqual(settings);
+  });
+
+  it("sends PUT to /api/settings", async () => {
+    const settings = { openrouterApiKeyConfigured: true, openrouterModel: "openrouter/free" };
+    mockFetch.mockResolvedValueOnce(mockResponse(settings));
+
+    await api.updateSettings({ openrouterApiKey: "or-key" });
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/settings");
+    expect(opts.method).toBe("PUT");
+    expect(JSON.parse(opts.body)).toEqual({ openrouterApiKey: "or-key" });
+  });
+});
+
+// ===========================================================================
 // getRepoInfo
 // ===========================================================================
 describe("getRepoInfo", () => {

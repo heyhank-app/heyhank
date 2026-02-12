@@ -12,6 +12,7 @@ import { SessionStore } from "./session-store.js";
 import { WorktreeTracker } from "./worktree-tracker.js";
 import { generateSessionTitle } from "./auto-namer.js";
 import * as sessionNames from "./session-names.js";
+import { getSettings } from "./settings-manager.js";
 import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
 import { isRunningAsService } from "./service.js";
 import type { SocketData } from "./ws-bridge.js";
@@ -66,11 +67,11 @@ wsBridge.onCLIRelaunchNeededCallback(async (sessionId) => {
 wsBridge.onFirstTurnCompletedCallback(async (sessionId, firstUserMessage) => {
   // Don't overwrite a name that was already set (manual rename or prior auto-name)
   if (sessionNames.getName(sessionId)) return;
+  if (!getSettings().openrouterApiKey.trim()) return;
   const info = launcher.getSession(sessionId);
   const model = info?.model || "claude-sonnet-4-5-20250929";
-  const backendType = info?.backendType || "claude";
-  console.log(`[server] Auto-naming session ${sessionId} with model ${model} (${backendType})...`);
-  const title = await generateSessionTitle(firstUserMessage, model, { backendType });
+  console.log(`[server] Auto-naming session ${sessionId} via OpenRouter with model ${model}...`);
+  const title = await generateSessionTitle(firstUserMessage, model);
   // Re-check: a manual rename may have occurred while we were generating
   if (title && !sessionNames.getName(sessionId)) {
     console.log(`[server] Auto-named session ${sessionId}: "${title}"`);

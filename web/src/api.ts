@@ -60,6 +60,18 @@ async function del<T = unknown>(path: string, body?: object): Promise<T> {
   return res.json();
 }
 
+export interface ContainerCreateOpts {
+  image?: string;
+  ports?: number[];
+  volumes?: string[];
+  env?: Record<string, string>;
+}
+
+export interface ContainerStatus {
+  available: boolean;
+  version: string | null;
+}
+
 export interface CreateSessionOpts {
   model?: string;
   permissionMode?: string;
@@ -73,6 +85,7 @@ export interface CreateSessionOpts {
   createBranch?: boolean;
   useWorktree?: boolean;
   backend?: "claude" | "codex";
+  container?: ContainerCreateOpts;
 }
 
 export interface BackendInfo {
@@ -165,6 +178,11 @@ export interface UsageLimits {
   } | null;
 }
 
+export interface AppSettings {
+  openrouterApiKeyConfigured: boolean;
+  openrouterModel: string;
+}
+
 export interface GitHubPRInfo {
   number: number;
   title: string;
@@ -234,6 +252,11 @@ export const api = {
   ) => put<CompanionEnv>(`/envs/${encodeURIComponent(slug)}`, data),
   deleteEnv: (slug: string) => del(`/envs/${encodeURIComponent(slug)}`),
 
+  // Settings
+  getSettings: () => get<AppSettings>("/settings"),
+  updateSettings: (data: { openrouterApiKey?: string; openrouterModel?: string }) =>
+    put<AppSettings>("/settings", data),
+
   // Git operations
   getRepoInfo: (path: string) =>
     get<GitRepoInfo>(`/git/repo-info?path=${encodeURIComponent(path)}`),
@@ -277,6 +300,10 @@ export const api = {
   getBackends: () => get<BackendInfo[]>("/backends"),
   getBackendModels: (backendId: string) =>
     get<BackendModelInfo[]>(`/backends/${encodeURIComponent(backendId)}/models`),
+
+  // Containers
+  getContainerStatus: () => get<ContainerStatus>("/containers/status"),
+  getContainerImages: () => get<string[]>("/containers/images"),
 
   // Editor
   startEditor: (sessionId: string) =>
