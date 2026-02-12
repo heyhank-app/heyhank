@@ -3,7 +3,7 @@ import { FadeIn } from "./FadeIn";
 const features = [
   {
     title: "Multiple Sessions",
-    description: "Run several Claude Code instances side by side. Each gets its own process, model, and permission settings.",
+    description: "Run Claude Code and Codex sessions side by side. Each gets its own process, model, and permission settings.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="2" y="3" width="20" height="14" rx="2" />

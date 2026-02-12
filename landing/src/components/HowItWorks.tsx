@@ -13,7 +13,7 @@ export function HowItWorks() {
           <div className="cc-card rounded-2xl p-4 sm:p-6 mb-12 bg-cc-card">
             <div className="flex items-center justify-center gap-4 flex-wrap">
               <div className="bg-[#f0e5d2] border border-cc-border rounded-[10px] px-5 py-3.5 text-sm font-mono-code whitespace-nowrap">
-                Claude Code CLI
+                Claude Code + Codex CLI
               </div>
               <span className="text-cc-muted font-mono-code text-xs">&larr; WebSocket &rarr;</span>
               <div className="bg-cc-primary text-[#fff4eb] border border-[#8e3518] rounded-[10px] px-5 py-3.5 text-sm font-mono-code whitespace-nowrap">
@@ -43,7 +43,7 @@ export function HowItWorks() {
               {
                 step: 2,
                 title: "Bridge",
-                description: "The server starts Claude Code sessions and forwards their WebSocket channels to the web app.",
+                description: "The server starts Claude Code or Codex sessions and forwards their channels to the web app.",
               },
               {
                 step: 3,

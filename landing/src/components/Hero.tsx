@@ -5,7 +5,7 @@ export function Hero() {
   return (
     <section className="pt-14 sm:pt-20 pb-16 px-5 sm:px-7">
       <div className="max-w-[1060px] mx-auto">
-        <div className="cc-label animate-fade-up-1 mb-5 text-center">Vibe Coder Companion</div>
+        <div className="cc-label animate-fade-up-1 mb-5 text-center">The Companion</div>
         <div className="animate-fade-up-2 mb-7 inline-flex w-full justify-center">
           <div className="cc-card rounded-2xl p-2 bg-cc-card">
             <div className="bg-[#efe3cd] rounded-xl px-4 py-2.5">
@@ -21,8 +21,8 @@ export function Hero() {
         </h1>
 
         <p className="text-center text-[clamp(16px,2.5vw,20px)] text-cc-muted max-w-[680px] mx-auto mb-10 leading-relaxed animate-fade-up-3">
-          A browser control room for Claude Code with real-time agent output, full tool-call transparency, and safe
-          multi-session orchestration.
+          A browser control room for Claude Code and Codex with real-time agent output, full tool-call transparency,
+          and safe multi-session orchestration.
         </p>
 
         <div className="animate-fade-up-4 text-center">

@@ -6,9 +6,17 @@ export function Nav() {
       <div className="max-w-[1060px] mx-auto w-full flex items-center justify-between">
         <a href="/" className="flex items-center gap-2.5 font-semibold text-[15px] text-cc-fg no-underline">
           <ClawdLogo size={28} />
-          <span className="font-condensed text-xl tracking-wide">Vibe Coder Companion</span>
+          <span className="font-condensed text-xl tracking-wide">The Companion</span>
         </a>
         <div className="flex items-center gap-5 sm:gap-6">
+          <a
+            href="https://thevibecompany.co"
+            target="_blank"
+            rel="noopener"
+            className="text-sm text-cc-muted hover:text-cc-fg transition-colors hidden sm:block font-mono-code"
+          >
+            The Vibe Company
+          </a>
           <a
             href="https://github.com/The-Vibe-Company/companion"
             target="_blank"

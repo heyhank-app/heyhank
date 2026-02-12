@@ -18,7 +18,7 @@ export function GetStarted() {
 
         <FadeIn className="mt-8">
           <div className="flex justify-center gap-6 flex-wrap text-sm text-cc-muted">
-            {["Bun runtime", "Claude Code CLI", "Active subscription"].map((req) => (
+            {["Bun runtime", "Claude Code or Codex CLI", "Active subscription"].map((req) => (
               <span key={req} className="flex items-center gap-2 bg-cc-card border border-cc-border rounded-full px-4 py-2">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#1e5e73" strokeWidth="1.5">
                   <polyline points="13 4 6 11 3 8" />
