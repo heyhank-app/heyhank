@@ -84,14 +84,9 @@ export function groupSessionsByProject(
     (a, b) => a.label.localeCompare(b.label),
   );
 
-  // Within each group, sort sessions: running first, then by createdAt desc
+  // Within each group, sort sessions by createdAt desc (stable order, no reordering on status change)
   for (const group of sorted) {
-    group.sessions.sort((a, b) => {
-      const aRunning = a.status === "running" ? 1 : 0;
-      const bRunning = b.status === "running" ? 1 : 0;
-      if (aRunning !== bRunning) return bRunning - aRunning;
-      return b.createdAt - a.createdAt;
-    });
+    group.sessions.sort((a, b) => b.createdAt - a.createdAt);
   }
 
   return sorted;
