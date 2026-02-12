@@ -1,6 +1,6 @@
 import { CopyButton } from "./CopyButton";
 
-const COMMAND = "bunx the-vibe-companion";
+const COMMAND = "bunx the-companion";
 
 export function InstallBlock({ large }: { large?: boolean }) {
   return (

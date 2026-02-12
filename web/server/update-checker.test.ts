@@ -78,6 +78,12 @@ describe("checkForUpdate", () => {
 
     await checker.checkForUpdate();
 
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://registry.npmjs.org/the-companion/latest",
+      expect.objectContaining({
+        headers: { Accept: "application/json" },
+      }),
+    );
     const state = checker.getUpdateState();
     expect(state.latestVersion).toBe("99.0.0");
     expect(state.lastChecked).toBeGreaterThan(0);

@@ -83,7 +83,7 @@ describe("CodexAdapter", () => {
     // Check stdin received the initialize request
     const allWritten = stdin.chunks.join("");
     expect(allWritten).toContain('"method":"initialize"');
-    expect(allWritten).toContain("vibe-companion");
+    expect(allWritten).toContain("the-companion");
   });
 
   it("translates agent message streaming to content_block_delta events", async () => {

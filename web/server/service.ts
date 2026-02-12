@@ -12,9 +12,11 @@ import { DEFAULT_PORT_PROD } from "./constants.js";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
-const LABEL = "co.thevibecompany.companion";
+const LABEL = "sh.thecompanion.app";
+const OLD_LABEL = "co.thevibecompany.companion";
 const PLIST_DIR = join(homedir(), "Library", "LaunchAgents");
 const PLIST_PATH = join(PLIST_DIR, `${LABEL}.plist`);
+const OLD_PLIST_PATH = join(PLIST_DIR, `${OLD_LABEL}.plist`);
 const COMPANION_DIR = join(homedir(), ".companion");
 const LOG_DIR = join(COMPANION_DIR, "logs");
 const STDOUT_LOG = join(LOG_DIR, "companion.log");
@@ -97,20 +99,54 @@ export function generatePlist(opts: PlistOptions): string {
 
 function resolveBinPath(): string {
   try {
-    const binPath = execSync("which the-vibe-companion", { encoding: "utf-8" }).trim();
+    const binPath = execSync("which the-companion", { encoding: "utf-8" }).trim();
     if (binPath) return binPath;
   } catch {
     // not found globally
   }
 
-  console.error("the-vibe-companion must be installed globally for service mode.");
+  console.error("the-companion must be installed globally for service mode.");
   console.error("");
-  console.error("  bun install -g the-vibe-companion");
+  console.error("  bun install -g the-companion");
   console.error("");
   console.error("Then retry:");
   console.error("");
-  console.error("  the-vibe-companion install");
+  console.error("  the-companion install");
   process.exit(1);
+}
+
+function unloadService(plistPath: string): void {
+  try {
+    execSync(`launchctl unload -w "${plistPath}"`, { stdio: "pipe" });
+  } catch {
+    // Service may already be unloaded — that's fine
+  }
+}
+
+function removePlist(plistPath: string): void {
+  try {
+    unlinkSync(plistPath);
+  } catch {
+    // Already gone
+  }
+}
+
+function migrateLegacyInstallIfNeeded(): void {
+  if (!existsSync(OLD_PLIST_PATH)) return;
+
+  console.log("Found legacy The Vibe Companion service. Migrating...");
+  unloadService(OLD_PLIST_PATH);
+  removePlist(OLD_PLIST_PATH);
+}
+
+function getInstalledService():
+  | { label: string; plistPath: string }
+  | undefined {
+  if (existsSync(PLIST_PATH)) return { label: LABEL, plistPath: PLIST_PATH };
+  if (existsSync(OLD_PLIST_PATH)) {
+    return { label: OLD_LABEL, plistPath: OLD_PLIST_PATH };
+  }
+  return undefined;
 }
 
 // ─── Install ───────────────────────────────────────────────────────────────────
@@ -118,9 +154,11 @@ function resolveBinPath(): string {
 export async function install(opts?: { port?: number }): Promise<void> {
   ensureMacOS();
 
+  migrateLegacyInstallIfNeeded();
+
   if (existsSync(PLIST_PATH)) {
-    console.error("The Vibe Companion is already installed as a service.");
-    console.error("Run 'the-vibe-companion uninstall' first to reinstall.");
+    console.error("The Companion is already installed as a service.");
+    console.error("Run 'the-companion uninstall' first to reinstall.");
     process.exit(1);
   }
 
@@ -146,14 +184,14 @@ export async function install(opts?: { port?: number }): Promise<void> {
     process.exit(1);
   }
 
-  console.log("The Vibe Companion has been installed as a background service.");
+  console.log("The Companion has been installed as a background service.");
   console.log("");
   console.log(`  URL:    http://localhost:${port}`);
   console.log(`  Logs:   ${LOG_DIR}`);
   console.log(`  Plist:  ${PLIST_PATH}`);
   console.log("");
   console.log("The service will start automatically on login.");
-  console.log("Use 'the-vibe-companion status' to check if it's running.");
+  console.log("Use 'the-companion status' to check if it's running.");
 }
 
 // ─── Uninstall ─────────────────────────────────────────────────────────────────
@@ -161,26 +199,16 @@ export async function install(opts?: { port?: number }): Promise<void> {
 export async function uninstall(): Promise<void> {
   ensureMacOS();
 
-  if (!existsSync(PLIST_PATH)) {
-    console.log("The Vibe Companion is not installed as a service.");
+  const installedService = getInstalledService();
+  if (!installedService) {
+    console.log("The Companion is not installed as a service.");
     return;
   }
 
-  // Unload the service
-  try {
-    execSync(`launchctl unload -w "${PLIST_PATH}"`, { stdio: "pipe" });
-  } catch {
-    // Service may already be unloaded — that's fine
-  }
+  unloadService(installedService.plistPath);
+  removePlist(installedService.plistPath);
 
-  // Remove plist
-  try {
-    unlinkSync(PLIST_PATH);
-  } catch {
-    // Already gone
-  }
-
-  console.log("The Vibe Companion service has been removed.");
+  console.log("The Companion service has been removed.");
   console.log(`Logs are preserved at ${LOG_DIR}`);
 }
 
@@ -199,9 +227,10 @@ export interface ServiceStatus {
  */
 export function isRunningAsService(): boolean {
   if (process.platform !== "darwin") return false;
-  if (!existsSync(PLIST_PATH)) return false;
+  const installedService = getInstalledService();
+  if (!installedService) return false;
   try {
-    const output = execSync(`launchctl list "${LABEL}"`, {
+    const output = execSync(`launchctl list "${installedService.label}"`, {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -214,21 +243,22 @@ export function isRunningAsService(): boolean {
 export async function status(): Promise<ServiceStatus> {
   ensureMacOS();
 
-  if (!existsSync(PLIST_PATH)) {
+  const installedService = getInstalledService();
+  if (!installedService) {
     return { installed: false, running: false };
   }
 
   // Read port from the plist
   let port = DEFAULT_PORT_PROD;
   try {
-    const plistContent = readFileSync(PLIST_PATH, "utf-8");
+    const plistContent = readFileSync(installedService.plistPath, "utf-8");
     const portMatch = plistContent.match(/<key>PORT<\/key>\s*<string>(\d+)<\/string>/);
     if (portMatch) port = Number(portMatch[1]);
   } catch { /* use default */ }
 
   // Check if service is running via launchctl
   try {
-    const output = execSync(`launchctl list "${LABEL}"`, {
+    const output = execSync(`launchctl list "${installedService.label}"`, {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
     });

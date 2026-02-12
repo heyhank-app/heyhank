@@ -242,7 +242,7 @@ export function Sidebar() {
       <div className="p-4 pb-3">
         <div className="flex items-center gap-2 mb-4">
           <img src={logoSrc} alt="" className="w-7 h-7" />
-          <span className="text-sm font-semibold text-cc-fg tracking-tight">The Vibe Companion</span>
+          <span className="text-sm font-semibold text-cc-fg tracking-tight">The Companion</span>
         </div>
 
         <button

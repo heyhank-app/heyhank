@@ -342,7 +342,7 @@ export function createRoutes(
     const cwd = process.cwd();
     // Only report cwd if the user launched companion from a real project directory
     // (not from the package root or the home directory itself)
-    const packageRoot = process.env.__VIBE_PACKAGE_ROOT;
+    const packageRoot = process.env.__COMPANION_PACKAGE_ROOT;
     const isProjectDir =
       cwd !== home &&
       (!packageRoot || !cwd.startsWith(packageRoot));
@@ -715,10 +715,10 @@ export function createRoutes(
     setTimeout(async () => {
       try {
         console.log(
-          `[update] Updating the-vibe-companion to ${state.latestVersion}...`,
+          `[update] Updating the-companion to ${state.latestVersion}...`,
         );
         const proc = Bun.spawn(
-          ["bun", "install", "-g", `the-vibe-companion@${state.latestVersion}`],
+          ["bun", "install", "-g", `the-companion@${state.latestVersion}`],
           { stdout: "pipe", stderr: "pipe" },
         );
         const exitCode = await proc.exited;

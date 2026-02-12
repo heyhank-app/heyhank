@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="screenshot.png" alt="The Vibe Companion" width="100%" />
+  <img src="screenshot.png" alt="The Companion" width="100%" />
 </p>
 
-<h1 align="center">The Vibe Companion</h1>
+<h1 align="center">The Companion</h1>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/the-vibe-companion"><img src="https://img.shields.io/npm/v/the-vibe-companion.svg" alt="npm version" /></a>
-  <a href="https://www.npmjs.com/package/the-vibe-companion"><img src="https://img.shields.io/npm/dm/the-vibe-companion.svg" alt="npm downloads" /></a>
+  <a href="https://www.npmjs.com/package/the-companion"><img src="https://img.shields.io/npm/v/the-companion.svg" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/the-companion"><img src="https://img.shields.io/npm/dm/the-companion.svg" alt="npm downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
 </p>
 
@@ -15,7 +15,7 @@
 Claude Code in your browser. We reverse-engineered the undocumented WebSocket protocol hidden inside the CLI and built a web UI on top of it. No API key needed, it runs on your existing Claude Code subscription.
 
 ```bash
-bunx the-vibe-companion
+bunx the-companion
 ```
 
 Open [localhost:3456](http://localhost:3456). That's it.
@@ -24,7 +24,7 @@ Open [localhost:3456](http://localhost:3456). That's it.
 
 Claude Code is powerful but stuck in a terminal. You can't easily run multiple sessions, there's no visual feedback on tool calls, and if the process dies your context is gone.
 
-The Vibe Companion fixes that. It spawns Claude Code processes, streams their output to your browser in real-time, and lets you approve or deny tool calls from a proper UI.
+The Companion fixes that. It spawns Claude Code processes, streams their output to your browser in real-time, and lets you approve or deny tool calls from a proper UI.
 
 ## What you get
 
@@ -71,16 +71,16 @@ Production: `bun run build && bun run start` serves everything on `:3456`.
 Install as a launchd service that starts on login and restarts on crash:
 
 ```bash
-bun install -g the-vibe-companion
-the-vibe-companion install
+bun install -g the-companion
+the-companion install
 ```
 
 Other commands:
 
 ```bash
-the-vibe-companion status      # check if the service is running
-the-vibe-companion logs        # tail stdout/stderr logs
-the-vibe-companion uninstall   # remove the service
+the-companion status      # check if the service is running
+the-companion logs        # tail stdout/stderr logs
+the-companion uninstall   # remove the service
 ```
 
 Use `--port <n>` with `install` to override the default port (3456).

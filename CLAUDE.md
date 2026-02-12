@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-The Vibe Companion — a web UI for Claude Code. It reverse-engineers the undocumented `--sdk-url` WebSocket protocol in the Claude Code CLI to provide a browser-based interface for running multiple Claude Code sessions with streaming, tool call visibility, and permission control.
+The Companion — a web UI for Claude Code. It reverse-engineers the undocumented `--sdk-url` WebSocket protocol in the Claude Code CLI to provide a browser-based interface for running multiple Claude Code sessions with streaming, tool call visibility, and permission control.
 
 ## Development Commands
 
@@ -80,7 +80,7 @@ Browser (React) ←→ WebSocket ←→ Hono Server (Bun) ←→ WebSocket (NDJS
   - `App.tsx` — Root layout with sidebar, chat view, task panel. Hash routing (`#/playground`).
   - `components/` — UI: `ChatView`, `MessageFeed`, `MessageBubble`, `ToolBlock`, `Composer`, `Sidebar`, `TopBar`, `HomePage`, `TaskPanel`, `PermissionBanner`, `EnvManager`, `Playground`.
 
-- **`web/bin/cli.ts`** — CLI entry point (`bunx the-vibe-companion`). Sets `__VIBE_PACKAGE_ROOT` and imports the server.
+- **`web/bin/cli.ts`** — CLI entry point (`bunx the-companion`). Sets `__COMPANION_PACKAGE_ROOT` and imports the server.
 
 ### WebSocket Protocol
 

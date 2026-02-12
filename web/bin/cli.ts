@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 // Package root so the server can find dist/ regardless of CWD
 const __dirname = dirname(fileURLToPath(import.meta.url));
-process.env.__VIBE_PACKAGE_ROOT = resolve(__dirname, "..");
+process.env.__COMPANION_PACKAGE_ROOT = resolve(__dirname, "..");
 
 const command = process.argv[2];
 
@@ -28,13 +28,13 @@ switch (command) {
     const { status } = await import("../server/service.js");
     const result = await status();
     if (!result.installed) {
-      console.log("The Vibe Companion is not installed as a service.");
-      console.log("Run: the-vibe-companion install");
+      console.log("The Companion is not installed as a service.");
+      console.log("Run: the-companion install");
     } else if (result.running) {
-      console.log(`The Vibe Companion is running (PID: ${result.pid})`);
+      console.log(`The Companion is running (PID: ${result.pid})`);
       console.log(`  URL: http://localhost:${result.port}`);
     } else {
-      console.log("The Vibe Companion is installed but not running.");
+      console.log("The Companion is installed but not running.");
       console.log("Check logs at ~/.companion/logs/");
     }
     break;
@@ -69,7 +69,7 @@ switch (command) {
   default:
     console.error(`Unknown command: ${command}`);
     console.log(`
-Usage: the-vibe-companion [command]
+Usage: the-companion [command]
 
 Commands:
   (none)      Start the server in foreground (default)
