@@ -91,9 +91,12 @@ export function HomePage() {
   const setCurrentSession = useStore((s) => s.setCurrentSession);
   const currentSessionId = useStore((s) => s.currentSessionId);
 
-  // Auto-focus textarea
+  // Auto-focus textarea (desktop only — on mobile it triggers the keyboard immediately)
   useEffect(() => {
-    textareaRef.current?.focus();
+    const isDesktop = window.matchMedia("(min-width: 640px)").matches;
+    if (isDesktop) {
+      textareaRef.current?.focus();
+    }
   }, []);
 
   // Load server home/cwd and available backends on mount
@@ -381,7 +384,7 @@ export function HomePage() {
   const canSend = text.trim().length > 0 && !sending;
 
   return (
-    <div className="flex-1 h-full flex items-center justify-center px-3 sm:px-4">
+    <div className="flex-1 h-full flex items-start justify-center px-3 sm:px-4 pt-[15vh] sm:pt-[20vh] overflow-y-auto">
       <div className="w-full max-w-2xl">
         {/* Logo + Title */}
         <div className="flex flex-col items-center justify-center mb-4 sm:mb-6">
@@ -617,7 +620,7 @@ export function HomePage() {
                       value={branchFilter}
                       onChange={(e) => setBranchFilter(e.target.value)}
                       placeholder="Filter or create branch..."
-                      className="w-full px-2 py-1 text-xs bg-cc-input-bg border border-cc-border rounded-md text-cc-fg font-mono-code placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50"
+                      className="w-full px-2 py-1 text-base sm:text-xs bg-cc-input-bg border border-cc-border rounded-md text-cc-fg font-mono-code placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50"
                       autoFocus
                       onKeyDown={(e) => {
                         if (e.key === "Escape") {
