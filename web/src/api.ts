@@ -165,6 +165,26 @@ export interface UsageLimits {
   } | null;
 }
 
+export interface GitHubPRInfo {
+  number: number;
+  title: string;
+  url: string;
+  state: "OPEN" | "CLOSED" | "MERGED";
+  isDraft: boolean;
+  reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  checks: { name: string; status: string; conclusion: string | null }[];
+  checksSummary: { total: number; success: number; failure: number; pending: number };
+  reviewThreads: { total: number; resolved: number; unresolved: number };
+}
+
+export interface PRStatusResponse {
+  available: boolean;
+  pr: GitHubPRInfo | null;
+}
+
 export const api = {
   createSession: (opts?: CreateSessionOpts) =>
     post<{ sessionId: string; state: string; cwd: string }>(
@@ -246,6 +266,12 @@ export const api = {
       git_ahead: number;
       git_behind: number;
     }>("/git/pull", { cwd }),
+
+  // GitHub PR status
+  getPRStatus: (cwd: string, branch: string) =>
+    get<PRStatusResponse>(
+      `/git/pr-status?cwd=${encodeURIComponent(cwd)}&branch=${encodeURIComponent(branch)}`,
+    ),
 
   // Backends
   getBackends: () => get<BackendInfo[]>("/backends"),

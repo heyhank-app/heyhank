@@ -7,7 +7,8 @@ import { UpdateBanner } from "./UpdateBanner.js";
 import { useStore } from "../store.js";
 import type { PermissionRequest, ChatMessage, ContentBlock } from "../types.js";
 import type { TaskItem } from "../types.js";
-import type { UpdateInfo } from "../api.js";
+import type { UpdateInfo, GitHubPRInfo } from "../api.js";
+import { GitHubPRDisplay } from "./TaskPanel.js";
 
 // ─── Mock Data ──────────────────────────────────────────────────────────────
 
@@ -294,6 +295,81 @@ const MOCK_SUBAGENT_TOOL_ITEMS = [
   { id: "sa-2", name: "Grep", input: { pattern: "session.userId", path: "src/" } },
 ];
 
+// GitHub PR mock data
+const MOCK_PR_FAILING: GitHubPRInfo = {
+  number: 162,
+  title: "feat: add dark mode toggle to application settings",
+  url: "https://github.com/example/project/pull/162",
+  state: "OPEN",
+  isDraft: false,
+  reviewDecision: "CHANGES_REQUESTED",
+  additions: 91,
+  deletions: 88,
+  changedFiles: 24,
+  checks: [
+    { name: "CI / Build", status: "COMPLETED", conclusion: "SUCCESS" },
+    { name: "CI / Test", status: "COMPLETED", conclusion: "FAILURE" },
+    { name: "CI / Lint", status: "COMPLETED", conclusion: "SUCCESS" },
+  ],
+  checksSummary: { total: 3, success: 2, failure: 1, pending: 0 },
+  reviewThreads: { total: 4, resolved: 2, unresolved: 2 },
+};
+
+const MOCK_PR_PASSING: GitHubPRInfo = {
+  number: 158,
+  title: "fix: prevent mobile keyboard layout shift and iOS zoom",
+  url: "https://github.com/example/project/pull/158",
+  state: "OPEN",
+  isDraft: false,
+  reviewDecision: "APPROVED",
+  additions: 42,
+  deletions: 12,
+  changedFiles: 3,
+  checks: [
+    { name: "CI / Build", status: "COMPLETED", conclusion: "SUCCESS" },
+    { name: "CI / Test", status: "COMPLETED", conclusion: "SUCCESS" },
+  ],
+  checksSummary: { total: 2, success: 2, failure: 0, pending: 0 },
+  reviewThreads: { total: 1, resolved: 1, unresolved: 0 },
+};
+
+const MOCK_PR_DRAFT: GitHubPRInfo = {
+  number: 165,
+  title: "refactor: migrate auth module to JWT tokens with refresh support",
+  url: "https://github.com/example/project/pull/165",
+  state: "OPEN",
+  isDraft: true,
+  reviewDecision: null,
+  additions: 340,
+  deletions: 156,
+  changedFiles: 18,
+  checks: [
+    { name: "CI / Build", status: "IN_PROGRESS", conclusion: null },
+    { name: "CI / Test", status: "QUEUED", conclusion: null },
+  ],
+  checksSummary: { total: 2, success: 0, failure: 0, pending: 2 },
+  reviewThreads: { total: 0, resolved: 0, unresolved: 0 },
+};
+
+const MOCK_PR_MERGED: GitHubPRInfo = {
+  number: 155,
+  title: "feat(cli): add service install/uninstall and separate dev/prod ports",
+  url: "https://github.com/example/project/pull/155",
+  state: "MERGED",
+  isDraft: false,
+  reviewDecision: "APPROVED",
+  additions: 287,
+  deletions: 63,
+  changedFiles: 11,
+  checks: [
+    { name: "CI / Build", status: "COMPLETED", conclusion: "SUCCESS" },
+    { name: "CI / Test", status: "COMPLETED", conclusion: "SUCCESS" },
+    { name: "CI / Lint", status: "COMPLETED", conclusion: "SUCCESS" },
+  ],
+  checksSummary: { total: 3, success: 3, failure: 0, pending: 0 },
+  reviewThreads: { total: 3, resolved: 3, unresolved: 0 },
+};
+
 // ─── Playground Component ───────────────────────────────────────────────────
 
 export function Playground() {
@@ -438,6 +514,32 @@ export function Playground() {
                 <TaskRow key={task.id} task={task} />
               ))}
             </div>
+          </div>
+        </Section>
+
+        {/* ─── GitHub PR Status ──────────────────────────────── */}
+        <Section title="GitHub PR Status" description="PR health shown in the TaskPanel — checks, reviews, unresolved comments">
+          <div className="space-y-4">
+            <Card label="Open PR — failing checks + changes requested">
+              <div className="w-[280px] border border-cc-border rounded-xl overflow-hidden bg-cc-card">
+                <GitHubPRDisplay pr={MOCK_PR_FAILING} />
+              </div>
+            </Card>
+            <Card label="Open PR — all checks passed + approved">
+              <div className="w-[280px] border border-cc-border rounded-xl overflow-hidden bg-cc-card">
+                <GitHubPRDisplay pr={MOCK_PR_PASSING} />
+              </div>
+            </Card>
+            <Card label="Draft PR — pending checks">
+              <div className="w-[280px] border border-cc-border rounded-xl overflow-hidden bg-cc-card">
+                <GitHubPRDisplay pr={MOCK_PR_DRAFT} />
+              </div>
+            </Card>
+            <Card label="Merged PR">
+              <div className="w-[280px] border border-cc-border rounded-xl overflow-hidden bg-cc-card">
+                <GitHubPRDisplay pr={MOCK_PR_MERGED} />
+              </div>
+            </Card>
           </div>
         </Section>
 

@@ -34,7 +34,8 @@ index 1234567..abcdefg 100644
     expect(container.querySelector(".diff-viewer")).toBeTruthy();
     expect(container.querySelector(".diff-line-del")).toBeTruthy();
     expect(container.querySelector(".diff-line-add")).toBeTruthy();
-    expect(screen.getByText("src/utils.ts")).toBeTruthy();
+    // FileHeader splits path into dir + basename spans
+    expect(screen.getByText("utils.ts")).toBeTruthy();
   });
 
   it("renders compact mode without line numbers", () => {
@@ -89,8 +90,8 @@ index 1234567..abcdefg 100644
   it("renders word-level highlighting", () => {
     const { container } = render(
       <DiffViewer
-        oldText="const value = 1;"
-        newText="const value = 42;"
+        oldText={"const value = 1;\nconst other = true;"}
+        newText={"const value = 42;\nconst other = true;"}
       />,
     );
     // Word-level diffs should create diff-word-add/diff-word-del spans

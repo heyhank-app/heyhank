@@ -103,7 +103,7 @@ describe("DiffPanel", () => {
       expect(mockApi.getFileDiff).toHaveBeenCalledWith("/repo/src/app.ts");
     });
 
-    // DiffViewer should render the diff content
+    // DiffViewer should render the diff content (may appear in top bar + DiffViewer header)
     await waitFor(() => {
       expect(container.querySelector(".diff-line-add")).toBeTruthy();
     });

@@ -10,5 +10,9 @@ export default defineConfig({
       ["src/**/*.test.tsx", "jsdom"],
     ],
     setupFiles: ["src/test-setup.ts"],
+    // React 19.2+ only exports `act` in the development CJS build.
+    // Without this, jsdom tests load react.production.js which breaks
+    // @testing-library/react's act() calls.
+    env: { NODE_ENV: "test" },
   },
 });

@@ -617,6 +617,22 @@ export function createRoutes(
     return c.json({ ...result, git_ahead, git_behind });
   });
 
+  // ─── GitHub PR Status ────────────────────────────────────────────────
+
+  api.get("/git/pr-status", async (c) => {
+    const cwd = c.req.query("cwd");
+    const branch = c.req.query("branch");
+    if (!cwd || !branch) return c.json({ error: "cwd and branch required" }, 400);
+
+    const { isGhAvailable, fetchPRInfo } = await import("./github-pr.js");
+    if (!isGhAvailable()) {
+      return c.json({ available: false, pr: null });
+    }
+
+    const pr = await fetchPRInfo(cwd, branch);
+    return c.json({ available: true, pr });
+  });
+
   // ─── Usage Limits ─────────────────────────────────────────────────────
 
   api.get("/usage-limits", async (c) => {
