@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { PermissionBanner } from "./PermissionBanner.js";
 import { MessageBubble } from "./MessageBubble.js";
-import { ToolBlock } from "./ToolBlock.js";
+import { ToolBlock, getToolIcon, getToolLabel, getPreview, ToolIcon } from "./ToolBlock.js";
 import type { PermissionRequest, ChatMessage, ContentBlock } from "../types.js";
 import type { TaskItem } from "../types.js";
 
@@ -277,6 +277,19 @@ const MOCK_TASKS: TaskItem[] = [
   { id: "6", subject: "Run full test suite and fix failures", description: "", status: "pending", blockedBy: ["5"] },
 ];
 
+// Tool group items (for ToolMessageGroup mock)
+const MOCK_TOOL_GROUP_ITEMS = [
+  { id: "tg-1", name: "Read", input: { file_path: "src/auth/middleware.ts" } },
+  { id: "tg-2", name: "Read", input: { file_path: "src/auth/login.ts" } },
+  { id: "tg-3", name: "Read", input: { file_path: "src/auth/session.ts" } },
+  { id: "tg-4", name: "Read", input: { file_path: "src/auth/types.ts" } },
+];
+
+const MOCK_SUBAGENT_TOOL_ITEMS = [
+  { id: "sa-1", name: "Grep", input: { pattern: "useAuth", path: "src/" } },
+  { id: "sa-2", name: "Grep", input: { pattern: "session.userId", path: "src/" } },
+];
+
 // ─── Playground Component ───────────────────────────────────────────────────
 
 export function Playground() {
@@ -455,6 +468,198 @@ export function Playground() {
             </Card>
           </div>
         </Section>
+
+        {/* ─── Composer ──────────────────────────────── */}
+        <Section title="Composer" description="Message input bar with mode toggle, image upload, and send/stop buttons">
+          <div className="max-w-3xl">
+            <Card label="Connected — code mode">
+              <div className="border-t border-cc-border bg-cc-card px-4 py-3">
+                <div className="bg-cc-input-bg border border-cc-border rounded-[14px] overflow-hidden">
+                  <textarea
+                    readOnly
+                    value="Can you refactor the auth module to use JWT?"
+                    rows={1}
+                    className="w-full px-4 pt-3 pb-1 text-sm bg-transparent resize-none text-cc-fg font-sans-ui"
+                    style={{ minHeight: "36px" }}
+                  />
+                  <div className="flex items-center justify-between px-2.5 pb-2.5">
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] font-medium text-cc-muted">
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                        <path d="M2.5 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                        <path d="M8.5 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                      </svg>
+                      <span>code</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="flex items-center justify-center w-8 h-8 rounded-lg text-cc-muted">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                          <rect x="2" y="2" width="12" height="12" rx="2" />
+                          <circle cx="5.5" cy="5.5" r="1" fill="currentColor" stroke="none" />
+                          <path d="M2 11l3-3 2 2 3-4 4 5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </div>
+                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-cc-primary text-white">
+                        <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                          <path d="M3 2l11 6-11 6V9.5l7-1.5-7-1.5V2z" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+            <div className="mt-4" />
+            <Card label="Plan mode active">
+              <div className="border-t border-cc-border bg-cc-card px-4 py-3">
+                <div className="bg-cc-input-bg border border-cc-primary/40 rounded-[14px] overflow-hidden">
+                  <textarea
+                    readOnly
+                    value=""
+                    placeholder="Type a message... (/ for commands)"
+                    rows={1}
+                    className="w-full px-4 pt-3 pb-1 text-sm bg-transparent resize-none text-cc-fg font-sans-ui placeholder:text-cc-muted"
+                    style={{ minHeight: "36px" }}
+                  />
+                  <div className="flex items-center justify-between px-2.5 pb-2.5">
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] font-medium text-cc-primary">
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                        <rect x="3" y="3" width="3.5" height="10" rx="0.75" />
+                        <rect x="9.5" y="3" width="3.5" height="10" rx="0.75" />
+                      </svg>
+                      <span>plan</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="flex items-center justify-center w-8 h-8 rounded-lg text-cc-muted">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                          <rect x="2" y="2" width="12" height="12" rx="2" />
+                          <circle cx="5.5" cy="5.5" r="1" fill="currentColor" stroke="none" />
+                          <path d="M2 11l3-3 2 2 3-4 4 5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </div>
+                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-cc-hover text-cc-muted">
+                        <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                          <path d="M3 2l11 6-11 6V9.5l7-1.5-7-1.5V2z" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+            <div className="mt-4" />
+            <Card label="Running — stop button visible">
+              <div className="border-t border-cc-border bg-cc-card px-4 py-3">
+                <div className="bg-cc-input-bg border border-cc-border rounded-[14px] overflow-hidden">
+                  <textarea
+                    readOnly
+                    value=""
+                    placeholder="Type a message... (/ for commands)"
+                    rows={1}
+                    className="w-full px-4 pt-3 pb-1 text-sm bg-transparent resize-none text-cc-fg font-sans-ui placeholder:text-cc-muted"
+                    style={{ minHeight: "36px" }}
+                  />
+                  {/* Git branch info */}
+                  <div className="flex items-center gap-2 px-4 pb-1 text-[11px] text-cc-muted overflow-hidden">
+                    <span className="flex items-center gap-1 truncate min-w-0">
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0 opacity-60">
+                        <path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.116.862a2.25 2.25 0 10-.862.862A4.48 4.48 0 007.25 7.5h-1.5A2.25 2.25 0 003.5 9.75v.318a2.25 2.25 0 101.5 0V9.75a.75.75 0 01.75-.75h1.5a5.98 5.98 0 003.884-1.435A2.25 2.25 0 109.634 3.362zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
+                      </svg>
+                      <span className="truncate">feat/jwt-auth</span>
+                      <span className="text-[10px] bg-cc-primary/10 text-cc-primary px-1 rounded">worktree</span>
+                    </span>
+                    <span className="flex items-center gap-0.5 text-[10px]">
+                      <span className="text-green-500">3&#8593;</span>
+                    </span>
+                    <span className="flex items-center gap-1 shrink-0">
+                      <span className="text-green-500">+142</span>
+                      <span className="text-red-400">-38</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between px-2.5 pb-2.5">
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] font-medium text-cc-muted">
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                        <path d="M2.5 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                        <path d="M8.5 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                      </svg>
+                      <span>code</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="flex items-center justify-center w-8 h-8 rounded-lg text-cc-muted">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                          <rect x="2" y="2" width="12" height="12" rx="2" />
+                          <circle cx="5.5" cy="5.5" r="1" fill="currentColor" stroke="none" />
+                          <path d="M2 11l3-3 2 2 3-4 4 5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </div>
+                      <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-cc-error/10 text-cc-error">
+                        <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                          <rect x="3" y="3" width="10" height="10" rx="1" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </div>
+        </Section>
+
+        {/* ─── Streaming Indicator ──────────────────────────────── */}
+        <Section title="Streaming Indicator" description="Live typing animation shown while the assistant is generating">
+          <div className="space-y-4 max-w-3xl">
+            <Card label="Streaming with cursor">
+              <div className="flex items-start gap-3">
+                <div className="w-6 h-6 rounded-full bg-cc-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                  <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5 text-cc-primary">
+                    <path d="M8 1v14M1 8h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <pre className="font-serif-assistant text-[15px] text-cc-fg whitespace-pre-wrap break-words leading-relaxed">
+                    I'll start by creating the JWT utility module with sign and verify helpers. Let me first check what dependencies are already installed...
+                    <span className="inline-block w-0.5 h-4 bg-cc-primary ml-0.5 align-middle animate-[pulse-dot_0.8s_ease-in-out_infinite]" />
+                  </pre>
+                </div>
+              </div>
+            </Card>
+            <Card label="Generation stats bar">
+              <div className="flex items-center gap-1.5 text-[11px] text-cc-muted font-mono-code pl-9">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-cc-primary animate-pulse" />
+                <span>Generating...</span>
+                <span className="text-cc-muted/60">(</span>
+                <span>12s</span>
+                <span className="text-cc-muted/40">&middot;</span>
+                <span>&darr; 1.2k</span>
+                <span className="text-cc-muted/60">)</span>
+              </div>
+            </Card>
+          </div>
+        </Section>
+
+        {/* ─── Tool Message Groups ──────────────────────────────── */}
+        <Section title="Tool Message Groups" description="Consecutive same-tool calls collapsed into a single expandable row">
+          <div className="space-y-4 max-w-3xl">
+            <Card label="Multi-item group (4 Reads)">
+              <PlaygroundToolGroup toolName="Read" items={MOCK_TOOL_GROUP_ITEMS} />
+            </Card>
+            <Card label="Single-item group">
+              <PlaygroundToolGroup toolName="Glob" items={[{ id: "sg-1", name: "Glob", input: { pattern: "src/auth/**/*.ts" } }]} />
+            </Card>
+          </div>
+        </Section>
+
+        {/* ─── Subagent Groups ──────────────────────────────── */}
+        <Section title="Subagent Groups" description="Nested messages from Task tool subagents shown in a collapsible indent">
+          <div className="space-y-4 max-w-3xl">
+            <Card label="Subagent with nested tool calls">
+              <PlaygroundSubagentGroup
+                description="Search codebase for auth patterns"
+                agentType="Explore"
+                items={MOCK_SUBAGENT_TOOL_ITEMS}
+              />
+            </Card>
+          </div>
+        </Section>
       </div>
     </div>
   );
@@ -481,6 +686,127 @@ function Card({ label, children }: { label: string; children: React.ReactNode })
         <span className="text-[10px] text-cc-muted font-mono-code uppercase tracking-wider">{label}</span>
       </div>
       <div className="p-4">{children}</div>
+    </div>
+  );
+}
+
+// ─── Inline Tool Group (mirrors MessageFeed's ToolMessageGroup) ─────────────
+
+interface ToolItem { id: string; name: string; input: Record<string, unknown> }
+
+function PlaygroundToolGroup({ toolName, items }: { toolName: string; items: ToolItem[] }) {
+  const [open, setOpen] = useState(false);
+  const iconType = getToolIcon(toolName);
+  const label = getToolLabel(toolName);
+  const count = items.length;
+
+  if (count === 1) {
+    const item = items[0];
+    return (
+      <div className="flex items-start gap-3">
+        <div className="w-6 h-6 rounded-full bg-cc-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+          <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-primary"><circle cx="8" cy="8" r="3" /></svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="border border-cc-border rounded-[10px] overflow-hidden bg-cc-card">
+            <button
+              onClick={() => setOpen(!open)}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-cc-hover transition-colors cursor-pointer"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" className={`w-3 h-3 text-cc-muted transition-transform shrink-0 ${open ? "rotate-90" : ""}`}>
+                <path d="M6 4l4 4-4 4" />
+              </svg>
+              <ToolIcon type={iconType} />
+              <span className="text-xs font-medium text-cc-fg">{label}</span>
+              <span className="text-xs text-cc-muted truncate flex-1 font-mono-code">
+                {getPreview(item.name, item.input)}
+              </span>
+            </button>
+            {open && (
+              <div className="px-3 pb-3 pt-0 border-t border-cc-border mt-0">
+                <pre className="mt-2 text-[11px] text-cc-muted font-mono-code whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
+                  {JSON.stringify(item.input, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-3">
+      <div className="w-6 h-6 rounded-full bg-cc-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+        <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-primary"><circle cx="8" cy="8" r="3" /></svg>
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="border border-cc-border rounded-[10px] overflow-hidden bg-cc-card">
+          <button
+            onClick={() => setOpen(!open)}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-cc-hover transition-colors cursor-pointer"
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" className={`w-3 h-3 text-cc-muted transition-transform shrink-0 ${open ? "rotate-90" : ""}`}>
+              <path d="M6 4l4 4-4 4" />
+            </svg>
+            <ToolIcon type={iconType} />
+            <span className="text-xs font-medium text-cc-fg">{label}</span>
+            <span className="text-[10px] text-cc-muted bg-cc-hover rounded-full px-1.5 py-0.5 tabular-nums font-medium">
+              {count}
+            </span>
+          </button>
+          {open && (
+            <div className="border-t border-cc-border px-3 py-1.5">
+              {items.map((item, i) => {
+                const preview = getPreview(item.name, item.input);
+                return (
+                  <div key={item.id || i} className="flex items-center gap-2 py-1 text-xs text-cc-muted font-mono-code truncate">
+                    <span className="w-1 h-1 rounded-full bg-cc-muted/40 shrink-0" />
+                    <span className="truncate">{preview || JSON.stringify(item.input).slice(0, 80)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Inline Subagent Group (mirrors MessageFeed's SubagentContainer) ────────
+
+function PlaygroundSubagentGroup({ description, agentType, items }: { description: string; agentType: string; items: ToolItem[] }) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <div className="ml-9 border-l-2 border-cc-primary/20 pl-4">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 py-1.5 text-left cursor-pointer mb-1"
+      >
+        <svg viewBox="0 0 16 16" fill="currentColor" className={`w-3 h-3 text-cc-muted transition-transform shrink-0 ${open ? "rotate-90" : ""}`}>
+          <path d="M6 4l4 4-4 4" />
+        </svg>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5 text-cc-primary shrink-0">
+          <circle cx="8" cy="8" r="5" />
+          <path d="M8 5v3l2 1" strokeLinecap="round" />
+        </svg>
+        <span className="text-xs font-medium text-cc-fg truncate">{description}</span>
+        {agentType && (
+          <span className="text-[10px] text-cc-muted bg-cc-hover rounded-full px-1.5 py-0.5 shrink-0">
+            {agentType}
+          </span>
+        )}
+        <span className="text-[10px] text-cc-muted bg-cc-hover rounded-full px-1.5 py-0.5 tabular-nums shrink-0 ml-auto">
+          {items.length}
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-3 pb-2">
+          <PlaygroundToolGroup toolName={items[0]?.name || "Grep"} items={items} />
+        </div>
+      )}
     </div>
   );
 }
