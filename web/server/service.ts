@@ -10,29 +10,47 @@ import { homedir } from "node:os";
 import { execSync } from "node:child_process";
 import { DEFAULT_PORT_PROD } from "./constants.js";
 
-// ─── Constants ─────────────────────────────────────────────────────────────────
+// ─── Shared Constants ───────────────────────────────────────────────────────────
+
+const COMPANION_DIR = join(homedir(), ".companion");
+const LOG_DIR = join(COMPANION_DIR, "logs");
+const STDOUT_LOG = join(LOG_DIR, "companion.log");
+const STDERR_LOG = join(LOG_DIR, "companion.error.log");
+
+// ─── macOS (launchd) Constants ──────────────────────────────────────────────────
 
 const LABEL = "sh.thecompanion.app";
 const OLD_LABEL = "co.thevibecompany.companion";
 const PLIST_DIR = join(homedir(), "Library", "LaunchAgents");
 const PLIST_PATH = join(PLIST_DIR, `${LABEL}.plist`);
 const OLD_PLIST_PATH = join(PLIST_DIR, `${OLD_LABEL}.plist`);
-const COMPANION_DIR = join(homedir(), ".companion");
-const LOG_DIR = join(COMPANION_DIR, "logs");
-const STDOUT_LOG = join(LOG_DIR, "companion.log");
-const STDERR_LOG = join(LOG_DIR, "companion.error.log");
 
-// ─── Platform check ────────────────────────────────────────────────────────────
+// ─── Linux (systemd) Constants ──────────────────────────────────────────────────
 
-function ensureMacOS(): void {
-  if (process.platform !== "darwin") {
-    console.error("Service management is only supported on macOS (launchd).");
-    console.error("Linux systemd support is planned for a future release.");
+const SYSTEMD_DIR = join(homedir(), ".config", "systemd", "user");
+const UNIT_NAME = "the-companion.service";
+const UNIT_PATH = join(SYSTEMD_DIR, UNIT_NAME);
+
+// ─── Platform check ─────────────────────────────────────────────────────────────
+
+function ensureSupportedPlatform(): void {
+  if (process.platform !== "darwin" && process.platform !== "linux") {
+    console.error(
+      "Service management is only supported on macOS (launchd) and Linux (systemd).",
+    );
     process.exit(1);
   }
 }
 
-// ─── Plist generation ──────────────────────────────────────────────────────────
+function isDarwin(): boolean {
+  return process.platform === "darwin";
+}
+
+function isLinux(): boolean {
+  return process.platform === "linux";
+}
+
+// ─── Plist generation (macOS) ───────────────────────────────────────────────────
 
 interface PlistOptions {
   binPath: string;
@@ -95,7 +113,40 @@ export function generatePlist(opts: PlistOptions): string {
 </plist>`;
 }
 
-// ─── Binary resolution ─────────────────────────────────────────────────────────
+// ─── Systemd unit generation (Linux) ────────────────────────────────────────────
+
+interface UnitOptions {
+  binPath: string;
+  port?: number;
+}
+
+export function generateSystemdUnit(opts: UnitOptions): string {
+  const port = opts.port ?? DEFAULT_PORT_PROD;
+  const home = homedir();
+
+  return `[Unit]
+Description=The Companion - Web UI for Claude Code
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${opts.binPath} start
+WorkingDirectory=${home}
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:${STDOUT_LOG}
+StandardError=append:${STDERR_LOG}
+Environment=NODE_ENV=production
+Environment=PORT=${port}
+Environment=HOME=${home}
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:${home}/.bun/bin:${home}/.local/bin
+
+[Install]
+WantedBy=default.target
+`;
+}
+
+// ─── Binary resolution ──────────────────────────────────────────────────────────
 
 function resolveBinPath(): string {
   try {
@@ -115,7 +166,9 @@ function resolveBinPath(): string {
   process.exit(1);
 }
 
-function unloadService(plistPath: string): void {
+// ─── macOS helpers ──────────────────────────────────────────────────────────────
+
+function unloadLaunchdService(plistPath: string): void {
   try {
     execSync(`launchctl unload -w "${plistPath}"`, { stdio: "pipe" });
   } catch {
@@ -135,11 +188,11 @@ function migrateLegacyInstallIfNeeded(): void {
   if (!existsSync(OLD_PLIST_PATH)) return;
 
   console.log("Found legacy The Vibe Companion service. Migrating...");
-  unloadService(OLD_PLIST_PATH);
+  unloadLaunchdService(OLD_PLIST_PATH);
   removePlist(OLD_PLIST_PATH);
 }
 
-function getInstalledService():
+function getInstalledLaunchdService():
   | { label: string; plistPath: string }
   | undefined {
   if (existsSync(PLIST_PATH)) return { label: LABEL, plistPath: PLIST_PATH };
@@ -149,11 +202,31 @@ function getInstalledService():
   return undefined;
 }
 
-// ─── Install ───────────────────────────────────────────────────────────────────
+// ─── Linux helpers ──────────────────────────────────────────────────────────────
+
+function isSystemdUnitInstalled(): boolean {
+  return existsSync(UNIT_PATH);
+}
+
+function systemctlUser(cmd: string): string {
+  return execSync(`systemctl --user ${cmd}`, {
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
+// ─── Install ────────────────────────────────────────────────────────────────────
 
 export async function install(opts?: { port?: number }): Promise<void> {
-  ensureMacOS();
+  ensureSupportedPlatform();
 
+  if (isDarwin()) {
+    return installDarwin(opts);
+  }
+  return installLinux(opts);
+}
+
+async function installDarwin(opts?: { port?: number }): Promise<void> {
   migrateLegacyInstallIfNeeded();
 
   if (existsSync(PLIST_PATH)) {
@@ -194,25 +267,100 @@ export async function install(opts?: { port?: number }): Promise<void> {
   console.log("Use 'the-companion status' to check if it's running.");
 }
 
-// ─── Uninstall ─────────────────────────────────────────────────────────────────
+async function installLinux(opts?: { port?: number }): Promise<void> {
+  if (isSystemdUnitInstalled()) {
+    console.error("The Companion is already installed as a service.");
+    console.error("Run 'the-companion uninstall' first to reinstall.");
+    process.exit(1);
+  }
+
+  const binPath = resolveBinPath();
+  const port = opts?.port ?? DEFAULT_PORT_PROD;
+
+  // Create log directory
+  mkdirSync(LOG_DIR, { recursive: true });
+
+  // Generate and write systemd unit
+  const unit = generateSystemdUnit({ binPath, port });
+  mkdirSync(SYSTEMD_DIR, { recursive: true });
+  writeFileSync(UNIT_PATH, unit, "utf-8");
+
+  // Reload systemd and enable + start the service
+  try {
+    systemctlUser("daemon-reload");
+    systemctlUser(`enable --now ${UNIT_NAME}`);
+  } catch (err: unknown) {
+    console.error("Failed to enable the service with systemctl:");
+    console.error(err instanceof Error ? err.message : String(err));
+    // Clean up the unit file on failure
+    try { unlinkSync(UNIT_PATH); } catch { /* ok */ }
+    process.exit(1);
+  }
+
+  console.log("The Companion has been installed as a background service.");
+  console.log("");
+  console.log(`  URL:    http://localhost:${port}`);
+  console.log(`  Logs:   ${LOG_DIR}`);
+  console.log(`  Unit:   ${UNIT_PATH}`);
+  console.log("");
+  console.log("The service will start automatically on login.");
+  console.log("Use 'the-companion status' to check if it's running.");
+}
+
+// ─── Uninstall ──────────────────────────────────────────────────────────────────
 
 export async function uninstall(): Promise<void> {
-  ensureMacOS();
+  ensureSupportedPlatform();
 
-  const installedService = getInstalledService();
+  if (isDarwin()) {
+    return uninstallDarwin();
+  }
+  return uninstallLinux();
+}
+
+async function uninstallDarwin(): Promise<void> {
+  const installedService = getInstalledLaunchdService();
   if (!installedService) {
     console.log("The Companion is not installed as a service.");
     return;
   }
 
-  unloadService(installedService.plistPath);
+  unloadLaunchdService(installedService.plistPath);
   removePlist(installedService.plistPath);
 
   console.log("The Companion service has been removed.");
   console.log(`Logs are preserved at ${LOG_DIR}`);
 }
 
-// ─── Status ────────────────────────────────────────────────────────────────────
+async function uninstallLinux(): Promise<void> {
+  if (!isSystemdUnitInstalled()) {
+    console.log("The Companion is not installed as a service.");
+    return;
+  }
+
+  try {
+    systemctlUser(`disable --now ${UNIT_NAME}`);
+  } catch {
+    // Service may already be stopped — that's fine
+  }
+
+  try {
+    unlinkSync(UNIT_PATH);
+  } catch {
+    // Already gone
+  }
+
+  try {
+    systemctlUser("daemon-reload");
+  } catch {
+    // Best-effort reload
+  }
+
+  console.log("The Companion service has been removed.");
+  console.log(`Logs are preserved at ${LOG_DIR}`);
+}
+
+// ─── Status ─────────────────────────────────────────────────────────────────────
 
 export interface ServiceStatus {
   installed: boolean;
@@ -222,28 +370,48 @@ export interface ServiceStatus {
 }
 
 /**
- * Safe check for whether the current process is running as a launchd service.
+ * Safe check for whether the current process is running as a managed service.
  * Unlike status(), this never calls process.exit() and works on all platforms.
  */
 export function isRunningAsService(): boolean {
-  if (process.platform !== "darwin") return false;
-  const installedService = getInstalledService();
-  if (!installedService) return false;
-  try {
-    const output = execSync(`launchctl list "${installedService.label}"`, {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    return /"PID"\s*=\s*\d+/.test(output);
-  } catch {
-    return false;
+  if (isDarwin()) {
+    const installedService = getInstalledLaunchdService();
+    if (!installedService) return false;
+    try {
+      const output = execSync(`launchctl list "${installedService.label}"`, {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      return /"PID"\s*=\s*\d+/.test(output);
+    } catch {
+      return false;
+    }
   }
+
+  if (isLinux()) {
+    if (!isSystemdUnitInstalled()) return false;
+    try {
+      const output = systemctlUser(`is-active ${UNIT_NAME}`);
+      return output.trim() === "active";
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
 }
 
 export async function status(): Promise<ServiceStatus> {
-  ensureMacOS();
+  ensureSupportedPlatform();
 
-  const installedService = getInstalledService();
+  if (isDarwin()) {
+    return statusDarwin();
+  }
+  return statusLinux();
+}
+
+async function statusDarwin(): Promise<ServiceStatus> {
+  const installedService = getInstalledLaunchdService();
   if (!installedService) {
     return { installed: false, running: false };
   }
@@ -273,6 +441,38 @@ export async function status(): Promise<ServiceStatus> {
     return { installed: true, running: false, port };
   } catch {
     // launchctl list fails if service is not loaded
+    return { installed: true, running: false, port };
+  }
+}
+
+async function statusLinux(): Promise<ServiceStatus> {
+  if (!isSystemdUnitInstalled()) {
+    return { installed: false, running: false };
+  }
+
+  // Read port from the unit file
+  let port = DEFAULT_PORT_PROD;
+  try {
+    const unitContent = readFileSync(UNIT_PATH, "utf-8");
+    const portMatch = unitContent.match(/Environment=PORT=(\d+)/);
+    if (portMatch) port = Number(portMatch[1]);
+  } catch { /* use default */ }
+
+  // Check if service is running via systemctl
+  try {
+    const output = systemctlUser(`show ${UNIT_NAME} --property=ActiveState,MainPID --no-pager`);
+    const activeMatch = output.match(/ActiveState=(\w+)/);
+    const pidMatch = output.match(/MainPID=(\d+)/);
+
+    const isActive = activeMatch?.[1] === "active";
+    const pid = pidMatch ? Number(pidMatch[1]) : undefined;
+
+    if (isActive && pid && pid > 0) {
+      return { installed: true, running: true, pid, port };
+    }
+
+    return { installed: true, running: false, port };
+  } catch {
     return { installed: true, running: false, port };
   }
 }

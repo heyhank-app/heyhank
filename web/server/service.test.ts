@@ -52,13 +52,6 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 // Mock process.platform
 const originalPlatform = process.platform;
-beforeEach(() => {
-  Object.defineProperty(process, "platform", {
-    value: mockPlatform.get(),
-    writable: true,
-    configurable: true,
-  });
-});
 
 afterAll(() => {
   Object.defineProperty(process, "platform", {
@@ -75,6 +68,13 @@ beforeEach(async () => {
   mockHomedir.set(tempDir);
   mockPlatform.set("darwin");
   mockExecSync.mockReset();
+
+  // Set process.platform AFTER resetting mockPlatform to "darwin"
+  Object.defineProperty(process, "platform", {
+    value: mockPlatform.get(),
+    writable: true,
+    configurable: true,
+  });
 
   // Mock process.exit to throw instead of exiting
   vi.spyOn(process, "exit").mockImplementation((code?: string | number | null) => {
@@ -98,6 +98,10 @@ function plistPath(): string {
 
 function oldPlistPath(): string {
   return join(tempDir, "Library", "LaunchAgents", "co.thevibecompany.companion.plist");
+}
+
+function unitPath(): string {
+  return join(tempDir, ".config", "systemd", "user", "the-companion.service");
 }
 
 function logDir(): string {
@@ -164,7 +168,61 @@ describe("generatePlist", () => {
 });
 
 // ===========================================================================
-// install
+// generateSystemdUnit
+// ===========================================================================
+describe("generateSystemdUnit", () => {
+  it("generates a valid systemd unit with correct sections", () => {
+    const unit = service.generateSystemdUnit({ binPath: "/usr/local/bin/the-companion" });
+    expect(unit).toContain("[Unit]");
+    expect(unit).toContain("[Service]");
+    expect(unit).toContain("[Install]");
+  });
+
+  it("includes the description", () => {
+    const unit = service.generateSystemdUnit({ binPath: "/usr/local/bin/the-companion" });
+    expect(unit).toContain("Description=The Companion");
+  });
+
+  it("uses the provided binary path in ExecStart", () => {
+    const unit = service.generateSystemdUnit({ binPath: "/home/user/.bun/bin/the-companion" });
+    expect(unit).toContain("ExecStart=/home/user/.bun/bin/the-companion start");
+  });
+
+  it("uses the default production port when none specified", () => {
+    const unit = service.generateSystemdUnit({ binPath: "/usr/local/bin/the-companion" });
+    expect(unit).toContain("Environment=PORT=3456");
+  });
+
+  it("uses a custom port when specified", () => {
+    const unit = service.generateSystemdUnit({ binPath: "/usr/local/bin/the-companion", port: 8080 });
+    expect(unit).toContain("Environment=PORT=8080");
+  });
+
+  it("includes NODE_ENV production", () => {
+    const unit = service.generateSystemdUnit({ binPath: "/usr/local/bin/the-companion" });
+    expect(unit).toContain("Environment=NODE_ENV=production");
+  });
+
+  it("includes restart on failure", () => {
+    const unit = service.generateSystemdUnit({ binPath: "/usr/local/bin/the-companion" });
+    expect(unit).toContain("Restart=on-failure");
+    expect(unit).toContain("RestartSec=5");
+  });
+
+  it("includes PATH with bun and local/bin directories", () => {
+    const unit = service.generateSystemdUnit({ binPath: "/usr/local/bin/the-companion" });
+    expect(unit).toContain(".bun/bin");
+    expect(unit).toContain(".local/bin");
+  });
+
+  it("targets default.target for user service", () => {
+    const unit = service.generateSystemdUnit({ binPath: "/usr/local/bin/the-companion" });
+    expect(unit).toContain("WantedBy=default.target");
+  });
+});
+
+// ===========================================================================
+// install (macOS)
 // ===========================================================================
 describe("install", () => {
   it("creates log directory and writes plist file", async () => {
@@ -276,7 +334,102 @@ describe("install", () => {
 });
 
 // ===========================================================================
-// uninstall
+// install (Linux)
+// ===========================================================================
+describe("install (linux)", () => {
+  beforeEach(async () => {
+    mockPlatform.set("linux");
+    Object.defineProperty(process, "platform", { value: "linux" });
+    vi.resetModules();
+    service = await import("./service.js");
+  });
+
+  it("creates log directory and writes systemd unit file", async () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("systemctl")) return "";
+      return "";
+    });
+
+    await service.install();
+
+    expect(existsSync(logDir())).toBe(true);
+    expect(existsSync(unitPath())).toBe(true);
+
+    const content = readFileSync(unitPath(), "utf-8");
+    expect(content).toContain("ExecStart=/usr/local/bin/the-companion start");
+  });
+
+  it("calls systemctl daemon-reload and enable --now", async () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("systemctl")) return "";
+      return "";
+    });
+
+    await service.install();
+
+    const daemonReload = mockExecSync.mock.calls.find(
+      ([cmd]) => typeof cmd === "string" && cmd.includes("daemon-reload"),
+    );
+    expect(daemonReload).toBeDefined();
+
+    const enableCall = mockExecSync.mock.calls.find(
+      ([cmd]) => typeof cmd === "string" && cmd.includes("enable --now"),
+    );
+    expect(enableCall).toBeDefined();
+  });
+
+  it("exits with error if already installed", async () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("systemctl")) return "";
+      return "";
+    });
+    await service.install();
+
+    vi.resetModules();
+    service = await import("./service.js");
+    await expect(service.install()).rejects.toThrow("process.exit(1)");
+  });
+
+  it("exits with error if binary not found globally", async () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) throw new Error("not found");
+      return "";
+    });
+
+    await expect(service.install()).rejects.toThrow("process.exit(1)");
+  });
+
+  it("uses custom port when provided", async () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("systemctl")) return "";
+      return "";
+    });
+
+    await service.install({ port: 9000 });
+
+    const content = readFileSync(unitPath(), "utf-8");
+    expect(content).toContain("Environment=PORT=9000");
+  });
+
+  it("cleans up unit file if systemctl enable fails", async () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.includes("daemon-reload")) return "";
+      if (cmd.includes("enable --now")) throw new Error("systemctl failed");
+      return "";
+    });
+
+    await expect(service.install()).rejects.toThrow("process.exit(1)");
+    expect(existsSync(unitPath())).toBe(false);
+  });
+});
+
+// ===========================================================================
+// uninstall (macOS)
 // ===========================================================================
 describe("uninstall", () => {
   it("calls launchctl unload and removes plist", async () => {
@@ -326,7 +479,69 @@ describe("uninstall", () => {
 });
 
 // ===========================================================================
-// status
+// uninstall (Linux)
+// ===========================================================================
+describe("uninstall (linux)", () => {
+  beforeEach(async () => {
+    mockPlatform.set("linux");
+    Object.defineProperty(process, "platform", { value: "linux" });
+    vi.resetModules();
+    service = await import("./service.js");
+  });
+
+  it("calls systemctl disable --now and removes unit file", async () => {
+    // Install first
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("systemctl")) return "";
+      return "";
+    });
+    await service.install();
+
+    vi.resetModules();
+    service = await import("./service.js");
+    mockExecSync.mockReset();
+    mockExecSync.mockImplementation(() => "");
+
+    await service.uninstall();
+
+    const disableCall = mockExecSync.mock.calls.find(
+      ([cmd]) => typeof cmd === "string" && cmd.includes("disable --now"),
+    );
+    expect(disableCall).toBeDefined();
+    expect(existsSync(unitPath())).toBe(false);
+  });
+
+  it("calls daemon-reload after removing unit file", async () => {
+    // Install first
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("systemctl")) return "";
+      return "";
+    });
+    await service.install();
+
+    vi.resetModules();
+    service = await import("./service.js");
+    mockExecSync.mockReset();
+    mockExecSync.mockImplementation(() => "");
+
+    await service.uninstall();
+
+    const reloadCall = mockExecSync.mock.calls.find(
+      ([cmd]) => typeof cmd === "string" && cmd.includes("daemon-reload"),
+    );
+    expect(reloadCall).toBeDefined();
+  });
+
+  it("handles not-installed gracefully", async () => {
+    // Should not throw
+    await service.uninstall();
+  });
+});
+
+// ===========================================================================
+// status (macOS)
 // ===========================================================================
 describe("status", () => {
   it("returns installed: false when no plist exists", async () => {
@@ -422,12 +637,101 @@ describe("status", () => {
 });
 
 // ===========================================================================
-// isRunningAsService
+// status (Linux)
 // ===========================================================================
-describe("isRunningAsService", () => {
-  it("returns false on non-macOS platforms", async () => {
+describe("status (linux)", () => {
+  beforeEach(async () => {
     mockPlatform.set("linux");
     Object.defineProperty(process, "platform", { value: "linux" });
+    vi.resetModules();
+    service = await import("./service.js");
+  });
+
+  it("returns installed: false when no unit file exists", async () => {
+    const result = await service.status();
+    expect(result).toEqual({ installed: false, running: false });
+  });
+
+  it("returns installed: true, running: true with PID", async () => {
+    // Install first
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("systemctl")) return "";
+      return "";
+    });
+    await service.install();
+
+    vi.resetModules();
+    service = await import("./service.js");
+    mockExecSync.mockReset();
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (typeof cmd === "string" && cmd.includes("show the-companion.service")) {
+        return "ActiveState=active\nMainPID=54321\n";
+      }
+      return "";
+    });
+
+    const result = await service.status();
+    expect(result.installed).toBe(true);
+    expect(result.running).toBe(true);
+    expect(result.pid).toBe(54321);
+    expect(result.port).toBe(3456);
+  });
+
+  it("returns installed: true, running: false when service is inactive", async () => {
+    // Install first
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("systemctl")) return "";
+      return "";
+    });
+    await service.install();
+
+    vi.resetModules();
+    service = await import("./service.js");
+    mockExecSync.mockReset();
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (typeof cmd === "string" && cmd.includes("show the-companion.service")) {
+        return "ActiveState=inactive\nMainPID=0\n";
+      }
+      return "";
+    });
+
+    const result = await service.status();
+    expect(result.installed).toBe(true);
+    expect(result.running).toBe(false);
+  });
+
+  it("reads custom port from unit file", async () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("systemctl")) return "";
+      return "";
+    });
+    await service.install({ port: 7777 });
+
+    vi.resetModules();
+    service = await import("./service.js");
+    mockExecSync.mockReset();
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (typeof cmd === "string" && cmd.includes("show the-companion.service")) {
+        return "ActiveState=active\nMainPID=1234\n";
+      }
+      return "";
+    });
+
+    const result = await service.status();
+    expect(result.port).toBe(7777);
+  });
+});
+
+// ===========================================================================
+// isRunningAsService (macOS)
+// ===========================================================================
+describe("isRunningAsService", () => {
+  it("returns false on unsupported platforms", async () => {
+    mockPlatform.set("win32");
+    Object.defineProperty(process, "platform", { value: "win32" });
 
     vi.resetModules();
     service = await import("./service.js");
@@ -435,7 +739,7 @@ describe("isRunningAsService", () => {
     expect(service.isRunningAsService()).toBe(false);
   });
 
-  it("returns false when no plist exists", () => {
+  it("returns false when no plist exists (macOS)", () => {
     expect(service.isRunningAsService()).toBe(false);
   });
 
@@ -485,16 +789,114 @@ describe("isRunningAsService", () => {
 });
 
 // ===========================================================================
+// isRunningAsService (Linux)
+// ===========================================================================
+describe("isRunningAsService (linux)", () => {
+  beforeEach(async () => {
+    mockPlatform.set("linux");
+    Object.defineProperty(process, "platform", { value: "linux" });
+    vi.resetModules();
+    service = await import("./service.js");
+  });
+
+  it("returns false when no unit file exists", () => {
+    expect(service.isRunningAsService()).toBe(false);
+  });
+
+  it("returns true when unit file exists and service is active", async () => {
+    // Install first
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.includes("daemon-reload")) return "";
+      if (cmd.includes("enable --now")) return "";
+      return "";
+    });
+    await service.install();
+
+    vi.resetModules();
+    service = await import("./service.js");
+    mockExecSync.mockReset();
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (typeof cmd === "string" && cmd.includes("is-active")) {
+        return "active\n";
+      }
+      return "";
+    });
+
+    expect(service.isRunningAsService()).toBe(true);
+  });
+
+  it("returns false when unit file exists but service is inactive", async () => {
+    // Install first
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.includes("daemon-reload")) return "";
+      if (cmd.includes("enable --now")) return "";
+      return "";
+    });
+    await service.install();
+
+    vi.resetModules();
+    service = await import("./service.js");
+    mockExecSync.mockReset();
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (typeof cmd === "string" && cmd.includes("is-active")) {
+        throw new Error("inactive");
+      }
+      return "";
+    });
+
+    expect(service.isRunningAsService()).toBe(false);
+  });
+});
+
+// ===========================================================================
 // Platform check
 // ===========================================================================
 describe("platform check", () => {
-  it("exits on non-macOS platforms", async () => {
+  it("exits on unsupported platforms", async () => {
+    mockPlatform.set("win32");
+    Object.defineProperty(process, "platform", { value: "win32" });
+
+    vi.resetModules();
+    service = await import("./service.js");
+
+    await expect(service.install()).rejects.toThrow("process.exit(1)");
+  });
+
+  it("allows macOS (darwin)", async () => {
+    mockPlatform.set("darwin");
+    Object.defineProperty(process, "platform", { value: "darwin" });
+
+    vi.resetModules();
+    service = await import("./service.js");
+
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("launchctl")) return "";
+      return "";
+    });
+
+    // Should not throw platform error
+    await service.install();
+    expect(existsSync(plistPath())).toBe(true);
+  });
+
+  it("allows Linux", async () => {
     mockPlatform.set("linux");
     Object.defineProperty(process, "platform", { value: "linux" });
 
     vi.resetModules();
     service = await import("./service.js");
 
-    await expect(service.install()).rejects.toThrow("process.exit(1)");
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("systemctl")) return "";
+      return "";
+    });
+
+    // Should not throw platform error
+    await service.install();
+    expect(existsSync(unitPath())).toBe(true);
   });
 });

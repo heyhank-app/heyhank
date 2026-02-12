@@ -732,9 +732,9 @@ export function createRoutes(
           return;
         }
         console.log(
-          "[update] Update successful, exiting for launchd restart...",
+          "[update] Update successful, exiting for service restart...",
         );
-        // Exit with non-zero code so launchd restarts us
+        // Exit with non-zero code so the service manager restarts us
         process.exit(42);
       } catch (err) {
         console.error("[update] Update failed:", err);

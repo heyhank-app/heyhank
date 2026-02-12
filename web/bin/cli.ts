@@ -74,7 +74,7 @@ Usage: the-companion [command]
 Commands:
   (none)      Start the server in foreground (default)
   start       Start the server in foreground
-  install     Install as a background service (launchd)
+  install     Install as a background service (launchd/systemd)
   uninstall   Remove the background service
   status      Show service status
   logs        Tail service log files
