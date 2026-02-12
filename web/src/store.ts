@@ -55,10 +55,8 @@ interface AppState {
   sidebarOpen: boolean;
   taskPanelOpen: boolean;
   homeResetKey: number;
-  activeTab: "chat" | "editor";
-  editorOpenFile: Map<string, string>;
-  editorUrl: Map<string, string>;
-  editorLoading: Map<string, boolean>;
+  activeTab: "chat" | "diff";
+  diffPanelSelectedFile: Map<string, string>;
 
   // Actions
   setDarkMode: (v: boolean) => void;
@@ -116,11 +114,9 @@ interface AppState {
   setUpdateInfo: (info: UpdateInfo | null) => void;
   dismissUpdate: (version: string) => void;
 
-  // Editor actions
-  setActiveTab: (tab: "chat" | "editor") => void;
-  setEditorOpenFile: (sessionId: string, filePath: string | null) => void;
-  setEditorUrl: (sessionId: string, url: string) => void;
-  setEditorLoading: (sessionId: string, loading: boolean) => void;
+  // Diff panel actions
+  setActiveTab: (tab: "chat" | "diff") => void;
+  setDiffPanelSelectedFile: (sessionId: string, filePath: string | null) => void;
 
   reset: () => void;
 }
@@ -193,9 +189,7 @@ export const useStore = create<AppState>((set) => ({
   taskPanelOpen: typeof window !== "undefined" ? window.innerWidth >= 1024 : false,
   homeResetKey: 0,
   activeTab: "chat",
-  editorOpenFile: new Map(),
-  editorUrl: new Map(),
-  editorLoading: new Map(),
+  diffPanelSelectedFile: new Map(),
 
   setDarkMode: (v) => {
     localStorage.setItem("cc-dark-mode", String(v));
@@ -280,12 +274,8 @@ export const useStore = create<AppState>((set) => ({
       sessionNames.delete(sessionId);
       const recentlyRenamed = new Set(s.recentlyRenamed);
       recentlyRenamed.delete(sessionId);
-      const editorOpenFile = new Map(s.editorOpenFile);
-      editorOpenFile.delete(sessionId);
-      const editorUrl = new Map(s.editorUrl);
-      editorUrl.delete(sessionId);
-      const editorLoading = new Map(s.editorLoading);
-      editorLoading.delete(sessionId);
+      const diffPanelSelectedFile = new Map(s.diffPanelSelectedFile);
+      diffPanelSelectedFile.delete(sessionId);
       localStorage.setItem("cc-session-names", JSON.stringify(Array.from(sessionNames.entries())));
       if (s.currentSessionId === sessionId) {
         localStorage.removeItem("cc-current-session");
@@ -305,9 +295,7 @@ export const useStore = create<AppState>((set) => ({
         changedFiles,
         sessionNames,
         recentlyRenamed,
-        editorOpenFile,
-        editorUrl,
-        editorLoading,
+        diffPanelSelectedFile,
         sdkSessions: s.sdkSessions.filter((sdk) => sdk.sessionId !== sessionId),
         currentSessionId: s.currentSessionId === sessionId ? null : s.currentSessionId,
       };
@@ -508,29 +496,15 @@ export const useStore = create<AppState>((set) => ({
 
   setActiveTab: (tab) => set({ activeTab: tab }),
 
-  setEditorOpenFile: (sessionId, filePath) =>
+  setDiffPanelSelectedFile: (sessionId, filePath) =>
     set((s) => {
-      const editorOpenFile = new Map(s.editorOpenFile);
+      const diffPanelSelectedFile = new Map(s.diffPanelSelectedFile);
       if (filePath) {
-        editorOpenFile.set(sessionId, filePath);
+        diffPanelSelectedFile.set(sessionId, filePath);
       } else {
-        editorOpenFile.delete(sessionId);
+        diffPanelSelectedFile.delete(sessionId);
       }
-      return { editorOpenFile };
-    }),
-
-  setEditorUrl: (sessionId, url) =>
-    set((s) => {
-      const editorUrl = new Map(s.editorUrl);
-      editorUrl.set(sessionId, url);
-      return { editorUrl };
-    }),
-
-  setEditorLoading: (sessionId, loading) =>
-    set((s) => {
-      const editorLoading = new Map(s.editorLoading);
-      editorLoading.set(sessionId, loading);
-      return { editorLoading };
+      return { diffPanelSelectedFile };
     }),
 
   reset: () =>
@@ -552,8 +526,6 @@ export const useStore = create<AppState>((set) => ({
       sessionNames: new Map(),
       recentlyRenamed: new Set(),
       activeTab: "chat" as const,
-      editorOpenFile: new Map(),
-      editorUrl: new Map(),
-      editorLoading: new Map(),
+      diffPanelSelectedFile: new Map(),
     }),
 }));

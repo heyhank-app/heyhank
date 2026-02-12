@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { DiffViewer } from "./DiffViewer.js";
 
 const TOOL_ICONS: Record<string, string> = {
   Bash: "terminal",
@@ -108,40 +109,25 @@ function EditToolDetail({ input }: { input: Record<string, unknown> }) {
   const newStr = String(input.new_string || "");
 
   return (
-    <div className="space-y-2">
-      <div className="text-xs text-cc-muted font-mono-code">{filePath}</div>
-      {oldStr && (
-        <div className="rounded-lg overflow-hidden border border-cc-border">
-          <div className="px-2 py-1 bg-cc-error/5 text-[10px] text-cc-error font-mono-code">removed</div>
-          <pre className="px-3 py-2 bg-cc-code-bg text-cc-code-fg text-[11px] font-mono-code leading-relaxed overflow-x-auto max-h-32 overflow-y-auto">
-            {oldStr}
-          </pre>
-        </div>
-      )}
-      {newStr && (
-        <div className="rounded-lg overflow-hidden border border-cc-border">
-          <div className="px-2 py-1 bg-cc-success/5 text-[10px] text-cc-success font-mono-code">added</div>
-          <pre className="px-3 py-2 bg-cc-code-bg text-cc-code-fg text-[11px] font-mono-code leading-relaxed overflow-x-auto max-h-32 overflow-y-auto">
-            {newStr}
-          </pre>
-        </div>
-      )}
-    </div>
+    <DiffViewer
+      oldText={oldStr}
+      newText={newStr}
+      fileName={filePath}
+      mode="compact"
+    />
   );
 }
 
 function WriteToolDetail({ input }: { input: Record<string, unknown> }) {
   const filePath = String(input.file_path || "");
   const content = String(input.content || "");
-  const preview = content.length > 500 ? content.slice(0, 500) + "..." : content;
 
   return (
-    <div className="space-y-2">
-      <div className="text-xs text-cc-muted font-mono-code">{filePath}</div>
-      <pre className="px-3 py-2 rounded-lg bg-cc-code-bg text-cc-code-fg text-[11px] font-mono-code leading-relaxed overflow-x-auto max-h-40 overflow-y-auto">
-        {preview}
-      </pre>
-    </div>
+    <DiffViewer
+      newText={content}
+      fileName={filePath}
+      mode="compact"
+    />
   );
 }
 

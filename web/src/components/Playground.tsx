@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { PermissionBanner } from "./PermissionBanner.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { ToolBlock, getToolIcon, getToolLabel, getPreview, ToolIcon } from "./ToolBlock.js";
+import { DiffViewer } from "./DiffViewer.js";
 import { UpdateBanner } from "./UpdateBanner.js";
 import { useStore } from "../store.js";
 import type { PermissionRequest, ChatMessage, ContentBlock } from "../types.js";
@@ -702,6 +703,58 @@ export function Playground() {
                 agentType="Explore"
                 items={MOCK_SUBAGENT_TOOL_ITEMS}
               />
+            </Card>
+          </div>
+        </Section>
+
+        {/* ─── Diff Viewer ──────────────────────────────── */}
+        <Section title="Diff Viewer" description="Unified diff rendering with word-level highlighting — used in ToolBlock, PermissionBanner, and DiffPanel">
+          <div className="space-y-4 max-w-3xl">
+            <Card label="Edit diff (compact mode)">
+              <DiffViewer
+                oldText={'export function formatDate(d: Date) {\n  return d.toISOString();\n}'}
+                newText={'export function formatDate(d: Date, locale = "en-US") {\n  return d.toLocaleDateString(locale, {\n    year: "numeric",\n    month: "short",\n    day: "numeric",\n  });\n}'}
+                fileName="src/utils/format.ts"
+                mode="compact"
+              />
+            </Card>
+            <Card label="New file diff (compact mode)">
+              <DiffViewer
+                newText={'export const config = {\n  apiUrl: "https://api.example.com",\n  timeout: 5000,\n  retries: 3,\n  debug: process.env.NODE_ENV !== "production",\n};\n'}
+                fileName="src/config.ts"
+                mode="compact"
+              />
+            </Card>
+            <Card label="Git diff (full mode with line numbers)">
+              <DiffViewer
+                unifiedDiff={`diff --git a/src/auth/middleware.ts b/src/auth/middleware.ts
+--- a/src/auth/middleware.ts
++++ b/src/auth/middleware.ts
+@@ -1,8 +1,12 @@
+-import { getSession } from "./session";
++import { verifyToken } from "./jwt";
++import type { Request, Response, NextFunction } from "express";
+
+-export function authMiddleware(req, res, next) {
+-  const session = getSession(req);
+-  if (!session?.userId) {
++export function authMiddleware(req: Request, res: Response, next: NextFunction) {
++  const header = req.headers.authorization;
++  if (!header?.startsWith("Bearer ")) {
+     return res.status(401).json({ error: "Unauthorized" });
+   }
+-  req.userId = session.userId;
++  const token = header.slice(7);
++  const payload = verifyToken(token);
++  if (!payload) return res.status(401).json({ error: "Invalid token" });
++  req.userId = payload.userId;
+   next();
+ }`}
+                mode="full"
+              />
+            </Card>
+            <Card label="No changes">
+              <DiffViewer oldText="same content" newText="same content" />
             </Card>
           </div>
         </Section>
