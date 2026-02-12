@@ -193,6 +193,24 @@ export interface ServiceStatus {
   port?: number;
 }
 
+/**
+ * Safe check for whether the current process is running as a launchd service.
+ * Unlike status(), this never calls process.exit() and works on all platforms.
+ */
+export function isRunningAsService(): boolean {
+  if (process.platform !== "darwin") return false;
+  if (!existsSync(PLIST_PATH)) return false;
+  try {
+    const output = execSync(`launchctl list "${LABEL}"`, {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    return /"PID"\s*=\s*\d+/.test(output);
+  } catch {
+    return false;
+  }
+}
+
 export async function status(): Promise<ServiceStatus> {
   ensureMacOS();
 

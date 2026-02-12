@@ -12,6 +12,8 @@ import { SessionStore } from "./session-store.js";
 import { WorktreeTracker } from "./worktree-tracker.js";
 import { generateSessionTitle } from "./auto-namer.js";
 import * as sessionNames from "./session-names.js";
+import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
+import { isRunningAsService } from "./service.js";
 import type { SocketData } from "./ws-bridge.js";
 import type { ServerWebSocket } from "bun";
 
@@ -156,6 +158,13 @@ console.log(`  Browser WebSocket: ws://localhost:${server.port}/ws/browser/:sess
 
 if (process.env.NODE_ENV !== "production") {
   console.log("Dev mode: frontend at http://localhost:5174");
+}
+
+// ── Update checker ──────────────────────────────────────────────────────────
+startPeriodicCheck();
+if (isRunningAsService()) {
+  setServiceMode(true);
+  console.log("[server] Running as launchd service (auto-update available)");
 }
 
 // ── Reconnection watchdog ────────────────────────────────────────────────────

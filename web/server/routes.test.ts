@@ -47,6 +47,20 @@ vi.mock("./usage-limits.js", () => ({
   getUsageLimits: mockGetUsageLimits,
 }));
 
+vi.mock("./update-checker.js", () => ({
+  getUpdateState: vi.fn(() => ({
+    currentVersion: "0.22.1",
+    latestVersion: null,
+    lastChecked: 0,
+    isServiceMode: false,
+    checking: false,
+    updateInProgress: false,
+  })),
+  checkForUpdate: vi.fn(async () => {}),
+  isUpdateAvailable: vi.fn(() => false),
+  setUpdateInProgress: vi.fn(),
+}));
+
 import { Hono } from "hono";
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";

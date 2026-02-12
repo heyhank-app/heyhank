@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { SessionState, PermissionRequest, ChatMessage, SdkSessionInfo, TaskItem } from "./types.js";
+import type { UpdateInfo } from "./api.js";
 
 interface AppState {
   // Sessions
@@ -43,6 +44,10 @@ interface AppState {
 
   // Sidebar project grouping
   collapsedProjects: Set<string>;
+
+  // Update info
+  updateInfo: UpdateInfo | null;
+  updateDismissedVersion: string | null;
 
   // UI
   darkMode: boolean;
@@ -107,6 +112,10 @@ interface AppState {
   setCliConnected: (sessionId: string, connected: boolean) => void;
   setSessionStatus: (sessionId: string, status: "idle" | "running" | "compacting" | null) => void;
 
+  // Update actions
+  setUpdateInfo: (info: UpdateInfo | null) => void;
+  dismissUpdate: (version: string) => void;
+
   // Editor actions
   setActiveTab: (tab: "chat" | "editor") => void;
   setEditorOpenFile: (sessionId: string, filePath: string | null) => void;
@@ -144,6 +153,11 @@ function getInitialNotificationSound(): boolean {
   return true;
 }
 
+function getInitialDismissedVersion(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("cc-update-dismissed") || null;
+}
+
 function getInitialCollapsedProjects(): Set<string> {
   if (typeof window === "undefined") return new Set();
   try {
@@ -171,6 +185,8 @@ export const useStore = create<AppState>((set) => ({
   sessionNames: getInitialSessionNames(),
   recentlyRenamed: new Set(),
   collapsedProjects: getInitialCollapsedProjects(),
+  updateInfo: null,
+  updateDismissedVersion: getInitialDismissedVersion(),
   darkMode: getInitialDarkMode(),
   notificationSound: getInitialNotificationSound(),
   sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 768 : true,
@@ -483,6 +499,12 @@ export const useStore = create<AppState>((set) => ({
       sessionStatus.set(sessionId, status);
       return { sessionStatus };
     }),
+
+  setUpdateInfo: (info) => set({ updateInfo: info }),
+  dismissUpdate: (version) => {
+    localStorage.setItem("cc-update-dismissed", version);
+    set({ updateDismissedVersion: version });
+  },
 
   setActiveTab: (tab) => set({ activeTab: tab }),
 

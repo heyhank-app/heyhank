@@ -12,6 +12,12 @@ import * as envManager from "./env-manager.js";
 import * as gitUtils from "./git-utils.js";
 import * as sessionNames from "./session-names.js";
 import { getUsageLimits } from "./usage-limits.js";
+import {
+  getUpdateState,
+  checkForUpdate,
+  isUpdateAvailable,
+  setUpdateInProgress,
+} from "./update-checker.js";
 
 export function createRoutes(
   launcher: CliLauncher,
@@ -600,6 +606,87 @@ export function createRoutes(
     // Claude sessions: use existing logic
     const limits = await getUsageLimits();
     return c.json(limits);
+  });
+
+  // ─── Update checking ─────────────────────────────────────────────────
+
+  api.get("/update-check", (c) => {
+    const state = getUpdateState();
+    return c.json({
+      currentVersion: state.currentVersion,
+      latestVersion: state.latestVersion,
+      updateAvailable: isUpdateAvailable(),
+      isServiceMode: state.isServiceMode,
+      updateInProgress: state.updateInProgress,
+      lastChecked: state.lastChecked,
+    });
+  });
+
+  api.post("/update-check", async (c) => {
+    await checkForUpdate();
+    const state = getUpdateState();
+    return c.json({
+      currentVersion: state.currentVersion,
+      latestVersion: state.latestVersion,
+      updateAvailable: isUpdateAvailable(),
+      isServiceMode: state.isServiceMode,
+      updateInProgress: state.updateInProgress,
+      lastChecked: state.lastChecked,
+    });
+  });
+
+  api.post("/update", async (c) => {
+    const state = getUpdateState();
+    if (!state.isServiceMode) {
+      return c.json(
+        { error: "Update & restart is only available in service mode" },
+        400,
+      );
+    }
+    if (!isUpdateAvailable()) {
+      return c.json({ error: "No update available" }, 400);
+    }
+    if (state.updateInProgress) {
+      return c.json({ error: "Update already in progress" }, 409);
+    }
+
+    setUpdateInProgress(true);
+
+    // Respond immediately, then perform update async
+    setTimeout(async () => {
+      try {
+        console.log(
+          `[update] Updating the-vibe-companion to ${state.latestVersion}...`,
+        );
+        const proc = Bun.spawn(
+          ["bun", "install", "-g", `the-vibe-companion@${state.latestVersion}`],
+          { stdout: "pipe", stderr: "pipe" },
+        );
+        const exitCode = await proc.exited;
+        if (exitCode !== 0) {
+          const stderr = await new Response(proc.stderr).text();
+          console.error(
+            `[update] bun install failed (code ${exitCode}):`,
+            stderr,
+          );
+          setUpdateInProgress(false);
+          return;
+        }
+        console.log(
+          "[update] Update successful, exiting for launchd restart...",
+        );
+        // Exit with non-zero code so launchd restarts us
+        process.exit(42);
+      } catch (err) {
+        console.error("[update] Update failed:", err);
+        setUpdateInProgress(false);
+      }
+    }, 100);
+
+    return c.json({
+      ok: true,
+      message: "Update started. Server will restart shortly.",
+    });
   });
 
   // ─── Helper ─────────────────────────────────────────────────────────

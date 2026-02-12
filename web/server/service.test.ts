@@ -331,6 +331,69 @@ describe("status", () => {
 });
 
 // ===========================================================================
+// isRunningAsService
+// ===========================================================================
+describe("isRunningAsService", () => {
+  it("returns false on non-macOS platforms", async () => {
+    mockPlatform.set("linux");
+    Object.defineProperty(process, "platform", { value: "linux" });
+
+    vi.resetModules();
+    service = await import("./service.js");
+
+    expect(service.isRunningAsService()).toBe(false);
+  });
+
+  it("returns false when no plist exists", () => {
+    expect(service.isRunningAsService()).toBe(false);
+  });
+
+  it("returns true when plist exists and service has a PID", async () => {
+    // Install first
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-vibe-companion\n";
+      if (cmd.startsWith("launchctl load")) return "";
+      return "";
+    });
+    await service.install();
+
+    vi.resetModules();
+    service = await import("./service.js");
+    mockExecSync.mockReset();
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (typeof cmd === "string" && cmd.includes("launchctl list")) {
+        return `{\n\t"PID" = 12345;\n\t"Label" = "co.thevibecompany.companion";\n}`;
+      }
+      return "";
+    });
+
+    expect(service.isRunningAsService()).toBe(true);
+  });
+
+  it("returns false when plist exists but no PID (not running)", async () => {
+    // Install first
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-vibe-companion\n";
+      if (cmd.startsWith("launchctl load")) return "";
+      return "";
+    });
+    await service.install();
+
+    vi.resetModules();
+    service = await import("./service.js");
+    mockExecSync.mockReset();
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (typeof cmd === "string" && cmd.includes("launchctl list")) {
+        return `{\n\t"Label" = "co.thevibecompany.companion";\n}`;
+      }
+      return "";
+    });
+
+    expect(service.isRunningAsService()).toBe(false);
+  });
+});
+
+// ===========================================================================
 // Platform check
 // ===========================================================================
 describe("platform check", () => {

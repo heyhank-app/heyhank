@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { useStore } from "./store.js";
 import { connectSession } from "./ws.js";
+import { api } from "./api.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { ChatView } from "./components/ChatView.js";
 import { TopBar } from "./components/TopBar.js";
@@ -8,6 +9,7 @@ import { HomePage } from "./components/HomePage.js";
 import { TaskPanel } from "./components/TaskPanel.js";
 import { EditorPanel } from "./components/EditorPanel.js";
 import { Playground } from "./components/Playground.js";
+import { UpdateBanner } from "./components/UpdateBanner.js";
 
 function useHash() {
   return useSyncExternalStore(
@@ -35,6 +37,18 @@ export default function App() {
     if (restoredId) {
       connectSession(restoredId);
     }
+  }, []);
+
+  // Poll for updates
+  useEffect(() => {
+    const check = () => {
+      api.checkForUpdate().then((info) => {
+        useStore.getState().setUpdateInfo(info);
+      }).catch(() => {});
+    };
+    check();
+    const interval = setInterval(check, 5 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
   if (hash === "#/playground") {
@@ -66,6 +80,7 @@ export default function App() {
       {/* Main area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <TopBar />
+        <UpdateBanner />
         <div className="flex-1 overflow-hidden relative">
           {/* Chat tab — visible when activeTab is "chat" or no session */}
           <div className={`absolute inset-0 ${activeTab === "chat" || !currentSessionId ? "" : "hidden"}`}>
