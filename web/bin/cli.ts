@@ -45,7 +45,18 @@ switch (command) {
   case "start": {
     // Internal service process should stay in foreground server mode.
     const forceForeground = process.argv.includes("--foreground");
-    const launchedByInit = process.ppid === 1;
+    const launchedByInit = (() => {
+      if (process.ppid === 1) return true;
+      // User-level systemd (systemctl --user) spawns services from a
+      // per-user systemd process whose ppid != 1.  Detect it via /proc.
+      try {
+        const { readFileSync } = require("node:fs");
+        const comm = readFileSync(`/proc/${process.ppid}/comm`, "utf-8").trim();
+        return comm === "systemd";
+      } catch {
+        return false;
+      }
+    })();
     if (forceForeground || launchedByInit) {
       process.env.NODE_ENV = process.env.NODE_ENV || "production";
       await import("../server/index.ts");

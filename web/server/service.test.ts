@@ -633,9 +633,26 @@ describe("start (linux)", () => {
     expect(startCall).toBeDefined();
   });
 
-  it("handles not-installed gracefully", async () => {
-    // Should not throw
+  it("auto-installs and starts when not installed", async () => {
+    // When the service is not installed, start() should auto-install it.
+    // Mock `which` to return a valid binary path so install can proceed.
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("systemctl")) return "";
+      if (cmd.startsWith("loginctl")) return "";
+      return "";
+    });
+
     await service.start();
+
+    // Verify unit file was written (install happened)
+    expect(existsSync(unitPath())).toBe(true);
+
+    // Verify systemctl enable --now was called (service started)
+    const enableCall = mockExecSync.mock.calls.find(
+      ([cmd]) => typeof cmd === "string" && cmd.includes("enable --now"),
+    );
+    expect(enableCall).toBeDefined();
   });
 });
 

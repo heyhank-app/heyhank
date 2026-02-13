@@ -926,6 +926,14 @@ export function createRoutes(
           stdout: "ignore",
           stderr: "ignore",
           stdin: "ignore",
+          env: isLinux
+            ? {
+                ...process.env,
+                XDG_RUNTIME_DIR:
+                  process.env.XDG_RUNTIME_DIR ||
+                  `/run/user/${uid ?? 1000}`,
+              }
+            : undefined,
         });
 
         // Give the spawn a moment to dispatch, then exit cleanly.

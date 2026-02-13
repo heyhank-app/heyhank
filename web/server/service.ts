@@ -211,9 +211,14 @@ function isSystemdUnitInstalled(): boolean {
 }
 
 function systemctlUser(cmd: string): string {
+  const uid = typeof process.getuid === "function" ? process.getuid() : 1000;
   return execSync(`systemctl --user ${cmd}`, {
     encoding: "utf-8",
     stdio: ["pipe", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR || `/run/user/${uid}`,
+    },
   });
 }
 
@@ -297,6 +302,16 @@ async function installLinux(opts?: { port?: number }): Promise<void> {
     // Clean up the unit file on failure
     try { unlinkSync(UNIT_PATH); } catch { /* ok */ }
     process.exit(1);
+  }
+
+  // Enable linger so user services survive logout
+  try {
+    execSync("loginctl enable-linger", { stdio: ["pipe", "pipe", "pipe"] });
+  } catch {
+    console.warn(
+      "Warning: Could not enable linger. The service may stop when you log out.",
+    );
+    console.warn("  sudo loginctl enable-linger $(whoami)");
   }
 
   console.log("The Companion has been installed as a background service.");
@@ -408,9 +423,9 @@ async function startDarwin(): Promise<void> {
 
 async function startLinux(): Promise<void> {
   if (!isSystemdUnitInstalled()) {
-    console.log("The Companion is not installed as a service.");
-    console.log("Run 'the-companion install' first.");
-    return;
+    console.log("Service not yet installed. Installing now...");
+    await installLinux();
+    return; // installLinux uses enable --now which starts the service
   }
 
   try {

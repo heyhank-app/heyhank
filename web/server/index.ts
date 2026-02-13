@@ -191,7 +191,7 @@ if (process.env.NODE_ENV !== "production") {
 startPeriodicCheck();
 if (isRunningAsService()) {
   setServiceMode(true);
-  console.log("[server] Running as launchd service (auto-update available)");
+  console.log("[server] Running as background service (auto-update available)");
 }
 
 // ── Reconnection watchdog ────────────────────────────────────────────────────
