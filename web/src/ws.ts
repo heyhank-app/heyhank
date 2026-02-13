@@ -5,6 +5,7 @@ import { playNotificationSound } from "./utils/notification-sound.js";
 
 const sockets = new Map<string, WebSocket>();
 const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const lastSeqBySession = new Map<string, number>();
 const taskCounters = new Map<string, number>();
 /** Track processed tool_use IDs to prevent duplicate task creation */
 const processedToolUseIds = new Map<string, Set<string>>();
@@ -130,13 +131,62 @@ function sendBrowserNotification(title: string, body: string, tag: string) {
 }
 
 let idCounter = 0;
+let clientMsgCounter = 0;
 function nextId(): string {
   return `msg-${Date.now()}-${++idCounter}`;
 }
 
+function nextClientMsgId(): string {
+  return `cmsg-${Date.now()}-${++clientMsgCounter}`;
+}
+
+const IDEMPOTENT_OUTGOING_TYPES = new Set<BrowserOutgoingMessage["type"]>([
+  "user_message",
+  "permission_response",
+  "interrupt",
+  "set_model",
+  "set_permission_mode",
+  "mcp_get_status",
+  "mcp_toggle",
+  "mcp_reconnect",
+  "mcp_set_servers",
+]);
+
 function getWsUrl(sessionId: string): string {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${location.host}/ws/browser/${sessionId}`;
+}
+
+function getLastSeqStorageKey(sessionId: string): string {
+  return `companion:last-seq:${sessionId}`;
+}
+
+function getLastSeq(sessionId: string): number {
+  const cached = lastSeqBySession.get(sessionId);
+  if (typeof cached === "number") return cached;
+  try {
+    const raw = localStorage.getItem(getLastSeqStorageKey(sessionId));
+    const parsed = raw ? Number(raw) : 0;
+    const normalized = Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+    lastSeqBySession.set(sessionId, normalized);
+    return normalized;
+  } catch {
+    return 0;
+  }
+}
+
+function setLastSeq(sessionId: string, seq: number): void {
+  const normalized = Math.max(0, Math.floor(seq));
+  lastSeqBySession.set(sessionId, normalized);
+  try {
+    localStorage.setItem(getLastSeqStorageKey(sessionId), String(normalized));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function ackSeq(sessionId: string, seq: number): void {
+  sendToSession(sessionId, { type: "session_ack", last_seq: seq });
 }
 
 function extractTextFromBlocks(blocks: ContentBlock[]): string {
@@ -151,7 +201,6 @@ function extractTextFromBlocks(blocks: ContentBlock[]): string {
 }
 
 function handleMessage(sessionId: string, event: MessageEvent) {
-  const store = useStore.getState();
   let data: BrowserIncomingMessage;
   try {
     data = JSON.parse(event.data);
@@ -159,11 +208,34 @@ function handleMessage(sessionId: string, event: MessageEvent) {
     return;
   }
 
+  handleParsedMessage(sessionId, data);
+}
+
+function handleParsedMessage(
+  sessionId: string,
+  data: BrowserIncomingMessage,
+  options: { processSeq?: boolean; ackSeqMessage?: boolean } = {},
+) {
+  const { processSeq = true, ackSeqMessage = true } = options;
+  const store = useStore.getState();
+
+  if (processSeq && typeof data.seq === "number") {
+    const previous = getLastSeq(sessionId);
+    if (data.seq <= previous) return;
+    setLastSeq(sessionId, data.seq);
+    if (ackSeqMessage) {
+      ackSeq(sessionId, data.seq);
+    }
+  }
+
   switch (data.type) {
     case "session_init": {
+      const existingSession = store.sessions.get(sessionId);
       store.addSession(data.session);
       store.setCliConnected(sessionId, true);
-      store.setSessionStatus(sessionId, "idle");
+      if (!existingSession) {
+        store.setSessionStatus(sessionId, "idle");
+      }
       if (!store.sessionNames.has(sessionId)) {
         const existingNames = new Set(store.sessionNames.values());
         const name = generateUniqueSessionName(existingNames);
@@ -448,6 +520,25 @@ function handleMessage(sessionId: string, event: MessageEvent) {
       }
       break;
     }
+
+    case "event_replay": {
+      let latestProcessed: number | undefined;
+      for (const evt of data.events) {
+        const previous = getLastSeq(sessionId);
+        if (evt.seq <= previous) continue;
+        setLastSeq(sessionId, evt.seq);
+        latestProcessed = evt.seq;
+        handleParsedMessage(
+          sessionId,
+          evt.message as BrowserIncomingMessage,
+          { processSeq: false, ackSeqMessage: false },
+        );
+      }
+      if (typeof latestProcessed === "number") {
+        ackSeq(sessionId, latestProcessed);
+      }
+      break;
+    }
   }
 }
 
@@ -462,6 +553,8 @@ export function connectSession(sessionId: string) {
 
   ws.onopen = () => {
     useStore.getState().setConnectionStatus(sessionId, "connected");
+    const lastSeq = getLastSeq(sessionId);
+    ws.send(JSON.stringify({ type: "session_subscribe", last_seq: lastSeq }));
     // Clear any reconnect timer
     const timer = reconnectTimers.get(sessionId);
     if (timer) {
@@ -545,8 +638,26 @@ export function waitForConnection(sessionId: string): Promise<void> {
 
 export function sendToSession(sessionId: string, msg: BrowserOutgoingMessage) {
   const ws = sockets.get(sessionId);
+  let outgoing: BrowserOutgoingMessage = msg;
+  if (IDEMPOTENT_OUTGOING_TYPES.has(msg.type)) {
+    switch (msg.type) {
+      case "user_message":
+      case "permission_response":
+      case "interrupt":
+      case "set_model":
+      case "set_permission_mode":
+      case "mcp_get_status":
+      case "mcp_toggle":
+      case "mcp_reconnect":
+      case "mcp_set_servers":
+        if (!msg.client_msg_id) {
+          outgoing = { ...msg, client_msg_id: nextClientMsgId() };
+        }
+        break;
+    }
+  }
   if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(msg));
+    ws.send(JSON.stringify(outgoing));
   }
 }
 

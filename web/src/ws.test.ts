@@ -114,6 +114,17 @@ describe("connectSession", () => {
     // lastWs should still be the first one (no new constructor call)
     expect(lastWs).toBe(first);
   });
+
+  it("sends session_subscribe with last_seq on open", () => {
+    localStorage.setItem("companion:last-seq:s1", "12");
+    wsModule.connectSession("s1");
+
+    lastWs.onopen?.(new Event("open"));
+
+    expect(lastWs.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "session_subscribe", last_seq: 12 }),
+    );
+  });
 });
 
 // ===========================================================================
@@ -126,12 +137,36 @@ describe("sendToSession", () => {
 
     wsModule.sendToSession("s1", msg);
 
-    expect(lastWs.send).toHaveBeenCalledWith(JSON.stringify(msg));
+    const payload = JSON.parse(lastWs.send.mock.calls[0][0]);
+    expect(payload.type).toBe("user_message");
+    expect(payload.content).toBe("hello");
+    expect(typeof payload.client_msg_id).toBe("string");
   });
 
   it("does nothing when session has no socket", () => {
     // Should not throw
     wsModule.sendToSession("nonexistent", { type: "interrupt" });
+  });
+
+  it("preserves provided client_msg_id", () => {
+    wsModule.connectSession("s1");
+    wsModule.sendToSession("s1", {
+      type: "user_message",
+      content: "hello",
+      client_msg_id: "fixed-id-1",
+    });
+
+    const payload = JSON.parse(lastWs.send.mock.calls[0][0]);
+    expect(payload.client_msg_id).toBe("fixed-id-1");
+  });
+
+  it("adds client_msg_id for interrupt control message", () => {
+    wsModule.connectSession("s1");
+    wsModule.sendToSession("s1", { type: "interrupt" });
+
+    const payload = JSON.parse(lastWs.send.mock.calls[0][0]);
+    expect(payload.type).toBe("interrupt");
+    expect(typeof payload.client_msg_id).toBe("string");
   });
 });
 
@@ -191,6 +226,67 @@ describe("handleMessage: session_update", () => {
     fireMessage({ type: "session_update", session: { model: "claude-sonnet-4-20250514" } });
 
     expect(useStore.getState().sessions.get("s1")!.model).toBe("claude-sonnet-4-20250514");
+  });
+});
+
+describe("handleMessage: event_replay", () => {
+  it("replays sequenced stream events and stores latest seq", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({
+      type: "event_replay",
+      events: [
+        {
+          seq: 1,
+          message: {
+            type: "stream_event",
+            event: { type: "content_block_delta", delta: { type: "text_delta", text: "Hello" } },
+            parent_tool_use_id: null,
+          },
+        },
+      ],
+    });
+
+    expect(useStore.getState().streaming.get("s1")).toBe("Hello");
+    expect(localStorage.getItem("companion:last-seq:s1")).toBe("1");
+    expect(lastWs.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "session_ack", last_seq: 1 }),
+    );
+  });
+
+  it("acks only once using the latest replayed seq", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+    lastWs.send.mockClear();
+
+    fireMessage({
+      type: "event_replay",
+      events: [
+        {
+          seq: 1,
+          message: {
+            type: "stream_event",
+            event: { type: "content_block_delta", delta: { type: "text_delta", text: "A" } },
+            parent_tool_use_id: null,
+          },
+        },
+        {
+          seq: 2,
+          message: {
+            type: "stream_event",
+            event: { type: "content_block_delta", delta: { type: "text_delta", text: "B" } },
+            parent_tool_use_id: null,
+          },
+        },
+      ],
+    });
+
+    expect(useStore.getState().streaming.get("s1")).toBe("AB");
+    expect(lastWs.send).toHaveBeenCalledTimes(1);
+    expect(lastWs.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "session_ack", last_seq: 2 }),
+    );
   });
 });
 
@@ -1006,6 +1102,7 @@ describe("MCP status messages", () => {
     expect(lastWs.send).toHaveBeenCalledTimes(1);
     const sent = JSON.parse(lastWs.send.mock.calls[0][0]);
     expect(sent.type).toBe("mcp_get_status");
+    expect(typeof sent.client_msg_id).toBe("string");
   });
 
   it("sendMcpToggle: sends mcp_toggle message", () => {
@@ -1019,6 +1116,7 @@ describe("MCP status messages", () => {
     expect(sent.type).toBe("mcp_toggle");
     expect(sent.serverName).toBe("my-server");
     expect(sent.enabled).toBe(false);
+    expect(typeof sent.client_msg_id).toBe("string");
   });
 
   it("sendMcpReconnect: sends mcp_reconnect message", () => {
@@ -1031,6 +1129,7 @@ describe("MCP status messages", () => {
     const sent = JSON.parse(lastWs.send.mock.calls[0][0]);
     expect(sent.type).toBe("mcp_reconnect");
     expect(sent.serverName).toBe("failing-server");
+    expect(typeof sent.client_msg_id).toBe("string");
   });
 
   it("sendMcpSetServers: sends mcp_set_servers message", () => {
@@ -1050,5 +1149,6 @@ describe("MCP status messages", () => {
     const sent = JSON.parse(lastWs.send.mock.calls[0][0]);
     expect(sent.type).toBe("mcp_set_servers");
     expect(sent.servers).toEqual(servers);
+    expect(typeof sent.client_msg_id).toBe("string");
   });
 });

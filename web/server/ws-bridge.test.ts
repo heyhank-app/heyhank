@@ -195,7 +195,7 @@ describe("CLI handlers", () => {
 
     // Should have broadcast cli_connected
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
-    expect(calls).toContainEqual({ type: "cli_connected" });
+    expect(calls).toContainEqual(expect.objectContaining({ type: "cli_connected" }));
   });
 
   it("handleCLIOpen: flushes pending messages", () => {
@@ -378,7 +378,7 @@ describe("CLI handlers", () => {
     expect(state.permissionMode).toBe("plan");
 
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
-    expect(calls).toContainEqual({ type: "status_change", status: "compacting" });
+    expect(calls).toContainEqual(expect.objectContaining({ type: "status_change", status: "compacting" }));
   });
 
   it("handleCLIClose: nulls cliSocket and broadcasts cli_disconnected", () => {
@@ -395,7 +395,7 @@ describe("CLI handlers", () => {
     expect(bridge.isCliConnected("s1")).toBe(false);
 
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
-    expect(calls).toContainEqual({ type: "cli_disconnected" });
+    expect(calls).toContainEqual(expect.objectContaining({ type: "cli_disconnected" }));
   });
 
   it("handleCLIClose: cancels pending permissions", () => {
@@ -578,6 +578,115 @@ describe("Browser handlers", () => {
 
     bridge.handleBrowserClose(browser);
     expect(bridge.getSession("s1")!.browserSockets.has(browser)).toBe(false);
+  });
+
+  it("session_subscribe: replays buffered sequenced events after last_seq", () => {
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+
+    // Generate replayable events while no browser is connected.
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "a" } },
+      parent_tool_use_id: null,
+      uuid: "u1",
+      session_id: "s1",
+    }));
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "b" } },
+      parent_tool_use_id: null,
+      uuid: "u2",
+      session_id: "s1",
+    }));
+
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+
+    // Ask for replay after seq=1 (cli_connected). Both stream events should replay.
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "session_subscribe",
+      last_seq: 1,
+    }));
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const replay = calls.find((c: any) => c.type === "event_replay");
+    expect(replay).toBeDefined();
+    expect(replay.events).toHaveLength(2);
+    expect(replay.events[0].seq).toBe(2);
+    expect(replay.events[0].message.type).toBe("stream_event");
+  });
+
+  it("session_subscribe: falls back to message_history when last_seq is older than buffer window", () => {
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+
+    // Populate history so fallback payload has content.
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "hist-1",
+        type: "message",
+        role: "assistant",
+        model: "claude-sonnet-4-5-20250929",
+        content: [{ type: "text", text: "from history" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      },
+      parent_tool_use_id: null,
+      uuid: "hist-u1",
+      session_id: "s1",
+    }));
+
+    // Generate several stream events, then trim the first one from in-memory buffer.
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "1" } },
+      parent_tool_use_id: null,
+      uuid: "se-u1",
+      session_id: "s1",
+    }));
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "2" } },
+      parent_tool_use_id: null,
+      uuid: "se-u2",
+      session_id: "s1",
+    }));
+    const session = bridge.getSession("s1")!;
+    session.eventBuffer.shift();
+    session.eventBuffer.shift(); // force earliest seq high enough to create a gap for last_seq=1
+
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "session_subscribe",
+      last_seq: 1,
+    }));
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const historyMsg = calls.find((c: any) => c.type === "message_history");
+    expect(historyMsg).toBeDefined();
+    expect(historyMsg.messages.some((m: any) => m.type === "assistant")).toBe(true);
+    const replayMsg = calls.find((c: any) => c.type === "event_replay");
+    expect(replayMsg).toBeDefined();
+    expect(replayMsg.events.some((e: any) => e.message.type === "stream_event")).toBe(true);
+  });
+
+  it("session_ack: updates lastAckSeq for the session", () => {
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "session_ack",
+      last_seq: 42,
+    }));
+
+    const session = bridge.getSession("s1")!;
+    expect(session.lastAckSeq).toBe(42);
   });
 });
 
@@ -929,6 +1038,22 @@ describe("Browser message routing", () => {
     expect(queued.message.content).toBe("queued message");
   });
 
+  it("user_message: deduplicates repeated client_msg_id", () => {
+    const payload = {
+      type: "user_message",
+      content: "once only",
+      client_msg_id: "client-msg-1",
+    };
+
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+
+    expect(cli.send).toHaveBeenCalledTimes(1);
+    const session = bridge.getSession("s1")!;
+    const userMessages = session.messageHistory.filter((m) => m.type === "user_message");
+    expect(userMessages).toHaveLength(1);
+  });
+
   it("user_message with images: builds content blocks", () => {
     bridge.handleBrowserMessage(browser, JSON.stringify({
       type: "user_message",
@@ -1022,6 +1147,33 @@ describe("Browser message routing", () => {
     expect(session.pendingPermissions.has("req-deny")).toBe(false);
   });
 
+  it("permission_response: deduplicates repeated client_msg_id", () => {
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "control_request",
+      request_id: "req-dedupe",
+      request: {
+        subtype: "can_use_tool",
+        tool_name: "Bash",
+        input: { command: "echo hi" },
+        tool_use_id: "tu-dedupe",
+      },
+    }));
+    cli.send.mockClear();
+
+    const payload = {
+      type: "permission_response",
+      request_id: "req-dedupe",
+      behavior: "allow",
+      client_msg_id: "perm-msg-1",
+    };
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+
+    expect(cli.send).toHaveBeenCalledTimes(1);
+    const session = bridge.getSession("s1")!;
+    expect(session.pendingPermissions.has("req-dedupe")).toBe(false);
+  });
+
   it("interrupt: sends control_request with interrupt subtype to CLI", () => {
     bridge.handleBrowserMessage(browser, JSON.stringify({
       type: "interrupt",
@@ -1033,6 +1185,14 @@ describe("Browser message routing", () => {
     expect(sent.type).toBe("control_request");
     expect(sent.request_id).toBe("test-uuid");
     expect(sent.request.subtype).toBe("interrupt");
+  });
+
+  it("interrupt: deduplicates repeated client_msg_id", () => {
+    const payload = { type: "interrupt", client_msg_id: "ctrl-msg-1" };
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+
+    expect(cli.send).toHaveBeenCalledTimes(1);
   });
 
   it("set_model: sends control_request with set_model subtype to CLI", () => {
@@ -1063,6 +1223,80 @@ describe("Browser message routing", () => {
     expect(sent.request_id).toBe("test-uuid");
     expect(sent.request.subtype).toBe("set_permission_mode");
     expect(sent.request.mode).toBe("bypassPermissions");
+  });
+
+  it("set_model: deduplicates repeated client_msg_id", () => {
+    const payload = {
+      type: "set_model",
+      model: "claude-opus-4-5-20250929",
+      client_msg_id: "set-model-1",
+    };
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+    expect(cli.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("set_permission_mode: deduplicates repeated client_msg_id", () => {
+    const payload = {
+      type: "set_permission_mode",
+      mode: "plan",
+      client_msg_id: "set-mode-1",
+    };
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+    expect(cli.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("mcp_toggle: deduplicates repeated client_msg_id", () => {
+    const payload = {
+      type: "mcp_toggle",
+      serverName: "my-mcp",
+      enabled: true,
+      client_msg_id: "mcp-msg-1",
+    };
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+
+    // 1 send for mcp_toggle control_request + delayed status refresh timer not run in this assertion window.
+    expect(cli.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("mcp_get_status: deduplicates repeated client_msg_id", () => {
+    const payload = {
+      type: "mcp_get_status",
+      client_msg_id: "mcp-status-1",
+    };
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+    expect(cli.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("mcp_reconnect: deduplicates repeated client_msg_id", () => {
+    const payload = {
+      type: "mcp_reconnect",
+      serverName: "my-mcp",
+      client_msg_id: "mcp-reconnect-1",
+    };
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+    expect(cli.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("mcp_set_servers: deduplicates repeated client_msg_id", () => {
+    const payload = {
+      type: "mcp_set_servers",
+      servers: {
+        "server-a": {
+          type: "stdio",
+          command: "node",
+          args: ["server.js"],
+        },
+      },
+      client_msg_id: "mcp-set-servers-1",
+    };
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+    bridge.handleBrowserMessage(browser, JSON.stringify(payload));
+    expect(cli.send).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1101,6 +1335,7 @@ describe("Persistence", () => {
       ],
       pendingMessages: [],
       pendingPermissions: [],
+      processedClientMessageIds: ["restored-client-1"],
     });
 
     const count = bridge.restoreFromDisk();
@@ -1114,6 +1349,7 @@ describe("Persistence", () => {
     expect(session!.messageHistory).toHaveLength(1);
     expect(session!.cliSocket).toBeNull();
     expect(session!.browserSockets.size).toBe(0);
+    expect(session!.processedClientMessageIdSet.has("restored-client-1")).toBe(true);
   });
 
   it("restoreFromDisk: does not overwrite live sessions", () => {
@@ -2510,9 +2746,10 @@ describe("broadcastNameUpdate", () => {
 
     bridge.broadcastNameUpdate("s1", "Fix Auth Bug");
 
-    const expected = JSON.stringify({ type: "session_name_update", name: "Fix Auth Bug" });
-    expect(browser1.send).toHaveBeenCalledWith(expected);
-    expect(browser2.send).toHaveBeenCalledWith(expected);
+    const calls1 = browser1.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const calls2 = browser2.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    expect(calls1).toContainEqual(expect.objectContaining({ type: "session_name_update", name: "Fix Auth Bug" }));
+    expect(calls2).toContainEqual(expect.objectContaining({ type: "session_name_update", name: "Fix Auth Bug" }));
   });
 
   it("does nothing for unknown sessions", () => {

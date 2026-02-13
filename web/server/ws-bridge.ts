@@ -16,6 +16,8 @@ import type {
   CLIAuthStatusMessage,
   BrowserOutgoingMessage,
   BrowserIncomingMessage,
+  ReplayableBrowserIncomingMessage,
+  BufferedBrowserEvent,
   SessionState,
   PermissionRequest,
   BackendType,
@@ -35,6 +37,8 @@ interface CLISocketData {
 interface BrowserSocketData {
   kind: "browser";
   sessionId: string;
+  subscribed?: boolean;
+  lastAckSeq?: number;
 }
 
 interface TerminalSocketData {
@@ -65,6 +69,15 @@ interface Session {
   messageHistory: BrowserIncomingMessage[];
   /** Messages queued while waiting for CLI to connect */
   pendingMessages: string[];
+  /** Monotonic sequence for broadcast events */
+  nextEventSeq: number;
+  /** Recent broadcast events for reconnect replay */
+  eventBuffer: BufferedBrowserEvent[];
+  /** Highest acknowledged seq seen from any browser for this session */
+  lastAckSeq: number;
+  /** Recently processed browser client_msg_id values for idempotency on reconnect retries */
+  processedClientMessageIds: string[];
+  processedClientMessageIdSet: Set<string>;
 }
 
 type GitSessionKey = "git_branch" | "is_worktree" | "repo_root" | "git_ahead" | "git_behind";
@@ -152,6 +165,19 @@ function resolveGitInfo(state: SessionState): void {
 // ─── Bridge ───────────────────────────────────────────────────────────────────
 
 export class WsBridge {
+  private static readonly EVENT_BUFFER_LIMIT = 600;
+  private static readonly PROCESSED_CLIENT_MSG_ID_LIMIT = 1000;
+  private static readonly IDEMPOTENT_BROWSER_MESSAGE_TYPES = new Set<string>([
+    "user_message",
+    "permission_response",
+    "interrupt",
+    "set_model",
+    "set_permission_mode",
+    "mcp_get_status",
+    "mcp_toggle",
+    "mcp_reconnect",
+    "mcp_set_servers",
+  ]);
   private sessions = new Map<string, Session>();
   private store: SessionStore | null = null;
   private onCLISessionId: ((sessionId: string, cliSessionId: string) => void) | null = null;
@@ -218,6 +244,13 @@ export class WsBridge {
         pendingControlRequests: new Map(),
         messageHistory: p.messageHistory || [],
         pendingMessages: p.pendingMessages || [],
+        nextEventSeq: p.nextEventSeq && p.nextEventSeq > 0 ? p.nextEventSeq : 1,
+        eventBuffer: Array.isArray(p.eventBuffer) ? p.eventBuffer : [],
+        lastAckSeq: typeof p.lastAckSeq === "number" ? p.lastAckSeq : 0,
+        processedClientMessageIds: Array.isArray(p.processedClientMessageIds) ? p.processedClientMessageIds : [],
+        processedClientMessageIdSet: new Set(
+          Array.isArray(p.processedClientMessageIds) ? p.processedClientMessageIds : [],
+        ),
       };
       session.state.backend_type = session.backendType;
       // Resolve git info for restored sessions (may have been persisted without it)
@@ -244,6 +277,10 @@ export class WsBridge {
       messageHistory: session.messageHistory,
       pendingMessages: session.pendingMessages,
       pendingPermissions: Array.from(session.pendingPermissions.entries()),
+      eventBuffer: session.eventBuffer,
+      nextEventSeq: session.nextEventSeq,
+      lastAckSeq: session.lastAckSeq,
+      processedClientMessageIds: session.processedClientMessageIds,
     });
   }
 
@@ -307,6 +344,11 @@ export class WsBridge {
         pendingControlRequests: new Map(),
         messageHistory: [],
         pendingMessages: [],
+        nextEventSeq: 1,
+        eventBuffer: [],
+        lastAckSeq: 0,
+        processedClientMessageIds: [],
+        processedClientMessageIdSet: new Set(),
       };
       this.sessions.set(sessionId, session);
     } else if (backendType) {
@@ -546,6 +588,9 @@ export class WsBridge {
 
   handleBrowserOpen(ws: ServerWebSocket<SocketData>, sessionId: string) {
     const session = this.getOrCreateSession(sessionId);
+    const browserData = ws.data as BrowserSocketData;
+    browserData.subscribed = false;
+    browserData.lastAckSeq = 0;
     session.browserSockets.add(ws);
     console.log(`[ws-bridge] Browser connected for session ${sessionId} (${session.browserSockets.size} browsers)`);
 
@@ -603,7 +648,7 @@ export class WsBridge {
       return;
     }
 
-    this.routeBrowserMessage(session, msg);
+    this.routeBrowserMessage(session, msg, ws);
   }
 
   handleBrowserClose(ws: ServerWebSocket<SocketData>) {
@@ -833,7 +878,32 @@ export class WsBridge {
 
   // ── Browser message routing ─────────────────────────────────────────────
 
-  private routeBrowserMessage(session: Session, msg: BrowserOutgoingMessage) {
+  private routeBrowserMessage(
+    session: Session,
+    msg: BrowserOutgoingMessage,
+    ws?: ServerWebSocket<SocketData>,
+  ) {
+    if (msg.type === "session_subscribe") {
+      this.handleSessionSubscribe(session, ws, msg.last_seq);
+      return;
+    }
+
+    if (msg.type === "session_ack") {
+      this.handleSessionAck(session, ws, msg.last_seq);
+      return;
+    }
+
+    if (
+      WsBridge.IDEMPOTENT_BROWSER_MESSAGE_TYPES.has(msg.type)
+      && "client_msg_id" in msg
+      && msg.client_msg_id
+    ) {
+      if (this.isDuplicateClientMessage(session, msg.client_msg_id)) {
+        return;
+      }
+      this.rememberClientMessage(session, msg.client_msg_id);
+    }
+
     // For Codex sessions, delegate entirely to the adapter
     if (session.backendType === "codex") {
       // Store user messages in history for replay with stable ID for dedup on reconnect
@@ -901,6 +971,80 @@ export class WsBridge {
       case "mcp_set_servers":
         this.handleMcpSetServers(session, msg.servers);
         break;
+    }
+  }
+
+  private isDuplicateClientMessage(session: Session, clientMsgId: string): boolean {
+    return session.processedClientMessageIdSet.has(clientMsgId);
+  }
+
+  private rememberClientMessage(session: Session, clientMsgId: string): void {
+    session.processedClientMessageIds.push(clientMsgId);
+    session.processedClientMessageIdSet.add(clientMsgId);
+    if (session.processedClientMessageIds.length > WsBridge.PROCESSED_CLIENT_MSG_ID_LIMIT) {
+      const overflow = session.processedClientMessageIds.length - WsBridge.PROCESSED_CLIENT_MSG_ID_LIMIT;
+      const removed = session.processedClientMessageIds.splice(0, overflow);
+      for (const id of removed) {
+        session.processedClientMessageIdSet.delete(id);
+      }
+    }
+    this.persistSession(session);
+  }
+
+  private handleSessionSubscribe(
+    session: Session,
+    ws: ServerWebSocket<SocketData> | undefined,
+    lastSeq: number,
+  ) {
+    if (!ws) return;
+    const data = ws.data as BrowserSocketData;
+    data.subscribed = true;
+    const lastAckSeq = Number.isFinite(lastSeq) ? Math.max(0, Math.floor(lastSeq)) : 0;
+    data.lastAckSeq = lastAckSeq;
+
+    if (session.eventBuffer.length === 0) return;
+    if (lastAckSeq >= session.nextEventSeq - 1) return;
+
+    const earliest = session.eventBuffer[0]?.seq ?? session.nextEventSeq;
+    const hasGap = lastAckSeq > 0 && lastAckSeq < earliest - 1;
+    if (hasGap) {
+      this.sendToBrowser(ws, {
+        type: "message_history",
+        messages: session.messageHistory,
+      });
+      const transientMissed = session.eventBuffer
+        .filter((evt) => evt.seq > lastAckSeq && !this.isHistoryBackedEvent(evt.message));
+      if (transientMissed.length > 0) {
+        this.sendToBrowser(ws, {
+          type: "event_replay",
+          events: transientMissed,
+        });
+      }
+      return;
+    }
+
+    const missed = session.eventBuffer.filter((evt) => evt.seq > lastAckSeq);
+    if (missed.length === 0) return;
+    this.sendToBrowser(ws, {
+      type: "event_replay",
+      events: missed,
+    });
+  }
+
+  private handleSessionAck(
+    session: Session,
+    ws: ServerWebSocket<SocketData> | undefined,
+    lastSeq: number,
+  ) {
+    const normalized = Number.isFinite(lastSeq) ? Math.max(0, Math.floor(lastSeq)) : 0;
+    if (ws) {
+      const data = ws.data as BrowserSocketData;
+      const prior = typeof data.lastAckSeq === "number" ? data.lastAckSeq : 0;
+      data.lastAckSeq = Math.max(prior, normalized);
+    }
+    if (normalized > session.lastAckSeq) {
+      session.lastAckSeq = normalized;
+      this.persistSession(session);
     }
   }
 
@@ -1098,12 +1242,41 @@ export class WsBridge {
     this.broadcastToBrowsers(session, { type: "session_name_update", name });
   }
 
+  private shouldBufferForReplay(msg: BrowserIncomingMessage): msg is ReplayableBrowserIncomingMessage {
+    return msg.type !== "session_init"
+      && msg.type !== "message_history"
+      && msg.type !== "event_replay";
+  }
+
+  private isHistoryBackedEvent(msg: ReplayableBrowserIncomingMessage): boolean {
+    return msg.type === "assistant"
+      || msg.type === "result"
+      || msg.type === "user_message"
+      || msg.type === "error";
+  }
+
+  private sequenceEvent(
+    session: Session,
+    msg: BrowserIncomingMessage,
+  ): BrowserIncomingMessage {
+    const seq = session.nextEventSeq++;
+    const sequenced = { ...msg, seq };
+    if (this.shouldBufferForReplay(msg)) {
+      session.eventBuffer.push({ seq, message: msg });
+      if (session.eventBuffer.length > WsBridge.EVENT_BUFFER_LIMIT) {
+        session.eventBuffer.splice(0, session.eventBuffer.length - WsBridge.EVENT_BUFFER_LIMIT);
+      }
+      this.persistSession(session);
+    }
+    return sequenced;
+  }
+
   private broadcastToBrowsers(session: Session, msg: BrowserIncomingMessage) {
     // Debug: warn when assistant messages are broadcast to 0 browsers (they may be lost)
     if (session.browserSockets.size === 0 && (msg.type === "assistant" || msg.type === "stream_event" || msg.type === "result")) {
       console.log(`[ws-bridge] ⚠ Broadcasting ${msg.type} to 0 browsers for session ${session.id} (stored in history: ${msg.type === "assistant" || msg.type === "result"})`);
     }
-    const json = JSON.stringify(msg);
+    const json = JSON.stringify(this.sequenceEvent(session, msg));
     for (const ws of session.browserSockets) {
       try {
         ws.send(json);
