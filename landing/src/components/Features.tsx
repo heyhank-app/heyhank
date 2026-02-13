@@ -2,8 +2,8 @@ import { FadeIn } from "./FadeIn";
 
 const features = [
   {
-    title: "Multiple Sessions",
-    description: "Run Claude Code and Codex sessions side by side. Each gets its own process, model, and permission settings.",
+    title: "Codex + Claude Code",
+    description: "Run both agents side by side with independent contexts, permissions, and process isolation.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="2" y="3" width="20" height="14" rx="2" />
@@ -14,54 +14,60 @@ const features = [
     ),
   },
   {
-    title: "Real-time Streaming",
-    description: "Responses render token by token. See what the agent is writing as it writes it.",
+    title: "MCP Integration",
+    description: "Add and manage MCP servers from the UI so sessions can use your custom tools and data sources.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+        <path d="M12 3v18" />
+        <path d="M3 12h18" />
+        <circle cx="12" cy="12" r="9" />
       </svg>
     ),
   },
   {
-    title: "Tool Call Visibility",
-    description: "Every Bash command, file read, edit, and search displayed in collapsible blocks with syntax highlighting.",
+    title: "Integrated Terminal",
+    description: "Open terminal sessions in the browser to run commands without leaving your agent workspace.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="16 18 22 12 16 6" />
-        <polyline points="8 6 2 12 8 18" />
-        <line x1="14" y1="4" x2="10" y2="20" />
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <polyline points="8 9 11 12 8 15" />
+        <line x1="13" y1="15" x2="17" y2="15" />
       </svg>
     ),
   },
   {
-    title: "Subagent Nesting",
-    description: "When agents spawn sub-agents, their work renders hierarchically so you can follow the full chain.",
+    title: "Environment Profiles",
+    description: "Create dedicated environments for specific providers and models, then launch in one click.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="18" cy="18" r="3" />
-        <circle cx="6" cy="6" r="3" />
-        <path d="M6 21V9a9 9 0 0 0 9 9" />
+        <path d="M4 7h16" />
+        <path d="M7 3v4" />
+        <path d="M17 3v4" />
+        <rect x="4" y="7" width="16" height="14" rx="2" />
+        <path d="M9 13h6" />
       </svg>
     ),
   },
   {
-    title: "Permission Control",
-    description: "Four modes from auto-approve everything to manual approval for each individual tool call.",
+    title: "Model Routing",
+    description: "Launch Claude Code with different backends like GLM 5, Minimax 2.5, or Kimi K2.5 via env configuration.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        <circle cx="12" cy="12" r="3" />
+        <path d="M3 12h6" />
+        <path d="M15 12h6" />
+        <path d="M12 3v6" />
+        <path d="M12 15v6" />
       </svg>
     ),
   },
   {
-    title: "Session Persistence",
-    description: "Sessions save to disk and auto-recover after server restarts or CLI crashes.",
+    title: "Secure Remote Ops",
+    description: "Run Companion on a calm remote server and expose it safely over Tailscale for private access.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-        <polyline points="17 21 17 13 7 13 7 21" />
-        <polyline points="7 3 7 8 15 8" />
+        <path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z" />
+        <path d="M9 12l2 2 4-4" />
       </svg>
     ),
   },
@@ -71,11 +77,11 @@ export function Features() {
   return (
     <section className="py-24 px-5 sm:px-7">
       <div className="max-w-[1060px] mx-auto">
-        <div className="cc-label mb-3">Feature Stack</div>
+        <div className="cc-label mb-3">Capabilities</div>
         <h2 className="font-condensed text-[clamp(40px,6vw,72px)] uppercase leading-[0.92] mb-10 tracking-tight">
-          Everything
+          Built For
           <br />
-          You Need
+          Real Work
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">

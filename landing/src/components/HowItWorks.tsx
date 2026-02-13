@@ -6,14 +6,16 @@ export function HowItWorks() {
       <div className="max-w-[1060px] mx-auto">
         <div className="cc-label mb-3">Architecture</div>
         <h2 className="font-condensed text-[clamp(38px,6vw,64px)] uppercase leading-[0.92] mb-10 tracking-tight">
-          How It Works
+          One Bridge
+          <br />
+          Two Agents
         </h2>
 
         <FadeIn>
           <div className="cc-card rounded-2xl p-4 sm:p-6 mb-12 bg-cc-card">
             <div className="flex items-center justify-center gap-4 flex-wrap">
               <div className="bg-[#f0e5d2] border border-cc-border rounded-[10px] px-5 py-3.5 text-sm font-mono-code whitespace-nowrap">
-                Claude Code + Codex CLI
+                Codex + Claude Code CLI
               </div>
               <span className="text-cc-muted font-mono-code text-xs">&larr; WebSocket &rarr;</span>
               <div className="bg-cc-primary text-[#fff4eb] border border-[#8e3518] rounded-[10px] px-5 py-3.5 text-sm font-mono-code whitespace-nowrap">
@@ -21,7 +23,7 @@ export function HowItWorks() {
               </div>
               <span className="text-cc-muted font-mono-code text-xs">&larr; WebSocket &rarr;</span>
               <div className="bg-[#f0e5d2] border border-cc-border rounded-[10px] px-5 py-3.5 text-sm font-mono-code whitespace-nowrap">
-                Browser Workspace
+                Browser UI + Terminal + MCP
               </div>
             </div>
           </div>
@@ -35,20 +37,19 @@ export function HowItWorks() {
                 title: "Launch",
                 description: (
                   <>
-                    Run <code className="font-mono-code text-xs bg-cc-code-bg text-cc-code-fg px-1.5 py-0.5 rounded">bunx the-companion</code> in
-                    your terminal.
+                    Run <code className="font-mono-code text-xs bg-cc-code-bg text-cc-code-fg px-1.5 py-0.5 rounded">bunx the-companion</code>.
                   </>
                 ),
               },
               {
                 step: 2,
-                title: "Bridge",
-                description: "The server starts Claude Code or Codex sessions and forwards their channels to the web app.",
+                title: "Configure",
+                description: "Add MCP servers, define environment profiles, and select your model/provider backend.",
               },
               {
                 step: 3,
                 title: "Operate",
-                description: "Monitor streams, inspect tool calls, and control permissions while shipping work faster.",
+                description: "Work from one UI with live streams, tool visibility, terminal access, and permission control.",
               },
             ].map((s) => (
               <div key={s.step} className="cc-card rounded-[14px] p-5 bg-cc-card">

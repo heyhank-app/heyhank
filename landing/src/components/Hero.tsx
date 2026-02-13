@@ -15,14 +15,14 @@ export function Hero() {
         </div>
 
         <h1 className="font-condensed text-center text-[clamp(54px,13vw,126px)] uppercase tracking-tight leading-[0.86] mb-6 animate-sweep">
-          Code Faster
+          Codex + Claude Code
           <br />
-          <span className="text-cc-primary">In Browser</span>
+          <span className="text-cc-primary">One WebUI</span>
         </h1>
 
-        <p className="text-center text-[clamp(16px,2.5vw,20px)] text-cc-muted max-w-[680px] mx-auto mb-10 leading-relaxed animate-fade-up-3">
-          A browser control room for Claude Code and Codex with real-time agent output, full tool-call transparency,
-          and safe multi-session orchestration.
+        <p className="text-center text-[clamp(16px,2.5vw,20px)] text-cc-muted max-w-[760px] mx-auto mb-10 leading-relaxed animate-fade-up-3">
+          Pilot your coding agents in one browser workspace: connect MCP servers, open a terminal, create model-specific
+          environments, and run sessions locally or on a remote server.
         </p>
 
         <div className="animate-fade-up-4 text-center">
@@ -36,12 +36,39 @@ export function Hero() {
           </code>
         </p>
 
+        <div className="mt-8 mx-auto max-w-[860px] cc-card bg-cc-card rounded-2xl p-4 sm:p-5 animate-fade-up-4">
+          <p className="text-xs uppercase tracking-[0.16em] text-cc-muted text-center mb-3">Works With</p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <span className="inline-flex items-center gap-2 border border-cc-border rounded-full px-3 py-1.5 bg-[#f3e6d1]">
+              <img src="/logos/codex.svg" alt="Codex" className="w-4 h-4" />
+              <span className="font-mono-code text-xs">Codex</span>
+            </span>
+            <span className="inline-flex items-center gap-2 border border-cc-border rounded-full px-3 py-1.5 bg-[#f3e6d1]">
+              <img src="/logos/anthropic.ico" alt="Anthropic" className="w-4 h-4 rounded-sm" />
+              <span className="font-mono-code text-xs">Claude Code</span>
+            </span>
+            <span className="inline-flex items-center gap-2 border border-cc-border rounded-full px-3 py-1.5 bg-[#f3e6d1]">
+              <img src="/logos/tailscale.svg" alt="Tailscale" className="w-4 h-4" />
+              <span className="font-mono-code text-xs">Tailscale</span>
+            </span>
+            <span className="inline-flex items-center border border-cc-border rounded-full px-3 py-1.5 bg-cc-card">
+              <span className="font-mono-code text-xs">GLM 5</span>
+            </span>
+            <span className="inline-flex items-center border border-cc-border rounded-full px-3 py-1.5 bg-cc-card">
+              <span className="font-mono-code text-xs">Minimax 2.5</span>
+            </span>
+            <span className="inline-flex items-center border border-cc-border rounded-full px-3 py-1.5 bg-cc-card">
+              <span className="font-mono-code text-xs">Kimi K2.5</span>
+            </span>
+          </div>
+        </div>
+
         <div className="mt-8 mx-auto max-w-[760px] cc-card bg-cc-card rounded-2xl p-5 sm:p-6 animate-fade-up-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
             {[
-              ["Live Streams", "Token-level responses and tool events rendered as they happen."],
-              ["Session Matrix", "Run parallel tasks with separate contexts, models, and permissions."],
-              ["Audit Trail", "Inspect every command and file operation without leaving the thread."],
+              ["MCP Native", "Attach MCP servers and expose tools/resources directly to Codex and Claude Code sessions."],
+              ["Web Terminal", "Open terminal tabs in the UI for logs, scripts, and quick ops next to agent output."],
+              ["Env Profiles", "Create launch profiles with model/provider settings and reuse them across projects."],
             ].map(([title, body]) => (
               <div key={title}>
                 <h3 className="font-condensed text-xl uppercase tracking-wide">{title}</h3>
