@@ -1,12 +1,12 @@
 {
-  "name": "the-companion",
+  "name": "thecompanion",
   "version": "0.34.5",
   "type": "module",
   "description": "Web UI for launching and interacting with Claude Code agents",
   "license": "MIT",
   "author": "The Vibe Company",
   "bin": {
-    "the-companion": "./bin/cli.ts"
+    "thecompanion": "./bin/cli.ts"
   },
   "files": [
     "bin/",

@@ -10,7 +10,7 @@ const command = process.argv[2];
 
 function printUsage(): void {
   console.log(`
-Usage: the-companion [command]
+Usage: thecompanion [command]
 
 Commands:
   (none)      Start the server in foreground (default)
@@ -87,7 +87,7 @@ switch (command) {
     const result = await status();
     if (!result.installed) {
       console.log("The Companion is not installed as a service.");
-      console.log("Run: the-companion install");
+      console.log("Run: thecompanion install");
     } else if (result.running) {
       console.log(`The Companion is running (PID: ${result.pid})`);
       console.log(`  URL: http://localhost:${result.port}`);

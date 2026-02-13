@@ -475,7 +475,7 @@ export class CodexAdapter {
       // Step 1: Send initialize request
       const result = await this.transport.call("initialize", {
         clientInfo: {
-          name: "the-companion",
+          name: "thecompanion",
           title: "The Companion",
           version: "1.0.0",
         },
