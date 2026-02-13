@@ -20,7 +20,13 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const toggleNotificationSound = useStore((s) => s.toggleNotificationSound);
   const notificationDesktop = useStore((s) => s.notificationDesktop);
   const setNotificationDesktop = useStore((s) => s.setNotificationDesktop);
+  const updateInfo = useStore((s) => s.updateInfo);
+  const setUpdateInfo = useStore((s) => s.setUpdateInfo);
   const notificationApiAvailable = typeof Notification !== "undefined";
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [updatingApp, setUpdatingApp] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState("");
+  const [updateError, setUpdateError] = useState("");
 
   useEffect(() => {
     api
@@ -56,6 +62,38 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function onCheckUpdates() {
+    setCheckingUpdates(true);
+    setUpdateStatus("");
+    setUpdateError("");
+    try {
+      const info = await api.forceCheckForUpdate();
+      setUpdateInfo(info);
+      if (info.updateAvailable && info.latestVersion) {
+        setUpdateStatus(`Update v${info.latestVersion} is available.`);
+      } else {
+        setUpdateStatus("You are up to date.");
+      }
+    } catch (err: unknown) {
+      setUpdateError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCheckingUpdates(false);
+    }
+  }
+
+  async function onTriggerUpdate() {
+    setUpdatingApp(true);
+    setUpdateStatus("");
+    setUpdateError("");
+    try {
+      const res = await api.triggerUpdate();
+      setUpdateStatus(res.message);
+    } catch (err: unknown) {
+      setUpdateError(err instanceof Error ? err.message : String(err));
+      setUpdatingApp(false);
     }
   }
 
@@ -177,6 +215,64 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
               <span className="text-xs text-cc-muted">{notificationDesktop ? "On" : "Off"}</span>
             </button>
           )}
+        </div>
+
+        <div className="mt-4 bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-3">
+          <h2 className="text-sm font-semibold text-cc-fg">Updates</h2>
+          {updateInfo ? (
+            <p className="text-xs text-cc-muted">
+              Current version: v{updateInfo.currentVersion}
+              {updateInfo.latestVersion ? ` • Latest: v${updateInfo.latestVersion}` : ""}
+            </p>
+          ) : (
+            <p className="text-xs text-cc-muted">Version information not loaded yet.</p>
+          )}
+
+          {updateError && (
+            <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
+              {updateError}
+            </div>
+          )}
+
+          {updateStatus && (
+            <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
+              {updateStatus}
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onCheckUpdates}
+              disabled={checkingUpdates}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                checkingUpdates
+                  ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                  : "bg-cc-hover hover:bg-cc-active text-cc-fg cursor-pointer"
+              }`}
+            >
+              {checkingUpdates ? "Checking..." : "Check for updates"}
+            </button>
+
+            {updateInfo?.isServiceMode ? (
+              <button
+                type="button"
+                onClick={onTriggerUpdate}
+                disabled={updatingApp || updateInfo.updateInProgress || !updateInfo.updateAvailable}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  updatingApp || updateInfo.updateInProgress || !updateInfo.updateAvailable
+                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                    : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+                }`}
+              >
+                {updatingApp || updateInfo.updateInProgress ? "Updating..." : "Update & Restart"}
+              </button>
+            ) : (
+              <p className="text-xs text-cc-muted self-center">
+                Install service mode with <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">the-companion install</code> to enable one-click updates.
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="mt-4 bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-3">
