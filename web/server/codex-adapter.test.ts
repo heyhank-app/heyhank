@@ -798,6 +798,36 @@ describe("CodexAdapter", () => {
     expect(errors[0]).toContain("initialization failed");
   });
 
+  it("rejects messages and discards queue after init failure", async () => {
+    // Verify that after initialization fails, sendBrowserMessage returns false
+    // and any previously queued messages are discarded (no memory leak).
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Queue a message before init completes — should be accepted
+    const queued = adapter.sendBrowserMessage({ type: "user_message", content: "hello" } as any);
+    expect(queued).toBe(true);
+
+    // Fail init
+    stdout.push(JSON.stringify({
+      id: 1,
+      error: { code: -1, message: "no rollout found" },
+    }) + "\n");
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    // After init failure, new messages should be rejected
+    const rejected = adapter.sendBrowserMessage({ type: "user_message", content: "world" } as any);
+    expect(rejected).toBe(false);
+
+    // The error message should have been emitted to the browser
+    const errorMsg = messages.find((m) => m.type === "error");
+    expect(errorMsg).toBeDefined();
+  });
+
   // ── Session resume ──────────────────────────────────────────────────────────
 
   it("uses thread/resume instead of thread/start when threadId is provided", async () => {

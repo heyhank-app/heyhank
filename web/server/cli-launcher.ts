@@ -1,11 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { execSync } from "node:child_process";
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  mkdirSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  copyFileSync,
+  cpSync,
+} from "node:fs";
+import { join, resolve } from "node:path";
 import type { Subprocess } from "bun";
 import type { SessionStore } from "./session-store.js";
 import type { BackendType } from "./session-types.js";
 import { CodexAdapter } from "./codex-adapter.js";
+import {
+  getLegacyCodexHome,
+  resolveCompanionCodexSessionHome,
+} from "./codex-home.js";
 
 export interface SdkSessionInfo {
   sessionId: string;
@@ -60,6 +71,8 @@ export interface LaunchOptions {
   codexSandbox?: "workspace-write" | "danger-full-access";
   /** Whether Codex internet/web search should be enabled for this session. */
   codexInternetAccess?: boolean;
+  /** Optional override for CODEX_HOME used by Codex sessions. */
+  codexHome?: string;
   /** Pre-resolved worktree info from the session creation flow */
   worktreeInfo?: {
     isWorktree: boolean;
@@ -331,6 +344,43 @@ export class CliLauncher {
    * Spawn a Codex app-server subprocess for a session.
    * Unlike Claude Code (which connects back via WebSocket), Codex uses stdio.
    */
+  private prepareCodexHome(codexHome: string): void {
+    mkdirSync(codexHome, { recursive: true });
+
+    const legacyHome = getLegacyCodexHome();
+    if (resolve(legacyHome) === resolve(codexHome) || !existsSync(legacyHome)) {
+      return;
+    }
+
+    // Bootstrap only the user-level artifacts Codex needs (auth/config/skills),
+    // while intentionally skipping sessions/sqlite to avoid stale rollout indexes.
+    const fileSeeds = ["auth.json", "config.toml", "models_cache.json", "version.json"];
+    for (const name of fileSeeds) {
+      try {
+        const src = join(legacyHome, name);
+        const dest = join(codexHome, name);
+        if (!existsSync(dest) && existsSync(src)) {
+          copyFileSync(src, dest);
+        }
+      } catch (e) {
+        console.warn(`[cli-launcher] Failed to bootstrap ${name} from legacy home:`, e);
+      }
+    }
+
+    const dirSeeds = ["skills", "vendor_imports", "prompts", "rules"];
+    for (const name of dirSeeds) {
+      try {
+        const src = join(legacyHome, name);
+        const dest = join(codexHome, name);
+        if (!existsSync(dest) && existsSync(src)) {
+          cpSync(src, dest, { recursive: true });
+        }
+      } catch (e) {
+        console.warn(`[cli-launcher] Failed to bootstrap ${name}/ from legacy home:`, e);
+      }
+    }
+  }
+
   private spawnCodex(sessionId: string, info: SdkSessionInfo, options: LaunchOptions): void {
     let binary = options.codexBinary || "codex";
     if (!binary.startsWith("/")) {
@@ -344,11 +394,17 @@ export class CliLauncher {
     const args: string[] = ["app-server"];
     const internetEnabled = options.codexInternetAccess === true;
     args.push("-c", `tools.webSearch=${internetEnabled ? "true" : "false"}`);
+    const codexHome = resolveCompanionCodexSessionHome(
+      sessionId,
+      options.codexHome,
+    );
+    this.prepareCodexHome(codexHome);
 
     const env: Record<string, string | undefined> = {
       ...process.env,
       CLAUDECODE: undefined,
       ...options.env,
+      CODEX_HOME: codexHome,
     };
 
     console.log(`[cli-launcher] Spawning Codex session ${sessionId}: ${binary} ${args.join(" ")}`);
@@ -380,13 +436,16 @@ export class CliLauncher {
       sandbox: options.codexSandbox,
     });
 
-    // Handle init errors — mark session as exited so UI shows failure
+    // Handle init errors — mark session as exited so UI shows failure.
+    // Also clear cliSessionId so the next relaunch starts a fresh thread
+    // instead of trying to resume one whose rollout may be missing.
     adapter.onInitError((error) => {
       console.error(`[cli-launcher] Codex session ${sessionId} init failed: ${error}`);
       const session = this.sessions.get(sessionId);
       if (session) {
         session.state = "exited";
         session.exitCode = 1;
+        session.cliSessionId = undefined;
       }
       this.persistState();
     });
