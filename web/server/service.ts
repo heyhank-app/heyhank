@@ -433,6 +433,11 @@ async function startLinux(): Promise<void> {
     return; // installLinux uses enable --now which starts the service
   }
 
+  // Ensure the installed unit file matches the latest template (e.g.
+  // SuccessExitStatus=42, Restart=always) so that stale definitions from
+  // older versions don't cause restart loops after an auto-update.
+  refreshServiceDefinition();
+
   try {
     systemctlUser(`start ${UNIT_NAME}`);
   } catch (err: unknown) {
@@ -538,6 +543,9 @@ async function restartLinux(): Promise<void> {
     console.log("The Companion is not installed as a service.");
     return;
   }
+
+  // Keep the unit file in sync with the latest template before restarting.
+  refreshServiceDefinition();
 
   try {
     systemctlUser(`restart ${UNIT_NAME}`);
