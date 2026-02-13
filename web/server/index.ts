@@ -1,5 +1,11 @@
 process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1";
 
+// Enrich process PATH at startup so binary resolution and `which` calls can find
+// binaries installed via version managers (nvm, volta, fnm, etc.).
+// Critical when running as a launchd/systemd service with a restricted PATH.
+import { getEnrichedPath } from "./path-resolver.js";
+process.env.PATH = getEnrichedPath();
+
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";

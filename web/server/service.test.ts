@@ -50,6 +50,12 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
+// Mock path-resolver to return a deterministic enriched PATH
+const MOCK_SERVICE_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/mock/.bun/bin:/mock/.local/bin";
+vi.mock("./path-resolver.js", () => ({
+  getServicePath: () => MOCK_SERVICE_PATH,
+}));
+
 // Mock process.platform
 const originalPlatform = process.platform;
 
@@ -155,10 +161,16 @@ describe("generatePlist", () => {
     expect(plist).toContain("<string>production</string>");
   });
 
-  it("includes PATH with homebrew and bun directories", () => {
+  it("uses enriched PATH from path-resolver when no path option given", () => {
     const plist = service.generatePlist({ binPath: "/usr/local/bin/the-companion" });
-    expect(plist).toContain("/opt/homebrew/bin");
-    expect(plist).toContain(".bun/bin");
+    expect(plist).toContain(MOCK_SERVICE_PATH);
+  });
+
+  it("uses custom path option when provided", () => {
+    const customPath = "/custom/bin:/other/bin";
+    const plist = service.generatePlist({ binPath: "/usr/local/bin/the-companion", path: customPath });
+    expect(plist).toContain(customPath);
+    expect(plist).not.toContain(MOCK_SERVICE_PATH);
   });
 
   it("includes ThrottleInterval", () => {
@@ -211,10 +223,16 @@ describe("generateSystemdUnit", () => {
     expect(unit).toContain("SuccessExitStatus=42");
   });
 
-  it("includes PATH with bun and local/bin directories", () => {
+  it("uses enriched PATH from path-resolver when no path option given", () => {
     const unit = service.generateSystemdUnit({ binPath: "/usr/local/bin/the-companion" });
-    expect(unit).toContain(".bun/bin");
-    expect(unit).toContain(".local/bin");
+    expect(unit).toContain(`Environment=PATH=${MOCK_SERVICE_PATH}`);
+  });
+
+  it("uses custom path option when provided", () => {
+    const customPath = "/custom/bin:/other/bin";
+    const unit = service.generateSystemdUnit({ binPath: "/usr/local/bin/the-companion", path: customPath });
+    expect(unit).toContain(`Environment=PATH=${customPath}`);
+    expect(unit).not.toContain(MOCK_SERVICE_PATH);
   });
 
   it("targets default.target for user service", () => {

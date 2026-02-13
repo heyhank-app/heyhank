@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { execSync } from "node:child_process";
 import {
   mkdirSync,
   existsSync,
@@ -13,6 +12,7 @@ import type { Subprocess } from "bun";
 import type { SessionStore } from "./session-store.js";
 import type { BackendType } from "./session-types.js";
 import { CodexAdapter } from "./codex-adapter.js";
+import { resolveBinary } from "./path-resolver.js";
 import {
   getLegacyCodexHome,
   resolveCompanionCodexSessionHome,
@@ -248,12 +248,15 @@ export class CliLauncher {
 
   private spawnCLI(sessionId: string, info: SdkSessionInfo, options: LaunchOptions & { resumeSessionId?: string }): void {
     let binary = options.claudeBinary || "claude";
-    if (!binary.startsWith("/")) {
-      try {
-        binary = execSync(`which ${binary}`, { encoding: "utf-8" }).trim();
-      } catch {
-        // fall through, hope it's in PATH
-      }
+    const resolved = resolveBinary(binary);
+    if (resolved) {
+      binary = resolved;
+    } else {
+      console.error(`[cli-launcher] Binary "${binary}" not found in PATH`);
+      info.state = "exited";
+      info.exitCode = 127;
+      this.persistState();
+      return;
     }
 
     const sdkUrl = `ws://localhost:${this.port}/ws/cli/${sessionId}`;
@@ -383,12 +386,15 @@ export class CliLauncher {
 
   private spawnCodex(sessionId: string, info: SdkSessionInfo, options: LaunchOptions): void {
     let binary = options.codexBinary || "codex";
-    if (!binary.startsWith("/")) {
-      try {
-        binary = execSync(`which ${binary}`, { encoding: "utf-8" }).trim();
-      } catch {
-        // fall through, hope it's in PATH
-      }
+    const resolved = resolveBinary(binary);
+    if (resolved) {
+      binary = resolved;
+    } else {
+      console.error(`[cli-launcher] Binary "${binary}" not found in PATH`);
+      info.state = "exited";
+      info.exitCode = 127;
+      this.persistState();
+      return;
     }
 
     const args: string[] = ["app-server"];

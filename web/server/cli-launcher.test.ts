@@ -8,9 +8,9 @@ import { tmpdir } from "node:os";
 // Mock randomUUID so session IDs are deterministic
 vi.mock("node:crypto", () => ({ randomUUID: () => "test-session-id" }));
 
-// Mock execSync for `which` command resolution
-const mockExecSync = vi.hoisted(() => vi.fn(() => "/usr/bin/claude"));
-vi.mock("node:child_process", () => ({ execSync: mockExecSync }));
+// Mock path-resolver for binary resolution
+const mockResolveBinary = vi.hoisted(() => vi.fn((_name: string): string | null => "/usr/bin/claude"));
+vi.mock("./path-resolver.js", () => ({ resolveBinary: mockResolveBinary }));
 
 // Mock fs operations for worktree guardrails (CLAUDE.md in .claude dirs)
 const mockMkdirSync = vi.hoisted(() => vi.fn());
@@ -108,7 +108,7 @@ beforeEach(() => {
   launcher = new CliLauncher(3456);
   launcher.setStore(store);
   mockSpawn.mockReturnValue(createMockProc());
-  mockExecSync.mockReturnValue("/usr/bin/claude");
+  mockResolveBinary.mockReturnValue("/usr/bin/claude");
 });
 
 afterEach(() => {
@@ -191,23 +191,35 @@ describe("launch", () => {
     expect(toolFlags).toEqual(["Read", "Write", "Bash"]);
   });
 
-  it("resolves binary path with `which` when not absolute", () => {
+  it("resolves binary path via resolveBinary when not absolute", () => {
+    mockResolveBinary.mockReturnValue("/usr/local/bin/claude-dev");
     launcher.launch({ claudeBinary: "claude-dev", cwd: "/tmp" });
 
-    expect(mockExecSync).toHaveBeenCalledWith("which claude-dev", {
-      encoding: "utf-8",
-    });
+    expect(mockResolveBinary).toHaveBeenCalledWith("claude-dev");
+    const [cmdAndArgs] = mockSpawn.mock.calls[0];
+    expect(cmdAndArgs[0]).toBe("/usr/local/bin/claude-dev");
   });
 
-  it("skips `which` resolution when binary path is absolute", () => {
+  it("passes absolute binary path directly to resolveBinary", () => {
+    mockResolveBinary.mockReturnValue("/opt/bin/claude");
     launcher.launch({
       claudeBinary: "/opt/bin/claude",
       cwd: "/tmp",
     });
 
-    expect(mockExecSync).not.toHaveBeenCalled();
+    expect(mockResolveBinary).toHaveBeenCalledWith("/opt/bin/claude");
     const [cmdAndArgs] = mockSpawn.mock.calls[0];
     expect(cmdAndArgs[0]).toBe("/opt/bin/claude");
+  });
+
+  it("sets state=exited and exitCode=127 when claude binary not found", () => {
+    mockResolveBinary.mockReturnValue(null);
+
+    const info = launcher.launch({ cwd: "/tmp" });
+
+    expect(info.state).toBe("exited");
+    expect(info.exitCode).toBe(127);
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("stores worktree metadata when worktreeInfo provided", () => {
@@ -356,7 +368,7 @@ describe("launch", () => {
   });
 
   it("enables Codex web search when codexInternetAccess=true", () => {
-    mockExecSync.mockReturnValue("/usr/bin/codex");
+    mockResolveBinary.mockReturnValue("/usr/bin/codex");
     mockSpawn.mockReturnValueOnce(createMockCodexProc());
 
     launcher.launch({
@@ -375,7 +387,7 @@ describe("launch", () => {
   });
 
   it("disables Codex web search when codexInternetAccess=false", () => {
-    mockExecSync.mockReturnValue("/usr/bin/codex");
+    mockResolveBinary.mockReturnValue("/usr/bin/codex");
     mockSpawn.mockReturnValueOnce(createMockCodexProc());
 
     launcher.launch({
@@ -389,6 +401,20 @@ describe("launch", () => {
     expect(cmdAndArgs).toContain("app-server");
     expect(cmdAndArgs).toContain("-c");
     expect(cmdAndArgs).toContain("tools.webSearch=false");
+  });
+
+  it("sets state=exited and exitCode=127 when codex binary not found", () => {
+    mockResolveBinary.mockReturnValue(null);
+
+    const info = launcher.launch({
+      backendType: "codex",
+      cwd: "/tmp/project",
+      codexSandbox: "workspace-write",
+    });
+
+    expect(info.state).toBe("exited");
+    expect(info.exitCode).toBe(127);
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 });
 

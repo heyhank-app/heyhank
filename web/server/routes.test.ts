@@ -13,6 +13,11 @@ vi.mock("node:child_process", () => ({
   execSync: vi.fn(() => ""),
 }));
 
+const mockResolveBinary = vi.hoisted(() => vi.fn((_name: string) => null as string | null));
+vi.mock("./path-resolver.js", () => ({
+  resolveBinary: mockResolveBinary,
+}));
+
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
@@ -1190,8 +1195,8 @@ index 0000000..e69de29
 
 describe("GET /api/backends", () => {
   it("returns both backends with availability status", async () => {
-    // First call: `which claude` succeeds, second: `which codex` succeeds
-    vi.mocked(execSync)
+    // resolveBinary returns a path for both binaries
+    mockResolveBinary
       .mockReturnValueOnce("/usr/bin/claude")
       .mockReturnValueOnce("/usr/bin/codex");
 
@@ -1205,10 +1210,11 @@ describe("GET /api/backends", () => {
     ]);
   });
 
-  it("marks backends as unavailable when CLI is not found", async () => {
-    vi.mocked(execSync)
-      .mockImplementationOnce(() => { throw new Error("not found"); })
-      .mockImplementationOnce(() => { throw new Error("not found"); });
+  it("marks backends as unavailable when binary is not found", async () => {
+    // resolveBinary returns null for both
+    mockResolveBinary
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(null);
 
     const res = await app.request("/api/backends", { method: "GET" });
 
@@ -1221,9 +1227,9 @@ describe("GET /api/backends", () => {
   });
 
   it("handles mixed availability", async () => {
-    vi.mocked(execSync)
+    mockResolveBinary
       .mockReturnValueOnce("/usr/bin/claude") // claude found
-      .mockImplementationOnce(() => { throw new Error("not found"); }); // codex not found
+      .mockReturnValueOnce(null); // codex not found
 
     const res = await app.request("/api/backends", { method: "GET" });
 

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { execSync } from "node:child_process";
+import { resolveBinary } from "./path-resolver.js";
 import { readdir, readFile, writeFile, stat } from "node:fs/promises";
 import { resolve, join, dirname } from "node:path";
 import { homedir } from "node:os";
@@ -295,21 +296,8 @@ export function createRoutes(
   api.get("/backends", (c) => {
     const backends: Array<{ id: string; name: string; available: boolean }> = [];
 
-    // Check Claude Code
-    let claudeAvailable = false;
-    try {
-      execSync("which claude", { encoding: "utf-8", timeout: 3000 });
-      claudeAvailable = true;
-    } catch {}
-    backends.push({ id: "claude", name: "Claude Code", available: claudeAvailable });
-
-    // Check Codex
-    let codexAvailable = false;
-    try {
-      execSync("which codex", { encoding: "utf-8", timeout: 3000 });
-      codexAvailable = true;
-    } catch {}
-    backends.push({ id: "codex", name: "Codex", available: codexAvailable });
+    backends.push({ id: "claude", name: "Claude Code", available: resolveBinary("claude") !== null });
+    backends.push({ id: "codex", name: "Codex", available: resolveBinary("codex") !== null });
 
     return c.json(backends);
   });

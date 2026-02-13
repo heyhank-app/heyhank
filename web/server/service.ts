@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
 import { DEFAULT_PORT_PROD } from "./constants.js";
+import { getServicePath } from "./path-resolver.js";
 
 // ─── Shared Constants ───────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ function isLinux(): boolean {
 interface PlistOptions {
   binPath: string;
   port?: number;
+  path?: string;
 }
 
 export function generatePlist(opts: PlistOptions): string {
@@ -102,7 +104,7 @@ export function generatePlist(opts: PlistOptions): string {
         <key>HOME</key>
         <string>${home}</string>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${home}/.bun/bin</string>
+        <string>${opts.path || getServicePath()}</string>
     </dict>
 
     <key>ProcessType</key>
@@ -119,6 +121,7 @@ export function generatePlist(opts: PlistOptions): string {
 interface UnitOptions {
   binPath: string;
   port?: number;
+  path?: string;
 }
 
 export function generateSystemdUnit(opts: UnitOptions): string {
@@ -141,7 +144,7 @@ StandardError=append:${STDERR_LOG}
 Environment=NODE_ENV=production
 Environment=PORT=${port}
 Environment=HOME=${home}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${home}/.bun/bin:${home}/.local/bin
+Environment=PATH=${opts.path || getServicePath()}
 
 [Install]
 WantedBy=default.target
@@ -248,8 +251,9 @@ async function installDarwin(opts?: { port?: number }): Promise<void> {
   // Create log directory
   mkdirSync(LOG_DIR, { recursive: true });
 
-  // Generate and write plist
-  const plist = generatePlist({ binPath, port });
+  // Generate and write plist (capture user's shell PATH at install time)
+  const path = getServicePath();
+  const plist = generatePlist({ binPath, port, path });
   mkdirSync(PLIST_DIR, { recursive: true });
   writeFileSync(PLIST_PATH, plist, "utf-8");
 
@@ -287,8 +291,9 @@ async function installLinux(opts?: { port?: number }): Promise<void> {
   // Create log directory
   mkdirSync(LOG_DIR, { recursive: true });
 
-  // Generate and write systemd unit
-  const unit = generateSystemdUnit({ binPath, port });
+  // Generate and write systemd unit (capture user's shell PATH at install time)
+  const path = getServicePath();
+  const unit = generateSystemdUnit({ binPath, port, path });
   mkdirSync(SYSTEMD_DIR, { recursive: true });
   writeFileSync(UNIT_PATH, unit, "utf-8");
 
@@ -604,7 +609,8 @@ export function refreshServiceDefinition(): void {
     } catch { /* use default */ }
 
     const binPath = resolveBinPath();
-    const plist = generatePlist({ binPath, port });
+    const path = getServicePath();
+    const plist = generatePlist({ binPath, port, path });
     writeFileSync(installedService.plistPath, plist, "utf-8");
   } else if (isLinux()) {
     if (!isSystemdUnitInstalled()) return;
@@ -617,7 +623,8 @@ export function refreshServiceDefinition(): void {
     } catch { /* use default */ }
 
     const binPath = resolveBinPath();
-    const unit = generateSystemdUnit({ binPath, port });
+    const path = getServicePath();
+    const unit = generateSystemdUnit({ binPath, port, path });
     writeFileSync(UNIT_PATH, unit, "utf-8");
 
     try {
