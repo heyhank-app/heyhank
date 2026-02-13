@@ -337,11 +337,11 @@ describe("launch", () => {
     expect(info.pid).toBe(99999);
   });
 
-  it("includes CLAUDECODE=1 in environment", () => {
+  it("unsets CLAUDECODE to avoid CLI nesting guard", () => {
     launcher.launch({ cwd: "/tmp" });
 
     const [, options] = mockSpawn.mock.calls[0];
-    expect(options.env.CLAUDECODE).toBe("1");
+    expect(options.env.CLAUDECODE).toBeUndefined();
   });
 
   it("merges custom env variables", () => {
@@ -352,7 +352,7 @@ describe("launch", () => {
 
     const [, options] = mockSpawn.mock.calls[0];
     expect(options.env.MY_VAR).toBe("hello");
-    expect(options.env.CLAUDECODE).toBe("1");
+    expect(options.env.CLAUDECODE).toBeUndefined();
   });
 
   it("enables Codex web search when codexInternetAccess=true", () => {

@@ -43,7 +43,7 @@ export class TerminalManager {
 
     const proc = Bun.spawn([shell, "-l"], {
       cwd,
-      env: { ...process.env, TERM: "xterm-256color" },
+      env: { ...process.env, TERM: "xterm-256color", CLAUDECODE: undefined },
       terminal: {
         cols,
         rows,
