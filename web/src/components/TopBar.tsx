@@ -15,6 +15,8 @@ export function TopBar() {
   const currentSessionId = useStore((s) => s.currentSessionId);
   const cliConnected = useStore((s) => s.cliConnected);
   const sessionStatus = useStore((s) => s.sessionStatus);
+  const sessionNames = useStore((s) => s.sessionNames);
+  const sdkSessions = useStore((s) => s.sdkSessions);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const setSidebarOpen = useStore((s) => s.setSidebarOpen);
   const taskPanelOpen = useStore((s) => s.taskPanelOpen);
@@ -45,6 +47,11 @@ export function TopBar() {
 
   const isConnected = currentSessionId ? (cliConnected.get(currentSessionId) ?? false) : false;
   const status = currentSessionId ? (sessionStatus.get(currentSessionId) ?? null) : null;
+  const sessionName = currentSessionId
+    ? (sessionNames?.get(currentSessionId) ||
+      sdkSessions.find((s) => s.sessionId === currentSessionId)?.name ||
+      `Session ${currentSessionId.slice(0, 8)}`)
+    : null;
 
   return (
     <header className="shrink-0 flex items-center justify-between px-2 sm:px-4 py-2 sm:py-2.5 bg-cc-card border-b border-cc-border">
@@ -67,9 +74,12 @@ export function TopBar() {
                 isConnected ? "bg-cc-success" : "bg-cc-muted opacity-40"
               }`}
             />
-            {isConnected ? (
-              <span className="text-[11px] text-cc-muted hidden sm:inline">Connected</span>
-            ) : (
+            {sessionName && (
+              <span className="text-[11px] font-medium text-cc-fg max-w-[9rem] sm:max-w-none truncate" title={sessionName}>
+                {sessionName}
+              </span>
+            )}
+            {!isConnected && (
               <button
                 onClick={() => currentSessionId && api.relaunchSession(currentSessionId).catch(console.error)}
                 className="text-[11px] text-cc-warning hover:text-cc-warning/80 font-medium cursor-pointer hidden sm:inline"
