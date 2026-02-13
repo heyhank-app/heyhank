@@ -42,6 +42,32 @@ function execCaptureStdout(
   }
 }
 
+function resolveBranchDiffBases(
+  repoRoot: string,
+): string[] {
+  const options = { cwd: repoRoot, encoding: "utf-8", timeout: 5000 } as const;
+
+  try {
+    const originHead = execSync("git symbolic-ref refs/remotes/origin/HEAD", options).trim();
+    const match = originHead.match(/^refs\/remotes\/origin\/(.+)$/);
+    if (match?.[1]) {
+      return [`origin/${match[1]}`, match[1]];
+    }
+  } catch {
+    // No remote HEAD ref available, fallback to common local defaults.
+  }
+
+  try {
+    const branches = execSync("git branch --list main master", options).trim();
+    if (branches.includes("main")) return ["main"];
+    if (branches.includes("master")) return ["master"];
+  } catch {
+    // Ignore and use a conservative fallback below.
+  }
+
+  return ["main"];
+}
+
 export function createRoutes(
   launcher: CliLauncher,
   wsBridge: WsBridge,
@@ -499,13 +525,22 @@ export function createRoutes(
         timeout: 5000,
       }).trim() || absPath;
 
-      let diff = execCaptureStdout(`git diff HEAD -- "${relPath}"`, {
-        cwd: repoRoot,
-        encoding: "utf-8",
-        timeout: 5000,
-      });
+      let diff = "";
+      const diffBases = resolveBranchDiffBases(repoRoot);
+      for (const base of diffBases) {
+        try {
+          diff = execCaptureStdout(`git diff ${base} -- "${relPath}"`, {
+            cwd: repoRoot,
+            encoding: "utf-8",
+            timeout: 5000,
+          });
+          break;
+        } catch {
+          // If a base ref is unavailable, try the next candidate.
+        }
+      }
 
-      // For untracked files, HEAD diff is empty. Show full file as added.
+      // For untracked files, base-branch diff is empty. Show full file as added.
       if (!diff.trim()) {
         const untracked = execSync(`git ls-files --others --exclude-standard -- "${relPath}"`, {
           cwd: repoRoot,

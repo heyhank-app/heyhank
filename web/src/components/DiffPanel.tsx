@@ -182,11 +182,16 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
                 </svg>
               </button>
             )}
-            <span className="text-cc-fg text-[13px] font-medium truncate">
-              {selectedRelPath?.split("/").pop()}
-            </span>
-            <span className="text-cc-muted truncate text-[11px] hidden sm:inline font-mono-code">
-              {selectedRelPath}
+            <div className="flex-1 min-w-0">
+              <span className="text-cc-fg text-[13px] font-medium truncate block">
+                {selectedRelPath?.split("/").pop()}
+              </span>
+              <span className="text-cc-muted truncate text-[11px] hidden sm:block font-mono-code">
+                {selectedRelPath}
+              </span>
+            </div>
+            <span className="text-cc-muted text-[11px] shrink-0 hidden sm:inline">
+              Compared to default branch
             </span>
           </div>
         )}

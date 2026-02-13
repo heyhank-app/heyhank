@@ -1121,6 +1121,7 @@ describe("GET /api/fs/diff", () => {
   });
 
   it("returns unified diff for a file", async () => {
+    // Validates that /api/fs/diff uses the repository default branch as base (origin/main here).
     const diffOutput = `diff --git a/file.ts b/file.ts
 --- a/file.ts
 +++ b/file.ts
@@ -1132,7 +1133,8 @@ describe("GET /api/fs/diff", () => {
     vi.mocked(execSync)
       .mockReturnValueOnce("/repo\n") // rev-parse --show-toplevel
       .mockReturnValueOnce("file.ts\n") // ls-files --full-name
-      .mockReturnValueOnce(diffOutput); // git diff HEAD
+      .mockReturnValueOnce("refs/remotes/origin/main\n") // symbolic-ref refs/remotes/origin/HEAD
+      .mockReturnValueOnce(diffOutput); // git diff origin/main
 
     const res = await app.request("/api/fs/diff?path=/repo/file.ts", { method: "GET" });
 
@@ -1141,12 +1143,13 @@ describe("GET /api/fs/diff", () => {
     expect(json.diff).toBe(diffOutput);
     expect(json.path).toContain("file.ts");
     expect(vi.mocked(execSync)).toHaveBeenCalledWith(
-      expect.stringContaining("git diff HEAD"),
+      expect.stringContaining("git diff origin/main"),
       expect.objectContaining({ encoding: "utf-8", timeout: 5000 }),
     );
   });
 
   it("returns no-index diff for untracked files", async () => {
+    // Untracked files have no base-branch diff content, so API must fallback to a full-file no-index diff.
     const untrackedDiff = `diff --git a/new.txt b/new.txt
 new file mode 100644
 index 0000000..e69de29
@@ -1158,7 +1161,8 @@ index 0000000..e69de29
     vi.mocked(execSync)
       .mockReturnValueOnce("/repo\n") // rev-parse --show-toplevel
       .mockReturnValueOnce("new.txt\n") // ls-files --full-name
-      .mockReturnValueOnce("") // git diff HEAD -> empty for untracked
+      .mockReturnValueOnce("refs/remotes/origin/main\n") // symbolic-ref refs/remotes/origin/HEAD
+      .mockReturnValueOnce("") // git diff origin/main -> empty for untracked
       .mockReturnValueOnce("new.txt\n") // ls-files --others --exclude-standard
       .mockImplementationOnce(() => {
         const err = new Error("diff exits with 1 for differences") as Error & { stdout: string };
@@ -1173,6 +1177,36 @@ index 0000000..e69de29
     expect(json.diff).toContain("new file mode");
     expect(vi.mocked(execSync)).toHaveBeenCalledWith(
       expect.stringContaining("git diff --no-index -- /dev/null"),
+      expect.objectContaining({ encoding: "utf-8", timeout: 5000 }),
+    );
+  });
+
+  it("falls back to local default branch when origin HEAD is unavailable", async () => {
+    // Ensures fallback chain works when symbolic-ref fails (e.g. no origin/HEAD): use local fallback branch.
+    const diffOutput = `diff --git a/file.ts b/file.ts
+--- a/file.ts
++++ b/file.ts
+@@ -1,2 +1,3 @@
+ line1
++added`;
+    vi.mocked(execSync)
+      .mockReturnValueOnce("/repo\n") // rev-parse --show-toplevel
+      .mockReturnValueOnce("file.ts\n") // ls-files --full-name
+      .mockImplementationOnce(() => {
+        const err = new Error("no symbol ref") as Error & { stdout: string };
+        err.stdout = "error: ref refs/remotes/origin/HEAD is not a symbolic ref";
+        throw err;
+      }) // symbolic-ref refs/remotes/origin/HEAD unavailable
+      .mockReturnValueOnce("main\n") // branch --list fallback
+      .mockReturnValueOnce(diffOutput); // git diff main
+
+    const res = await app.request("/api/fs/diff?path=/repo/file.ts", { method: "GET" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.diff).toBe(diffOutput);
+    expect(vi.mocked(execSync)).toHaveBeenCalledWith(
+      expect.stringContaining("git diff main"),
       expect.objectContaining({ encoding: "utf-8", timeout: 5000 }),
     );
   });
