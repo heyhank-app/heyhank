@@ -79,6 +79,12 @@ describe("SettingsPage", () => {
     await screen.findByText("OpenRouter key not configured");
   });
 
+  it("shows the auto-renaming helper copy under the API key input", async () => {
+    render(<SettingsPage />);
+
+    expect(await screen.findByText("Auto-renaming is disabled until this key is configured.")).toBeInTheDocument();
+  });
+
   it("saves settings with trimmed values", async () => {
     render(<SettingsPage />);
     await screen.findByText("OpenRouter key configured");

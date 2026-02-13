@@ -99,7 +99,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
               className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/60"
             />
             <p className="mt-1.5 text-xs text-cc-muted">
-              Automatic session renaming is disabled until this key is configured.
+              Auto-renaming is disabled until this key is configured.
             </p>
           </div>
 
