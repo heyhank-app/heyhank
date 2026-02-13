@@ -6,6 +6,7 @@ import {
   writeFileSync,
   copyFileSync,
   cpSync,
+  realpathSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Subprocess } from "bun";
@@ -409,13 +410,32 @@ export class CliLauncher {
     );
     this.prepareCodexHome(codexHome);
 
-    // Use enriched PATH so the spawned codex process can find the correct
-    // Node version (e.g. nvm-managed v22 instead of system v12).
-    // Prepend the directory containing the resolved binary so its sibling
-    // `node` is found first.
+    // The codex binary is a Node.js script with `#!/usr/bin/env node` shebang.
+    // When Bun.spawn executes it, the kernel resolves `node` via /usr/bin/env
+    // which may find the system Node (e.g. v12) instead of the nvm-managed one.
+    // To guarantee the correct Node version, we resolve the `node` binary that
+    // lives alongside `codex` and spawn `node <codex.js>` directly.
     const binaryDir = resolve(binary, "..");
+    const siblingNode = join(binaryDir, "node");
     const enrichedPath = getEnrichedPath();
     const spawnPath = [binaryDir, ...enrichedPath.split(":")].filter(Boolean).join(":");
+
+    // Determine whether to invoke node explicitly or use the binary directly.
+    // If a `node` binary exists next to `codex`, use it to bypass shebang issues.
+    let spawnCmd: string[];
+    if (existsSync(siblingNode)) {
+      // Resolve the real path of the codex script (follows symlinks)
+      // so node can load it as an ES module with the correct package.json context.
+      let codexScript: string;
+      try {
+        codexScript = realpathSync(binary);
+      } catch {
+        codexScript = binary;
+      }
+      spawnCmd = [siblingNode, codexScript, ...args];
+    } else {
+      spawnCmd = [binary, ...args];
+    }
 
     const env: Record<string, string | undefined> = {
       ...process.env,
@@ -425,9 +445,9 @@ export class CliLauncher {
       PATH: spawnPath,
     };
 
-    console.log(`[cli-launcher] Spawning Codex session ${sessionId}: ${binary} ${args.join(" ")}`);
+    console.log(`[cli-launcher] Spawning Codex session ${sessionId}: ${spawnCmd.join(" ")}`);
 
-    const proc = Bun.spawn([binary, ...args], {
+    const proc = Bun.spawn(spawnCmd, {
       cwd: info.cwd,
       env,
       stdin: "pipe",
