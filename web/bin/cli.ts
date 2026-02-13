@@ -40,6 +40,18 @@ switch (command) {
     break;
   }
 
+  case "stop": {
+    const { stop } = await import("../server/service.js");
+    await stop();
+    break;
+  }
+
+  case "restart": {
+    const { restart } = await import("../server/service.js");
+    await restart();
+    break;
+  }
+
   case "logs": {
     const { join } = await import("node:path");
     const { homedir } = await import("node:os");
@@ -75,6 +87,8 @@ Commands:
   (none)      Start the server in foreground (default)
   start       Start the server in foreground
   install     Install as a background service (launchd/systemd)
+  stop        Stop the background service
+  restart     Restart the background service
   uninstall   Remove the background service
   status      Show service status
   logs        Tail service log files

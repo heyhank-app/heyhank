@@ -79,6 +79,8 @@ Other commands:
 
 ```bash
 the-companion status      # check if the service is running
+the-companion stop        # stop the service (keeps it installed)
+the-companion restart     # restart the service
 the-companion logs        # tail stdout/stderr logs
 the-companion uninstall   # remove the service
 ```

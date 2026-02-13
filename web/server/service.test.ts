@@ -541,6 +541,174 @@ describe("uninstall (linux)", () => {
 });
 
 // ===========================================================================
+// stop (macOS)
+// ===========================================================================
+describe("stop", () => {
+  it("calls launchctl stop when installed", async () => {
+    // Install first
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("launchctl")) return "";
+      return "";
+    });
+    await service.install();
+
+    vi.resetModules();
+    service = await import("./service.js");
+    mockExecSync.mockReset();
+    mockExecSync.mockImplementation(() => "");
+
+    await service.stop();
+
+    const stopCall = mockExecSync.mock.calls.find(
+      ([cmd]) => typeof cmd === "string" && cmd.startsWith("launchctl stop"),
+    );
+    expect(stopCall).toBeDefined();
+  });
+
+  it("falls back to launchctl unload when stop fails", async () => {
+    // Install first
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("launchctl")) return "";
+      return "";
+    });
+    await service.install();
+
+    vi.resetModules();
+    service = await import("./service.js");
+    mockExecSync.mockReset();
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("launchctl stop")) throw new Error("stop failed");
+      if (cmd.startsWith("launchctl unload")) return "";
+      return "";
+    });
+
+    await service.stop();
+
+    const unloadCall = mockExecSync.mock.calls.find(
+      ([cmd]) => typeof cmd === "string" && cmd.startsWith("launchctl unload"),
+    );
+    expect(unloadCall).toBeDefined();
+  });
+
+  it("handles not-installed gracefully", async () => {
+    // Should not throw
+    await service.stop();
+  });
+});
+
+// ===========================================================================
+// stop (Linux)
+// ===========================================================================
+describe("stop (linux)", () => {
+  beforeEach(async () => {
+    mockPlatform.set("linux");
+    Object.defineProperty(process, "platform", { value: "linux" });
+    vi.resetModules();
+    service = await import("./service.js");
+  });
+
+  it("calls systemctl stop when installed", async () => {
+    // Install first
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("systemctl")) return "";
+      return "";
+    });
+    await service.install();
+
+    vi.resetModules();
+    service = await import("./service.js");
+    mockExecSync.mockReset();
+    mockExecSync.mockImplementation(() => "");
+
+    await service.stop();
+
+    const stopCall = mockExecSync.mock.calls.find(
+      ([cmd]) => typeof cmd === "string" && cmd.includes("stop the-companion.service"),
+    );
+    expect(stopCall).toBeDefined();
+  });
+
+  it("handles not-installed gracefully", async () => {
+    // Should not throw
+    await service.stop();
+  });
+});
+
+// ===========================================================================
+// restart (macOS)
+// ===========================================================================
+describe("restart", () => {
+  it("calls launchctl kickstart when installed", async () => {
+    // Install first
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("launchctl")) return "";
+      return "";
+    });
+    await service.install();
+
+    vi.resetModules();
+    service = await import("./service.js");
+    mockExecSync.mockReset();
+    mockExecSync.mockImplementation(() => "");
+
+    await service.restart();
+
+    const restartCall = mockExecSync.mock.calls.find(
+      ([cmd]) => typeof cmd === "string" && cmd.startsWith("launchctl kickstart -k"),
+    );
+    expect(restartCall).toBeDefined();
+  });
+
+  it("handles not-installed gracefully", async () => {
+    // Should not throw
+    await service.restart();
+  });
+});
+
+// ===========================================================================
+// restart (Linux)
+// ===========================================================================
+describe("restart (linux)", () => {
+  beforeEach(async () => {
+    mockPlatform.set("linux");
+    Object.defineProperty(process, "platform", { value: "linux" });
+    vi.resetModules();
+    service = await import("./service.js");
+  });
+
+  it("calls systemctl restart when installed", async () => {
+    // Install first
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+      if (cmd.startsWith("systemctl")) return "";
+      return "";
+    });
+    await service.install();
+
+    vi.resetModules();
+    service = await import("./service.js");
+    mockExecSync.mockReset();
+    mockExecSync.mockImplementation(() => "");
+
+    await service.restart();
+
+    const restartCall = mockExecSync.mock.calls.find(
+      ([cmd]) => typeof cmd === "string" && cmd.includes("restart the-companion.service"),
+    );
+    expect(restartCall).toBeDefined();
+  });
+
+  it("handles not-installed gracefully", async () => {
+    // Should not throw
+    await service.restart();
+  });
+});
+
+// ===========================================================================
 // status (macOS)
 // ===========================================================================
 describe("status", () => {

@@ -360,6 +360,108 @@ async function uninstallLinux(): Promise<void> {
   console.log(`Logs are preserved at ${LOG_DIR}`);
 }
 
+// ─── Stop / Restart ────────────────────────────────────────────────────────────
+
+export async function stop(): Promise<void> {
+  ensureSupportedPlatform();
+
+  if (isDarwin()) {
+    return stopDarwin();
+  }
+  return stopLinux();
+}
+
+async function stopDarwin(): Promise<void> {
+  const installedService = getInstalledLaunchdService();
+  if (!installedService) {
+    console.log("The Companion is not installed as a service.");
+    return;
+  }
+
+  try {
+    execSync(`launchctl stop "${installedService.label}"`, { stdio: "pipe" });
+  } catch {
+    // If stop is unavailable or service is unloaded, best-effort unload.
+    unloadLaunchdService(installedService.plistPath);
+  }
+
+  console.log("The Companion service has been stopped.");
+  console.log("Run 'the-companion restart' to start it again.");
+}
+
+async function stopLinux(): Promise<void> {
+  if (!isSystemdUnitInstalled()) {
+    console.log("The Companion is not installed as a service.");
+    return;
+  }
+
+  try {
+    systemctlUser(`stop ${UNIT_NAME}`);
+  } catch (err: unknown) {
+    console.error("Failed to stop the service with systemctl:");
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+
+  console.log("The Companion service has been stopped.");
+  console.log("Run 'the-companion restart' to start it again.");
+}
+
+export async function restart(): Promise<void> {
+  ensureSupportedPlatform();
+
+  if (isDarwin()) {
+    return restartDarwin();
+  }
+  return restartLinux();
+}
+
+async function restartDarwin(): Promise<void> {
+  const installedService = getInstalledLaunchdService();
+  if (!installedService) {
+    console.log("The Companion is not installed as a service.");
+    return;
+  }
+
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  const domainTarget = uid !== undefined
+    ? `gui/${uid}/${installedService.label}`
+    : installedService.label;
+
+  try {
+    execSync(`launchctl kickstart -k "${domainTarget}"`, { stdio: "pipe" });
+  } catch {
+    // Fallback for environments where kickstart/domain targeting is unavailable.
+    unloadLaunchdService(installedService.plistPath);
+    try {
+      execSync(`launchctl load -w "${installedService.plistPath}"`, { stdio: "pipe" });
+    } catch (err: unknown) {
+      console.error("Failed to restart the service with launchctl:");
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  }
+
+  console.log("The Companion service has been restarted.");
+}
+
+async function restartLinux(): Promise<void> {
+  if (!isSystemdUnitInstalled()) {
+    console.log("The Companion is not installed as a service.");
+    return;
+  }
+
+  try {
+    systemctlUser(`restart ${UNIT_NAME}`);
+  } catch (err: unknown) {
+    console.error("Failed to restart the service with systemctl:");
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+
+  console.log("The Companion service has been restarted.");
+}
+
 // ─── Status ─────────────────────────────────────────────────────────────────────
 
 export interface ServiceStatus {
