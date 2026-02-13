@@ -8,7 +8,33 @@ process.env.__COMPANION_PACKAGE_ROOT = resolve(__dirname, "..");
 
 const command = process.argv[2];
 
+function printUsage(): void {
+  console.log(`
+Usage: the-companion [command]
+
+Commands:
+  (none)      Start the server in foreground (default)
+  start       Start the server in foreground
+  install     Install as a background service (launchd/systemd)
+  stop        Stop the background service
+  restart     Restart the background service
+  uninstall   Remove the background service
+  status      Show service status
+  logs        Tail service log files
+  help        Show this help message
+
+Options:
+  --port <n>  Override the default port (default: 3456)
+`);
+}
+
 switch (command) {
+  case "help":
+  case "-h":
+  case "--help":
+    printUsage();
+    break;
+
   case "install": {
     const { install } = await import("../server/service.js");
     const portIdx = process.argv.indexOf("--port");
@@ -80,21 +106,6 @@ switch (command) {
 
   default:
     console.error(`Unknown command: ${command}`);
-    console.log(`
-Usage: the-companion [command]
-
-Commands:
-  (none)      Start the server in foreground (default)
-  start       Start the server in foreground
-  install     Install as a background service (launchd/systemd)
-  stop        Stop the background service
-  restart     Restart the background service
-  uninstall   Remove the background service
-  status      Show service status
-  logs        Tail service log files
-
-Options:
-  --port <n>  Override the default port (default: 3456)
-`);
+    printUsage();
     process.exit(1);
 }
