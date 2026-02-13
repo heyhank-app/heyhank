@@ -14,7 +14,8 @@ Usage: the-companion [command]
 
 Commands:
   (none)      Start the server in foreground (default)
-  start       Start the server in foreground
+  serve       Start the server in foreground
+  start       Start the background service
   install     Install as a background service (launchd/systemd)
   stop        Stop the background service
   restart     Restart the background service
@@ -34,6 +35,26 @@ switch (command) {
   case "--help":
     printUsage();
     break;
+
+  case "serve": {
+    process.env.NODE_ENV = process.env.NODE_ENV || "production";
+    await import("../server/index.ts");
+    break;
+  }
+
+  case "start": {
+    // Internal service process should stay in foreground server mode.
+    const forceForeground = process.argv.includes("--foreground");
+    const launchedByInit = process.ppid === 1;
+    if (forceForeground || launchedByInit) {
+      process.env.NODE_ENV = process.env.NODE_ENV || "production";
+      await import("../server/index.ts");
+      break;
+    }
+    const { start } = await import("../server/service.js");
+    await start();
+    break;
+  }
 
   case "install": {
     const { install } = await import("../server/service.js");
@@ -96,9 +117,8 @@ switch (command) {
     break;
   }
 
-  case "start":
   case undefined: {
-    // Default: start server in foreground (current behavior)
+    // Default: start server in foreground
     process.env.NODE_ENV = process.env.NODE_ENV || "production";
     await import("../server/index.ts");
     break;

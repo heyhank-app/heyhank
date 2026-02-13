@@ -72,6 +72,7 @@ export function generatePlist(opts: PlistOptions): string {
     <array>
         <string>${opts.binPath}</string>
         <string>start</string>
+        <string>--foreground</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -130,7 +131,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${opts.binPath} start
+ExecStart=${opts.binPath} start --foreground
 WorkingDirectory=${home}
 Restart=on-failure
 RestartSec=5
@@ -361,6 +362,66 @@ async function uninstallLinux(): Promise<void> {
 }
 
 // ─── Stop / Restart ────────────────────────────────────────────────────────────
+
+export async function start(): Promise<void> {
+  ensureSupportedPlatform();
+
+  if (isDarwin()) {
+    return startDarwin();
+  }
+  return startLinux();
+}
+
+async function startDarwin(): Promise<void> {
+  const installedService = getInstalledLaunchdService();
+  if (!installedService) {
+    console.log("The Companion is not installed as a service.");
+    console.log("Run 'the-companion install' first.");
+    return;
+  }
+
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  const domain = uid !== undefined ? `gui/${uid}` : "gui";
+  const domainTarget = uid !== undefined
+    ? `gui/${uid}/${installedService.label}`
+    : installedService.label;
+
+  try {
+    execSync(`launchctl kickstart -k "${domainTarget}"`, { stdio: "pipe" });
+  } catch {
+    try {
+      execSync(`launchctl bootstrap "${domain}" "${installedService.plistPath}"`, { stdio: "pipe" });
+    } catch {
+      try {
+        execSync(`launchctl load -w "${installedService.plistPath}"`, { stdio: "pipe" });
+      } catch (err: unknown) {
+        console.error("Failed to start the service with launchctl:");
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    }
+  }
+
+  console.log("The Companion service has been started.");
+}
+
+async function startLinux(): Promise<void> {
+  if (!isSystemdUnitInstalled()) {
+    console.log("The Companion is not installed as a service.");
+    console.log("Run 'the-companion install' first.");
+    return;
+  }
+
+  try {
+    systemctlUser(`start ${UNIT_NAME}`);
+  } catch (err: unknown) {
+    console.error("Failed to start the service with systemctl:");
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+
+  console.log("The Companion service has been started.");
+}
 
 export async function stop(): Promise<void> {
   ensureSupportedPlatform();
