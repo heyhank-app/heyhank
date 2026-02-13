@@ -47,6 +47,7 @@ interface MockStoreState {
   currentSessionId: string | null;
   darkMode: boolean;
   notificationSound: boolean;
+  notificationDesktop: boolean;
   cliConnected: Map<string, boolean>;
   sessionStatus: Map<string, "idle" | "running" | "compacting" | null>;
   sessionNames: Map<string, string>;
@@ -56,6 +57,7 @@ interface MockStoreState {
   setCurrentSession: ReturnType<typeof vi.fn>;
   toggleDarkMode: ReturnType<typeof vi.fn>;
   toggleNotificationSound: ReturnType<typeof vi.fn>;
+  setNotificationDesktop: ReturnType<typeof vi.fn>;
   toggleProjectCollapse: ReturnType<typeof vi.fn>;
   removeSession: ReturnType<typeof vi.fn>;
   newSession: ReturnType<typeof vi.fn>;
@@ -113,6 +115,7 @@ function createMockState(overrides: Partial<MockStoreState> = {}): MockStoreStat
     currentSessionId: null,
     darkMode: false,
     notificationSound: true,
+    notificationDesktop: true,
     cliConnected: new Map(),
     sessionStatus: new Map(),
     sessionNames: new Map(),
@@ -122,6 +125,7 @@ function createMockState(overrides: Partial<MockStoreState> = {}): MockStoreStat
     setCurrentSession: vi.fn(),
     toggleDarkMode: vi.fn(),
     toggleNotificationSound: vi.fn(),
+    setNotificationDesktop: vi.fn(),
     toggleProjectCollapse: vi.fn(),
     removeSession: vi.fn(),
     newSession: vi.fn(),
@@ -391,6 +395,18 @@ describe("Sidebar", () => {
     fireEvent.click(darkModeButton);
 
     expect(mockState.toggleDarkMode).toHaveBeenCalled();
+  });
+
+  it("groups notification toggles under Notification section", () => {
+    vi.stubGlobal("Notification", {
+      permission: "granted",
+      requestPermission: vi.fn().mockResolvedValue("granted"),
+    });
+    render(<Sidebar />);
+    expect(screen.getByText("Notification")).toBeInTheDocument();
+    expect(screen.getByText("Sound on")).toBeInTheDocument();
+    expect(screen.getByText("Alerts on")).toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 
   it("session name shows animate-name-appear class when recently renamed", () => {
