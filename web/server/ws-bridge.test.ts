@@ -2520,3 +2520,160 @@ describe("broadcastNameUpdate", () => {
     bridge.broadcastNameUpdate("nonexistent", "Name");
   });
 });
+
+// ─── MCP Control Messages ────────────────────────────────────────────────────
+
+describe("MCP control messages", () => {
+  let cli: ReturnType<typeof makeCliSocket>;
+  let browser: ReturnType<typeof makeBrowserSocket>;
+
+  beforeEach(() => {
+    cli = makeCliSocket("s1");
+    browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    bridge.handleCLIMessage(cli, makeInitMsg());
+    cli.send.mockClear();
+    browser.send.mockClear();
+  });
+
+  it("mcp_get_status: sends mcp_status control_request to CLI", () => {
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "mcp_get_status",
+    }));
+
+    expect(cli.send).toHaveBeenCalledTimes(1);
+    const sentRaw = cli.send.mock.calls[0][0] as string;
+    const sent = JSON.parse(sentRaw.trim());
+    expect(sent.type).toBe("control_request");
+    expect(sent.request_id).toBe("test-uuid");
+    expect(sent.request.subtype).toBe("mcp_status");
+  });
+
+  it("mcp_toggle: sends mcp_toggle control_request to CLI", () => {
+    // Use vi.useFakeTimers to prevent the delayed mcp_get_status
+    vi.useFakeTimers();
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "mcp_toggle",
+      serverName: "my-server",
+      enabled: false,
+    }));
+
+    expect(cli.send).toHaveBeenCalledTimes(1);
+    const sentRaw = cli.send.mock.calls[0][0] as string;
+    const sent = JSON.parse(sentRaw.trim());
+    expect(sent.type).toBe("control_request");
+    expect(sent.request.subtype).toBe("mcp_toggle");
+    expect(sent.request.serverName).toBe("my-server");
+    expect(sent.request.enabled).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it("mcp_reconnect: sends mcp_reconnect control_request to CLI", () => {
+    vi.useFakeTimers();
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "mcp_reconnect",
+      serverName: "failing-server",
+    }));
+
+    expect(cli.send).toHaveBeenCalledTimes(1);
+    const sentRaw = cli.send.mock.calls[0][0] as string;
+    const sent = JSON.parse(sentRaw.trim());
+    expect(sent.type).toBe("control_request");
+    expect(sent.request.subtype).toBe("mcp_reconnect");
+    expect(sent.request.serverName).toBe("failing-server");
+    vi.useRealTimers();
+  });
+
+  it("control_response for mcp_status: broadcasts mcp_status to browsers", () => {
+    // Send mcp_get_status to create the pending request
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "mcp_get_status",
+    }));
+    browser.send.mockClear();
+
+    // Simulate CLI responding with control_response
+    const mockServers = [
+      {
+        name: "test-server",
+        status: "connected",
+        config: { type: "stdio", command: "node", args: ["server.js"] },
+        scope: "project",
+        tools: [{ name: "myTool" }],
+      },
+    ];
+
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: "test-uuid",
+        response: { mcpServers: mockServers },
+      },
+    }));
+
+    expect(browser.send).toHaveBeenCalledTimes(1);
+    const browserMsg = JSON.parse(browser.send.mock.calls[0][0] as string);
+    expect(browserMsg.type).toBe("mcp_status");
+    expect(browserMsg.servers).toHaveLength(1);
+    expect(browserMsg.servers[0].name).toBe("test-server");
+    expect(browserMsg.servers[0].status).toBe("connected");
+    expect(browserMsg.servers[0].tools).toHaveLength(1);
+  });
+
+  it("control_response with error: does not broadcast to browsers", () => {
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "mcp_get_status",
+    }));
+    browser.send.mockClear();
+
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "control_response",
+      response: {
+        subtype: "error",
+        request_id: "test-uuid",
+        error: "MCP not available",
+      },
+    }));
+
+    // Should not broadcast anything
+    expect(browser.send).not.toHaveBeenCalled();
+  });
+
+  it("control_response for unknown request_id: ignored silently", () => {
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: "unknown-id",
+        response: { mcpServers: [] },
+      },
+    }));
+
+    // Should not throw and not send anything
+    expect(browser.send).not.toHaveBeenCalled();
+  });
+
+  it("mcp_set_servers: sends mcp_set_servers control_request to CLI", () => {
+    vi.useFakeTimers();
+    const servers = {
+      "my-notes": {
+        type: "stdio" as const,
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-memory"],
+      },
+    };
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "mcp_set_servers",
+      servers,
+    }));
+
+    expect(cli.send).toHaveBeenCalledTimes(1);
+    const sentRaw = cli.send.mock.calls[0][0] as string;
+    const sent = JSON.parse(sentRaw.trim());
+    expect(sent.type).toBe("control_request");
+    expect(sent.request.subtype).toBe("mcp_set_servers");
+    expect(sent.request.servers).toEqual(servers);
+    vi.useRealTimers();
+  });
+});

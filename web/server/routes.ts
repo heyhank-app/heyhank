@@ -125,7 +125,8 @@ export function createRoutes(
 
           const pullResult = gitUtils.gitPull(repoInfo.repoRoot);
           if (!pullResult.success) {
-            throw new Error(`git pull failed before session create: ${pullResult.output}`);
+            // Don't fail session creation if pull fails (e.g. no upstream tracking)
+            console.warn(`[routes] git pull warning (non-fatal): ${pullResult.output}`);
           }
         }
       }

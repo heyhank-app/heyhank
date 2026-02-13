@@ -960,3 +960,95 @@ describe("handleMessage: session_name_update", () => {
     expect(useStore.getState().sessionNames.get("s1")).toBe("My Cool Project");
   });
 });
+
+// ===========================================================================
+// MCP Status
+// ===========================================================================
+
+describe("MCP status messages", () => {
+  it("mcp_status: stores servers in store", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    const servers = [
+      {
+        name: "test-mcp",
+        status: "connected",
+        config: { type: "stdio", command: "node", args: ["server.js"] },
+        scope: "project",
+        tools: [{ name: "myTool" }],
+      },
+      {
+        name: "disabled-mcp",
+        status: "disabled",
+        config: { type: "sse", url: "http://localhost:3000" },
+        scope: "user",
+      },
+    ];
+
+    fireMessage({ type: "mcp_status", servers });
+
+    const stored = useStore.getState().mcpServers.get("s1");
+    expect(stored).toHaveLength(2);
+    expect(stored![0].name).toBe("test-mcp");
+    expect(stored![0].status).toBe("connected");
+    expect(stored![0].tools).toHaveLength(1);
+    expect(stored![1].name).toBe("disabled-mcp");
+    expect(stored![1].status).toBe("disabled");
+  });
+
+  it("sendMcpGetStatus: sends mcp_get_status message", () => {
+    wsModule.connectSession("s1");
+    lastWs.send.mockClear();
+
+    wsModule.sendMcpGetStatus("s1");
+
+    expect(lastWs.send).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse(lastWs.send.mock.calls[0][0]);
+    expect(sent.type).toBe("mcp_get_status");
+  });
+
+  it("sendMcpToggle: sends mcp_toggle message", () => {
+    wsModule.connectSession("s1");
+    lastWs.send.mockClear();
+
+    wsModule.sendMcpToggle("s1", "my-server", false);
+
+    expect(lastWs.send).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse(lastWs.send.mock.calls[0][0]);
+    expect(sent.type).toBe("mcp_toggle");
+    expect(sent.serverName).toBe("my-server");
+    expect(sent.enabled).toBe(false);
+  });
+
+  it("sendMcpReconnect: sends mcp_reconnect message", () => {
+    wsModule.connectSession("s1");
+    lastWs.send.mockClear();
+
+    wsModule.sendMcpReconnect("s1", "failing-server");
+
+    expect(lastWs.send).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse(lastWs.send.mock.calls[0][0]);
+    expect(sent.type).toBe("mcp_reconnect");
+    expect(sent.serverName).toBe("failing-server");
+  });
+
+  it("sendMcpSetServers: sends mcp_set_servers message", () => {
+    wsModule.connectSession("s1");
+    lastWs.send.mockClear();
+
+    const servers = {
+      "notes-server": {
+        type: "stdio" as const,
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-memory"],
+      },
+    };
+    wsModule.sendMcpSetServers("s1", servers);
+
+    expect(lastWs.send).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse(lastWs.send.mock.calls[0][0]);
+    expect(sent.type).toBe("mcp_set_servers");
+    expect(sent.servers).toEqual(servers);
+  });
+});

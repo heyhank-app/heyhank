@@ -12,12 +12,15 @@ import type {
   CLIToolProgressMessage,
   CLIToolUseSummaryMessage,
   CLIControlRequestMessage,
+  CLIControlResponseMessage,
   CLIAuthStatusMessage,
   BrowserOutgoingMessage,
   BrowserIncomingMessage,
   SessionState,
   PermissionRequest,
   BackendType,
+  McpServerDetail,
+  McpServerConfig,
 } from "./session-types.js";
 import type { SessionStore } from "./session-store.js";
 import type { CodexAdapter } from "./codex-adapter.js";
@@ -43,6 +46,12 @@ export type SocketData = CLISocketData | BrowserSocketData | TerminalSocketData;
 
 // ─── Session ──────────────────────────────────────────────────────────────────
 
+/** Tracks a pending control_request sent to CLI that expects a control_response. */
+interface PendingControlRequest {
+  subtype: string;
+  resolve: (response: unknown) => void;
+}
+
 interface Session {
   id: string;
   backendType: BackendType;
@@ -51,6 +60,8 @@ interface Session {
   browserSockets: Set<ServerWebSocket<SocketData>>;
   state: SessionState;
   pendingPermissions: Map<string, PermissionRequest>;
+  /** Pending control_requests sent TO CLI, keyed by request_id */
+  pendingControlRequests: Map<string, PendingControlRequest>;
   messageHistory: BrowserIncomingMessage[];
   /** Messages queued while waiting for CLI to connect */
   pendingMessages: string[];
@@ -204,6 +215,7 @@ export class WsBridge {
         browserSockets: new Set(),
         state: p.state,
         pendingPermissions: new Map(p.pendingPermissions || []),
+        pendingControlRequests: new Map(),
         messageHistory: p.messageHistory || [],
         pendingMessages: p.pendingMessages || [],
       };
@@ -292,6 +304,7 @@ export class WsBridge {
         browserSockets: new Set(),
         state: makeDefaultState(sessionId, type),
         pendingPermissions: new Map(),
+        pendingControlRequests: new Map(),
         messageHistory: [],
         pendingMessages: [],
       };
@@ -638,6 +651,10 @@ export class WsBridge {
         this.handleAuthStatus(session, msg);
         break;
 
+      case "control_response":
+        this.handleControlResponse(session, msg);
+        break;
+
       case "keep_alive":
         // Silently consume keepalives
         break;
@@ -868,6 +885,22 @@ export class WsBridge {
       case "set_permission_mode":
         this.handleSetPermissionMode(session, msg.mode);
         break;
+
+      case "mcp_get_status":
+        this.handleMcpGetStatus(session);
+        break;
+
+      case "mcp_toggle":
+        this.handleMcpToggle(session, msg.serverName, msg.enabled);
+        break;
+
+      case "mcp_reconnect":
+        this.handleMcpReconnect(session, msg.serverName);
+        break;
+
+      case "mcp_set_servers":
+        this.handleMcpSetServers(session, msg.servers);
+        break;
     }
   }
 
@@ -976,6 +1009,69 @@ export class WsBridge {
       request: { subtype: "set_permission_mode", mode },
     });
     this.sendToCLI(session, ndjson);
+  }
+
+  // ── Control response handling ─────────────────────────────────────────
+
+  private handleControlResponse(
+    session: Session,
+    msg: CLIControlResponseMessage,
+  ) {
+    const reqId = msg.response.request_id;
+    const pending = session.pendingControlRequests.get(reqId);
+    if (!pending) return; // Not a request we're tracking
+    session.pendingControlRequests.delete(reqId);
+
+    if (msg.response.subtype === "error") {
+      console.warn(`[ws-bridge] Control request ${pending.subtype} failed: ${msg.response.error}`);
+      return;
+    }
+
+    pending.resolve(msg.response.response ?? {});
+  }
+
+  // ── MCP control messages ──────────────────────────────────────────────
+
+  /** Send a control_request to CLI, optionally tracking the response via a callback. */
+  private sendControlRequest(
+    session: Session,
+    request: Record<string, unknown>,
+    onResponse?: PendingControlRequest,
+  ) {
+    const requestId = randomUUID();
+    if (onResponse) {
+      session.pendingControlRequests.set(requestId, onResponse);
+    }
+    this.sendToCLI(session, JSON.stringify({
+      type: "control_request",
+      request_id: requestId,
+      request,
+    }));
+  }
+
+  private handleMcpGetStatus(session: Session) {
+    this.sendControlRequest(session, { subtype: "mcp_status" }, {
+      subtype: "mcp_status",
+      resolve: (response) => {
+        const servers = (response as { mcpServers?: McpServerDetail[] }).mcpServers ?? [];
+        this.broadcastToBrowsers(session, { type: "mcp_status", servers });
+      },
+    });
+  }
+
+  private handleMcpToggle(session: Session, serverName: string, enabled: boolean) {
+    this.sendControlRequest(session, { subtype: "mcp_toggle", serverName, enabled });
+    setTimeout(() => this.handleMcpGetStatus(session), 500);
+  }
+
+  private handleMcpReconnect(session: Session, serverName: string) {
+    this.sendControlRequest(session, { subtype: "mcp_reconnect", serverName });
+    setTimeout(() => this.handleMcpGetStatus(session), 1000);
+  }
+
+  private handleMcpSetServers(session: Session, servers: Record<string, McpServerConfig>) {
+    this.sendControlRequest(session, { subtype: "mcp_set_servers", servers });
+    setTimeout(() => this.handleMcpGetStatus(session), 2000);
   }
 
   // ── Transport helpers ───────────────────────────────────────────────────

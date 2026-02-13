@@ -539,5 +539,34 @@ describe("reset", () => {
     expect(state.sessionTasks.size).toBe(0);
     expect(state.sessionNames.size).toBe(0);
     expect(state.recentlyRenamed.size).toBe(0);
+    expect(state.mcpServers.size).toBe(0);
+  });
+});
+
+// ─── MCP Servers ──────────────────────────────────────────────────────────────
+
+describe("MCP Servers", () => {
+  it("setMcpServers: stores servers for a session", () => {
+    const servers = [
+      { name: "test-server", status: "connected" as const, config: { type: "stdio" }, scope: "project" },
+    ];
+    useStore.getState().setMcpServers("s1", servers);
+    expect(useStore.getState().mcpServers.get("s1")).toEqual(servers);
+  });
+
+  it("setMcpServers: replaces existing servers", () => {
+    const first = [{ name: "old", status: "connected" as const, config: { type: "stdio" }, scope: "project" }];
+    const second = [{ name: "new", status: "failed" as const, config: { type: "sse" }, scope: "user" }];
+    useStore.getState().setMcpServers("s1", first);
+    useStore.getState().setMcpServers("s1", second);
+    expect(useStore.getState().mcpServers.get("s1")).toEqual(second);
+  });
+
+  it("removeSession: clears mcpServers", () => {
+    const servers = [{ name: "test", status: "connected" as const, config: { type: "stdio" }, scope: "project" }];
+    useStore.getState().addSession(makeSession("s1"));
+    useStore.getState().setMcpServers("s1", servers);
+    useStore.getState().removeSession("s1");
+    expect(useStore.getState().mcpServers.has("s1")).toBe(false);
   });
 });

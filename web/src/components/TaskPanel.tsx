@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useStore } from "../store.js";
 import { api, type UsageLimits, type GitHubPRInfo } from "../api.js";
 import type { TaskItem } from "../types.js";
+import { McpSection } from "./McpPanel.js";
 
 const EMPTY_TASKS: TaskItem[] = [];
 const POLL_INTERVAL = 60_000;
@@ -344,6 +345,9 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
 
       {/* GitHub PR status */}
       <GitHubPRSection sessionId={sessionId} />
+
+      {/* MCP servers */}
+      <McpSection sessionId={sessionId} />
 
       {showTasks && (
         <>

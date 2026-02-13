@@ -1,5 +1,5 @@
 import { useStore } from "./store.js";
-import type { BrowserIncomingMessage, BrowserOutgoingMessage, ContentBlock, ChatMessage, TaskItem, SdkSessionInfo } from "./types.js";
+import type { BrowserIncomingMessage, BrowserOutgoingMessage, ContentBlock, ChatMessage, TaskItem, SdkSessionInfo, McpServerConfig } from "./types.js";
 import { generateUniqueSessionName } from "./utils/names.js";
 import { playNotificationSound } from "./utils/notification-sound.js";
 
@@ -365,6 +365,11 @@ function handleMessage(sessionId: string, event: MessageEvent) {
       break;
     }
 
+    case "mcp_status": {
+      store.setMcpServers(sessionId, data.servers);
+      break;
+    }
+
     case "message_history": {
       const chatMessages: ChatMessage[] = [];
       for (let i = 0; i < data.messages.length; i++) {
@@ -526,4 +531,20 @@ export function sendToSession(sessionId: string, msg: BrowserOutgoingMessage) {
   if (ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(msg));
   }
+}
+
+export function sendMcpGetStatus(sessionId: string) {
+  sendToSession(sessionId, { type: "mcp_get_status" });
+}
+
+export function sendMcpToggle(sessionId: string, serverName: string, enabled: boolean) {
+  sendToSession(sessionId, { type: "mcp_toggle", serverName, enabled });
+}
+
+export function sendMcpReconnect(sessionId: string, serverName: string) {
+  sendToSession(sessionId, { type: "mcp_reconnect", serverName });
+}
+
+export function sendMcpSetServers(sessionId: string, servers: Record<string, McpServerConfig>) {
+  sendToSession(sessionId, { type: "mcp_set_servers", servers });
 }

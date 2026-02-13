@@ -17,6 +17,8 @@ import type {
   SessionState,
   PermissionRequest,
   CLIResultMessage,
+  McpServerDetail,
+  McpServerConfig,
 } from "./session-types.js";
 
 // ─── Codex JSON-RPC Types ─────────────────────────────────────────────────────
@@ -102,6 +104,17 @@ interface CodexReasoningItem extends CodexItem {
 
 interface CodexContextCompactionItem extends CodexItem {
   type: "contextCompaction";
+}
+
+interface CodexMcpServerStatus {
+  name: string;
+  tools?: Record<string, { name?: string; annotations?: unknown }>;
+  authStatus?: "unsupported" | "notLoggedIn" | "bearerToken" | "oAuth";
+}
+
+interface CodexMcpStatusListResponse {
+  data?: CodexMcpServerStatus[];
+  nextCursor?: string | null;
 }
 
 // ─── Adapter Options ──────────────────────────────────────────────────────────
@@ -361,7 +374,14 @@ export class CodexAdapter {
   sendBrowserMessage(msg: BrowserOutgoingMessage): boolean {
     // Queue messages if not yet initialized (init is async)
     if (!this.initialized || !this.threadId) {
-      if (msg.type === "user_message" || msg.type === "permission_response") {
+      if (
+        msg.type === "user_message"
+        || msg.type === "permission_response"
+        || msg.type === "mcp_get_status"
+        || msg.type === "mcp_toggle"
+        || msg.type === "mcp_reconnect"
+        || msg.type === "mcp_set_servers"
+      ) {
         console.log(`[codex-adapter] Queuing ${msg.type} — adapter not yet initialized`);
         this.pendingOutgoing.push(msg);
         return true; // accepted, will be sent after init
@@ -390,6 +410,18 @@ export class CodexAdapter {
       case "set_permission_mode":
         console.warn("[codex-adapter] Runtime permission mode switching not supported by Codex");
         return false;
+      case "mcp_get_status":
+        this.handleOutgoingMcpGetStatus();
+        return true;
+      case "mcp_toggle":
+        this.handleOutgoingMcpToggle(msg.serverName, msg.enabled);
+        return true;
+      case "mcp_reconnect":
+        this.handleOutgoingMcpReconnect();
+        return true;
+      case "mcp_set_servers":
+        this.handleOutgoingMcpSetServers(msg.servers);
+        return true;
       default:
         return false;
     }
@@ -640,6 +672,110 @@ export class CodexAdapter {
       });
     } catch (err) {
       console.warn("[codex-adapter] Interrupt failed:", err);
+    }
+  }
+
+  private async handleOutgoingMcpGetStatus(): Promise<void> {
+    try {
+      const statusEntries = await this.listAllMcpServerStatuses();
+      const configMap = await this.readMcpServersConfig();
+
+      const names = new Set<string>([
+        ...statusEntries.map((s) => s.name),
+        ...Object.keys(configMap),
+      ]);
+
+      const statusByName = new Map(statusEntries.map((s) => [s.name, s]));
+      const servers: McpServerDetail[] = Array.from(names).sort().map((name) => {
+        const status = statusByName.get(name);
+        const config = this.toMcpServerConfig(configMap[name]);
+        const isEnabled = this.isMcpServerEnabled(configMap[name]);
+        const serverStatus: McpServerDetail["status"] =
+          !isEnabled
+            ? "disabled"
+            : (status?.authStatus === "notLoggedIn" ? "failed" : "connected");
+
+        return {
+          name,
+          status: serverStatus,
+          error: status?.authStatus === "notLoggedIn" ? "MCP server requires login" : undefined,
+          config,
+          scope: "user",
+          tools: this.mapMcpTools(status?.tools),
+        };
+      });
+
+      this.emit({ type: "mcp_status", servers });
+    } catch (err) {
+      this.emit({ type: "error", message: `Failed to get MCP status: ${err}` });
+    }
+  }
+
+  private async handleOutgoingMcpToggle(serverName: string, enabled: boolean): Promise<void> {
+    try {
+      if (serverName.includes(".")) {
+        throw new Error("Server names containing '.' are not supported for toggle");
+      }
+      await this.transport.call("config/value/write", {
+        keyPath: `mcp_servers.${serverName}.enabled`,
+        value: enabled,
+        mergeStrategy: "upsert",
+      });
+      await this.reloadMcpServers();
+      await this.handleOutgoingMcpGetStatus();
+    } catch (err) {
+      // Some existing configs may contain legacy/foreign fields (e.g. `transport`)
+      // that fail on reload when touched. If so, remove this server entry entirely.
+      const msg = String(err);
+      if (msg.includes("invalid transport")) {
+        try {
+          await this.transport.call("config/value/write", {
+            keyPath: `mcp_servers.${serverName}`,
+            value: null,
+            mergeStrategy: "replace",
+          });
+          await this.reloadMcpServers();
+          await this.handleOutgoingMcpGetStatus();
+          return;
+        } catch {
+          // fall through to user-visible error below
+        }
+      }
+      this.emit({ type: "error", message: `Failed to toggle MCP server "${serverName}": ${err}` });
+    }
+  }
+
+  private async handleOutgoingMcpReconnect(): Promise<void> {
+    try {
+      await this.reloadMcpServers();
+      await this.handleOutgoingMcpGetStatus();
+    } catch (err) {
+      this.emit({ type: "error", message: `Failed to reload MCP servers: ${err}` });
+    }
+  }
+
+  private async handleOutgoingMcpSetServers(servers: Record<string, McpServerConfig>): Promise<void> {
+    try {
+      const edits: Array<{ keyPath: string; value: Record<string, unknown>; mergeStrategy: "upsert" }> = [];
+      for (const [name, config] of Object.entries(servers)) {
+        if (name.includes(".")) {
+          throw new Error(`Server names containing '.' are not supported: ${name}`);
+        }
+        edits.push({
+          keyPath: `mcp_servers.${name}`,
+          value: this.fromMcpServerConfig(config),
+          mergeStrategy: "upsert",
+        });
+      }
+      if (edits.length > 0) {
+        await this.transport.call("config/batchWrite", {
+          edits,
+        });
+      }
+      await this.reloadMcpServers();
+      await this.handleOutgoingMcpGetStatus();
+    } catch (err) {
+      this.emit({ type: "error", message: `Failed to configure MCP servers: ${err}` });
     }
   }
 
@@ -1500,5 +1636,153 @@ export class CodexAdapter {
       default:
         return "workspace-write";
     }
+  }
+
+  private async listAllMcpServerStatuses(): Promise<CodexMcpServerStatus[]> {
+    const out: CodexMcpServerStatus[] = [];
+    let cursor: string | null = null;
+    let page = 0;
+
+    while (page < 50) {
+      const response = await this.transport.call("mcpServerStatus/list", {
+        cursor,
+        limit: 100,
+      }) as CodexMcpStatusListResponse;
+      if (Array.isArray(response.data)) {
+        out.push(...response.data);
+      }
+      cursor = typeof response.nextCursor === "string" ? response.nextCursor : null;
+      if (!cursor) break;
+      page++;
+    }
+
+    return out;
+  }
+
+  private async readMcpServersConfig(): Promise<Record<string, unknown>> {
+    const response = await this.transport.call("config/read", {}) as {
+      config?: Record<string, unknown>;
+    };
+    const config = this.asRecord(response?.config) || {};
+    return this.asRecord(config.mcp_servers) || {};
+  }
+
+  private async reloadMcpServers(): Promise<void> {
+    await this.transport.call("config/mcpServer/reload", {});
+  }
+
+  private isMcpServerEnabled(value: unknown): boolean {
+    const cfg = this.asRecord(value);
+    if (!cfg) return true;
+    return cfg.enabled !== false;
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+  }
+
+  private toMcpServerConfig(value: unknown): McpServerConfig {
+    const cfg = this.asRecord(value) || {};
+    const args = Array.isArray(cfg.args)
+      ? cfg.args.filter((a): a is string => typeof a === "string")
+      : undefined;
+    const env = this.asRecord(cfg.env) as Record<string, string> | null;
+
+    let type: McpServerConfig["type"] = "sdk";
+    if (cfg.type === "stdio" || cfg.type === "sse" || cfg.type === "http" || cfg.type === "sdk") {
+      type = cfg.type;
+    } else if (typeof cfg.command === "string") {
+      type = "stdio";
+    } else if (typeof cfg.url === "string") {
+      type = "http";
+    }
+
+    return {
+      type,
+      command: typeof cfg.command === "string" ? cfg.command : undefined,
+      args,
+      env: env || undefined,
+      url: typeof cfg.url === "string" ? cfg.url : undefined,
+    };
+  }
+
+  private fromMcpServerConfig(config: McpServerConfig): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    if (typeof config.command === "string") out.command = config.command;
+    if (Array.isArray(config.args)) out.args = config.args;
+    if (config.env) out.env = config.env;
+    if (typeof config.url === "string") out.url = config.url;
+    return out;
+  }
+
+  private normalizeRawMcpServerConfig(value: unknown): Record<string, unknown> {
+    const cfg = this.asRecord(value) || {};
+    const out: Record<string, unknown> = {};
+
+    // Keep only fields supported by Codex raw MCP config schema
+    if (typeof cfg.command === "string") out.command = cfg.command;
+    if (Array.isArray(cfg.args)) out.args = cfg.args.filter((a) => typeof a === "string");
+    if (typeof cfg.cwd === "string") out.cwd = cfg.cwd;
+    if (typeof cfg.url === "string") out.url = cfg.url;
+    if (typeof cfg.enabled === "boolean") out.enabled = cfg.enabled;
+    if (typeof cfg.required === "boolean") out.required = cfg.required;
+
+    const env = this.asRecord(cfg.env);
+    if (env) out.env = Object.fromEntries(
+      Object.entries(env).filter(([, v]) => typeof v === "string"),
+    );
+
+    const envHttpHeaders = this.asRecord(cfg.env_http_headers);
+    if (envHttpHeaders) out.env_http_headers = Object.fromEntries(
+      Object.entries(envHttpHeaders).filter(([, v]) => typeof v === "string"),
+    );
+
+    const httpHeaders = this.asRecord(cfg.http_headers);
+    if (httpHeaders) out.http_headers = Object.fromEntries(
+      Object.entries(httpHeaders).filter(([, v]) => typeof v === "string"),
+    );
+
+    const asStringArray = (arr: unknown): string[] | undefined =>
+      Array.isArray(arr)
+        ? arr.filter((x): x is string => typeof x === "string")
+        : undefined;
+
+    const disabledTools = asStringArray(cfg.disabled_tools);
+    if (disabledTools) out.disabled_tools = disabledTools;
+    const enabledTools = asStringArray(cfg.enabled_tools);
+    if (enabledTools) out.enabled_tools = enabledTools;
+    const envVars = asStringArray(cfg.env_vars);
+    if (envVars) out.env_vars = envVars;
+    const scopes = asStringArray(cfg.scopes);
+    if (scopes) out.scopes = scopes;
+
+    if (typeof cfg.startup_timeout_ms === "number") out.startup_timeout_ms = cfg.startup_timeout_ms;
+    if (typeof cfg.startup_timeout_sec === "number") out.startup_timeout_sec = cfg.startup_timeout_sec;
+    if (typeof cfg.tool_timeout_sec === "number") out.tool_timeout_sec = cfg.tool_timeout_sec;
+    if (typeof cfg.bearer_token === "string") out.bearer_token = cfg.bearer_token;
+    if (typeof cfg.bearer_token_env_var === "string") out.bearer_token_env_var = cfg.bearer_token_env_var;
+
+    return out;
+  }
+
+  private mapMcpTools(
+    tools: Record<string, { name?: string; annotations?: unknown }> | undefined,
+  ): McpServerDetail["tools"] {
+    if (!tools) return [];
+    return Object.entries(tools).map(([key, tool]) => {
+      const ann = this.asRecord(tool.annotations);
+      const annotations = ann ? {
+        readOnly: (ann.readOnly ?? ann.readOnlyHint) === true,
+        destructive: (ann.destructive ?? ann.destructiveHint) === true,
+        openWorld: (ann.openWorld ?? ann.openWorldHint) === true,
+      } : undefined;
+
+      return {
+        name: typeof tool.name === "string" ? tool.name : key,
+        annotations,
+      };
+    });
   }
 }

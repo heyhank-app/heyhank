@@ -136,6 +136,16 @@ export interface CLIAuthStatusMessage {
   session_id: string;
 }
 
+export interface CLIControlResponseMessage {
+  type: "control_response";
+  response: {
+    subtype: "success" | "error";
+    request_id: string;
+    response?: Record<string, unknown>;
+    error?: string;
+  };
+}
+
 export type CLIMessage =
   | CLISystemInitMessage
   | CLISystemStatusMessage
@@ -145,6 +155,7 @@ export type CLIMessage =
   | CLIToolProgressMessage
   | CLIToolUseSummaryMessage
   | CLIControlRequestMessage
+  | CLIControlResponseMessage
   | CLIKeepAliveMessage
   | CLIAuthStatusMessage;
 
@@ -164,7 +175,11 @@ export type BrowserOutgoingMessage =
   | { type: "permission_response"; request_id: string; behavior: "allow" | "deny"; updated_input?: Record<string, unknown>; updated_permissions?: PermissionUpdate[]; message?: string }
   | { type: "interrupt" }
   | { type: "set_model"; model: string }
-  | { type: "set_permission_mode"; mode: string };
+  | { type: "set_permission_mode"; mode: string }
+  | { type: "mcp_get_status" }
+  | { type: "mcp_toggle"; serverName: string; enabled: boolean }
+  | { type: "mcp_reconnect"; serverName: string }
+  | { type: "mcp_set_servers"; servers: Record<string, McpServerConfig> };
 
 /** Messages the bridge sends to the browser */
 export type BrowserIncomingMessage =
@@ -185,7 +200,8 @@ export type BrowserIncomingMessage =
   | { type: "user_message"; content: string; timestamp: number; id?: string }
   | { type: "message_history"; messages: BrowserIncomingMessage[] }
   | { type: "session_name_update"; name: string }
-  | { type: "pr_status_update"; pr: import("./github-pr.js").GitHubPRInfo | null; available: boolean };
+  | { type: "pr_status_update"; pr: import("./github-pr.js").GitHubPRInfo | null; available: boolean }
+  | { type: "mcp_status"; servers: McpServerDetail[] };
 
 // ─── Session State ────────────────────────────────────────────────────────────
 
@@ -214,6 +230,26 @@ export interface SessionState {
   git_behind: number;
   total_lines_added: number;
   total_lines_removed: number;
+}
+
+// ─── MCP Types ───────────────────────────────────────────────────────────────
+
+export interface McpServerConfig {
+  type: "stdio" | "sse" | "http" | "sdk";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+}
+
+export interface McpServerDetail {
+  name: string;
+  status: "connected" | "failed" | "disabled" | "connecting";
+  serverInfo?: unknown;
+  error?: string;
+  config: { type: string; url?: string; command?: string; args?: string[] };
+  scope: string;
+  tools?: { name: string; annotations?: { readOnly?: boolean; destructive?: boolean; openWorld?: boolean } }[];
 }
 
 // ─── Permission Request ──────────────────────────────────────────────────────

@@ -8,7 +8,7 @@ import { ClaudeMdEditor } from "./ClaudeMdEditor.js";
 import { ChatView } from "./ChatView.js";
 import { useStore } from "../store.js";
 import { api } from "../api.js";
-import type { PermissionRequest, ChatMessage, ContentBlock, SessionState } from "../types.js";
+import type { PermissionRequest, ChatMessage, ContentBlock, SessionState, McpServerDetail } from "../types.js";
 import type { TaskItem } from "../types.js";
 import type { UpdateInfo, GitHubPRInfo } from "../api.js";
 import { GitHubPRDisplay } from "./TaskPanel.js";
@@ -379,6 +379,54 @@ const MOCK_PR_MERGED: GitHubPRInfo = {
   reviewThreads: { total: 3, resolved: 3, unresolved: 0 },
 };
 
+// MCP server mock data
+const MOCK_MCP_SERVERS: McpServerDetail[] = [
+  {
+    name: "filesystem",
+    status: "connected",
+    config: { type: "stdio", command: "npx", args: ["-y", "@anthropic/mcp-fs"] },
+    scope: "project",
+    tools: [
+      { name: "read_file", annotations: { readOnly: true } },
+      { name: "write_file", annotations: { destructive: true } },
+      { name: "list_directory", annotations: { readOnly: true } },
+    ],
+  },
+  {
+    name: "github",
+    status: "connected",
+    config: { type: "stdio", command: "npx", args: ["-y", "@anthropic/mcp-github"] },
+    scope: "user",
+    tools: [
+      { name: "create_issue" },
+      { name: "list_prs", annotations: { readOnly: true } },
+      { name: "create_pr" },
+    ],
+  },
+  {
+    name: "postgres",
+    status: "failed",
+    error: "Connection refused: ECONNREFUSED 127.0.0.1:5432",
+    config: { type: "stdio", command: "npx", args: ["-y", "@anthropic/mcp-postgres"] },
+    scope: "project",
+    tools: [],
+  },
+  {
+    name: "web-search",
+    status: "disabled",
+    config: { type: "sse", url: "http://localhost:8080/sse" },
+    scope: "user",
+    tools: [{ name: "search", annotations: { readOnly: true, openWorld: true } }],
+  },
+  {
+    name: "docker",
+    status: "connecting",
+    config: { type: "stdio", command: "docker-mcp-server" },
+    scope: "project",
+    tools: [],
+  },
+];
+
 // ─── Playground Component ───────────────────────────────────────────────────
 
 export function Playground() {
@@ -647,6 +695,37 @@ export function Playground() {
             <Card label="Merged PR">
               <div className="w-[280px] border border-cc-border rounded-xl overflow-hidden bg-cc-card">
                 <GitHubPRDisplay pr={MOCK_PR_MERGED} />
+              </div>
+            </Card>
+          </div>
+        </Section>
+
+        {/* ─── MCP Servers ──────────────────────────────── */}
+        <Section title="MCP Servers" description="MCP server status display with toggle, reconnect, and tool listing">
+          <div className="space-y-4">
+            <Card label="All server states (connected, failed, disabled, connecting)">
+              <div className="w-[280px] border border-cc-border rounded-xl overflow-hidden bg-cc-card">
+                {/* MCP section header */}
+                <div className="shrink-0 px-4 py-2.5 border-b border-cc-border flex items-center justify-between">
+                  <span className="text-[12px] font-semibold text-cc-fg flex items-center gap-1.5">
+                    <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 text-cc-muted">
+                      <path d="M1.5 3A1.5 1.5 0 013 1.5h10A1.5 1.5 0 0114.5 3v1A1.5 1.5 0 0113 5.5H3A1.5 1.5 0 011.5 4V3zm0 5A1.5 1.5 0 013 6.5h10A1.5 1.5 0 0114.5 8v1A1.5 1.5 0 0113 10.5H3A1.5 1.5 0 011.5 9V8zm0 5A1.5 1.5 0 013 11.5h10a1.5 1.5 0 011.5 1.5v1a1.5 1.5 0 01-1.5 1.5H3A1.5 1.5 0 011.5 14v-1z" />
+                    </svg>
+                    MCP Servers
+                  </span>
+                  <span className="text-[11px] text-cc-muted">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
+                      <path d="M2.5 8a5.5 5.5 0 019.78-3.5M13.5 8a5.5 5.5 0 01-9.78 3.5" strokeLinecap="round" />
+                      <path d="M12.5 2v3h-3M3.5 14v-3h3" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                </div>
+                {/* Server rows */}
+                <div className="px-3 py-2 space-y-1.5">
+                  {MOCK_MCP_SERVERS.map((server) => (
+                    <PlaygroundMcpRow key={server.name} server={server} />
+                  ))}
+                </div>
               </div>
             </Card>
           </div>
@@ -1179,6 +1258,76 @@ function PlaygroundClaudeMdButton() {
         open={open}
         onClose={() => setOpen(false)}
       />
+    </div>
+  );
+}
+
+// ─── Inline MCP Server Row (static preview, no WebSocket) ──────────────────
+
+function PlaygroundMcpRow({ server }: { server: McpServerDetail }) {
+  const [expanded, setExpanded] = useState(false);
+  const statusMap: Record<string, { label: string; cls: string; dot: string }> = {
+    connected: { label: "Connected", cls: "text-cc-success bg-cc-success/10", dot: "bg-cc-success" },
+    connecting: { label: "Connecting", cls: "text-cc-warning bg-cc-warning/10", dot: "bg-cc-warning animate-pulse" },
+    failed: { label: "Failed", cls: "text-cc-error bg-cc-error/10", dot: "bg-cc-error" },
+    disabled: { label: "Disabled", cls: "text-cc-muted bg-cc-hover", dot: "bg-cc-muted opacity-40" },
+  };
+  const badge = statusMap[server.status] || statusMap.disabled;
+
+  return (
+    <div className="rounded-lg border border-cc-border bg-cc-bg">
+      <div className="flex items-center gap-2 px-2.5 py-2">
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${badge.dot}`} />
+        <button onClick={() => setExpanded(!expanded)} className="flex-1 min-w-0 text-left cursor-pointer">
+          <span className="text-[12px] font-medium text-cc-fg truncate block">{server.name}</span>
+        </button>
+        <span className={`text-[9px] font-medium px-1.5 rounded-full leading-[16px] shrink-0 ${badge.cls}`}>
+          {badge.label}
+        </span>
+      </div>
+      {expanded && (
+        <div className="px-2.5 pb-2.5 space-y-1.5 border-t border-cc-border pt-2">
+          <div className="text-[11px] text-cc-muted space-y-0.5">
+            <div className="flex items-center gap-1">
+              <span className="text-cc-muted/60">Type:</span>
+              <span>{server.config.type}</span>
+            </div>
+            {server.config.command && (
+              <div className="flex items-start gap-1">
+                <span className="text-cc-muted/60 shrink-0">Cmd:</span>
+                <span className="font-mono text-[10px] break-all">
+                  {server.config.command}{server.config.args?.length ? ` ${server.config.args.join(" ")}` : ""}
+                </span>
+              </div>
+            )}
+            {server.config.url && (
+              <div className="flex items-start gap-1">
+                <span className="text-cc-muted/60 shrink-0">URL:</span>
+                <span className="font-mono text-[10px] break-all">{server.config.url}</span>
+              </div>
+            )}
+            <div className="flex items-center gap-1">
+              <span className="text-cc-muted/60">Scope:</span>
+              <span>{server.scope}</span>
+            </div>
+          </div>
+          {server.error && (
+            <div className="text-[11px] text-cc-error bg-cc-error/5 rounded px-2 py-1">{server.error}</div>
+          )}
+          {server.tools && server.tools.length > 0 && (
+            <div className="space-y-1">
+              <span className="text-[10px] text-cc-muted uppercase tracking-wider">Tools ({server.tools.length})</span>
+              <div className="flex flex-wrap gap-1">
+                {server.tools.map((tool) => (
+                  <span key={tool.name} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cc-hover text-cc-fg">
+                    {tool.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

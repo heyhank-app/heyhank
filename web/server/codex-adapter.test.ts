@@ -1832,4 +1832,230 @@ describe("CodexAdapter", () => {
     expect(responseLine).toContain('"denied"');
     expect(responseLine).not.toContain('"decline"');
   });
+
+  // ── MCP server management (Codex app-server methods) ───────────────────
+
+  it("handles mcp_get_status via mcpServerStatus/list + config/read", async () => {
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+
+    await new Promise((r) => setTimeout(r, 50));
+    stdout.push(JSON.stringify({ id: 1, result: { userAgent: "codex" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    stdin.chunks.length = 0;
+    adapter.sendBrowserMessage({ type: "mcp_get_status" });
+    await new Promise((r) => setTimeout(r, 20));
+
+    // id:4 = mcpServerStatus/list (id:3 is account/rateLimits/read)
+    stdout.push(JSON.stringify({
+      id: 4,
+      result: {
+        data: [
+          {
+            name: "alpha",
+            authStatus: "oAuth",
+            tools: {
+              read_file: { name: "read_file", annotations: { readOnly: true } },
+            },
+          },
+          {
+            name: "beta",
+            authStatus: "notLoggedIn",
+            tools: {},
+          },
+        ],
+        nextCursor: null,
+      },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+
+    // id:5 = config/read
+    stdout.push(JSON.stringify({
+      id: 5,
+      result: {
+        config: {
+          mcp_servers: {
+            alpha: { url: "http://localhost:8080/mcp", enabled: true },
+            beta: { command: "npx", args: ["-y", "@test/server"], enabled: true },
+          },
+        },
+      },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const mcpStatus = messages.find((m) => m.type === "mcp_status") as
+      | { type: "mcp_status"; servers: Array<{ name: string; status: string; tools?: unknown[]; error?: string }> }
+      | undefined;
+    expect(mcpStatus).toBeDefined();
+    expect(mcpStatus!.servers.find((s) => s.name === "alpha")?.status).toBe("connected");
+    expect(mcpStatus!.servers.find((s) => s.name === "beta")?.status).toBe("failed");
+    expect(mcpStatus!.servers.find((s) => s.name === "beta")?.error).toContain("requires login");
+    expect(mcpStatus!.servers.find((s) => s.name === "alpha")?.tools?.length).toBe(1);
+  });
+
+  it("handles mcp_toggle by writing config, reloading MCP, and refreshing status", async () => {
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+
+    await new Promise((r) => setTimeout(r, 50));
+    stdout.push(JSON.stringify({ id: 1, result: { userAgent: "codex" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    stdin.chunks.length = 0;
+    adapter.sendBrowserMessage({ type: "mcp_toggle", serverName: "alpha", enabled: false });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const allWritten = stdin.chunks.join("");
+    const writeLine = allWritten.split("\n").find((l) => l.includes('"method":"config/value/write"'));
+    expect(writeLine).toBeDefined();
+    const writeReq = JSON.parse(writeLine!);
+    expect(writeReq.params.keyPath).toBe("mcp_servers.alpha.enabled");
+    expect(writeReq.params.value).toBe(false);
+
+    // Respond to config/value/write with the actual request ID.
+    stdout.push(JSON.stringify({ id: writeReq.id, result: { status: "updated" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 30));
+
+    const afterWrite = stdin.chunks.join("");
+    const reloadLine = afterWrite.split("\n").find((l) => l.includes('"method":"config/mcpServer/reload"'));
+    expect(reloadLine).toBeDefined();
+    const reloadReq = JSON.parse(reloadLine!);
+    stdout.push(JSON.stringify({ id: reloadReq.id, result: {} }) + "\n");
+    await new Promise((r) => setTimeout(r, 30));
+
+    const afterReload = stdin.chunks.join("");
+    const listLine = afterReload.split("\n").find((l) => l.includes('"method":"mcpServerStatus/list"'));
+    expect(listLine).toBeDefined();
+    const listReq = JSON.parse(listLine!);
+    stdout.push(JSON.stringify({
+      id: listReq.id,
+      result: { data: [{ name: "alpha", tools: {}, authStatus: "oAuth" }], nextCursor: null },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 30));
+
+    const afterList = stdin.chunks.join("");
+    const readLine = afterList.split("\n").find((l) => l.includes('"method":"config/read"'));
+    expect(readLine).toBeDefined();
+    const readReq = JSON.parse(readLine!);
+    stdout.push(JSON.stringify({
+      id: readReq.id,
+      result: { config: { mcp_servers: { alpha: { url: "http://localhost:8080/mcp", enabled: false } } } },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const allWrittenAfter = stdin.chunks.join("");
+    expect(allWrittenAfter).toContain('"method":"config/mcpServer/reload"');
+    expect(allWrittenAfter).toContain('"method":"mcpServerStatus/list"');
+
+    const mcpStatus = messages.find((m) => m.type === "mcp_status") as
+      | { type: "mcp_status"; servers: Array<{ name: string; status: string }> }
+      | undefined;
+    expect(mcpStatus).toBeDefined();
+    expect(mcpStatus!.servers[0].name).toBe("alpha");
+    expect(mcpStatus!.servers[0].status).toBe("disabled");
+  });
+
+  it("handles mcp_set_servers by merging with existing config", async () => {
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
+
+    await new Promise((r) => setTimeout(r, 50));
+    stdout.push(JSON.stringify({ id: 1, result: { userAgent: "codex" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    stdin.chunks.length = 0;
+    adapter.sendBrowserMessage({
+      type: "mcp_set_servers",
+      servers: {
+        memory: {
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "@modelcontextprotocol/server-memory"],
+        },
+      },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const allWritten = stdin.chunks.join("");
+    const writeLine = allWritten.split("\n").find((l) => l.includes('"method":"config/batchWrite"'));
+    expect(writeLine).toBeDefined();
+    const writeReq = JSON.parse(writeLine!);
+    expect(writeReq.params.edits).toHaveLength(1);
+    expect(writeReq.params.edits[0].keyPath).toBe("mcp_servers.memory");
+    expect(writeReq.params.edits[0].mergeStrategy).toBe("upsert");
+    expect(writeReq.params.edits[0].value.command).toBe("npx");
+    expect(writeReq.params.edits[0].value.args).toEqual(["-y", "@modelcontextprotocol/server-memory"]);
+
+    // Complete in-flight requests
+    stdout.push(JSON.stringify({ id: 4, result: { status: "updated" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 5, result: {} }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 6, result: { data: [], nextCursor: null } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 7, result: { config: { mcp_servers: { memory: writeReq.params.edits[0].value } } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 30));
+  });
+
+  it("mcp_toggle fallback removes server entry when reload fails with invalid transport", async () => {
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
+
+    await new Promise((r) => setTimeout(r, 50));
+    stdout.push(JSON.stringify({ id: 1, result: { userAgent: "codex" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    stdin.chunks.length = 0;
+    adapter.sendBrowserMessage({ type: "mcp_toggle", serverName: "context7", enabled: false });
+    await new Promise((r) => setTimeout(r, 20));
+
+    // First write ok, then reload fails with invalid transport
+    stdout.push(JSON.stringify({ id: 4, result: { status: "updated" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 5, error: { code: -32603, message: "Invalid configuration: invalid transport in `mcp_servers.context7`" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 30));
+
+    const written = stdin.chunks.join("");
+    const lines = written.split("\n").filter(Boolean);
+    const deleteWrite = lines
+      .map((l) => JSON.parse(l))
+      .find((msg) => msg.method === "config/value/write" && msg.params?.keyPath === "mcp_servers.context7");
+    expect(deleteWrite).toBeDefined();
+    expect(deleteWrite.params.value).toBe(null);
+    expect(deleteWrite.params.mergeStrategy).toBe("replace");
+  });
+
+  it("handles mcp_reconnect by calling reload and then refreshing status", async () => {
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
+
+    await new Promise((r) => setTimeout(r, 50));
+    stdout.push(JSON.stringify({ id: 1, result: { userAgent: "codex" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    stdin.chunks.length = 0;
+    adapter.sendBrowserMessage({ type: "mcp_reconnect", serverName: "alpha" });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const allWritten = stdin.chunks.join("");
+    expect(allWritten).toContain('"method":"config/mcpServer/reload"');
+
+    // id:4 = reload, id:5 = mcpServerStatus/list, id:6 = config/read
+    stdout.push(JSON.stringify({ id: 4, result: {} }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 5, result: { data: [{ name: "alpha", tools: {}, authStatus: "oAuth" }], nextCursor: null } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 6, result: { config: { mcp_servers: { alpha: { enabled: true, url: "http://localhost:8080/mcp" } } } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 40));
+  });
 });
