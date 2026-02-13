@@ -82,7 +82,7 @@ Browser (React) ←→ WebSocket ←→ Hono Server (Bun) ←→ WebSocket (NDJS
   - `App.tsx` — Root layout with sidebar, chat view, task panel. Hash routing (`#/playground`).
   - `components/` — UI: `ChatView`, `MessageFeed`, `MessageBubble`, `ToolBlock`, `Composer`, `Sidebar`, `TopBar`, `HomePage`, `TaskPanel`, `PermissionBanner`, `EnvManager`, `Playground`.
 
-- **`web/bin/cli.ts`** — CLI entry point (`bunx thecompanion`). Sets `__COMPANION_PACKAGE_ROOT` and imports the server.
+- **`web/bin/cli.ts`** — CLI entry point (`bunx the-companion`). Sets `__COMPANION_PACKAGE_ROOT` and imports the server.
 
 ### WebSocket Protocol
 

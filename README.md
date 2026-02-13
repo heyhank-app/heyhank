@@ -5,8 +5,8 @@
 <h1 align="center">The Companion</h1>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/thecompanion"><img src="https://img.shields.io/npm/v/thecompanion.svg" alt="npm version" /></a>
-  <a href="https://www.npmjs.com/package/thecompanion"><img src="https://img.shields.io/npm/dm/thecompanion.svg" alt="npm downloads" /></a>
+  <a href="https://www.npmjs.com/package/the-companion"><img src="https://img.shields.io/npm/v/the-companion.svg" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/the-companion"><img src="https://img.shields.io/npm/dm/the-companion.svg" alt="npm downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
 </p>
 
@@ -15,7 +15,7 @@
 Claude Code in your browser. We reverse-engineered the undocumented WebSocket protocol hidden inside the CLI and built a web UI on top of it. No API key needed, it runs on your existing Claude Code subscription.
 
 ```bash
-bunx thecompanion
+bunx the-companion
 ```
 
 Open [localhost:3456](http://localhost:3456). That's it.
@@ -23,7 +23,7 @@ Open [localhost:3456](http://localhost:3456). That's it.
 Foreground mode is also available explicitly with:
 
 ```bash
-thecompanion serve
+the-companion serve
 ```
 
 ## Why
@@ -77,19 +77,19 @@ Production: `bun run build && bun run start` serves everything on `:3456`.
 Install as a launchd service that starts on login and restarts on crash:
 
 ```bash
-bun install -g thecompanion
-thecompanion install
+bun install -g the-companion
+the-companion install
 ```
 
 Other commands:
 
 ```bash
-thecompanion start       # start the installed background service
-thecompanion status      # check if the service is running
-thecompanion stop        # stop the service (keeps it installed)
-thecompanion restart     # restart the service
-thecompanion logs        # tail stdout/stderr logs
-thecompanion uninstall   # remove the service
+the-companion start       # start the installed background service
+the-companion status      # check if the service is running
+the-companion stop        # stop the service (keeps it installed)
+the-companion restart     # restart the service
+the-companion logs        # tail stdout/stderr logs
+the-companion uninstall   # remove the service
 ```
 
 Use `--port <n>` with `install` to override the default port (3456).

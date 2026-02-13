@@ -870,10 +870,10 @@ export function createRoutes(
     setTimeout(async () => {
       try {
         console.log(
-          `[update] Updating thecompanion to ${state.latestVersion}...`,
+          `[update] Updating the-companion to ${state.latestVersion}...`,
         );
         const proc = Bun.spawn(
-          ["bun", "install", "-g", `thecompanion@${state.latestVersion}`],
+          ["bun", "install", "-g", `the-companion@${state.latestVersion}`],
           { stdout: "pipe", stderr: "pipe" },
         );
         const exitCode = await proc.exited;
@@ -905,7 +905,7 @@ export function createRoutes(
         const isLinux = process.platform === "linux";
         const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
         const restartCmd = isLinux
-          ? ["systemctl", "--user", "restart", "thecompanion.service"]
+          ? ["systemctl", "--user", "restart", "the-companion.service"]
           : uid !== undefined
             ? ["launchctl", "kickstart", "-k", `gui/${uid}/sh.thecompanion.app`]
             : ["launchctl", "kickstart", "-k", "sh.thecompanion.app"];

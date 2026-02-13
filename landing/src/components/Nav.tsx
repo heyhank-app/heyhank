@@ -26,7 +26,7 @@ export function Nav() {
             GitHub
           </a>
           <a
-            href="https://www.npmjs.com/package/thecompanion"
+            href="https://www.npmjs.com/package/the-companion"
             target="_blank"
             rel="noopener"
             className="text-sm text-cc-muted hover:text-cc-fg transition-colors hidden sm:block font-mono-code"

@@ -23,7 +23,7 @@ The Codex adapter communicates with the `codex app-server` binary via stdin/stdo
 ## Initialization Sequence
 
 ```
-Server → Codex:  {"method":"initialize","id":1,"params":{"clientInfo":{"name":"thecompanion",...},"capabilities":{}}}
+Server → Codex:  {"method":"initialize","id":1,"params":{"clientInfo":{"name":"the-companion",...},"capabilities":{}}}
 Codex → Server:  {"id":1,"result":{...capabilities...}}
 Server → Codex:  {"method":"initialized","params":{}}
 Server → Codex:  {"method":"thread/start","id":2,"params":{"model":"...","cwd":"...","approvalPolicy":"...","sandbox":"workspace-write"}}

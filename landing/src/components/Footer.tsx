@@ -11,7 +11,7 @@ export function Footer() {
         <a href="https://github.com/The-Vibe-Company/companion" target="_blank" rel="noopener" className="text-cc-muted hover:text-cc-fg transition-colors">
           GitHub
         </a>
-        <a href="https://www.npmjs.com/package/thecompanion" target="_blank" rel="noopener" className="text-cc-muted hover:text-cc-fg transition-colors">
+        <a href="https://www.npmjs.com/package/the-companion" target="_blank" rel="noopener" className="text-cc-muted hover:text-cc-fg transition-colors">
           npm
         </a>
         <a href="https://github.com/The-Vibe-Company/companion/blob/main/LICENSE" target="_blank" rel="noopener" className="text-cc-muted hover:text-cc-fg transition-colors">

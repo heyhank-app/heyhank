@@ -29,7 +29,7 @@ const OLD_PLIST_PATH = join(PLIST_DIR, `${OLD_LABEL}.plist`);
 // ─── Linux (systemd) Constants ──────────────────────────────────────────────────
 
 const SYSTEMD_DIR = join(homedir(), ".config", "systemd", "user");
-const UNIT_NAME = "thecompanion.service";
+const UNIT_NAME = "the-companion.service";
 const UNIT_PATH = join(SYSTEMD_DIR, UNIT_NAME);
 
 // ─── Platform check ─────────────────────────────────────────────────────────────
@@ -155,19 +155,19 @@ WantedBy=default.target
 
 function resolveBinPath(): string {
   try {
-    const binPath = execSync("which thecompanion", { encoding: "utf-8" }).trim();
+    const binPath = execSync("which the-companion", { encoding: "utf-8" }).trim();
     if (binPath) return binPath;
   } catch {
     // not found globally
   }
 
-  console.error("thecompanion must be installed globally for service mode.");
+  console.error("the-companion must be installed globally for service mode.");
   console.error("");
-  console.error("  bun install -g thecompanion");
+  console.error("  bun install -g the-companion");
   console.error("");
   console.error("Then retry:");
   console.error("");
-  console.error("  thecompanion install");
+  console.error("  the-companion install");
   process.exit(1);
 }
 
@@ -241,7 +241,7 @@ async function installDarwin(opts?: { port?: number }): Promise<void> {
 
   if (existsSync(PLIST_PATH)) {
     console.error("The Companion is already installed as a service.");
-    console.error("Run 'thecompanion uninstall' first to reinstall.");
+    console.error("Run 'the-companion uninstall' first to reinstall.");
     process.exit(1);
   }
 
@@ -275,13 +275,13 @@ async function installDarwin(opts?: { port?: number }): Promise<void> {
   console.log(`  Plist:  ${PLIST_PATH}`);
   console.log("");
   console.log("The service will start automatically on login.");
-  console.log("Use 'thecompanion status' to check if it's running.");
+  console.log("Use 'the-companion status' to check if it's running.");
 }
 
 async function installLinux(opts?: { port?: number }): Promise<void> {
   if (isSystemdUnitInstalled()) {
     console.error("The Companion is already installed as a service.");
-    console.error("Run 'thecompanion uninstall' first to reinstall.");
+    console.error("Run 'the-companion uninstall' first to reinstall.");
     process.exit(1);
   }
 
@@ -326,7 +326,7 @@ async function installLinux(opts?: { port?: number }): Promise<void> {
   console.log(`  Unit:   ${UNIT_PATH}`);
   console.log("");
   console.log("The service will start automatically on login.");
-  console.log("Use 'thecompanion status' to check if it's running.");
+  console.log("Use 'the-companion status' to check if it's running.");
 }
 
 // ─── Uninstall ──────────────────────────────────────────────────────────────────
@@ -397,7 +397,7 @@ async function startDarwin(): Promise<void> {
   const installedService = getInstalledLaunchdService();
   if (!installedService) {
     console.log("The Companion is not installed as a service.");
-    console.log("Run 'thecompanion install' first.");
+    console.log("Run 'the-companion install' first.");
     return;
   }
 
@@ -479,7 +479,7 @@ async function stopDarwin(): Promise<void> {
   }
 
   console.log("The Companion service has been stopped.");
-  console.log("Run 'thecompanion restart' to start it again.");
+  console.log("Run 'the-companion restart' to start it again.");
 }
 
 async function stopLinux(): Promise<void> {
@@ -497,7 +497,7 @@ async function stopLinux(): Promise<void> {
   }
 
   console.log("The Companion service has been stopped.");
-  console.log("Run 'thecompanion restart' to start it again.");
+  console.log("Run 'the-companion restart' to start it again.");
 }
 
 export async function restart(): Promise<void> {

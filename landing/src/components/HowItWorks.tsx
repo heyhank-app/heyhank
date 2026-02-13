@@ -35,7 +35,7 @@ export function HowItWorks() {
                 title: "Launch",
                 description: (
                   <>
-                    Run <code className="font-mono-code text-xs bg-cc-code-bg text-cc-code-fg px-1.5 py-0.5 rounded">bunx thecompanion</code> in
+                    Run <code className="font-mono-code text-xs bg-cc-code-bg text-cc-code-fg px-1.5 py-0.5 rounded">bunx the-companion</code> in
                     your terminal.
                   </>
                 ),
