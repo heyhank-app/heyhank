@@ -1,9 +1,17 @@
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useStore } from "../store.js";
 import { api } from "../api.js";
 import { ClaudeMdEditor } from "./ClaudeMdEditor.js";
 
 export function TopBar() {
+  const hash = useSyncExternalStore(
+    (cb) => {
+      window.addEventListener("hashchange", cb);
+      return () => window.removeEventListener("hashchange", cb);
+    },
+    () => window.location.hash,
+  );
+  const isSessionView = hash !== "#/settings" && hash !== "#/terminal" && hash !== "#/environments";
   const currentSessionId = useStore((s) => s.currentSessionId);
   const cliConnected = useStore((s) => s.cliConnected);
   const sessionStatus = useStore((s) => s.sessionStatus);
@@ -74,7 +82,7 @@ export function TopBar() {
       </div>
 
       {/* Right side */}
-      {currentSessionId && (
+      {currentSessionId && isSessionView && (
         <div className="flex items-center gap-2 sm:gap-3 text-[12px] text-cc-muted">
           {status === "compacting" && (
             <span className="text-cc-warning font-medium animate-pulse">Compacting...</span>

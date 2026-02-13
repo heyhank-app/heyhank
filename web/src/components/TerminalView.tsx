@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -14,7 +13,8 @@ import {
 
 interface TerminalViewProps {
   cwd: string;
-  onClose: () => void;
+  onClose?: () => void;
+  embedded?: boolean;
 }
 
 function getTerminalTheme(dark: boolean) {
@@ -26,7 +26,7 @@ function getTerminalTheme(dark: boolean) {
   };
 }
 
-export function TerminalView({ cwd, onClose }: TerminalViewProps) {
+export function TerminalView({ cwd, onClose, embedded = false }: TerminalViewProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -112,27 +112,29 @@ export function TerminalView({ cwd, onClose }: TerminalViewProps) {
     }
   }, [darkMode]);
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div
-        className="w-[90vw] max-w-4xl h-[70vh] flex flex-col rounded-[14px] shadow-2xl overflow-hidden border border-cc-border"
-        style={{ background: darkMode ? "#141413" : "#1e1e1e" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-2 border-b border-cc-border bg-cc-sidebar shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <svg
-              viewBox="0 0 16 16"
-              fill="currentColor"
-              className="w-4 h-4 text-cc-muted shrink-0"
-            >
-              <path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3zm2 1.5l3 2.5-3 2.5V4.5zM8.5 10h3v1h-3v-1z" />
-            </svg>
-            <span className="text-xs text-cc-muted font-mono-code truncate">
-              {cwd}
-            </span>
-          </div>
+  const terminalFrame = (
+    <div
+      className={`flex flex-col rounded-[14px] shadow-2xl overflow-hidden border border-cc-border ${
+        embedded ? "h-full" : "w-[90vw] max-w-4xl h-[70vh]"
+      }`}
+      style={{ background: darkMode ? "#141413" : "#1e1e1e" }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-cc-border bg-cc-sidebar shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <svg
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            className="w-4 h-4 text-cc-muted shrink-0"
+          >
+            <path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3zm2 1.5l3 2.5-3 2.5V4.5zM8.5 10h3v1h-3v-1z" />
+          </svg>
+          <span className="text-xs text-cc-muted font-mono-code truncate">
+            {cwd}
+          </span>
+        </div>
+        {onClose && (
           <button
             onClick={onClose}
             className="w-6 h-6 flex items-center justify-center rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer shrink-0"
@@ -147,12 +149,25 @@ export function TerminalView({ cwd, onClose }: TerminalViewProps) {
               <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
             </svg>
           </button>
-        </div>
-
-        {/* Terminal container */}
-        <div ref={terminalRef} className="flex-1 min-h-0 p-1" />
+        )}
       </div>
-    </div>,
-    document.body,
+
+      {/* Terminal container */}
+      <div ref={terminalRef} className="flex-1 min-h-0 p-1" />
+    </div>
+  );
+
+  if (embedded) {
+    return (
+      <div className="h-full">
+        {terminalFrame}
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      {terminalFrame}
+    </div>
   );
 }

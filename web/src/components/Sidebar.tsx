@@ -2,8 +2,6 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useStore } from "../store.js";
 import { api } from "../api.js";
 import { connectSession, connectAllSessions, disconnectSession } from "../ws.js";
-import { EnvManager } from "./EnvManager.js";
-import { FolderPicker } from "./FolderPicker.js";
 import { ProjectGroup } from "./ProjectGroup.js";
 import { SessionItem } from "./SessionItem.js";
 import { groupSessionsByProject, type SessionItem as SessionItemType } from "../utils/project-grouping.js";
@@ -11,22 +9,14 @@ import { groupSessionsByProject, type SessionItem as SessionItemType } from "../
 export function Sidebar() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
-  const [showEnvManager, setShowEnvManager] = useState(false);
-  const [showTerminalPicker, setShowTerminalPicker] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null);
-  const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
+  const [hash, setHash] = useState(() => (typeof window !== "undefined" ? window.location.hash : ""));
   const editInputRef = useRef<HTMLInputElement>(null);
   const sessions = useStore((s) => s.sessions);
   const sdkSessions = useStore((s) => s.sdkSessions);
   const currentSessionId = useStore((s) => s.currentSessionId);
   const setCurrentSession = useStore((s) => s.setCurrentSession);
-  const darkMode = useStore((s) => s.darkMode);
-  const toggleDarkMode = useStore((s) => s.toggleDarkMode);
-  const notificationSound = useStore((s) => s.notificationSound);
-  const toggleNotificationSound = useStore((s) => s.toggleNotificationSound);
-  const notificationDesktop = useStore((s) => s.notificationDesktop);
-  const setNotificationDesktop = useStore((s) => s.setNotificationDesktop);
   const cliConnected = useStore((s) => s.cliConnected);
   const sessionStatus = useStore((s) => s.sessionStatus);
   const removeSession = useStore((s) => s.removeSession);
@@ -35,10 +25,9 @@ export function Sidebar() {
   const pendingPermissions = useStore((s) => s.pendingPermissions);
   const collapsedProjects = useStore((s) => s.collapsedProjects);
   const toggleProjectCollapse = useStore((s) => s.toggleProjectCollapse);
-  const terminalOpen = useStore((s) => s.terminalOpen);
-  const notificationApiAvailable = typeof Notification !== "undefined";
-  const notificationEnabledCount = Number(notificationSound) + (notificationApiAvailable ? Number(notificationDesktop) : 0);
-  const notificationSummary = notificationEnabledCount === 0 ? "Off" : `${notificationEnabledCount} on`;
+  const isSettingsPage = hash === "#/settings";
+  const isTerminalPage = hash === "#/terminal";
+  const isEnvironmentsPage = hash === "#/environments";
 
   // Poll for SDK sessions on mount
   useEffect(() => {
@@ -77,7 +66,15 @@ export function Sidebar() {
     };
   }, []);
 
+  useEffect(() => {
+    const onHashChange = () => setHash(window.location.hash);
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
   function handleSelectSession(sessionId: string) {
+    useStore.getState().closeTerminal();
+    window.location.hash = "";
     if (currentSessionId === sessionId) return;
     setCurrentSession(sessionId);
     // Ensure connected (idempotent — no-op if already connected)
@@ -89,6 +86,8 @@ export function Sidebar() {
   }
 
   function handleNewSession() {
+    useStore.getState().closeTerminal();
+    window.location.hash = "";
     useStore.getState().newSession();
     if (window.innerWidth < 768) {
       useStore.getState().setSidebarOpen(false);
@@ -355,111 +354,48 @@ export function Sidebar() {
       <div className="p-3 border-t border-cc-border space-y-0.5">
         <button
           onClick={() => {
-            if (terminalOpen) {
-              useStore.getState().closeTerminal();
-            } else {
-              setShowTerminalPicker(true);
+            window.location.hash = "#/terminal";
+            if (window.innerWidth < 768) {
+              useStore.getState().setSidebarOpen(false);
             }
           }}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm transition-colors cursor-pointer ${
+            isTerminalPage
+              ? "bg-cc-active text-cc-fg"
+              : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+          }`}
         >
           <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
             <path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3zm2 1.5l3 2.5-3 2.5V4.5zM8.5 10h3v1h-3v-1z" />
           </svg>
-          <span>{terminalOpen ? "Close Terminal" : "Terminal"}</span>
+          <span>Terminal</span>
         </button>
         <button
-          onClick={() => setShowEnvManager(true)}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+          onClick={() => {
+            useStore.getState().closeTerminal();
+            window.location.hash = "#/environments";
+          }}
+          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm transition-colors cursor-pointer ${
+            isEnvironmentsPage
+              ? "bg-cc-active text-cc-fg"
+              : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+          }`}
         >
           <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
             <path d="M8 1a2 2 0 012 2v1h2a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h2V3a2 2 0 012-2zm0 1.5a.5.5 0 00-.5.5v1h1V3a.5.5 0 00-.5-.5zM4 5.5a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V6a.5.5 0 00-.5-.5H4z" />
           </svg>
           <span>Environments</span>
         </button>
-        <div className="pt-1">
-          <button
-            onClick={() => setNotificationMenuOpen((open) => !open)}
-            aria-expanded={notificationMenuOpen}
-            aria-controls="notification-settings"
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
-          >
-            <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-              <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" />
-            </svg>
-            <span className="flex-1 text-left">Notification</span>
-            <span className="text-xs">{notificationSummary}</span>
-            <svg viewBox="0 0 16 16" fill="currentColor" className={`w-3 h-3 transition-transform ${notificationMenuOpen ? "rotate-180" : ""}`}>
-              <path d="M4 6l4 4 4-4" />
-            </svg>
-          </button>
-          {notificationMenuOpen && (
-            <div id="notification-settings" className="mt-1 space-y-0.5 border-l border-cc-border ml-5 pl-3">
-              <button
-                onClick={toggleNotificationSound}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
-              >
-                {notificationSound ? (
-                  <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                    <path d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z" />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                    <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z" clipRule="evenodd" />
-                  </svg>
-                )}
-                <span>{notificationSound ? "Sound on" : "Sound off"}</span>
-              </button>
-              {notificationApiAvailable && (
-                <button
-                  onClick={async () => {
-                    if (!notificationDesktop) {
-                      if (Notification.permission !== "granted") {
-                        const result = await Notification.requestPermission();
-                        if (result !== "granted") return;
-                      }
-                      setNotificationDesktop(true);
-                    } else {
-                      setNotificationDesktop(false);
-                    }
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
-                >
-                  {notificationDesktop ? (
-                    <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                      <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" />
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                      <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" opacity="0.4" />
-                    </svg>
-                  )}
-                  <span>{notificationDesktop ? "Alerts on" : "Alerts off"}</span>
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-        <button
-          onClick={toggleDarkMode}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
-        >
-          {darkMode ? (
-            <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-              <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
-            </svg>
-          ) : (
-            <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-              <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
-            </svg>
-          )}
-          <span>{darkMode ? "Light mode" : "Dark mode"}</span>
-        </button>
         <button
           onClick={() => {
+            useStore.getState().closeTerminal();
             window.location.hash = "#/settings";
           }}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm transition-colors cursor-pointer ${
+            isSettingsPage
+              ? "bg-cc-active text-cc-fg"
+              : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+          }`}
         >
           <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
             <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.53 1.53 0 01-2.29.95c-1.35-.8-2.92.77-2.12 2.12.54.9.07 2.04-.95 2.29-1.56.38-1.56 2.6 0 2.98 1.02.25 1.49 1.39.95 2.29-.8 1.35.77 2.92 2.12 2.12.9-.54 2.04-.07 2.29.95.38 1.56 2.6 1.56 2.98 0 .25-1.02 1.39-1.49 2.29-.95 1.35.8 2.92-.77 2.12-2.12-.54-.9-.07-2.04.95-2.29 1.56-.38 1.56-2.6 0-2.98-1.02-.25-1.49-1.39-.95-2.29.8-1.35-.77-2.92-2.12-2.12-.9.54-2.04.07-2.29-.95zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
@@ -467,23 +403,6 @@ export function Sidebar() {
           <span>Settings</span>
         </button>
       </div>
-
-      {/* Environment manager modal */}
-      {showEnvManager && (
-        <EnvManager onClose={() => setShowEnvManager(false)} />
-      )}
-
-      {/* Terminal folder picker */}
-      {showTerminalPicker && (
-        <FolderPicker
-          initialPath=""
-          onSelect={(path) => {
-            useStore.getState().openTerminal(path);
-            setShowTerminalPicker(false);
-          }}
-          onClose={() => setShowTerminalPicker(false)}
-        />
-      )}
     </aside>
   );
 }

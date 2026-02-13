@@ -31,11 +31,6 @@ vi.mock("../api.js", () => ({
   },
 }));
 
-// Mock EnvManager to avoid rendering complexity
-vi.mock("./EnvManager.js", () => ({
-  EnvManager: () => <div data-testid="env-manager">EnvManager</div>,
-}));
-
 // ─── Store mock helpers ──────────────────────────────────────────────────────
 
 // We need to mock the store. The Sidebar uses `useStore((s) => s.xxx)` selector pattern.
@@ -45,9 +40,6 @@ interface MockStoreState {
   sessions: Map<string, SessionState>;
   sdkSessions: SdkSessionInfo[];
   currentSessionId: string | null;
-  darkMode: boolean;
-  notificationSound: boolean;
-  notificationDesktop: boolean;
   cliConnected: Map<string, boolean>;
   sessionStatus: Map<string, "idle" | "running" | "compacting" | null>;
   sessionNames: Map<string, string>;
@@ -55,9 +47,6 @@ interface MockStoreState {
   pendingPermissions: Map<string, Map<string, unknown>>;
   collapsedProjects: Set<string>;
   setCurrentSession: ReturnType<typeof vi.fn>;
-  toggleDarkMode: ReturnType<typeof vi.fn>;
-  toggleNotificationSound: ReturnType<typeof vi.fn>;
-  setNotificationDesktop: ReturnType<typeof vi.fn>;
   toggleProjectCollapse: ReturnType<typeof vi.fn>;
   removeSession: ReturnType<typeof vi.fn>;
   newSession: ReturnType<typeof vi.fn>;
@@ -66,6 +55,7 @@ interface MockStoreState {
   markRecentlyRenamed: ReturnType<typeof vi.fn>;
   clearRecentlyRenamed: ReturnType<typeof vi.fn>;
   setSdkSessions: ReturnType<typeof vi.fn>;
+  closeTerminal: ReturnType<typeof vi.fn>;
 }
 
 function makeSession(id: string, overrides: Partial<SessionState> = {}): SessionState {
@@ -113,9 +103,6 @@ function createMockState(overrides: Partial<MockStoreState> = {}): MockStoreStat
     sessions: new Map(),
     sdkSessions: [],
     currentSessionId: null,
-    darkMode: false,
-    notificationSound: true,
-    notificationDesktop: true,
     cliConnected: new Map(),
     sessionStatus: new Map(),
     sessionNames: new Map(),
@@ -123,9 +110,6 @@ function createMockState(overrides: Partial<MockStoreState> = {}): MockStoreStat
     pendingPermissions: new Map(),
     collapsedProjects: new Set(),
     setCurrentSession: vi.fn(),
-    toggleDarkMode: vi.fn(),
-    toggleNotificationSound: vi.fn(),
-    setNotificationDesktop: vi.fn(),
     toggleProjectCollapse: vi.fn(),
     removeSession: vi.fn(),
     newSession: vi.fn(),
@@ -134,6 +118,7 @@ function createMockState(overrides: Partial<MockStoreState> = {}): MockStoreStat
     markRecentlyRenamed: vi.fn(),
     clearRecentlyRenamed: vi.fn(),
     setSdkSessions: vi.fn(),
+    closeTerminal: vi.fn(),
     ...overrides,
   };
 }
@@ -159,6 +144,7 @@ import { Sidebar } from "./Sidebar.js";
 beforeEach(() => {
   vi.clearAllMocks();
   mockState = createMockState();
+  window.location.hash = "";
 });
 
 describe("Sidebar", () => {
@@ -387,46 +373,28 @@ describe("Sidebar", () => {
     expect(screen.getByText("archived-model")).toBeInTheDocument();
   });
 
-  it("dark mode button toggles theme", () => {
-    mockState = createMockState({ darkMode: false });
-
+  it("does not render settings controls directly in sidebar", () => {
     render(<Sidebar />);
-    const darkModeButton = screen.getByText("Dark mode").closest("button")!;
-    fireEvent.click(darkModeButton);
-
-    expect(mockState.toggleDarkMode).toHaveBeenCalled();
+    expect(screen.queryByText("Notification")).not.toBeInTheDocument();
+    expect(screen.queryByText("Dark mode")).not.toBeInTheDocument();
   });
 
-  it("hides notification toggles by default and shows summary on Notification button", () => {
-    vi.stubGlobal("Notification", {
-      permission: "granted",
-      requestPermission: vi.fn().mockResolvedValue("granted"),
-    });
+  it("navigates to environments page when Environments is clicked", () => {
     render(<Sidebar />);
-    const notificationButton = screen.getByRole("button", { name: /Notification/i });
-    expect(notificationButton).toBeInTheDocument();
-    expect(notificationButton).toHaveTextContent("2 on");
-    expect(screen.queryByText("Sound on")).not.toBeInTheDocument();
-    expect(screen.queryByText("Alerts on")).not.toBeInTheDocument();
-    fireEvent.click(notificationButton);
-    expect(screen.getByText("Sound on")).toBeInTheDocument();
-    expect(screen.getByText("Alerts on")).toBeInTheDocument();
-    vi.unstubAllGlobals();
+    fireEvent.click(screen.getByText("Environments").closest("button")!);
+    expect(window.location.hash).toBe("#/environments");
   });
 
-  it("does not count desktop alerts in summary when Notification API is unavailable", () => {
-    vi.stubGlobal("Notification", undefined);
-    mockState = createMockState({
-      notificationSound: true,
-      notificationDesktop: true,
-    });
+  it("navigates to settings page when Settings is clicked", () => {
     render(<Sidebar />);
-    const notificationButton = screen.getByRole("button", { name: /Notification/i });
-    expect(notificationButton).toHaveTextContent("1 on");
-    fireEvent.click(notificationButton);
-    expect(screen.getByText("Sound on")).toBeInTheDocument();
-    expect(screen.queryByText("Alerts on")).not.toBeInTheDocument();
-    vi.unstubAllGlobals();
+    fireEvent.click(screen.getByText("Settings").closest("button")!);
+    expect(window.location.hash).toBe("#/settings");
+  });
+
+  it("navigates to terminal page when Terminal is clicked", () => {
+    render(<Sidebar />);
+    fireEvent.click(screen.getByText("Terminal").closest("button")!);
+    expect(window.location.hash).toBe("#/terminal");
   });
 
   it("session name shows animate-name-appear class when recently renamed", () => {
