@@ -133,8 +133,9 @@ After=network.target
 Type=simple
 ExecStart=${opts.binPath} start --foreground
 WorkingDirectory=${home}
-Restart=on-failure
+Restart=always
 RestartSec=5
+SuccessExitStatus=42
 StandardOutput=append:${STDOUT_LOG}
 StandardError=append:${STDERR_LOG}
 Environment=NODE_ENV=production
@@ -568,6 +569,46 @@ export function isRunningAsService(): boolean {
   }
 
   return false;
+}
+
+/**
+ * Re-write the service definition (plist or systemd unit) using the current
+ * binary path and the latest template, preserving the user's custom port.
+ * On Linux this also calls daemon-reload so systemd picks up the changes.
+ */
+export function refreshServiceDefinition(): void {
+  if (isDarwin()) {
+    const installedService = getInstalledLaunchdService();
+    if (!installedService) return;
+
+    let port = DEFAULT_PORT_PROD;
+    try {
+      const content = readFileSync(installedService.plistPath, "utf-8");
+      const portMatch = content.match(/<key>PORT<\/key>\s*<string>(\d+)<\/string>/);
+      if (portMatch) port = Number(portMatch[1]);
+    } catch { /* use default */ }
+
+    const binPath = resolveBinPath();
+    const plist = generatePlist({ binPath, port });
+    writeFileSync(installedService.plistPath, plist, "utf-8");
+  } else if (isLinux()) {
+    if (!isSystemdUnitInstalled()) return;
+
+    let port = DEFAULT_PORT_PROD;
+    try {
+      const content = readFileSync(UNIT_PATH, "utf-8");
+      const portMatch = content.match(/Environment=PORT=(\d+)/);
+      if (portMatch) port = Number(portMatch[1]);
+    } catch { /* use default */ }
+
+    const binPath = resolveBinPath();
+    const unit = generateSystemdUnit({ binPath, port });
+    writeFileSync(UNIT_PATH, unit, "utf-8");
+
+    try {
+      systemctlUser("daemon-reload");
+    } catch { /* best effort */ }
+  }
 }
 
 export async function status(): Promise<ServiceStatus> {

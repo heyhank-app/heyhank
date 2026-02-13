@@ -21,6 +21,7 @@ import {
   isUpdateAvailable,
   setUpdateInProgress,
 } from "./update-checker.js";
+import { refreshServiceDefinition } from "./service.js";
 
 const UPDATE_CHECK_STALE_MS = 5 * 60 * 1000;
 
@@ -897,11 +898,39 @@ export function createRoutes(
           setUpdateInProgress(false);
           return;
         }
+
+        // Refresh the service definition so the new unit/plist template
+        // (e.g. Restart=always) takes effect for existing installations.
+        try {
+          refreshServiceDefinition();
+          console.log("[update] Service definition refreshed.");
+        } catch (err) {
+          console.warn("[update] Failed to refresh service definition:", err);
+        }
+
         console.log(
-          "[update] Update successful, exiting for service restart...",
+          "[update] Update successful, restarting service...",
         );
-        // Exit with non-zero code so the service manager restarts us
-        process.exit(42);
+
+        // Explicitly restart via the service manager in a detached process
+        // so the restart survives our own exit.
+        const isLinux = process.platform === "linux";
+        const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+        const restartCmd = isLinux
+          ? ["systemctl", "--user", "restart", "the-companion.service"]
+          : uid !== undefined
+            ? ["launchctl", "kickstart", "-k", `gui/${uid}/sh.thecompanion.app`]
+            : ["launchctl", "kickstart", "-k", "sh.thecompanion.app"];
+
+        Bun.spawn(restartCmd, {
+          stdout: "ignore",
+          stderr: "ignore",
+          stdin: "ignore",
+        });
+
+        // Give the spawn a moment to dispatch, then exit cleanly.
+        // The service manager restart will kill us if we haven't exited yet.
+        setTimeout(() => process.exit(0), 500);
       } catch (err) {
         console.error("[update] Update failed:", err);
         setUpdateInProgress(false);
