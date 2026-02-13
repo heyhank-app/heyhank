@@ -318,7 +318,7 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
   const showTasks = !!session && !isCodex;
 
   return (
-    <aside className="w-[280px] h-full flex flex-col bg-cc-card border-l border-cc-border">
+    <aside className="w-[280px] h-full flex flex-col overflow-hidden bg-cc-card border-l border-cc-border">
       {/* Header */}
       <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-cc-border">
         <span className="text-sm font-semibold text-cc-fg tracking-tight">
@@ -340,41 +340,43 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
         </button>
       </div>
 
-      {/* Usage limits */}
-      <UsageLimitsSection sessionId={sessionId} />
+      <div data-testid="task-panel-content" className="min-h-0 flex-1 overflow-y-auto">
+        {/* Usage limits */}
+        <UsageLimitsSection sessionId={sessionId} />
 
-      {/* GitHub PR status */}
-      <GitHubPRSection sessionId={sessionId} />
+        {/* GitHub PR status */}
+        <GitHubPRSection sessionId={sessionId} />
 
-      {/* MCP servers */}
-      <McpSection sessionId={sessionId} />
+        {/* MCP servers */}
+        <McpSection sessionId={sessionId} />
 
-      {showTasks && (
-        <>
-          {/* Task section header */}
-          <div className="shrink-0 px-4 py-2.5 border-b border-cc-border flex items-center justify-between">
-            <span className="text-[12px] font-semibold text-cc-fg">Tasks</span>
-            {tasks.length > 0 && (
-              <span className="text-[11px] text-cc-muted tabular-nums">
-                {completedCount}/{tasks.length}
-              </span>
-            )}
-          </div>
+        {showTasks && (
+          <>
+            {/* Task section header */}
+            <div className="px-4 py-2.5 border-b border-cc-border flex items-center justify-between">
+              <span className="text-[12px] font-semibold text-cc-fg">Tasks</span>
+              {tasks.length > 0 && (
+                <span className="text-[11px] text-cc-muted tabular-nums">
+                  {completedCount}/{tasks.length}
+                </span>
+              )}
+            </div>
 
-          {/* Task list */}
-          <div className="flex-1 overflow-y-auto px-3 py-2">
-            {tasks.length === 0 ? (
-              <p className="text-xs text-cc-muted text-center py-8">No tasks yet</p>
-            ) : (
-              <div className="space-y-0.5">
-                {tasks.map((task) => (
-                  <TaskRow key={task.id} task={task} />
-                ))}
-              </div>
-            )}
-          </div>
-        </>
-      )}
+            {/* Task list */}
+            <div className="px-3 py-2">
+              {tasks.length === 0 ? (
+                <p className="text-xs text-cc-muted text-center py-8">No tasks yet</p>
+              ) : (
+                <div className="space-y-0.5">
+                  {tasks.map((task) => (
+                    <TaskRow key={task.id} task={task} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </aside>
   );
 }

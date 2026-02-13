@@ -106,6 +106,46 @@ When submitting a pull request:
 - Explain simply what the PR does and why it's needed
 - Tell me if the code was reviewed by a human or simply generated directly by an AI. 
 
+### How To Open A PR With GitHub CLI
+
+Use this flow from the repository root:
+
+```bash
+# 1) Create a branch
+git checkout -b fix/short-description (commitzen)
+
+# 2) Commit using commitzen format
+git add <files>
+git commit -m "fix(scope): short summary" (commitzen)
+
+# 3) Push and set upstream
+git push -u origin fix/short-description
+
+# 4) Create PR (title should follow commitzen style)
+gh pr create --base main --head fix/short-description --title "fix(scope): short summary"
+```
+
+For multi-line PR descriptions, prefer a body file to avoid shell quoting issues:
+
+```bash
+cat > /tmp/pr_body.md <<'EOF'
+## Summary
+- what changed
+
+## Why
+- why this is needed
+
+## Testing
+- what was run
+
+## Review provenance
+- Implemented by AI agent / Human
+- Human review: yes/no
+EOF
+
+gh pr edit --body-file /tmp/pr_body.md
+```
+
 ## Codex & Claude Code
 - All features must be compatible with both Codex and Claude Code. If a feature is only compatible with one, it must be gated behind a clear UI affordance (e.g. "This feature requires Claude Code") and the incompatible option should be hidden or disabled.
 - When implementing a new feature, always consider how it will work with both models and test with both if possible. If a feature is only implemented for one model, document that clearly in the code and in the UI.
