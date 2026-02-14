@@ -40,10 +40,6 @@ the-companion serve
 |---|---|
 | <img src="screenshot.png" alt="Main workspace" width="100%" /> | <img src="web/docs/screenshots/notification-section.png" alt="Permission and notifications" width="100%" /> |
 
-<p align="center">
-  <img src="landing/docs/screenshots/landing-refocus-desktop.png" alt="Landing page" width="100%" />
-</p>
-
 ## Architecture (simple)
 ```text
 Browser (React)
