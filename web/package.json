@@ -34,7 +34,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:codex-contract": "vitest run server/codex-protocol-*.test.ts"
+    "test:codex-contract": "vitest run server/codex-protocol-*.test.ts",
+    "plugin:new": "bun server/plugins/new-plugin.ts"
   },
   "dependencies": {
     "diff": "^8.0.3",
