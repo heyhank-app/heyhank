@@ -24,6 +24,7 @@ import {
   setUpdateInProgress,
 } from "./update-checker.js";
 import { refreshServiceDefinition } from "./service.js";
+import type { AssistantManager } from "./assistant-manager.js";
 
 const UPDATE_CHECK_STALE_MS = 5 * 60 * 1000;
 
@@ -78,6 +79,7 @@ export function createRoutes(
   prPoller?: import("./pr-poller.js").PRPoller,
   recorder?: import("./recorder.js").RecorderManager,
   cronScheduler?: import("./cron-scheduler.js").CronScheduler,
+  assistantManager?: AssistantManager,
 ) {
   const api = new Hono();
 
@@ -280,6 +282,9 @@ export function createRoutes(
 
   api.delete("/sessions/:id", async (c) => {
     const id = c.req.param("id");
+    if (assistantManager?.isAssistantSession(id)) {
+      return c.json({ error: "Cannot delete the assistant session. Use companion assistant stop instead." }, 403);
+    }
     await launcher.kill(id);
 
     // Clean up container if any
@@ -296,6 +301,9 @@ export function createRoutes(
 
   api.post("/sessions/:id/archive", async (c) => {
     const id = c.req.param("id");
+    if (assistantManager?.isAssistantSession(id)) {
+      return c.json({ error: "Cannot archive the assistant session. Use companion assistant stop instead." }, 403);
+    }
     const body = await c.req.json().catch(() => ({}));
     await launcher.kill(id);
 
@@ -1071,6 +1079,157 @@ export function createRoutes(
   api.post("/terminal/kill", (c) => {
     terminalManager.kill();
     return c.json({ ok: true });
+  });
+
+  // ─── Cross-session messaging ───────────────────────────────────────
+
+  api.post("/sessions/:id/message", async (c) => {
+    const id = c.req.param("id");
+    const session = launcher.getSession(id);
+    if (!session) return c.json({ error: "Session not found" }, 404);
+    if (!launcher.isAlive(id)) return c.json({ error: "Session is not running" }, 400);
+    const body = await c.req.json().catch(() => ({}));
+    if (typeof body.content !== "string" || !body.content.trim()) {
+      return c.json({ error: "content is required" }, 400);
+    }
+    wsBridge.injectUserMessage(id, body.content);
+    return c.json({ ok: true, sessionId: id });
+  });
+
+  // ─── Companion Assistant ──────────────────────────────────────────
+
+  api.get("/assistant/status", (c) => {
+    if (!assistantManager) return c.json({ error: "Assistant not available" }, 501);
+    return c.json(assistantManager.getStatus());
+  });
+
+  api.post("/assistant/launch", async (c) => {
+    if (!assistantManager) return c.json({ error: "Assistant not available" }, 501);
+    const session = await assistantManager.start();
+    if (!session) return c.json({ error: "Failed to launch assistant" }, 500);
+    return c.json({ ok: true, sessionId: session.sessionId });
+  });
+
+  api.post("/assistant/stop", async (c) => {
+    if (!assistantManager) return c.json({ error: "Assistant not available" }, 501);
+    const stopped = await assistantManager.stop();
+    return c.json({ ok: stopped });
+  });
+
+  api.get("/assistant/config", (c) => {
+    if (!assistantManager) return c.json({ error: "Assistant not available" }, 501);
+    return c.json(assistantManager.getConfig());
+  });
+
+  api.put("/assistant/config", async (c) => {
+    if (!assistantManager) return c.json({ error: "Assistant not available" }, 501);
+    const body = await c.req.json().catch(() => ({}));
+    const config = assistantManager.updateConfig({
+      model: typeof body.model === "string" ? body.model : undefined,
+      permissionMode: typeof body.permissionMode === "string" ? body.permissionMode : undefined,
+      enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
+    });
+    return c.json(config);
+  });
+
+  // ─── Skills ─────────────────────────────────────────────────────────
+
+  const SKILLS_DIR = join(homedir(), ".claude", "skills");
+
+  api.get("/skills", async (c) => {
+    try {
+      if (!existsSync(SKILLS_DIR)) return c.json([]);
+      const entries = await readdir(SKILLS_DIR, { withFileTypes: true });
+      const skills = [];
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const skillMdPath = join(SKILLS_DIR, entry.name, "SKILL.md");
+        if (!existsSync(skillMdPath)) continue;
+        const content = await readFile(skillMdPath, "utf-8");
+        // Parse frontmatter
+        const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+        let name = entry.name;
+        let description = "";
+        let body = content;
+        if (fmMatch) {
+          body = fmMatch[2];
+          for (const line of fmMatch[1].split("\n")) {
+            const nameMatch = line.match(/^name:\s*(.+)/);
+            if (nameMatch) name = nameMatch[1].trim().replace(/^["']|["']$/g, "");
+            const descMatch = line.match(/^description:\s*["']?(.+?)["']?\s*$/);
+            if (descMatch) description = descMatch[1];
+          }
+        }
+        skills.push({ slug: entry.name, name, description, path: skillMdPath });
+      }
+      return c.json(skills);
+    } catch (e) {
+      return c.json({ error: String(e) }, 500);
+    }
+  });
+
+  api.get("/skills/:slug", async (c) => {
+    const slug = c.req.param("slug");
+    if (!slug || slug.includes("..") || slug.includes("/") || slug.includes("\\")) {
+      return c.json({ error: "Invalid slug" }, 400);
+    }
+    const skillMdPath = join(SKILLS_DIR, slug, "SKILL.md");
+    if (!existsSync(skillMdPath)) return c.json({ error: "Skill not found" }, 404);
+    const content = await readFile(skillMdPath, "utf-8");
+    return c.json({ slug, path: skillMdPath, content });
+  });
+
+  api.post("/skills", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const { name, description, content } = body;
+    if (!name || typeof name !== "string") {
+      return c.json({ error: "name is required" }, 400);
+    }
+    // Slugify: lowercase, replace non-alphanumeric with dashes
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    if (!slug) return c.json({ error: "Invalid name" }, 400);
+
+    const skillDir = join(SKILLS_DIR, slug);
+    const skillMdPath = join(skillDir, "SKILL.md");
+
+    if (existsSync(skillMdPath)) {
+      return c.json({ error: `Skill "${slug}" already exists` }, 409);
+    }
+
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    mkdirSync(skillDir, { recursive: true });
+
+    const md = `---\nname: ${slug}\ndescription: ${JSON.stringify(description || `Skill: ${name}`)}\n---\n\n${content || `# ${name}\n\nDescribe what this skill does and how to use it.\n`}`;
+    writeFileSync(skillMdPath, md);
+
+    return c.json({ slug, name, description: description || `Skill: ${name}`, path: skillMdPath });
+  });
+
+  api.put("/skills/:slug", async (c) => {
+    const slug = c.req.param("slug");
+    if (!slug || slug.includes("..") || slug.includes("/") || slug.includes("\\")) {
+      return c.json({ error: "Invalid slug" }, 400);
+    }
+    const skillMdPath = join(SKILLS_DIR, slug, "SKILL.md");
+    if (!existsSync(skillMdPath)) return c.json({ error: "Skill not found" }, 404);
+    const body = await c.req.json().catch(() => ({}));
+    if (typeof body.content !== "string") {
+      return c.json({ error: "content is required" }, 400);
+    }
+    await writeFile(skillMdPath, body.content);
+    return c.json({ ok: true, slug, path: skillMdPath });
+  });
+
+  api.delete("/skills/:slug", async (c) => {
+    const slug = c.req.param("slug");
+    if (!slug || slug.includes("..") || slug.includes("/") || slug.includes("\\")) {
+      return c.json({ error: "Invalid slug" }, 400);
+    }
+    const skillDir = join(SKILLS_DIR, slug);
+    if (!existsSync(skillDir)) return c.json({ error: "Skill not found" }, 404);
+    const { rmSync } = await import("node:fs");
+    rmSync(skillDir, { recursive: true });
+    return c.json({ ok: true, slug });
   });
 
   // ─── Cron Jobs ──────────────────────────────────────────────────────

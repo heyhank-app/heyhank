@@ -30,6 +30,7 @@ export default function App() {
   const taskPanelOpen = useStore((s) => s.taskPanelOpen);
   const homeResetKey = useStore((s) => s.homeResetKey);
   const activeTab = useStore((s) => s.activeTab);
+  const assistantSessionId = useStore((s) => s.assistantSessionId);
   const hash = useHash();
   const isSettingsPage = hash === "#/settings";
   const isTerminalPage = hash === "#/terminal";
@@ -131,8 +132,8 @@ export default function App() {
                 )}
               </div>
 
-              {/* Diff tab */}
-              {currentSessionId && activeTab === "diff" && (
+              {/* Diff tab — not shown for assistant session */}
+              {currentSessionId && activeTab === "diff" && currentSessionId !== assistantSessionId && (
                 <div className="absolute inset-0">
                   <DiffPanel sessionId={currentSessionId} />
                 </div>

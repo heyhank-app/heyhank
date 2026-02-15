@@ -456,6 +456,7 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
   const sdkBackendType = useStore((s) => s.sdkSessions.find((x) => x.sessionId === sessionId)?.backendType);
   const taskPanelOpen = useStore((s) => s.taskPanelOpen);
   const setTaskPanelOpen = useStore((s) => s.setTaskPanelOpen);
+  const isAssistant = useStore((s) => s.assistantSessionId === sessionId);
 
   if (!taskPanelOpen) return null;
 
@@ -497,8 +498,8 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
           <UsageLimitsSection sessionId={sessionId} />
         )}
 
-        {/* GitHub PR status */}
-        <GitHubPRSection sessionId={sessionId} />
+        {/* GitHub PR status — hidden for assistant (no git context) */}
+        {!isAssistant && <GitHubPRSection sessionId={sessionId} />}
 
         {/* MCP servers */}
         <McpSection sessionId={sessionId} />

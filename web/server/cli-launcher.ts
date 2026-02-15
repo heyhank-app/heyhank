@@ -100,6 +100,7 @@ export class CliLauncher {
   private store: SessionStore | null = null;
   private recorder: RecorderManager | null = null;
   private onCodexAdapter: ((sessionId: string, adapter: CodexAdapter) => void) | null = null;
+  private exitHandlers: ((sessionId: string, exitCode: number | null) => void)[] = [];
 
   constructor(port: number) {
     this.port = port;
@@ -108,6 +109,11 @@ export class CliLauncher {
   /** Register a callback for when a CodexAdapter is created (WsBridge needs to attach it). */
   onCodexAdapterCreated(cb: (sessionId: string, adapter: CodexAdapter) => void): void {
     this.onCodexAdapter = cb;
+  }
+
+  /** Register a callback for when a CLI/Codex process exits. */
+  onSessionExited(cb: (sessionId: string, exitCode: number | null) => void): void {
+    this.exitHandlers.push(cb);
   }
 
   /** Attach a persistent store for surviving server restarts. */
@@ -353,6 +359,9 @@ export class CliLauncher {
       }
       this.processes.delete(sessionId);
       this.persistState();
+      for (const handler of this.exitHandlers) {
+        try { handler(sessionId, exitCode); } catch {}
+      }
     });
 
     this.persistState();
@@ -519,6 +528,9 @@ export class CliLauncher {
       }
       this.processes.delete(sessionId);
       this.persistState();
+      for (const handler of this.exitHandlers) {
+        try { handler(sessionId, exitCode); } catch {}
+      }
     });
 
     this.persistState();
