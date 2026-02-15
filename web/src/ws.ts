@@ -264,7 +264,15 @@ function handleParsedMessage(
       };
       store.appendMessage(sessionId, chatMsg);
       store.setStreaming(sessionId, null);
-      store.clearToolProgress(sessionId);
+      // Clear progress only for completed tools (tool_result blocks), not all tools.
+      // Blanket clear would cause flickering during concurrent tool execution.
+      if (msg.content?.length) {
+        for (const block of msg.content) {
+          if (block.type === "tool_result") {
+            store.clearToolProgress(sessionId, block.tool_use_id);
+          }
+        }
+      }
       store.setSessionStatus(sessionId, "running");
 
       // Start timer if not already started (for non-streaming tool calls)

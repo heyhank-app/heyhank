@@ -182,10 +182,10 @@ function ReadToolDetail({ input }: { input: Record<string, unknown> }) {
   return (
     <div className="space-y-1">
       <div className="text-xs text-cc-muted font-mono-code">{filePath}</div>
-      {(offset || limit) && (
+      {(offset != null || limit != null) && (
         <div className="flex gap-2 text-[10px] text-cc-muted">
-          {offset && <span>offset: {offset}</span>}
-          {limit && <span>limit: {limit}</span>}
+          {offset != null && <span>offset: {offset}</span>}
+          {limit != null && <span>limit: {limit}</span>}
         </div>
       )}
     </div>
