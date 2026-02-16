@@ -241,10 +241,12 @@ export function Sidebar() {
     };
   }).sort((a, b) => b.createdAt - a.createdAt);
 
-  const activeSessions = allSessionList.filter((s) => !s.archived && s.id !== assistantSessionId);
+  const activeSessions = allSessionList.filter((s) => !s.archived && s.id !== assistantSessionId && !s.cronJobId);
+  const cronSessions = allSessionList.filter((s) => !s.archived && s.id !== assistantSessionId && !!s.cronJobId);
   const archivedSessions = allSessionList.filter((s) => s.archived && s.id !== assistantSessionId);
   const currentSession = currentSessionId ? allSessionList.find((s) => s.id === currentSessionId) : null;
   const logoSrc = currentSession?.backendType === "codex" ? "/logo-codex.svg" : "/logo.svg";
+  const [showCronSessions, setShowCronSessions] = useState(true);
 
   // Group active sessions by project
   const projectGroups = useMemo(
@@ -381,7 +383,7 @@ export function Sidebar() {
 
       {/* Session list */}
       <div className="flex-1 overflow-y-auto px-2 pb-2">
-        {activeSessions.length === 0 && archivedSessions.length === 0 ? (
+        {activeSessions.length === 0 && cronSessions.length === 0 && archivedSessions.length === 0 ? (
           <p className="px-3 py-8 text-xs text-cc-muted text-center leading-relaxed">
             No sessions yet.
           </p>
@@ -401,6 +403,38 @@ export function Sidebar() {
                 {...sessionItemProps}
               />
             ))}
+
+            {cronSessions.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-cc-border">
+                <button
+                  onClick={() => setShowCronSessions(!showCronSessions)}
+                  className="w-full px-3 py-1.5 text-[11px] font-medium text-violet-400 uppercase tracking-wider flex items-center gap-1.5 hover:text-violet-300 transition-colors cursor-pointer"
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className={`w-3 h-3 transition-transform ${showCronSessions ? "rotate-90" : ""}`}>
+                    <path d="M6 4l4 4-4 4" />
+                  </svg>
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-60">
+                    <path d="M8 2a6 6 0 100 12A6 6 0 008 2zM0 8a8 8 0 1116 0A8 8 0 010 8zm9-3a1 1 0 10-2 0v3a1 1 0 00.293.707l2 2a1 1 0 001.414-1.414L9 7.586V5z" />
+                  </svg>
+                  Scheduled Runs ({cronSessions.length})
+                </button>
+                {showCronSessions && (
+                  <div className="space-y-0.5 mt-1">
+                    {cronSessions.map((s) => (
+                      <SessionItem
+                        key={s.id}
+                        session={s}
+                        isActive={currentSessionId === s.id}
+                        sessionName={sessionNames.get(s.id)}
+                        permCount={pendingPermissions.get(s.id)?.size ?? 0}
+                        isRecentlyRenamed={recentlyRenamed.has(s.id)}
+                        {...sessionItemProps}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {archivedSessions.length > 0 && (
               <div className="mt-2 pt-2 border-t border-cc-border">
