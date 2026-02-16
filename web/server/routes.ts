@@ -260,9 +260,18 @@ export function createRoutes(
         containerId = containerInfo.containerId;
         containerName = containerInfo.name;
         containerImage = effectiveImage;
-        // Note: we intentionally do NOT run git checkout inside the container.
-        // The container uses a bind mount of hostCwd at /workspace, so the host
-        // checkout state is already visible inside the container.
+
+        // Copy workspace files into the container's isolated volume
+        try {
+          await containerManager.copyWorkspaceToContainer(containerInfo.containerId, cwd);
+          containerManager.reseedGitAuth(containerInfo.containerId);
+        } catch (err) {
+          containerManager.removeContainer(tempId);
+          const reason = err instanceof Error ? err.message : String(err);
+          return c.json({
+            error: `Failed to copy workspace to container: ${reason}`,
+          }, 503);
+        }
 
         // Run per-environment init script if configured
         if (companionEnv?.initScript?.trim()) {
@@ -558,6 +567,25 @@ export function createRoutes(
           containerName = containerInfo.name;
           containerImage = effectiveImage;
           await emitProgress(stream, "creating_container", "Container running", "done");
+
+          // --- Step: Copy workspace into isolated volume ---
+          await emitProgress(stream, "copying_workspace", "Copying workspace files...", "in_progress");
+          try {
+            await containerManager.copyWorkspaceToContainer(containerInfo.containerId, cwd);
+            containerManager.reseedGitAuth(containerInfo.containerId);
+            await emitProgress(stream, "copying_workspace", "Workspace copied", "done");
+          } catch (err) {
+            containerManager.removeContainer(tempId);
+            const reason = err instanceof Error ? err.message : String(err);
+            await stream.writeSSE({
+              event: "error",
+              data: JSON.stringify({
+                error: `Failed to copy workspace: ${reason}`,
+                step: "copying_workspace",
+              }),
+            });
+            return;
+          }
 
           // --- Step: Init script ---
           if (companionEnv?.initScript?.trim()) {

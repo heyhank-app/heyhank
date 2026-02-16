@@ -163,6 +163,10 @@ beforeEach(() => {
   app = new Hono();
   const terminalManager = { getInfo: () => null, spawn: () => "", kill: () => {} } as any;
   app.route("/api", createRoutes(launcher, bridge, sessionStore, tracker, terminalManager));
+
+  // Default no-op mocks for container workspace isolation (called during container session creation)
+  vi.spyOn(containerManager, "copyWorkspaceToContainer").mockResolvedValue(undefined);
+  vi.spyOn(containerManager, "reseedGitAuth").mockImplementation(() => {});
 });
 
 // ─── Sessions ────────────────────────────────────────────────────────────────
