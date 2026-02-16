@@ -1856,7 +1856,7 @@ describe("POST /api/sessions/create-stream", () => {
     // Should have pulling_image step
     expect(steps).toContain("pulling_image");
     expect(pullSpy).toHaveBeenCalledWith(
-      expect.stringContaining("ghcr.io"),
+      expect.stringContaining("docker.io"),
       "the-companion:latest",
     );
 

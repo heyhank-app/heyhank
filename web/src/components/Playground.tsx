@@ -1137,7 +1137,7 @@ export function Playground() {
                   { step: "resolving_env", label: "Resolving environment...", status: "done" },
                   { step: "pulling_image", label: "Pulling Docker image...", status: "error" },
                 ] satisfies CreationProgressEvent[]}
-                error="Failed to pull ghcr.io/the-vibe-company/the-companion:latest — connection timed out after 30s"
+                error="Failed to pull docker.io/stangirard/the-companion:latest — connection timed out after 30s"
               />
             </Card>
             <Card label="Error during init script">

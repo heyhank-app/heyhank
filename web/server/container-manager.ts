@@ -52,7 +52,7 @@ const STANDARD_EXEC_TIMEOUT_MS = 30_000;
 const CONTAINER_BOOT_TIMEOUT_MS = 20_000;
 const IMAGE_PULL_TIMEOUT_MS = 300_000; // 5 min for pulling images
 
-const GHCR_REGISTRY = "ghcr.io/the-vibe-company";
+const DOCKER_REGISTRY = "docker.io/stangirard";
 
 function exec(cmd: string, opts?: ExecSyncOptionsWithStringEncoding): string {
   return execSync(cmd, { ...EXEC_OPTS, ...opts }).trim();
@@ -706,11 +706,11 @@ export class ContainerManager {
   }
 
   /**
-   * Return the ghcr.io remote path for a default image, or null for non-default images.
+   * Return the Docker Hub remote path for a default image, or null for non-default images.
    */
   static getRegistryImage(localTag: string): string | null {
     if (localTag === "the-companion:latest") {
-      return `${GHCR_REGISTRY}/the-companion:latest`;
+      return `${DOCKER_REGISTRY}/the-companion:latest`;
     }
     return null;
   }

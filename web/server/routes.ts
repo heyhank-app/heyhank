@@ -196,7 +196,7 @@ export function createRoutes(
               console.warn("[routes] the-companion:latest not found, falling back to companion-dev:latest (deprecated)");
               effectiveImage = "companion-dev:latest";
             } else {
-              // Try pulling from ghcr.io first, fall back to local build
+              // Try pulling from Docker Hub first, fall back to local build
               const registryImage = ContainerManager.getRegistryImage(effectiveImage);
               let pulled = false;
               if (registryImage) {
@@ -472,7 +472,7 @@ export function createRoutes(
               if (effectiveImage === "the-companion:latest" && containerManager.imageExists("companion-dev:latest")) {
                 effectiveImage = "companion-dev:latest";
               } else {
-                // Try pulling from ghcr.io first
+                // Try pulling from Docker Hub first
                 const registryImage = ContainerManager.getRegistryImage(effectiveImage);
                 let pulled = false;
                 if (registryImage) {
