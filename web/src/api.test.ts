@@ -283,7 +283,7 @@ describe("settings", () => {
 // ===========================================================================
 describe("getRepoInfo", () => {
   it("sends GET with encoded path query param", async () => {
-    const info = { repoRoot: "/repo", repoName: "app", currentBranch: "main", defaultBranch: "main", isWorktree: false };
+    const info = { repoRoot: "/repo", repoName: "app", currentBranch: "main", defaultBranch: "main" };
     mockFetch.mockResolvedValueOnce(mockResponse(info));
 
     const result = await api.getRepoInfo("/path/to repo");
@@ -291,23 +291,6 @@ describe("getRepoInfo", () => {
     const [url] = mockFetch.mock.calls[0];
     expect(url).toBe(`/api/git/repo-info?path=${encodeURIComponent("/path/to repo")}`);
     expect(result).toEqual(info);
-  });
-});
-
-// ===========================================================================
-// removeWorktree
-// ===========================================================================
-describe("removeWorktree", () => {
-  it("sends DELETE to /api/git/worktree with body", async () => {
-    mockFetch.mockResolvedValueOnce(mockResponse({ removed: true }));
-
-    await api.removeWorktree("/repo", "/repo-wt", true);
-
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/git/worktree");
-    expect(opts.method).toBe("DELETE");
-    expect(opts.headers["Content-Type"]).toBe("application/json");
-    expect(JSON.parse(opts.body)).toEqual({ repoRoot: "/repo", worktreePath: "/repo-wt", force: true });
   });
 });
 

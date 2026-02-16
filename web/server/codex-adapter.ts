@@ -573,6 +573,7 @@ export class CodexAdapter {
         is_compacting: false,
         git_branch: "",
         is_worktree: false,
+        is_containerized: false,
         repo_root: "",
         git_ahead: 0,
         git_behind: 0,

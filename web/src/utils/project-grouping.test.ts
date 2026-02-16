@@ -12,7 +12,7 @@ function makeItem(overrides: Partial<SessionItem> = {}): SessionItem {
     model: "claude-sonnet-4-5-20250929",
     cwd: "/home/user/projects/myapp",
     gitBranch: "",
-    isWorktree: false,
+    isContainerized: false,
     gitAhead: 0,
     gitBehind: 0,
     linesAdded: 0,
@@ -90,7 +90,7 @@ describe("groupSessionsByProject", () => {
   it("groups worktree sessions with their parent repo", () => {
     const sessions = [
       makeItem({ id: "s1", cwd: "/home/user/myapp", repoRoot: "/home/user/myapp" }),
-      makeItem({ id: "s2", cwd: "/home/user/myapp-wt-1234", repoRoot: "/home/user/myapp", isWorktree: true }),
+      makeItem({ id: "s2", cwd: "/home/user/myapp-wt-1234", repoRoot: "/home/user/myapp", isContainerized: true }),
     ];
     const groups = groupSessionsByProject(sessions);
     expect(groups).toHaveLength(1);
@@ -245,8 +245,8 @@ describe("groupSessionsByProject", () => {
   it("multiple worktrees of the same repo all land in one group", () => {
     const sessions = [
       makeItem({ id: "s1", cwd: "/home/user/repo", repoRoot: "/home/user/repo", createdAt: 300 }),
-      makeItem({ id: "s2", cwd: "/home/user/repo-wt-feat1", repoRoot: "/home/user/repo", isWorktree: true, createdAt: 200 }),
-      makeItem({ id: "s3", cwd: "/home/user/repo-wt-feat2", repoRoot: "/home/user/repo", isWorktree: true, createdAt: 100 }),
+      makeItem({ id: "s2", cwd: "/home/user/repo-wt-feat1", repoRoot: "/home/user/repo", isContainerized: true, createdAt: 200 }),
+      makeItem({ id: "s3", cwd: "/home/user/repo-wt-feat2", repoRoot: "/home/user/repo", isContainerized: true, createdAt: 100 }),
     ];
     const groups = groupSessionsByProject(sessions);
     expect(groups).toHaveLength(1);

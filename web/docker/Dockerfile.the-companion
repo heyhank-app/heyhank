@@ -1,0 +1,87 @@
+# The Companion — comprehensive development image
+# Ships with popular languages, runtimes, and tools pre-installed so Claude Code
+# can work on any project out of the box.
+#
+# Build:  docker build -t the-companion:latest -f Dockerfile.the-companion .
+# Usage:  Automatically used by The Companion when creating containerized sessions
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
+# ── Layer 1: System packages ──────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl wget git make jq ca-certificates gnupg lsb-release \
+    build-essential cmake \
+    openssh-client \
+    sqlite3 libsqlite3-dev \
+    ffmpeg \
+    imagemagick \
+    unzip zip xz-utils \
+    python3 python3-pip python3-venv python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Layer 2: Node.js 22 LTS via nvm ─────────────────────────────────────────
+ENV NVM_DIR=/root/.nvm
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash \
+    && . "$NVM_DIR/nvm.sh" \
+    && nvm install 22 \
+    && nvm alias default 22 \
+    && nvm use default \
+    && npm install -g pnpm
+# Create a stable symlink to the default node bin dir so ENV PATH survives version bumps
+RUN ln -sf "$(. "$NVM_DIR/nvm.sh" && dirname "$(nvm which default)")" /root/.nvm/default-bin
+ENV PATH="/root/.nvm/default-bin:$PATH"
+
+# ── Layer 3: Bun ─────────────────────────────────────────────────────────────
+RUN curl -fsSL https://bun.sh/install | bash
+ENV BUN_INSTALL="/root/.bun"
+ENV PATH="$BUN_INSTALL/bin:$PATH"
+
+# ── Layer 4: Deno ─────────────────────────────────────────────────────────────
+RUN curl -fsSL https://deno.land/install.sh | sh
+ENV DENO_INSTALL="/root/.deno"
+ENV PATH="$DENO_INSTALL/bin:$PATH"
+
+# ── Layer 5: Go 1.23 ─────────────────────────────────────────────────────────
+RUN ARCH=$(dpkg --print-architecture) \
+    && wget -q "https://go.dev/dl/go1.23.6.linux-${ARCH}.tar.gz" -O /tmp/go.tar.gz \
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz
+ENV GOROOT=/usr/local/go
+ENV GOPATH=/root/go
+ENV PATH="$GOPATH/bin:$GOROOT/bin:$PATH"
+
+# ── Layer 6: Rust (rustup + cargo) ───────────────────────────────────────────
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:$PATH"
+
+# ── Layer 7: Docker CLI ──────────────────────────────────────────────────────
+RUN ARCH=$(uname -m) \
+    && if [ "$ARCH" = "aarch64" ]; then ARCH="aarch64"; fi \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/${ARCH}/docker-27.5.1.tgz" \
+    | tar xz --strip-components=1 -C /usr/local/bin docker/docker
+
+# ── Layer 8: GitHub CLI ──────────────────────────────────────────────────────
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Layer 9: Claude Code CLI ─────────────────────────────────────────────────
+RUN . "$NVM_DIR/nvm.sh" && npm install -g @anthropic-ai/claude-code
+
+# ── Layer 10: Python tooling (poetry, uv) ────────────────────────────────────
+# --break-system-packages is safe here: this is a disposable container image,
+# not a shared system. No risk of breaking OS-managed Python packages.
+RUN pip install --break-system-packages poetry uv
+
+# ── Workspace ─────────────────────────────────────────────────────────────────
+WORKDIR /workspace
+
+# Keep container alive (overridden by docker exec from the host)
+CMD ["sleep", "infinity"]

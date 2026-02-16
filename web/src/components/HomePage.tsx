@@ -68,10 +68,10 @@ export function HomePage() {
   const [showModeDropdown, setShowModeDropdown] = useState(false);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
 
-  // Worktree state
+  // Git branch state
   const [gitRepoInfo, setGitRepoInfo] = useState<GitRepoInfo | null>(null);
   const [useWorktree, setUseWorktree] = useState(false);
-  const [worktreeBranch, setWorktreeBranch] = useState("");
+  const [selectedBranch, setSelectedBranch] = useState("");
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [showBranchDropdown, setShowBranchDropdown] = useState(false);
   const [branchFilter, setBranchFilter] = useState("");
@@ -167,8 +167,7 @@ export function HomePage() {
     }
     api.getRepoInfo(cwd).then((info) => {
       setGitRepoInfo(info);
-      setUseWorktree(false);
-      setWorktreeBranch(info.currentBranch);
+      setSelectedBranch(info.currentBranch);
       setIsNewBranch(false);
       api.listBranches(info.repoRoot).then(setBranches).catch(() => setBranches([]));
     }).catch(() => {
@@ -257,7 +256,7 @@ export function HomePage() {
     // Only offer pull when the effective branch is the currently checked-out branch,
     // since git pull operates on the checked-out branch
     if (gitRepoInfo) {
-      const effectiveBranch = useWorktree ? worktreeBranch : gitRepoInfo.currentBranch;
+      const effectiveBranch = selectedBranch || gitRepoInfo.currentBranch;
       if (effectiveBranch && effectiveBranch === gitRepoInfo.currentBranch) {
         const branchInfo = branches.find(b => b.name === effectiveBranch && !b.isRemote);
         if (branchInfo && branchInfo.behind > 0) {
@@ -282,8 +281,8 @@ export function HomePage() {
         disconnectSession(currentSessionId);
       }
 
-      // Create session (with optional worktree)
-      const branchName = worktreeBranch.trim() || undefined;
+      // Create session (with optional branch)
+      const branchName = selectedBranch.trim() || undefined;
       const result = await api.createSession({
         model,
         permissionMode: mode,
@@ -605,7 +604,7 @@ export function HomePage() {
                   <path d="M5 3.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm0 2.122a2.25 2.25 0 10-1.5 0v.378A2.5 2.5 0 007.5 8h1a1 1 0 010 2h-1A2.5 2.5 0 005 12.5v.128a2.25 2.25 0 101.5 0V12.5a1 1 0 011-1h1a2.5 2.5 0 000-5h-1a1 1 0 01-1-1V5.372zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
                 </svg>
                 <span className="max-w-[100px] sm:max-w-[160px] truncate font-mono-code">
-                  {worktreeBranch || gitRepoInfo.currentBranch}
+                  {selectedBranch || gitRepoInfo.currentBranch}
                 </span>
                 <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
                   <path d="M4 6l4 4 4-4" />
@@ -648,12 +647,12 @@ export function HomePage() {
                                 <button
                                   key={b.name}
                                   onClick={() => {
-                                    setWorktreeBranch(b.name);
+                                    setSelectedBranch(b.name);
                                     setIsNewBranch(false);
                                     setShowBranchDropdown(false);
                                   }}
                                   className={`w-full px-3 py-1.5 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-2 ${
-                                    b.name === worktreeBranch ? "text-cc-primary font-medium" : "text-cc-fg"
+                                    b.name === selectedBranch ? "text-cc-primary font-medium" : "text-cc-fg"
                                   }`}
                                 >
                                   <span className="truncate font-mono-code">{b.name}</span>
@@ -664,11 +663,11 @@ export function HomePage() {
                                     {b.behind > 0 && (
                                       <span className="text-[9px] text-amber-500">{b.behind}&#8595;</span>
                                     )}
-                                    {b.isCurrent && (
-                                      <span className="text-[9px] px-1 py-0.5 rounded bg-green-500/15 text-green-600 dark:text-green-400">current</span>
-                                    )}
                                     {b.worktreePath && (
                                       <span className="text-[9px] px-1 py-0.5 rounded bg-blue-500/15 text-blue-600 dark:text-blue-400">wt</span>
+                                    )}
+                                    {b.isCurrent && (
+                                      <span className="text-[9px] px-1 py-0.5 rounded bg-green-500/15 text-green-600 dark:text-green-400">current</span>
                                     )}
                                   </span>
                                 </button>
@@ -683,12 +682,12 @@ export function HomePage() {
                                 <button
                                   key={`remote-${b.name}`}
                                   onClick={() => {
-                                    setWorktreeBranch(b.name);
+                                    setSelectedBranch(b.name);
                                     setIsNewBranch(false);
                                     setShowBranchDropdown(false);
                                   }}
                                   className={`w-full px-3 py-1.5 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-2 ${
-                                    b.name === worktreeBranch ? "text-cc-primary font-medium" : "text-cc-fg"
+                                    b.name === selectedBranch ? "text-cc-primary font-medium" : "text-cc-fg"
                                   }`}
                                 >
                                   <span className="truncate font-mono-code">{b.name}</span>
@@ -706,7 +705,7 @@ export function HomePage() {
                             <div className="border-t border-cc-border mt-1 pt-1">
                               <button
                                 onClick={() => {
-                                  setWorktreeBranch(branchFilter.trim());
+                                  setSelectedBranch(branchFilter.trim());
                                   setIsNewBranch(true);
                                   setShowBranchDropdown(false);
                                 }}

@@ -349,8 +349,8 @@ export function Composer({ sessionId }: { sessionId: string }) {
                   <path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.116.862a2.25 2.25 0 10-.862.862A4.48 4.48 0 007.25 7.5h-1.5A2.25 2.25 0 003.5 9.75v.318a2.25 2.25 0 101.5 0V9.75a.75.75 0 01.75-.75h1.5a5.98 5.98 0 003.884-1.435A2.25 2.25 0 109.634 3.362zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
                 </svg>
                 <span className="truncate max-w-[100px] sm:max-w-[160px]">{sessionData.git_branch}</span>
-                {sessionData.is_worktree && (
-                  <span className="text-[10px] bg-cc-primary/10 text-cc-primary px-1 rounded">worktree</span>
+                {sessionData.is_containerized && (
+                  <span className="text-[10px] bg-blue-500/10 text-blue-400 px-1 rounded">container</span>
                 )}
               </span>
               {((sessionData.git_ahead || 0) > 0 || (sessionData.git_behind || 0) > 0) && (

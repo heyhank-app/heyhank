@@ -81,7 +81,7 @@ interface Session {
   processedClientMessageIdSet: Set<string>;
 }
 
-type GitSessionKey = "git_branch" | "is_worktree" | "repo_root" | "git_ahead" | "git_behind";
+type GitSessionKey = "git_branch" | "is_worktree" | "is_containerized" | "repo_root" | "git_ahead" | "git_behind";
 
 function makeDefaultState(sessionId: string, backendType: BackendType = "claude"): SessionState {
   return {
@@ -102,6 +102,7 @@ function makeDefaultState(sessionId: string, backendType: BackendType = "claude"
     is_compacting: false,
     git_branch: "",
     is_worktree: false,
+    is_containerized: false,
     repo_root: "",
     git_ahead: 0,
     git_behind: 0,
@@ -114,28 +115,34 @@ function makeDefaultState(sessionId: string, backendType: BackendType = "claude"
 
 function resolveGitInfo(state: SessionState): void {
   if (!state.cwd) return;
+  // Preserve is_containerized — it's set during session launch, not derived from git
+  const wasContainerized = state.is_containerized;
   try {
-    state.git_branch = execSync("git rev-parse --abbrev-ref HEAD", {
+    state.git_branch = execSync("git rev-parse --abbrev-ref HEAD 2>/dev/null", {
       cwd: state.cwd, encoding: "utf-8", timeout: 3000,
     }).trim();
 
+    // Detect if this is a linked worktree
     try {
-      const gitDir = execSync("git rev-parse --git-dir", {
+      const gitDir = execSync("git rev-parse --git-dir 2>/dev/null", {
         cwd: state.cwd, encoding: "utf-8", timeout: 3000,
       }).trim();
       state.is_worktree = gitDir.includes("/worktrees/");
-    } catch { /* ignore */ }
+    } catch {
+      state.is_worktree = false;
+    }
 
     try {
+      // For worktrees, --show-toplevel gives the worktree root, not the main repo.
+      // Use --git-common-dir to find the real repo root.
       if (state.is_worktree) {
-        // For worktrees, --show-toplevel returns the worktree dir, not the original repo.
-        // Use --git-common-dir to find the shared .git dir, then derive the repo root.
-        const commonDir = execSync("git rev-parse --git-common-dir", {
+        const commonDir = execSync("git rev-parse --git-common-dir 2>/dev/null", {
           cwd: state.cwd, encoding: "utf-8", timeout: 3000,
         }).trim();
+        // commonDir is e.g. /path/to/repo/.git — parent is the repo root
         state.repo_root = resolve(state.cwd, commonDir, "..");
       } else {
-        state.repo_root = execSync("git rev-parse --show-toplevel", {
+        state.repo_root = execSync("git rev-parse --show-toplevel 2>/dev/null", {
           cwd: state.cwd, encoding: "utf-8", timeout: 3000,
         }).trim();
       }
@@ -143,7 +150,7 @@ function resolveGitInfo(state: SessionState): void {
 
     try {
       const counts = execSync(
-        "git rev-list --left-right --count @{upstream}...HEAD",
+        "git rev-list --left-right --count @{upstream}...HEAD 2>/dev/null",
         { cwd: state.cwd, encoding: "utf-8", timeout: 3000 },
       ).trim();
       const [behind, ahead] = counts.split(/\s+/).map(Number);
@@ -161,6 +168,7 @@ function resolveGitInfo(state: SessionState): void {
     state.git_ahead = 0;
     state.git_behind = 0;
   }
+  state.is_containerized = wasContainerized;
 }
 
 // ─── Bridge ───────────────────────────────────────────────────────────────────
@@ -191,6 +199,7 @@ export class WsBridge {
   private static readonly GIT_SESSION_KEYS: GitSessionKey[] = [
     "git_branch",
     "is_worktree",
+    "is_containerized",
     "repo_root",
     "git_ahead",
     "git_behind",
@@ -214,6 +223,17 @@ export class WsBridge {
   /** Register a callback for when git info is resolved and branch is known. */
   onSessionGitInfoReadyCallback(cb: (sessionId: string, cwd: string, branch: string) => void): void {
     this.onGitInfoReady = cb;
+  }
+
+  /**
+   * Pre-populate a session with container info so that handleSystemMessage
+   * preserves the host cwd instead of overwriting it with /workspace.
+   * Call this right after launcher.launch() for containerized sessions.
+   */
+  markContainerized(sessionId: string, hostCwd: string): void {
+    const session = this.getOrCreateSession(sessionId);
+    session.state.is_containerized = true;
+    session.state.cwd = hostCwd;
   }
 
   /** Push a message to all connected browsers for a session (public, for PRPoller etc.). */
@@ -298,6 +318,7 @@ export class WsBridge {
     const before = {
       git_branch: session.state.git_branch,
       is_worktree: session.state.is_worktree,
+      is_containerized: session.state.is_containerized,
       repo_root: session.state.repo_root,
       git_ahead: session.state.git_ahead,
       git_behind: session.state.git_behind,
@@ -320,6 +341,7 @@ export class WsBridge {
           session: {
             git_branch: session.state.git_branch,
             is_worktree: session.state.is_worktree,
+            is_containerized: session.state.is_containerized,
             repo_root: session.state.repo_root,
             git_ahead: session.state.git_ahead,
             git_behind: session.state.git_behind,
@@ -545,13 +567,17 @@ export class WsBridge {
     console.log(`[ws-bridge] CLI connected for session ${sessionId}`);
     this.broadcastToBrowsers(session, { type: "cli_connected" });
 
-    // Flush any messages that were queued while waiting for CLI to connect
+    // Flush any messages queued while waiting for the CLI WebSocket.
+    // Per the SDK protocol, the first user message triggers system.init,
+    // so we must send it as soon as the WebSocket is open — NOT wait for
+    // system.init (which would create a deadlock for slow-starting sessions
+    // like Docker containers where the user message arrives before CLI connects).
     if (session.pendingMessages.length > 0) {
-      console.log(`[ws-bridge] Flushing ${session.pendingMessages.length} queued message(s) for session ${sessionId}`);
-      for (const ndjson of session.pendingMessages) {
+      console.log(`[ws-bridge] Flushing ${session.pendingMessages.length} queued message(s) on CLI connect for session ${sessionId}`);
+      const queued = session.pendingMessages.splice(0);
+      for (const ndjson of queued) {
         this.sendToCLI(session, ndjson);
       }
-      session.pendingMessages = [];
     }
   }
 
@@ -746,7 +772,11 @@ export class WsBridge {
       }
 
       session.state.model = msg.model;
-      session.state.cwd = msg.cwd;
+      // For containerized sessions, the CLI reports /workspace as its cwd.
+      // Keep the host path (set by markContainerized()) for correct project grouping.
+      if (!session.state.is_containerized) {
+        session.state.cwd = msg.cwd;
+      }
       session.state.tools = msg.tools;
       session.state.permissionMode = msg.permissionMode;
       session.state.claude_code_version = msg.claude_code_version;
@@ -763,6 +793,16 @@ export class WsBridge {
         session: session.state,
       });
       this.persistSession(session);
+
+      // Flush any messages queued before CLI was initialized (e.g. user sent
+      // a message while the container was still starting up).
+      if (session.pendingMessages.length > 0) {
+        console.log(`[ws-bridge] Flushing ${session.pendingMessages.length} queued message(s) after init for session ${session.id}`);
+        const queued = session.pendingMessages.splice(0);
+        for (const ndjson of queued) {
+          this.sendToCLI(session, ndjson);
+        }
+      }
     } else if (msg.subtype === "status") {
       session.state.is_compacting = msg.status === "compacting";
 

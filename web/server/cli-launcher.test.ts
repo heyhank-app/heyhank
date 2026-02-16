@@ -13,6 +13,18 @@ const mockResolveBinary = vi.hoisted(() => vi.fn((_name: string): string | null 
 const mockGetEnrichedPath = vi.hoisted(() => vi.fn(() => "/usr/bin:/usr/local/bin"));
 vi.mock("./path-resolver.js", () => ({ resolveBinary: mockResolveBinary, getEnrichedPath: mockGetEnrichedPath }));
 
+// Mock container-manager for container validation in relaunch
+const mockIsContainerAlive = vi.hoisted(() => vi.fn((): "running" | "stopped" | "missing" => "running"));
+const mockHasBinaryInContainer = vi.hoisted(() => vi.fn((): boolean => true));
+const mockStartContainer = vi.hoisted(() => vi.fn());
+vi.mock("./container-manager.js", () => ({
+  containerManager: {
+    isContainerAlive: mockIsContainerAlive,
+    hasBinaryInContainer: mockHasBinaryInContainer,
+    startContainer: mockStartContainer,
+  },
+}));
+
 // Mock fs operations for worktree guardrails (CLAUDE.md in .claude dirs)
 const mockMkdirSync = vi.hoisted(() => vi.fn());
 const mockExistsSync = vi.hoisted(() => vi.fn((..._args: any[]) => false));
@@ -104,6 +116,8 @@ let launcher: CliLauncher;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  delete process.env.COMPANION_CONTAINER_SDK_HOST;
+  delete process.env.COMPANION_FORCE_BYPASS_IN_CONTAINER;
   tempDir = mkdtempSync(join(tmpdir(), "launcher-test-"));
   store = new SessionStore(tempDir);
   launcher = new CliLauncher(3456);
@@ -174,6 +188,37 @@ describe("launch", () => {
     expect(cmdAndArgs[modeIdx + 1]).toBe("bypassPermissions");
   });
 
+  it("downgrades bypassPermissions to acceptEdits for containerized Claude sessions", () => {
+    launcher.launch({
+      cwd: "/tmp/project",
+      permissionMode: "bypassPermissions",
+      containerId: "abc123def456",
+      containerName: "companion-test",
+    });
+
+    const [cmdAndArgs] = mockSpawn.mock.calls[0];
+    // With bash -lc wrapping, CLI args are in the last element as a single string
+    const bashCmd = cmdAndArgs[cmdAndArgs.length - 1];
+    expect(bashCmd).toContain("--permission-mode");
+    expect(bashCmd).toContain("acceptEdits");
+    expect(bashCmd).not.toContain("bypassPermissions");
+  });
+
+  it("uses COMPANION_CONTAINER_SDK_HOST for containerized sdk-url when set", () => {
+    process.env.COMPANION_CONTAINER_SDK_HOST = "172.17.0.1";
+    launcher.launch({
+      cwd: "/tmp/project",
+      containerId: "abc123def456",
+      containerName: "companion-test",
+    });
+
+    const [cmdAndArgs] = mockSpawn.mock.calls[0];
+    // With bash -lc wrapping, CLI args are in the last element as a single string
+    const bashCmd = cmdAndArgs[cmdAndArgs.length - 1];
+    expect(bashCmd).toContain("--sdk-url");
+    expect(bashCmd).toContain("ws://172.17.0.1:3456/ws/cli/test-session-id");
+  });
+
   it("passes --allowedTools for each tool", () => {
     launcher.launch({
       allowedTools: ["Read", "Write", "Bash"],
@@ -223,125 +268,34 @@ describe("launch", () => {
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
-  it("stores worktree metadata when worktreeInfo provided", () => {
+  it("stores container metadata when containerId provided", () => {
     const info = launcher.launch({
-      cwd: "/tmp/worktrees/feature-branch",
-      worktreeInfo: {
-        isWorktree: true,
-        repoRoot: "/tmp/main-repo",
-        branch: "feature-branch",
-        actualBranch: "feature-branch",
-        worktreePath: "/tmp/worktrees/feature-branch",
-      },
+      cwd: "/tmp/project",
+      containerId: "abc123def456",
+      containerName: "companion-session-1",
+      containerImage: "ubuntu:22.04",
     });
 
-    expect(info.isWorktree).toBe(true);
-    expect(info.repoRoot).toBe("/tmp/main-repo");
-    expect(info.branch).toBe("feature-branch");
-    expect(info.actualBranch).toBe("feature-branch");
+    expect(info.containerId).toBe("abc123def456");
+    expect(info.containerName).toBe("companion-session-1");
+    expect(info.containerImage).toBe("ubuntu:22.04");
   });
 
-  it("injects worktree guardrails when isWorktree=true", () => {
-    // existsSync returns true for the worktree path (it exists on disk)
-    mockExistsSync.mockImplementation((path: string) => {
-      if (path === "/tmp/worktrees/feature-x") return true;
-      if (typeof path === "string" && path.includes(".claude")) return false;
-      return false;
-    });
-
+  it("uses docker exec -i with bash -lc for containerized Claude sessions", () => {
+    // bash -lc ensures ~/.bashrc is sourced so nvm-installed CLIs are on PATH
     launcher.launch({
-      cwd: "/tmp/worktrees/feature-x",
-      worktreeInfo: {
-        isWorktree: true,
-        repoRoot: "/tmp/main-repo",
-        branch: "feature-x",
-        actualBranch: "feature-x",
-        worktreePath: "/tmp/worktrees/feature-x",
-      },
+      cwd: "/tmp/project",
+      containerId: "abc123def456",
+      containerName: "companion-session-1",
     });
 
-    // Should create .claude directory
-    expect(mockMkdirSync).toHaveBeenCalledWith(
-      join("/tmp/worktrees/feature-x", ".claude"),
-      { recursive: true },
-    );
-
-    // Should write CLAUDE.md with guardrails content
-    expect(mockWriteFileSync).toHaveBeenCalled();
-    const writeCall = mockWriteFileSync.mock.calls[0];
-    expect(writeCall[0]).toBe(
-      join("/tmp/worktrees/feature-x", ".claude", "CLAUDE.md"),
-    );
-    const content = writeCall[1] as string;
-    expect(content).toContain("WORKTREE_GUARDRAILS_START");
-    expect(content).toContain("feature-x");
-    expect(content).toContain("/tmp/main-repo");
-    expect(content).toContain("DO NOT run `git checkout`");
-  });
-
-  it("injects guardrails with parent branch label when actualBranch differs", () => {
-    mockExistsSync.mockImplementation((path: string) => {
-      if (path === "/tmp/worktrees/main-wt-2") return true;
-      if (typeof path === "string" && path.includes(".claude")) return false;
-      return false;
-    });
-
-    launcher.launch({
-      cwd: "/tmp/worktrees/main-wt-2",
-      worktreeInfo: {
-        isWorktree: true,
-        repoRoot: "/tmp/main-repo",
-        branch: "main",
-        actualBranch: "main-wt-2",
-        worktreePath: "/tmp/worktrees/main-wt-2",
-      },
-    });
-
-    expect(mockWriteFileSync).toHaveBeenCalled();
-    const content = mockWriteFileSync.mock.calls[0][1] as string;
-    // Should mention the actual branch and the parent branch
-    expect(content).toContain("main-wt-2");
-    expect(content).toContain("(created from `main`)");
-    expect(content).toContain("MUST stay on the `main-wt-2` branch");
-  });
-
-  it("does NOT inject guardrails when worktree path equals main repo root", () => {
-    mockExistsSync.mockReturnValue(true);
-
-    launcher.launch({
-      cwd: "/tmp/main-repo",
-      worktreeInfo: {
-        isWorktree: true,
-        repoRoot: "/tmp/main-repo",
-        branch: "main",
-        actualBranch: "main",
-        worktreePath: "/tmp/main-repo",
-      },
-    });
-
-    // Should NOT write CLAUDE.md — worktree path is the main repo
-    expect(mockWriteFileSync).not.toHaveBeenCalled();
-    expect(mockMkdirSync).not.toHaveBeenCalled();
-  });
-
-  it("does NOT inject guardrails when worktree path does not exist on disk", () => {
-    // Worktree path doesn't exist (git worktree add failed or not yet run)
-    mockExistsSync.mockReturnValue(false);
-
-    launcher.launch({
-      cwd: "/tmp/worktrees/nonexistent",
-      worktreeInfo: {
-        isWorktree: true,
-        repoRoot: "/tmp/main-repo",
-        branch: "feature-y",
-        actualBranch: "feature-y",
-        worktreePath: "/tmp/worktrees/nonexistent",
-      },
-    });
-
-    // Should NOT write CLAUDE.md — path doesn't exist
-    expect(mockWriteFileSync).not.toHaveBeenCalled();
-    expect(mockMkdirSync).not.toHaveBeenCalled();
+    const [cmdAndArgs] = mockSpawn.mock.calls[0];
+    expect(cmdAndArgs[0]).toBe("docker");
+    expect(cmdAndArgs[1]).toBe("exec");
+    expect(cmdAndArgs[2]).toBe("-i");
+    // Should wrap the CLI command in bash -lc for login shell PATH
+    expect(cmdAndArgs).toContain("bash");
+    expect(cmdAndArgs).toContain("-lc");
   });
 
   it("sets session pid from spawned process", () => {
@@ -660,7 +614,7 @@ describe("relaunch", () => {
     mockSpawn.mockReturnValueOnce(secondProc);
 
     const result = await launcher.relaunch("test-session-id");
-    expect(result).toBe(true);
+    expect(result).toEqual({ ok: true });
 
     // Old process should have been killed
     expect(firstProc.kill).toHaveBeenCalledWith("SIGTERM");
@@ -678,9 +632,158 @@ describe("relaunch", () => {
     expect(session?.state).toBe("starting");
   });
 
-  it("returns false for unknown session", async () => {
+  it("reuses launch env variables during relaunch", async () => {
+    let resolveFirst: (code: number) => void;
+    const firstProc = {
+      pid: 12345,
+      kill: vi.fn(() => { resolveFirst(0); }),
+      exited: new Promise<number>((r) => { resolveFirst = r; }),
+      stdout: null,
+      stderr: null,
+    };
+    mockSpawn.mockReturnValueOnce(firstProc);
+
+    launcher.launch({
+      cwd: "/tmp/project",
+      containerId: "abc123def456",
+      containerName: "companion-test",
+      env: { CLAUDE_CODE_OAUTH_TOKEN: "tok-test" },
+    });
+
+    const secondProc = createMockProc(54321);
+    mockSpawn.mockReturnValueOnce(secondProc);
+
+    const result = await launcher.relaunch("test-session-id");
+    expect(result).toEqual({ ok: true });
+
+    const [relaunchCmd] = mockSpawn.mock.calls[1];
+    expect(relaunchCmd).toContain("-e");
+    expect(relaunchCmd).toContain("CLAUDE_CODE_OAUTH_TOKEN=tok-test");
+  });
+
+  it("returns error for unknown session", async () => {
     const result = await launcher.relaunch("nonexistent");
-    expect(result).toBe(false);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Session not found");
+  });
+
+  it("returns error when container was removed externally", async () => {
+    // Launch a containerized session
+    launcher.launch({
+      cwd: "/tmp/project",
+      containerId: "abc123def456",
+      containerName: "companion-gone",
+    });
+
+    // Simulate container being removed
+    mockIsContainerAlive.mockReturnValueOnce("missing");
+
+    const result = await launcher.relaunch("test-session-id");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("companion-gone");
+    expect(result.error).toContain("removed externally");
+
+    // Session should be marked as exited
+    const session = launcher.getSession("test-session-id");
+    expect(session?.state).toBe("exited");
+    expect(session?.exitCode).toBe(1);
+
+    // Should NOT have spawned a new process
+    expect(mockSpawn).toHaveBeenCalledTimes(1); // only the initial launch
+  });
+
+  it("restarts stopped container before spawning CLI", async () => {
+    // Create initial proc that exits immediately when killed
+    let resolveFirst: (code: number) => void;
+    const firstProc = {
+      pid: 12345,
+      kill: vi.fn(() => { resolveFirst(0); }),
+      exited: new Promise<number>((r) => { resolveFirst = r; }),
+      stdout: null,
+      stderr: null,
+    };
+    mockSpawn.mockReturnValueOnce(firstProc);
+
+    launcher.launch({
+      cwd: "/tmp/project",
+      containerId: "abc123def456",
+      containerName: "companion-stopped",
+    });
+
+    // Container is stopped but can be restarted
+    mockIsContainerAlive.mockReturnValueOnce("stopped");
+    mockHasBinaryInContainer.mockReturnValueOnce(true);
+
+    const secondProc = createMockProc(54321);
+    mockSpawn.mockReturnValueOnce(secondProc);
+
+    const result = await launcher.relaunch("test-session-id");
+    expect(result).toEqual({ ok: true });
+    expect(mockStartContainer).toHaveBeenCalledWith("abc123def456");
+    expect(mockSpawn).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns error when stopped container cannot be restarted", async () => {
+    launcher.launch({
+      cwd: "/tmp/project",
+      containerId: "abc123def456",
+      containerName: "companion-dead",
+    });
+
+    mockIsContainerAlive.mockReturnValueOnce("stopped");
+    mockStartContainer.mockImplementationOnce(() => { throw new Error("container start failed"); });
+
+    const result = await launcher.relaunch("test-session-id");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("companion-dead");
+    expect(result.error).toContain("stopped");
+    expect(result.error).toContain("container start failed");
+  });
+
+  it("returns error when CLI binary not found in container", async () => {
+    launcher.launch({
+      cwd: "/tmp/project",
+      containerId: "abc123def456",
+      containerName: "companion-nobin",
+    });
+
+    mockIsContainerAlive.mockReturnValueOnce("running");
+    mockHasBinaryInContainer.mockReturnValueOnce(false);
+
+    const result = await launcher.relaunch("test-session-id");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("claude");
+    expect(result.error).toContain("not found");
+    expect(result.error).toContain("companion-nobin");
+
+    const session = launcher.getSession("test-session-id");
+    expect(session?.state).toBe("exited");
+    expect(session?.exitCode).toBe(127);
+  });
+
+  it("skips container validation for non-containerized sessions", async () => {
+    // Create initial proc that exits when killed
+    let resolveFirst: (code: number) => void;
+    const firstProc = {
+      pid: 12345,
+      kill: vi.fn(() => { resolveFirst(0); }),
+      exited: new Promise<number>((r) => { resolveFirst = r; }),
+      stdout: null,
+      stderr: null,
+    };
+    mockSpawn.mockReturnValueOnce(firstProc);
+
+    launcher.launch({ cwd: "/tmp/project" });
+
+    const secondProc = createMockProc(54321);
+    mockSpawn.mockReturnValueOnce(secondProc);
+
+    const result = await launcher.relaunch("test-session-id");
+    expect(result).toEqual({ ok: true });
+
+    // Container validation methods should NOT have been called
+    expect(mockIsContainerAlive).not.toHaveBeenCalled();
+    expect(mockHasBinaryInContainer).not.toHaveBeenCalled();
   });
 });
 

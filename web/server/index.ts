@@ -16,6 +16,9 @@ import { CliLauncher } from "./cli-launcher.js";
 import { WsBridge } from "./ws-bridge.js";
 import { SessionStore } from "./session-store.js";
 import { WorktreeTracker } from "./worktree-tracker.js";
+import { containerManager } from "./container-manager.js";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { TerminalManager } from "./terminal-manager.js";
 import { generateSessionTitle } from "./auto-namer.js";
 import * as sessionNames from "./session-names.js";
@@ -40,6 +43,7 @@ const sessionStore = new SessionStore();
 const wsBridge = new WsBridge();
 const launcher = new CliLauncher(port);
 const worktreeTracker = new WorktreeTracker();
+const CONTAINER_STATE_PATH = join(homedir(), ".companion", "containers.json");
 const terminalManager = new TerminalManager();
 const prPoller = new PRPoller(wsBridge);
 const recorder = new RecorderManager();
@@ -53,6 +57,7 @@ launcher.setStore(sessionStore);
 launcher.setRecorder(recorder);
 launcher.restoreFromDisk();
 wsBridge.restoreFromDisk();
+containerManager.restoreState(CONTAINER_STATE_PATH);
 
 // When the CLI reports its internal session_id, store it for --resume on relaunch
 wsBridge.onCLISessionIdReceived((sessionId, cliSessionId) => {
@@ -88,7 +93,10 @@ wsBridge.onCLIRelaunchNeededCallback(async (sessionId) => {
     relaunchingSet.add(sessionId);
     console.log(`[server] Auto-relaunching CLI for session ${sessionId}`);
     try {
-      await launcher.relaunch(sessionId);
+      const result = await launcher.relaunch(sessionId);
+      if (!result.ok && result.error) {
+        wsBridge.broadcastToSession(sessionId, { type: "error", message: result.error });
+      }
     } finally {
       setTimeout(() => relaunchingSet.delete(sessionId), 5000);
     }
@@ -233,11 +241,20 @@ if (isRunningAsService()) {
   console.log("[server] Running as background service (auto-update available)");
 }
 
+// ── Graceful shutdown — persist container state ──────────────────────────────
+function gracefulShutdown() {
+  console.log("[server] Persisting container state before shutdown...");
+  containerManager.persistState(CONTAINER_STATE_PATH);
+  process.exit(0);
+}
+process.on("SIGTERM", gracefulShutdown);
+process.on("SIGINT", gracefulShutdown);
+
 // ── Reconnection watchdog ────────────────────────────────────────────────────
 // After a server restart, restored CLI processes may not reconnect their
 // WebSocket. Give them a grace period, then kill + relaunch any that are
 // still in "starting" state (alive but no WS connection).
-const RECONNECT_GRACE_MS = 10_000;
+const RECONNECT_GRACE_MS = Number(process.env.COMPANION_RECONNECT_GRACE_MS || "30000");
 const starting = launcher.getStartingSessions();
 if (starting.length > 0) {
   console.log(`[server] Waiting ${RECONNECT_GRACE_MS / 1000}s for ${starting.length} CLI process(es) to reconnect...`);

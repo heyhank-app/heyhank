@@ -237,6 +237,7 @@ export interface SessionState {
   is_compacting: boolean;
   git_branch: string;
   is_worktree: boolean;
+  is_containerized: boolean;
   repo_root: string;
   git_ahead: number;
   git_behind: number;

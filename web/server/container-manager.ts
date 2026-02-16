@@ -1,4 +1,13 @@
 import { execSync, type ExecSyncOptionsWithStringEncoding } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,6 +47,9 @@ const EXEC_OPTS: ExecSyncOptionsWithStringEncoding = {
   encoding: "utf-8",
   timeout: 30_000,
 };
+const QUICK_EXEC_TIMEOUT_MS = 8_000;
+const STANDARD_EXEC_TIMEOUT_MS = 30_000;
+const CONTAINER_BOOT_TIMEOUT_MS = 20_000;
 
 function exec(cmd: string, opts?: ExecSyncOptionsWithStringEncoding): string {
   return execSync(cmd, { ...EXEC_OPTS, ...opts }).trim();
@@ -53,7 +65,10 @@ export class ContainerManager {
   /** Check whether Docker daemon is reachable. */
   checkDocker(): boolean {
     try {
-      exec("docker info --format '{{.ServerVersion}}'");
+      exec("docker info --format '{{.ServerVersion}}'", {
+        encoding: "utf-8",
+        timeout: QUICK_EXEC_TIMEOUT_MS,
+      });
       return true;
     } catch {
       return false;
@@ -63,7 +78,10 @@ export class ContainerManager {
   /** Return Docker version string, or null if unavailable. */
   getDockerVersion(): string | null {
     try {
-      return exec("docker version --format '{{.Server.Version}}'");
+      return exec("docker version --format '{{.Server.Version}}'", {
+        encoding: "utf-8",
+        timeout: QUICK_EXEC_TIMEOUT_MS,
+      });
     } catch {
       return null;
     }
@@ -72,7 +90,10 @@ export class ContainerManager {
   /** List images available locally. Returns image:tag strings. */
   listImages(): string[] {
     try {
-      const raw = exec("docker images --format '{{.Repository}}:{{.Tag}}'");
+      const raw = exec("docker images --format '{{.Repository}}:{{.Tag}}'", {
+        encoding: "utf-8",
+        timeout: QUICK_EXEC_TIMEOUT_MS,
+      });
       if (!raw) return [];
       return raw
         .split("\n")
@@ -86,7 +107,10 @@ export class ContainerManager {
   /** Check if a specific image exists locally. */
   imageExists(image: string): boolean {
     try {
-      exec(`docker image inspect ${shellEscape(image)}`);
+      exec(`docker image inspect ${shellEscape(image)}`, {
+        encoding: "utf-8",
+        timeout: QUICK_EXEC_TIMEOUT_MS,
+      });
       return true;
     } catch {
       return false;
@@ -96,7 +120,8 @@ export class ContainerManager {
   /**
    * Create and start a container for a session.
    *
-   * - Mounts `~/.claude` read-only (auth)
+   * - Mounts `~/.claude` read-only at `/companion-host-claude` (auth seed)
+   * - Uses a writable tmpfs at `/root/.claude` for runtime state
    * - Mounts `hostCwd` at `/workspace`
    * - Publishes requested ports with auto-assigned host ports (`-p 0:PORT`)
    */
@@ -122,7 +147,9 @@ export class ContainerManager {
       // Ensure host.docker.internal resolves (automatic on Mac/Win Docker
       // Desktop, but required explicitly on Linux)
       "--add-host=host.docker.internal:host-gateway",
-      "-v", `${homedir}/.claude:/root/.claude:ro`,
+      // Seed auth/config from host home, but keep runtime writes inside container.
+      "-v", `${homedir}/.claude:/companion-host-claude:ro`,
+      "--tmpfs", "/root/.claude",
       "-v", `${hostCwd}:/workspace`,
       "-w", "/workspace",
     ];
@@ -161,12 +188,20 @@ export class ContainerManager {
 
     try {
       // Create
-      const containerId = exec(args.map(shellEscape).join(" "));
+      const containerId = exec(args.map(shellEscape).join(" "), {
+        encoding: "utf-8",
+        timeout: CONTAINER_BOOT_TIMEOUT_MS,
+      });
       info.containerId = containerId;
 
       // Start
-      exec(`docker start ${shellEscape(containerId)}`);
+      exec(`docker start ${shellEscape(containerId)}`, {
+        encoding: "utf-8",
+        timeout: CONTAINER_BOOT_TIMEOUT_MS,
+      });
       info.state = "running";
+
+      this.seedAuthFiles(containerId);
 
       // Resolve actual port mappings
       info.portMappings = this.resolvePortMappings(containerId, config.ports);
@@ -186,6 +221,31 @@ export class ContainerManager {
         `Failed to create container: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
+  }
+
+  /**
+   * Copy auth & config files from the read-only bind mount into the tmpfs home dir.
+   * Called after both initial create and restart (tmpfs is wiped on stop).
+   *
+   * Uses semicolons (not &&) deliberately: individual file copies are best-effort
+   * because not all auth files exist on every system. The trailing `true` ensures
+   * the overall exec succeeds even when some `cp` commands fail for missing files.
+   */
+  private seedAuthFiles(containerId: string): void {
+    try {
+      this.execInContainer(containerId, [
+        "sh", "-lc",
+        [
+          "mkdir -p /root/.claude",
+          "for f in .credentials.json auth.json .auth.json credentials.json; do " +
+            "[ -f /companion-host-claude/$f ] && cp /companion-host-claude/$f /root/.claude/$f 2>/dev/null; done",
+          "for f in settings.json settings.local.json; do " +
+            "[ -f /companion-host-claude/$f ] && cp /companion-host-claude/$f /root/.claude/$f 2>/dev/null; done",
+          "[ -d /companion-host-claude/skills ] && cp -r /companion-host-claude/skills /root/.claude/skills 2>/dev/null",
+          "true",
+        ].join("; "),
+      ]);
+    } catch { /* best-effort — container may not have /companion-host-claude mounted */ }
   }
 
   /** Parse `docker port` output to get host port mappings. */
@@ -211,6 +271,105 @@ export class ContainerManager {
       }
     }
     return mappings;
+  }
+
+  /**
+   * Execute a command inside a running container.
+   * Returns the stdout output. Throws on failure.
+   */
+  execInContainer(containerId: string, cmd: string[], timeout = STANDARD_EXEC_TIMEOUT_MS): string {
+    validateContainerId(containerId);
+    const dockerCmd = [
+      "docker", "exec",
+      shellEscape(containerId),
+      ...cmd.map(shellEscape),
+    ].join(" ");
+    return exec(dockerCmd, { encoding: "utf-8", timeout });
+  }
+
+  /**
+   * Execute a command inside a running container asynchronously.
+   * Uses Bun.spawn for longer-running operations (like init scripts).
+   * Returns exit code and combined stdout+stderr output.
+   */
+  async execInContainerAsync(
+    containerId: string,
+    cmd: string[],
+    opts?: { timeout?: number; onOutput?: (line: string) => void },
+  ): Promise<{ exitCode: number; output: string }> {
+    validateContainerId(containerId);
+    const timeout = opts?.timeout ?? 120_000;
+    const dockerCmd = [
+      "docker", "exec",
+      containerId,
+      ...cmd,
+    ];
+
+    const proc = Bun.spawn(dockerCmd, {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const lines: string[] = [];
+    const decoder = new TextDecoder();
+
+    // Read stdout
+    const stdoutReader = proc.stdout.getReader();
+    let stdoutBuffer = "";
+    const readStdout = (async () => {
+      try {
+        while (true) {
+          const { done, value } = await stdoutReader.read();
+          if (done) break;
+          stdoutBuffer += decoder.decode(value, { stream: true });
+          const parts = stdoutBuffer.split("\n");
+          stdoutBuffer = parts.pop() || "";
+          for (const line of parts) {
+            lines.push(line);
+            opts?.onOutput?.(line);
+          }
+        }
+        if (stdoutBuffer.trim()) {
+          lines.push(stdoutBuffer);
+          opts?.onOutput?.(stdoutBuffer);
+        }
+      } finally {
+        stdoutReader.releaseLock();
+      }
+    })();
+
+    // Read stderr
+    const stderrPromise = new Response(proc.stderr).text();
+
+    // Apply timeout — capture timer ID so we can clear it on normal exit
+    const exitPromise = proc.exited;
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        proc.kill();
+        reject(new Error(`Command timed out after ${timeout}ms`));
+      }, timeout);
+    });
+
+    try {
+      const exitCode = await Promise.race([exitPromise, timeoutPromise]);
+      clearTimeout(timeoutId!);
+      await readStdout;
+      const stderrText = await stderrPromise;
+      if (stderrText.trim()) {
+        for (const line of stderrText.split("\n")) {
+          if (line.trim()) {
+            lines.push(line);
+            opts?.onOutput?.(line);
+          }
+        }
+      }
+      return { exitCode, output: lines.join("\n") };
+    } catch (e) {
+      clearTimeout(timeoutId!);
+      await readStdout.catch(() => {});
+      throw e;
+    }
   }
 
   /**
@@ -257,6 +416,50 @@ export class ContainerManager {
     return Array.from(this.containers.values());
   }
 
+  /** Attempt to start a stopped container. Re-seeds auth files (tmpfs is wiped on stop). */
+  startContainer(containerId: string): void {
+    validateContainerId(containerId);
+    exec(`docker start ${shellEscape(containerId)}`, {
+      encoding: "utf-8",
+      timeout: CONTAINER_BOOT_TIMEOUT_MS,
+    });
+    this.seedAuthFiles(containerId);
+  }
+
+  /**
+   * Check whether a Docker container exists and its running state.
+   * Returns "running", "stopped", or "missing".
+   */
+  isContainerAlive(containerId: string): "running" | "stopped" | "missing" {
+    validateContainerId(containerId);
+    try {
+      const state = exec(
+        `docker inspect --format '{{.State.Running}}' ${shellEscape(containerId)}`,
+        { encoding: "utf-8", timeout: QUICK_EXEC_TIMEOUT_MS },
+      );
+      return state === "true" ? "running" : "stopped";
+    } catch {
+      return "missing";
+    }
+  }
+
+  /**
+   * Check if a binary is available inside a running container.
+   * Uses `bash -lc` so PATH includes nvm/bun/deno/etc.
+   */
+  hasBinaryInContainer(containerId: string, binary: string): boolean {
+    validateContainerId(containerId);
+    try {
+      exec(
+        `docker exec ${shellEscape(containerId)} bash -lc 'which ${shellEscape(binary)}'`,
+        { encoding: "utf-8", timeout: QUICK_EXEC_TIMEOUT_MS },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Re-register a container that was persisted across a server restart.
    * Verifies the container still exists in Docker before tracking it.
@@ -285,6 +488,57 @@ export class ContainerManager {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Persistence — survive server restarts
+  // ---------------------------------------------------------------------------
+
+  /** Persist all tracked container info to disk. */
+  persistState(filePath: string): void {
+    try {
+      const entries: { sessionId: string; info: ContainerInfo }[] = [];
+      for (const [sessionId, info] of this.containers) {
+        if (info.state !== "removed") {
+          entries.push({ sessionId, info });
+        }
+      }
+      writeFileSync(filePath, JSON.stringify(entries, null, 2), "utf-8");
+    } catch (e) {
+      console.warn(
+        "[container-manager] Failed to persist state:",
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }
+
+  /** Restore container tracking from disk, verifying each container still exists. */
+  restoreState(filePath: string): number {
+    if (!existsSync(filePath)) return 0;
+    try {
+      const raw = readFileSync(filePath, "utf-8");
+      const entries: { sessionId: string; info: ContainerInfo }[] = JSON.parse(raw);
+      let restored = 0;
+      for (const { sessionId, info } of entries) {
+        if (this.restoreContainer(sessionId, info)) {
+          restored++;
+        }
+      }
+      if (restored > 0) {
+        console.log(`[container-manager] Restored ${restored} container(s) from disk`);
+      }
+      return restored;
+    } catch (e) {
+      console.warn(
+        "[container-manager] Failed to restore state:",
+        e instanceof Error ? e.message : String(e),
+      );
+      return 0;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Image building
+  // ---------------------------------------------------------------------------
+
   /**
    * Build the companion-dev Docker image from the Dockerfile.dev.
    * Returns the build output log. Throws on failure.
@@ -305,6 +559,95 @@ export class ContainerManager {
     }
   }
 
+  /**
+   * Build a Docker image from inline Dockerfile content using Bun.spawn for streaming output.
+   * Writes the Dockerfile to a temp directory and runs docker build.
+   */
+  async buildImageStreaming(
+    dockerfileContent: string,
+    tag: string,
+    onProgress?: (line: string) => void,
+  ): Promise<{ success: boolean; log: string }> {
+    // Write Dockerfile to temp dir
+    const buildDir = join(tmpdir(), `companion-build-${Date.now()}`);
+    mkdirSync(buildDir, { recursive: true });
+    const dockerfilePath = join(buildDir, "Dockerfile");
+    writeFileSync(dockerfilePath, dockerfileContent, "utf-8");
+
+    try {
+      const args = [
+        "docker", "build",
+        "-t", tag,
+        "-f", dockerfilePath,
+        buildDir,
+      ];
+
+      const proc = Bun.spawn(args, {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+
+      const lines: string[] = [];
+
+      // Read stdout and stderr concurrently to avoid deadlock.
+      // Docker BuildKit sends build progress to stderr; if we read them
+      // sequentially, the stderr pipe buffer fills up and blocks Docker
+      // while we're still waiting on stdout.
+      const readStdout = (async () => {
+        const reader = proc.stdout.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split("\n");
+            buffer = parts.pop() || "";
+            for (const line of parts) {
+              if (line.trim()) {
+                lines.push(line);
+                onProgress?.(line);
+              }
+            }
+          }
+          if (buffer.trim()) {
+            lines.push(buffer);
+            onProgress?.(buffer);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      })();
+
+      const readStderr = (async () => {
+        const text = await new Response(proc.stderr).text();
+        if (text.trim()) {
+          for (const line of text.split("\n")) {
+            if (line.trim()) {
+              lines.push(line);
+              onProgress?.(line);
+            }
+          }
+        }
+      })();
+
+      await Promise.all([readStdout, readStderr]);
+      const exitCode = await proc.exited;
+      const log = lines.join("\n");
+
+      if (exitCode === 0) {
+        console.log(`[container-manager] Built image ${tag} (streaming)`);
+        return { success: true, log };
+      }
+
+      return { success: false, log };
+    } finally {
+      // Clean up temp build directory
+      try { rmSync(buildDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  }
+
   /** Clean up all tracked containers (e.g. on server shutdown). */
   cleanupAll(): void {
     for (const [sessionId] of this.containers) {
@@ -320,6 +663,15 @@ export class ContainerManager {
 function shellEscape(s: string): string {
   if (/^[a-zA-Z0-9._\-/:=@]+$/.test(s)) return s;
   return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/** Validate that a container ID is a hex string (Docker format) or a safe container name. */
+function validateContainerId(id: string): void {
+  // Docker container IDs are 64-char hex, but we accept short IDs too.
+  // Container names are alphanumeric with hyphens and underscores.
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$/.test(id)) {
+    throw new Error(`Invalid container ID or name: ${id.slice(0, 40)}`);
+  }
 }
 
 // Singleton

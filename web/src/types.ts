@@ -44,10 +44,9 @@ export interface SdkSessionInfo {
   cwd: string;
   createdAt: number;
   archived?: boolean;
-  isWorktree?: boolean;
-  repoRoot?: string;
-  branch?: string;
-  actualBranch?: string;
+  containerId?: string;
+  containerName?: string;
+  containerImage?: string;
   name?: string;
   backendType?: BackendType;
   gitBranch?: string;

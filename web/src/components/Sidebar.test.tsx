@@ -80,6 +80,7 @@ function makeSession(id: string, overrides: Partial<SessionState> = {}): Session
     is_compacting: false,
     git_branch: "",
     is_worktree: false,
+    is_containerized: false,
     repo_root: "",
     git_ahead: 0,
     git_behind: 0,
@@ -225,16 +226,16 @@ describe("Sidebar", () => {
     expect(screen.getByText("feature/awesome")).toBeInTheDocument();
   });
 
-  it("session items show worktree badge when is_worktree is true", () => {
-    const session = makeSession("s1", { git_branch: "feature/wt", is_worktree: true });
-    const sdk = makeSdkSession("s1", { isWorktree: true });
+  it("session items show container badge when is_containerized is true", () => {
+    const session = makeSession("s1", { git_branch: "feature/docker", is_containerized: true });
+    const sdk = makeSdkSession("s1", { containerId: "abc123" });
     mockState = createMockState({
       sessions: new Map([["s1", session]]),
       sdkSessions: [sdk],
     });
 
     render(<Sidebar />);
-    expect(screen.getByText("wt")).toBeInTheDocument();
+    expect(screen.getByText("Docker")).toBeInTheDocument();
   });
 
   it("session items show ahead/behind counts", () => {
