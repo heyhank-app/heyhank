@@ -154,6 +154,12 @@ export class ContainerManager {
       "-w", "/workspace",
     ];
 
+    // Mount host .gitconfig so git user.name/email are available for commits
+    const gitconfigPath = join(homedir, ".gitconfig");
+    if (existsSync(gitconfigPath)) {
+      args.push("-v", `${gitconfigPath}:/root/.gitconfig:ro`);
+    }
+
     // Port mappings: -p 0:{containerPort}
     for (const port of config.ports) {
       args.push("-p", `0:${port}`);
@@ -202,6 +208,7 @@ export class ContainerManager {
       info.state = "running";
 
       this.seedAuthFiles(containerId);
+      this.seedGitAuth(containerId);
 
       // Resolve actual port mappings
       info.portMappings = this.resolvePortMappings(containerId, config.ports);
@@ -246,6 +253,39 @@ export class ContainerManager {
         ].join("; "),
       ]);
     } catch { /* best-effort — container may not have /companion-host-claude mounted */ }
+  }
+
+  /**
+   * Seed git authentication inside the container.
+   * - Extracts GitHub CLI token from host keyring and logs in inside container
+   * - Sets up `gh` as the git credential helper for HTTPS operations
+   * - Disables GPG commit signing (host tools like 1Password aren't available)
+   *
+   * Called after both initial create and restart (tmpfs wipes gh config on stop).
+   */
+  private seedGitAuth(containerId: string): void {
+    // Extract GitHub token from host (may be stored in macOS keyring)
+    try {
+      const token = exec("gh auth token 2>/dev/null", {
+        encoding: "utf-8",
+        timeout: QUICK_EXEC_TIMEOUT_MS,
+      });
+      if (token) {
+        this.execInContainer(containerId, [
+          "sh", "-lc",
+          `echo "${token}" | gh auth login --with-token 2>/dev/null; gh auth setup-git 2>/dev/null; true`,
+        ]);
+      }
+    } catch { /* best-effort — gh may not be installed on host */ }
+
+    // Disable GPG/SSH commit signing — host signing tools (1Password, GPG agent)
+    // aren't available inside the container and would cause git commit to fail.
+    try {
+      this.execInContainer(containerId, [
+        "sh", "-lc",
+        "git config --global commit.gpgsign false 2>/dev/null; true",
+      ]);
+    } catch { /* best-effort */ }
   }
 
   /** Parse `docker port` output to get host port mappings. */
@@ -424,6 +464,7 @@ export class ContainerManager {
       timeout: CONTAINER_BOOT_TIMEOUT_MS,
     });
     this.seedAuthFiles(containerId);
+    this.seedGitAuth(containerId);
   }
 
   /**
