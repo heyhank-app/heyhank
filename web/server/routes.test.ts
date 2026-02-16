@@ -412,6 +412,66 @@ describe("POST /api/sessions/create", () => {
     expect(launcher.launch).not.toHaveBeenCalled();
   });
 
+  it("returns 400 when containerized Codex session lacks auth", async () => {
+    // Codex in containers needs OPENAI_API_KEY or ~/.codex/auth.json.
+    // Auth check runs before image resolution so no need to mock imageExists.
+    vi.mocked(envManager.getEnv).mockReturnValue({
+      name: "Codex Docker",
+      slug: "codex-docker",
+      variables: {},
+      baseImage: "the-companion:latest",
+      createdAt: 1000,
+      updatedAt: 1000,
+    } as any);
+    vi.mocked(envManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
+    const res = await app.request("/api/sessions/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/test", envSlug: "codex-docker", backend: "codex" }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("Containerized Codex requires auth");
+    expect(json.error).toContain("OPENAI_API_KEY");
+    expect(launcher.launch).not.toHaveBeenCalled();
+  });
+
+  it("allows containerized Codex when OPENAI_API_KEY is provided", async () => {
+    vi.mocked(envManager.getEnv).mockReturnValue({
+      name: "Codex Docker",
+      slug: "codex-docker",
+      variables: { OPENAI_API_KEY: "sk-test" },
+      baseImage: "the-companion:latest",
+      createdAt: 1000,
+      updatedAt: 1000,
+    } as any);
+    vi.mocked(envManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+    vi.spyOn(containerManager, "imageExists").mockReturnValueOnce(true);
+    vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
+      containerId: "cid-codex",
+      name: "companion-codex",
+      image: "the-companion:latest",
+      portMappings: [],
+      hostCwd: "/test",
+      containerCwd: "/workspace",
+      state: "running",
+    });
+    vi.spyOn(containerManager, "retrack").mockImplementation(() => {});
+
+    const res = await app.request("/api/sessions/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/test", envSlug: "codex-docker", backend: "codex" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(launcher.launch).toHaveBeenCalledWith(
+      expect.objectContaining({ backendType: "codex", containerId: "cid-codex" }),
+    );
+  });
+
   it("auto-builds companion base image when missing locally", async () => {
     vi.mocked(envManager.getEnv).mockReturnValue({
       name: "Companion",

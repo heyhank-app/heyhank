@@ -162,6 +162,10 @@ export class ContainerManager {
       // Seed auth/config from host home, but keep runtime writes inside container.
       "-v", `${homedir}/.claude:/companion-host-claude:ro`,
       "--tmpfs", "/root/.claude",
+      // Seed Codex auth/config from host (if present)
+      ...(existsSync(join(homedir, ".codex"))
+        ? ["-v", `${homedir}/.codex:/companion-host-codex:ro`, "--tmpfs", "/root/.codex"]
+        : []),
       // Isolated workspace: named volume populated later via docker cp
       "-v", `${volumeName}:/workspace`,
       "-w", "/workspace",
@@ -222,6 +226,7 @@ export class ContainerManager {
       info.state = "running";
 
       this.seedAuthFiles(containerId);
+      this.seedCodexFiles(containerId);
       this.seedGitAuth(containerId);
 
       // Resolve actual port mappings
@@ -268,6 +273,28 @@ export class ContainerManager {
         ].join("; "),
       ]);
     } catch { /* best-effort — container may not have /companion-host-claude mounted */ }
+  }
+
+  /**
+   * Copy Codex auth & config files from the read-only bind mount into the
+   * tmpfs home dir. Similar to seedAuthFiles but for Codex's ~/.codex directory.
+   * Called after both initial create and restart (tmpfs is wiped on stop).
+   */
+  private seedCodexFiles(containerId: string): void {
+    try {
+      this.execInContainer(containerId, [
+        "sh", "-lc",
+        [
+          "[ -d /companion-host-codex ] || exit 0",
+          "mkdir -p /root/.codex",
+          "for f in auth.json config.toml models_cache.json version.json; do " +
+            "[ -f /companion-host-codex/$f ] && cp /companion-host-codex/$f /root/.codex/$f 2>/dev/null; done",
+          "for d in skills vendor_imports prompts rules; do " +
+            "[ -d /companion-host-codex/$d ] && cp -r /companion-host-codex/$d /root/.codex/$d 2>/dev/null; done",
+          "true",
+        ].join("; "),
+      ]);
+    } catch { /* best-effort — container may not have /companion-host-codex mounted */ }
   }
 
   /**
@@ -562,6 +589,7 @@ export class ContainerManager {
       timeout: CONTAINER_BOOT_TIMEOUT_MS,
     });
     this.seedAuthFiles(containerId);
+    this.seedCodexFiles(containerId);
     this.seedGitAuth(containerId);
   }
 

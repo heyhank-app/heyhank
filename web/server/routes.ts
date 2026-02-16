@@ -19,6 +19,7 @@ import * as sessionNames from "./session-names.js";
 import { containerManager, ContainerManager, type ContainerConfig, type ContainerInfo } from "./container-manager.js";
 import type { CreationStepId } from "./session-types.js";
 import { hasContainerClaudeAuth } from "./claude-container-auth.js";
+import { hasContainerCodexAuth } from "./codex-container-auth.js";
 import { DEFAULT_OPENROUTER_MODEL, getSettings, updateSettings } from "./settings-manager.js";
 import { getUsageLimits } from "./usage-limits.js";
 import {
@@ -173,13 +174,20 @@ export function createRoutes(
       let containerName: string | undefined;
       let containerImage: string | undefined;
 
-      // Claude inside Linux containers cannot use host keychain auth.
+      // Containers cannot use host keychain auth.
       // Fail fast with a clear error when no container-compatible auth is present.
       if (effectiveImage && backend === "claude" && !hasContainerClaudeAuth(envVars)) {
         return c.json({
           error:
             "Containerized Claude requires auth available inside the container. " +
             "Set ANTHROPIC_API_KEY (or ANTHROPIC_AUTH_TOKEN / CLAUDE_CODE_AUTH_TOKEN) in the selected environment.",
+        }, 400);
+      }
+      if (effectiveImage && backend === "codex" && !hasContainerCodexAuth(envVars)) {
+        return c.json({
+          error:
+            "Containerized Codex requires auth available inside the container. " +
+            "Set OPENAI_API_KEY in the selected environment, or ensure ~/.codex/auth.json exists on the host.",
         }, 400);
       }
 
@@ -461,7 +469,7 @@ export function createRoutes(
         let containerName: string | undefined;
         let containerImage: string | undefined;
 
-        // Auth check for containerized Claude
+        // Auth check for containerized sessions
         if (effectiveImage && backend === "claude" && !hasContainerClaudeAuth(envVars)) {
           await stream.writeSSE({
             event: "error",
@@ -469,6 +477,17 @@ export function createRoutes(
               error:
                 "Containerized Claude requires auth available inside the container. " +
                 "Set ANTHROPIC_API_KEY (or ANTHROPIC_AUTH_TOKEN / CLAUDE_CODE_AUTH_TOKEN) in the selected environment.",
+            }),
+          });
+          return;
+        }
+        if (effectiveImage && backend === "codex" && !hasContainerCodexAuth(envVars)) {
+          await stream.writeSSE({
+            event: "error",
+            data: JSON.stringify({
+              error:
+                "Containerized Codex requires auth available inside the container. " +
+                "Set OPENAI_API_KEY in the selected environment, or ensure ~/.codex/auth.json exists on the host.",
             }),
           });
           return;
