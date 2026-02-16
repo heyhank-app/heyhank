@@ -280,10 +280,23 @@ export class ContainerManager {
 
     // Disable GPG/SSH commit signing — host signing tools (1Password, GPG agent)
     // aren't available inside the container and would cause git commit to fail.
+    // Also rewrite SSH git remotes to HTTPS so `gh` credential helper handles auth
+    // (containers don't have the host's SSH keys).
     try {
       this.execInContainer(containerId, [
         "sh", "-lc",
-        "git config --global commit.gpgsign false 2>/dev/null; true",
+        [
+          "git config --global commit.gpgsign false 2>/dev/null",
+          // Rewrite git@github.com:org/repo → https://github.com/org/repo for all remotes
+          "cd /workspace 2>/dev/null && " +
+            "git remote -v 2>/dev/null | grep 'git@github.com:' | awk '{print $1}' | sort -u | " +
+            "while read remote; do " +
+              "url=$(git remote get-url \"$remote\" 2>/dev/null); " +
+              "https_url=$(echo \"$url\" | sed 's|git@github.com:|https://github.com/|'); " +
+              "git remote set-url \"$remote\" \"$https_url\" 2>/dev/null; " +
+            "done",
+          "true",
+        ].join("; "),
       ]);
     } catch { /* best-effort */ }
   }
