@@ -15,6 +15,7 @@ import { SettingsPage } from "./components/SettingsPage.js";
 import { EnvManager } from "./components/EnvManager.js";
 import { CronManager } from "./components/CronManager.js";
 import { TerminalPage } from "./components/TerminalPage.js";
+import { SessionLaunchOverlay } from "./components/SessionLaunchOverlay.js";
 
 function useHash() {
   return useSyncExternalStore(
@@ -31,6 +32,10 @@ export default function App() {
   const homeResetKey = useStore((s) => s.homeResetKey);
   const activeTab = useStore((s) => s.activeTab);
   const assistantSessionId = useStore((s) => s.assistantSessionId);
+  const sessionCreating = useStore((s) => s.sessionCreating);
+  const sessionCreatingBackend = useStore((s) => s.sessionCreatingBackend);
+  const creationProgress = useStore((s) => s.creationProgress);
+  const creationError = useStore((s) => s.creationError);
   const hash = useHash();
   const isSettingsPage = hash === "#/settings";
   const isTerminalPage = hash === "#/terminal";
@@ -137,6 +142,16 @@ export default function App() {
                 <div className="absolute inset-0">
                   <DiffPanel sessionId={currentSessionId} />
                 </div>
+              )}
+
+              {/* Session launch overlay — shown during creation */}
+              {sessionCreating && creationProgress && creationProgress.length > 0 && (
+                <SessionLaunchOverlay
+                  steps={creationProgress}
+                  error={creationError}
+                  backend={sessionCreatingBackend ?? undefined}
+                  onCancel={() => useStore.getState().clearCreation()}
+                />
               )}
             </>
           )}

@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useStore } from "../store.js";
 import { api, createSessionStream, type CompanionEnv, type GitRepoInfo, type GitBranchInfo, type BackendInfo } from "../api.js";
-import { SessionCreationProgress } from "./SessionCreationProgress.js";
 import { connectSession, waitForConnection, sendToSession } from "../ws.js";
 import { disconnectSession } from "../ws.js";
 import { generateUniqueSessionName } from "../utils/names.js";
@@ -91,7 +90,6 @@ export function HomePage() {
 
   const setCurrentSession = useStore((s) => s.setCurrentSession);
   const currentSessionId = useStore((s) => s.currentSessionId);
-  const creationProgress = useStore((s) => s.creationProgress);
 
   // Auto-focus textarea (desktop only — on mobile it triggers the keyboard immediately)
   useEffect(() => {
@@ -279,6 +277,7 @@ export function HomePage() {
 
     const store = useStore.getState();
     store.clearCreation();
+    store.setSessionCreating(true, backend as "claude" | "codex");
 
     try {
       // Disconnect current session if any
@@ -344,7 +343,11 @@ export function HomePage() {
       // Clear progress on success
       useStore.getState().clearCreation();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      const errMsg = e instanceof Error ? e.message : String(e);
+      setError(errMsg);
+      // Set error in store so the overlay can display it; keep sessionCreating
+      // true so the overlay stays visible — user dismisses via the overlay's cancel button
+      useStore.getState().setCreationError(errMsg);
       setSending(false);
     }
   }
@@ -908,11 +911,6 @@ export function HomePage() {
               </div>
             </div>
           </div>
-        )}
-
-        {/* Session creation progress */}
-        {sending && creationProgress && creationProgress.length > 0 && (
-          <SessionCreationProgress steps={creationProgress} />
         )}
 
         {/* Error message */}
