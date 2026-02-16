@@ -1,8 +1,9 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { useStore } from "./store.js";
 import { connectSession } from "./ws.js";
 import { api } from "./api.js";
 import { capturePageView } from "./analytics.js";
+import { parseHash, navigateToSession } from "./utils/routing.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { ChatView } from "./components/ChatView.js";
 import { TopBar } from "./components/TopBar.js";
@@ -37,11 +38,12 @@ export default function App() {
   const creationProgress = useStore((s) => s.creationProgress);
   const creationError = useStore((s) => s.creationError);
   const hash = useHash();
-  const isSettingsPage = hash === "#/settings";
-  const isTerminalPage = hash === "#/terminal";
-  const isEnvironmentsPage = hash === "#/environments";
-  const isScheduledPage = hash === "#/scheduled";
-  const isSessionView = !isSettingsPage && !isTerminalPage && !isEnvironmentsPage && !isScheduledPage;
+  const route = useMemo(() => parseHash(hash), [hash]);
+  const isSettingsPage = route.page === "settings";
+  const isTerminalPage = route.page === "terminal";
+  const isEnvironmentsPage = route.page === "environments";
+  const isScheduledPage = route.page === "scheduled";
+  const isSessionView = route.page === "session" || route.page === "home";
 
   useEffect(() => {
     capturePageView(hash || "#/");
@@ -51,13 +53,34 @@ export default function App() {
     document.documentElement.classList.toggle("dark", darkMode);
   }, [darkMode]);
 
-  // Auto-connect to restored session on mount
+  // Capture the localStorage-restored session ID during render (before any effects run)
+  // so the mount logic can use it even if the hash-sync branch would clear it.
+  const restoredIdRef = useRef(useStore.getState().currentSessionId);
+
+  // Sync hash → store. On mount, restore a localStorage session into the URL first.
   useEffect(() => {
-    const restoredId = useStore.getState().currentSessionId;
-    if (restoredId) {
-      connectSession(restoredId);
+    // On first mount with no session hash, restore from localStorage
+    if (restoredIdRef.current !== null && route.page === "home") {
+      navigateToSession(restoredIdRef.current, true);
+      restoredIdRef.current = null;
+      return; // navigateToSession triggers hashchange → this effect re-runs with the session route
     }
-  }, []);
+    restoredIdRef.current = null;
+
+    if (route.page === "session") {
+      const store = useStore.getState();
+      if (store.currentSessionId !== route.sessionId) {
+        store.setCurrentSession(route.sessionId);
+      }
+      connectSession(route.sessionId);
+    } else if (route.page === "home") {
+      const store = useStore.getState();
+      if (store.currentSessionId !== null) {
+        store.setCurrentSession(null);
+      }
+    }
+    // For other pages (settings, terminal, etc.), preserve currentSessionId
+  }, [route]);
 
   // Poll for updates
   useEffect(() => {
@@ -71,7 +94,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  if (hash === "#/playground") {
+  if (route.page === "playground") {
     return <Playground />;
   }
 

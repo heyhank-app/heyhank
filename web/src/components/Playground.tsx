@@ -3,10 +3,11 @@ import { PermissionBanner } from "./PermissionBanner.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { ToolBlock, getToolIcon, getToolLabel, getPreview, ToolIcon } from "./ToolBlock.js";
 import { DiffViewer } from "./DiffViewer.js";
+import { useStore } from "../store.js";
+import { navigateToSession, navigateHome } from "../utils/routing.js";
 import { UpdateBanner } from "./UpdateBanner.js";
 import { ClaudeMdEditor } from "./ClaudeMdEditor.js";
 import { ChatView } from "./ChatView.js";
-import { useStore } from "../store.js";
 import { api } from "../api.js";
 import type { PermissionRequest, ChatMessage, ContentBlock, SessionState, McpServerDetail } from "../types.js";
 import type { TaskItem } from "../types.js";
@@ -545,7 +546,14 @@ export function Playground() {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => { window.location.hash = ""; }}
+              onClick={() => {
+                const sessionId = useStore.getState().currentSessionId;
+                if (sessionId) {
+                  navigateToSession(sessionId);
+                } else {
+                  navigateHome();
+                }
+              }}
               className="px-3 py-1.5 text-xs font-medium rounded-lg bg-cc-hover hover:bg-cc-active text-cc-fg border border-cc-border transition-colors cursor-pointer"
             >
               Back to App

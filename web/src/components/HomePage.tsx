@@ -5,6 +5,7 @@ import { connectSession, waitForConnection, sendToSession } from "../ws.js";
 import { disconnectSession } from "../ws.js";
 import { generateUniqueSessionName } from "../utils/names.js";
 import { getRecentDirs, addRecentDir } from "../utils/recent-dirs.js";
+import { navigateToSession } from "../utils/routing.js";
 import { getModelsForBackend, getModesForBackend, getDefaultModel, getDefaultMode, toModelOptions, type ModelOption } from "../utils/backends.js";
 import type { BackendType } from "../types.js";
 import { EnvManager } from "./EnvManager.js";
@@ -316,8 +317,10 @@ export function HomePage() {
       // Store the permission mode for this session
       useStore.getState().setPreviousPermissionMode(sessionId, mode);
 
-      // Switch to session
-      setCurrentSession(sessionId);
+      // Switch to session — use replace to avoid a back-button entry for the creation state
+      navigateToSession(sessionId, true);
+      // connectSession called eagerly so waitForConnection below can resolve immediately;
+      // the App.tsx hash-sync effect also calls it, but that runs after render (too late).
       connectSession(sessionId);
 
       // Wait for WebSocket connection

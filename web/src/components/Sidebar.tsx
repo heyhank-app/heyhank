@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useStore } from "../store.js";
 import { api } from "../api.js";
 import { connectSession, connectAllSessions, disconnectSession } from "../ws.js";
+import { navigateToSession, navigateHome, parseHash } from "../utils/routing.js";
 import { ProjectGroup } from "./ProjectGroup.js";
 import { SessionItem } from "./SessionItem.js";
 import { groupSessionsByProject, type SessionItem as SessionItemType } from "../utils/project-grouping.js";
@@ -28,10 +29,11 @@ export function Sidebar() {
   const setAssistantSessionId = useStore((s) => s.setAssistantSessionId);
   const collapsedProjects = useStore((s) => s.collapsedProjects);
   const toggleProjectCollapse = useStore((s) => s.toggleProjectCollapse);
-  const isSettingsPage = hash === "#/settings";
-  const isTerminalPage = hash === "#/terminal";
-  const isEnvironmentsPage = hash === "#/environments";
-  const isScheduledPage = hash === "#/scheduled";
+  const route = parseHash(hash);
+  const isSettingsPage = route.page === "settings";
+  const isTerminalPage = route.page === "terminal";
+  const isEnvironmentsPage = route.page === "environments";
+  const isScheduledPage = route.page === "scheduled";
 
   // Poll for SDK sessions on mount
   useEffect(() => {
@@ -92,11 +94,8 @@ export function Sidebar() {
 
   function handleSelectSession(sessionId: string) {
     useStore.getState().closeTerminal();
-    window.location.hash = "";
-    if (currentSessionId === sessionId) return;
-    setCurrentSession(sessionId);
-    // Ensure connected (idempotent — no-op if already connected)
-    connectSession(sessionId);
+    // Navigate to session hash — App.tsx hash effect handles setCurrentSession + connectSession
+    navigateToSession(sessionId);
     // Close sidebar on mobile
     if (window.innerWidth < 768) {
       useStore.getState().setSidebarOpen(false);
@@ -105,7 +104,7 @@ export function Sidebar() {
 
   function handleNewSession() {
     useStore.getState().closeTerminal();
-    window.location.hash = "";
+    navigateHome();
     useStore.getState().newSession();
     if (window.innerWidth < 768) {
       useStore.getState().setSidebarOpen(false);
@@ -147,6 +146,9 @@ export function Sidebar() {
     } catch {
       // best-effort
     }
+    if (useStore.getState().currentSessionId === sessionId) {
+      navigateHome();
+    }
     removeSession(sessionId);
   }, [removeSession]);
 
@@ -171,6 +173,7 @@ export function Sidebar() {
       // best-effort
     }
     if (useStore.getState().currentSessionId === sessionId) {
+      navigateHome();
       useStore.getState().newSession();
     }
     try {
@@ -291,7 +294,6 @@ export function Sidebar() {
             <button
               onClick={async () => {
                 useStore.getState().closeTerminal();
-                window.location.hash = "";
                 if (assistantSessionId) {
                   handleSelectSession(assistantSessionId);
                 } else {
@@ -299,8 +301,7 @@ export function Sidebar() {
                     const result = await api.launchAssistant();
                     if (result.sessionId) {
                       setAssistantSessionId(result.sessionId);
-                      connectSession(result.sessionId);
-                      setCurrentSession(result.sessionId);
+                      navigateToSession(result.sessionId);
                     }
                   } catch (e) {
                     console.error("[sidebar] Failed to launch assistant:", e);
