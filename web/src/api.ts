@@ -258,6 +258,15 @@ export interface CompanionEnv {
   updatedAt: number;
 }
 
+export interface ImagePullState {
+  image: string;
+  status: "idle" | "pulling" | "ready" | "error";
+  progress: string[];
+  error?: string;
+  startedAt?: number;
+  completedAt?: number;
+}
+
 export interface DirEntry {
   name: string;
   path: string;
@@ -559,6 +568,12 @@ export const api = {
   // Containers
   getContainerStatus: () => get<ContainerStatus>("/containers/status"),
   getContainerImages: () => get<string[]>("/containers/images"),
+
+  // Image pull manager
+  getImageStatus: (tag: string) =>
+    get<ImagePullState>(`/images/${encodeURIComponent(tag)}/status`),
+  pullImage: (tag: string) =>
+    post<{ ok: boolean; state: ImagePullState }>(`/images/${encodeURIComponent(tag)}/pull`),
   getCloudProviderPlan: (provider: "modal", cwd: string, sessionId: string) =>
     get<CloudProviderPlan>(
       `/cloud/providers/${encodeURIComponent(provider)}/plan?cwd=${encodeURIComponent(cwd)}&sessionId=${encodeURIComponent(sessionId)}`,

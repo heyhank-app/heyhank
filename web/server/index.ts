@@ -28,6 +28,7 @@ import { RecorderManager } from "./recorder.js";
 import { CronScheduler } from "./cron-scheduler.js";
 
 import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
+import { imagePullManager } from "./image-pull-manager.js";
 import { isRunningAsService } from "./service.js";
 import type { SocketData } from "./ws-bridge.js";
 import type { ServerWebSocket } from "bun";
@@ -213,6 +214,9 @@ if (process.env.NODE_ENV !== "production") {
 
 // ── Cron scheduler ──────────────────────────────────────────────────────────
 cronScheduler.startAll();
+
+// ── Image pull manager — pre-pull missing Docker images for environments ────
+imagePullManager.initFromEnvironments();
 
 // ── Update checker ──────────────────────────────────────────────────────────
 startPeriodicCheck();

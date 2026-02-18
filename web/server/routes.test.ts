@@ -86,6 +86,39 @@ vi.mock("./update-checker.js", () => ({
   setUpdateInProgress: mockSetUpdateInProgress,
 }));
 
+// Mock image-pull-manager — default: images are always ready
+const mockImagePullIsReady = vi.hoisted(() => vi.fn(() => true));
+interface MockImagePullState {
+  image: string;
+  status: "idle" | "pulling" | "ready" | "error";
+  progress: string[];
+  error?: string;
+  startedAt?: number;
+  completedAt?: number;
+}
+const mockImagePullGetState = vi.hoisted(() => vi.fn(
+  (image: string): MockImagePullState => ({
+    image,
+    status: "ready",
+    progress: [],
+  })
+));
+const mockImagePullEnsureImage = vi.hoisted(() => vi.fn());
+const mockImagePullWaitForReady = vi.hoisted(() => vi.fn(async () => true));
+const mockImagePullPull = vi.hoisted(() => vi.fn());
+const mockImagePullOnProgress = vi.hoisted(() => vi.fn(() => () => {}));
+
+vi.mock("./image-pull-manager.js", () => ({
+  imagePullManager: {
+    isReady: mockImagePullIsReady,
+    getState: mockImagePullGetState,
+    ensureImage: mockImagePullEnsureImage,
+    waitForReady: mockImagePullWaitForReady,
+    pull: mockImagePullPull,
+    onProgress: mockImagePullOnProgress,
+  },
+}));
+
 import { Hono } from "hono";
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -168,6 +201,15 @@ beforeEach(() => {
   // Default no-op mocks for container workspace isolation (called during container session creation)
   vi.spyOn(containerManager, "copyWorkspaceToContainer").mockResolvedValue(undefined);
   vi.spyOn(containerManager, "reseedGitAuth").mockImplementation(() => {});
+
+  // Default: images are always ready via pull manager
+  mockImagePullIsReady.mockReturnValue(true);
+  mockImagePullGetState.mockImplementation((image: string) => ({
+    image,
+    status: "ready" as const,
+    progress: [],
+  }));
+  mockImagePullWaitForReady.mockResolvedValue(true);
 });
 
 describe("POST /api/terminal/kill", () => {
@@ -497,7 +539,9 @@ describe("POST /api/sessions/create", () => {
     );
   });
 
-  it("auto-builds companion base image when missing locally", async () => {
+  it("waits for background pull when image is not ready", async () => {
+    // imagePullManager reports the image is not ready initially,
+    // but waitForReady resolves to true (background pull succeeds).
     vi.mocked(envManager.getEnv).mockReturnValue({
       name: "Companion",
       slug: "companion",
@@ -507,10 +551,13 @@ describe("POST /api/sessions/create", () => {
       updatedAt: 1000,
     } as any);
     vi.mocked(envManager.getEffectiveImage).mockReturnValue("the-companion:latest");
-    vi.mocked(existsSync).mockReturnValueOnce(true);
-    vi.spyOn(containerManager, "imageExists").mockReturnValueOnce(false);
-    vi.spyOn(containerManager, "pullImage").mockResolvedValueOnce(false);
-    const buildSpy = vi.spyOn(containerManager, "buildImage").mockReturnValue("ok");
+    mockImagePullIsReady.mockReturnValue(false);
+    mockImagePullGetState.mockReturnValue({
+      image: "the-companion:latest",
+      status: "idle" as const,
+      progress: [],
+    });
+    mockImagePullWaitForReady.mockResolvedValue(true);
     vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-1",
       name: "companion-temp",
@@ -529,10 +576,8 @@ describe("POST /api/sessions/create", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(buildSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Dockerfile.the-companion"),
-      "the-companion:latest",
-    );
+    expect(mockImagePullEnsureImage).toHaveBeenCalledWith("the-companion:latest");
+    expect(mockImagePullWaitForReady).toHaveBeenCalled();
     expect(launcher.launch).toHaveBeenCalled();
   });
 
@@ -975,6 +1020,55 @@ describe("DELETE /api/envs/:slug", () => {
     expect(res.status).toBe(404);
     const json = await res.json();
     expect(json).toEqual({ error: "Environment not found" });
+  });
+});
+
+// ─── Image Pull Manager API ──────────────────────────────────────────────────
+
+describe("GET /api/images/:tag/status", () => {
+  it("returns the pull state for an image", async () => {
+    mockImagePullGetState.mockReturnValueOnce({
+      image: "the-companion:latest",
+      status: "ready",
+      progress: [],
+    });
+
+    const res = await app.request("/api/images/the-companion%3Alatest/status");
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.image).toBe("the-companion:latest");
+    expect(json.status).toBe("ready");
+  });
+});
+
+describe("POST /api/images/:tag/pull", () => {
+  it("triggers a pull and returns the current state", async () => {
+    vi.spyOn(containerManager, "checkDocker").mockReturnValue(true);
+    mockImagePullGetState.mockReturnValueOnce({
+      image: "the-companion:latest",
+      status: "pulling",
+      progress: [],
+      startedAt: Date.now(),
+    });
+
+    const res = await app.request("/api/images/the-companion%3Alatest/pull", {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+    expect(mockImagePullPull).toHaveBeenCalledWith("the-companion:latest");
+  });
+
+  it("returns 503 when Docker is not available", async () => {
+    vi.spyOn(containerManager, "checkDocker").mockReturnValue(false);
+
+    const res = await app.request("/api/images/the-companion%3Alatest/pull", {
+      method: "POST",
+    });
+    expect(res.status).toBe(503);
+    const json = await res.json();
+    expect(json.error).toContain("Docker is not available");
   });
 });
 
@@ -1933,8 +2027,8 @@ describe("POST /api/sessions/create-stream", () => {
     expect(JSON.parse(doneEvent!.data).sessionId).toBe("session-1");
   });
 
-  it("tries pull then falls back to build when image is missing", async () => {
-    // Env with missing default Docker image — pull succeeds
+  it("emits pulling_image step when image is not ready and waits for background pull", async () => {
+    // Env with Docker image that is not available yet — pull manager handles it
     vi.mocked(envManager.getEnv).mockReturnValue({
       name: "Docker",
       slug: "docker",
@@ -1944,9 +2038,14 @@ describe("POST /api/sessions/create-stream", () => {
       updatedAt: 1000,
     } as any);
     vi.mocked(envManager.getEffectiveImage).mockReturnValue("the-companion:latest");
-    // the-companion:latest is not found locally
-    vi.spyOn(containerManager, "imageExists").mockReturnValueOnce(false);
-    const pullSpy = vi.spyOn(containerManager, "pullImage").mockResolvedValueOnce(true);
+    // Image not ready initially — pull manager will handle it
+    mockImagePullIsReady.mockReturnValue(false);
+    mockImagePullGetState.mockReturnValue({
+      image: "the-companion:latest",
+      status: "idle" as const,
+      progress: [],
+    });
+    mockImagePullWaitForReady.mockResolvedValue(true);
     vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-pulled",
       name: "companion-pulled",
@@ -1972,16 +2071,11 @@ describe("POST /api/sessions/create-stream", () => {
 
     // Should have pulling_image step
     expect(steps).toContain("pulling_image");
-    expect(pullSpy).toHaveBeenCalledWith(
-      expect.stringContaining("docker.io"),
-      "the-companion:latest",
-    );
-
-    // Should NOT have building_image (pull succeeded)
-    expect(steps).not.toContain("building_image");
+    expect(mockImagePullEnsureImage).toHaveBeenCalledWith("the-companion:latest");
+    expect(mockImagePullWaitForReady).toHaveBeenCalled();
   });
 
-  it("falls back to build when pull fails", async () => {
+  it("returns error when background pull fails", async () => {
     vi.mocked(envManager.getEnv).mockReturnValue({
       name: "Docker",
       slug: "docker",
@@ -1991,21 +2085,14 @@ describe("POST /api/sessions/create-stream", () => {
       updatedAt: 1000,
     } as any);
     vi.mocked(envManager.getEffectiveImage).mockReturnValue("the-companion:latest");
-    // the-companion:latest is not found locally
-    vi.spyOn(containerManager, "imageExists").mockReturnValueOnce(false);
-    vi.spyOn(containerManager, "pullImage").mockResolvedValueOnce(false);
-    vi.mocked(existsSync).mockReturnValueOnce(true); // Dockerfile exists
-    const buildSpy = vi.spyOn(containerManager, "buildImage").mockReturnValue("ok");
-    vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
-      containerId: "cid-built",
-      name: "companion-built",
+    mockImagePullIsReady.mockReturnValue(false);
+    mockImagePullGetState.mockReturnValue({
       image: "the-companion:latest",
-      portMappings: [],
-      hostCwd: "/test",
-      containerCwd: "/workspace",
-      state: "running",
+      status: "error" as const,
+      progress: [],
+      error: "Pull and build both failed",
     });
-    vi.spyOn(containerManager, "retrack").mockImplementation(() => {});
+    mockImagePullWaitForReady.mockResolvedValue(false);
 
     const res = await app.request("/api/sessions/create-stream", {
       method: "POST",
@@ -2015,17 +2102,9 @@ describe("POST /api/sessions/create-stream", () => {
 
     expect(res.status).toBe(200);
     const events = await parseSSE(res);
-    const steps = events
-      .filter((e) => e.event === "progress")
-      .map((e) => JSON.parse(e.data).step);
-
-    // Should have both pulling_image and building_image steps
-    expect(steps).toContain("pulling_image");
-    expect(steps).toContain("building_image");
-    expect(buildSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Dockerfile.the-companion"),
-      "the-companion:latest",
-    );
+    const errorEvent = events.find((e) => e.event === "error");
+    expect(errorEvent).toBeDefined();
+    expect(JSON.parse(errorEvent!.data).error).toContain("Pull and build both failed");
   });
 
   it("emits init script progress events when env has initScript", async () => {

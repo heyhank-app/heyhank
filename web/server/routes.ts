@@ -29,6 +29,7 @@ import {
   setUpdateInProgress,
 } from "./update-checker.js";
 import { refreshServiceDefinition } from "./service.js";
+import { imagePullManager } from "./image-pull-manager.js";
 
 const UPDATE_CHECK_STALE_MS = 5 * 60 * 1000;
 const ROUTES_DIR = dirname(fileURLToPath(import.meta.url));
@@ -193,43 +194,18 @@ export function createRoutes(
       // Do not silently fall back to host execution: if container startup fails,
       // return an explicit error.
       if (effectiveImage) {
-        if (!containerManager.imageExists(effectiveImage)) {
-          // Auto-build for the default base image.
-          const isDefaultImage = effectiveImage === "the-companion:latest";
-          if (isDefaultImage) {
-            // Try pulling from Docker Hub first, fall back to local build
-            const registryImage = ContainerManager.getRegistryImage(effectiveImage);
-            let pulled = false;
-            if (registryImage) {
-              console.log(`[routes] ${effectiveImage} missing locally, trying docker pull ${registryImage}...`);
-              pulled = await containerManager.pullImage(registryImage, effectiveImage);
-            }
-
-            if (!pulled) {
-              // Fall back to local Dockerfile build
-              const dockerfilePath = join(WEB_DIR, "docker", "Dockerfile.the-companion");
-              if (!existsSync(dockerfilePath)) {
-                return c.json({
-                  error:
-                    `Docker image ${effectiveImage} is missing, pull failed, and Dockerfile not found at ${dockerfilePath}`,
-                }, 503);
-              }
-              try {
-                console.log(`[routes] Pull failed/unavailable, building ${effectiveImage} from Dockerfile...`);
-                containerManager.buildImage(dockerfilePath, effectiveImage);
-              } catch (err) {
-                const reason = err instanceof Error ? err.message : String(err);
-                return c.json({
-                  error:
-                    `Docker image ${effectiveImage} is missing: pull and build both failed: ${reason}`,
-                }, 503);
-              }
-            }
-          } else {
+        if (!imagePullManager.isReady(effectiveImage)) {
+          // Image not available — use the pull manager to get it
+          const pullState = imagePullManager.getState(effectiveImage);
+          if (pullState.status === "idle" || pullState.status === "error") {
+            imagePullManager.ensureImage(effectiveImage);
+          }
+          const ready = await imagePullManager.waitForReady(effectiveImage, 300_000);
+          if (!ready) {
+            const state = imagePullManager.getState(effectiveImage);
             return c.json({
-              error:
-                `Docker image not found locally: ${effectiveImage}. ` +
-                "Build/pull the image first, then retry.",
+              error: state.error
+                || `Docker image ${effectiveImage} could not be pulled or built. Use the environment manager to pull/build the image first.`,
             }, 503);
           }
         }
@@ -483,56 +459,33 @@ export function createRoutes(
         }
 
         if (effectiveImage) {
-          if (!containerManager.imageExists(effectiveImage)) {
-            const isDefaultImage = effectiveImage === "the-companion:latest";
-            if (isDefaultImage) {
-              // Try pulling from Docker Hub first
-              const registryImage = ContainerManager.getRegistryImage(effectiveImage);
-              let pulled = false;
-              if (registryImage) {
-                await emitProgress(stream, "pulling_image", "Pulling Docker image...", "in_progress");
-                pulled = await containerManager.pullImage(registryImage, effectiveImage);
-                if (pulled) {
-                  await emitProgress(stream, "pulling_image", "Image pulled", "done");
-                } else {
-                  await emitProgress(stream, "pulling_image", "Pull failed, falling back to build", "error");
-                }
-              }
+          if (!imagePullManager.isReady(effectiveImage)) {
+            // Image not available — wait for background pull with progress streaming
+            const pullState = imagePullManager.getState(effectiveImage);
+            if (pullState.status === "idle" || pullState.status === "error") {
+              imagePullManager.ensureImage(effectiveImage);
+            }
 
-              // Fall back to local build if pull failed
-              if (!pulled) {
-                const dockerfilePath = join(WEB_DIR, "docker", "Dockerfile.the-companion");
-                if (!existsSync(dockerfilePath)) {
-                  await stream.writeSSE({
-                    event: "error",
-                    data: JSON.stringify({
-                      error: `Docker image ${effectiveImage} is missing, pull failed, and Dockerfile not found at ${dockerfilePath}`,
-                      step: "building_image",
-                    }),
-                  });
-                  return;
-                }
-                try {
-                  await emitProgress(stream, "building_image", "Building Docker image (this may take a minute)...", "in_progress");
-                  containerManager.buildImage(dockerfilePath, effectiveImage);
-                  await emitProgress(stream, "building_image", "Image built", "done");
-                } catch (err) {
-                  const reason = err instanceof Error ? err.message : String(err);
-                  await stream.writeSSE({
-                    event: "error",
-                    data: JSON.stringify({
-                      error: `Docker image build failed: ${reason}`,
-                      step: "building_image",
-                    }),
-                  });
-                  return;
-                }
-              }
+            await emitProgress(stream, "pulling_image", "Pulling Docker image...", "in_progress");
+
+            // Stream pull progress lines to the client
+            const unsub = imagePullManager.onProgress(effectiveImage, (line) => {
+              emitProgress(stream, "pulling_image", "Pulling Docker image...", "in_progress", line).catch(() => {});
+            });
+
+            const ready = await imagePullManager.waitForReady(effectiveImage, 300_000);
+            unsub();
+
+            if (ready) {
+              await emitProgress(stream, "pulling_image", "Image ready", "done");
             } else {
+              const state = imagePullManager.getState(effectiveImage);
               await stream.writeSSE({
                 event: "error",
                 data: JSON.stringify({
-                  error: `Docker image not found locally: ${effectiveImage}. Build/pull the image first, then retry.`,
+                  error: state.error
+                    || `Docker image ${effectiveImage} could not be pulled or built. Use the environment manager to pull/build the image first.`,
+                  step: "pulling_image",
                 }),
               });
               return;
@@ -596,7 +549,12 @@ export function createRoutes(
               const result = await containerManager.execInContainerAsync(
                 containerInfo.containerId,
                 ["sh", "-lc", companionEnv.initScript],
-                { timeout: initTimeout },
+                {
+                  timeout: initTimeout,
+                  onOutput: (line) => {
+                    emitProgress(stream, "running_init_script", "Running init script...", "in_progress", line).catch(() => {});
+                  },
+                },
               );
               if (result.exitCode !== 0) {
                 console.error(
@@ -1256,6 +1214,26 @@ export function createRoutes(
   api.get("/docker/base-image", (c) => {
     const exists = containerManager.imageExists("the-companion:latest");
     return c.json({ exists, image: "the-companion:latest" });
+  });
+
+  // ─── Image Pull Manager ──────────────────────────────────────────────
+
+  /** Get pull state for a Docker image */
+  api.get("/images/:tag/status", (c) => {
+    const tag = decodeURIComponent(c.req.param("tag"));
+    if (!tag) return c.json({ error: "Image tag is required" }, 400);
+    return c.json(imagePullManager.getState(tag));
+  });
+
+  /** Trigger a background pull for an image (idempotent) */
+  api.post("/images/:tag/pull", (c) => {
+    const tag = decodeURIComponent(c.req.param("tag"));
+    if (!tag) return c.json({ error: "Image tag is required" }, 400);
+    if (!containerManager.checkDocker()) {
+      return c.json({ error: "Docker is not available" }, 503);
+    }
+    imagePullManager.pull(tag);
+    return c.json({ ok: true, state: imagePullManager.getState(tag) });
   });
 
   // ─── Settings (~/.companion/settings.json) ────────────────────────

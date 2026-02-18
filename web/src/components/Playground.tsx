@@ -1132,6 +1132,24 @@ export function Playground() {
                 error="Failed to pull docker.io/stangirard/the-companion:latest — connection timed out after 30s"
               />
             </Card>
+            <Card label="With streaming init script logs">
+              <SessionCreationProgress
+                steps={[
+                  { step: "resolving_env", label: "Resolving environment...", status: "done" },
+                  { step: "pulling_image", label: "Image ready", status: "done" },
+                  { step: "creating_container", label: "Container running", status: "done" },
+                  { step: "running_init_script", label: "Running init script...", status: "in_progress", detail: "Installing dependencies..." },
+                ] satisfies CreationProgressEvent[]}
+              />
+            </Card>
+            <Card label="With streaming image pull logs">
+              <SessionCreationProgress
+                steps={[
+                  { step: "resolving_env", label: "Resolving environment...", status: "done" },
+                  { step: "pulling_image", label: "Pulling Docker image...", status: "in_progress", detail: "Downloading layer 3/7 [=====>    ] 45%" },
+                ] satisfies CreationProgressEvent[]}
+              />
+            </Card>
             <Card label="Error during init script">
               <SessionCreationProgress
                 steps={[
