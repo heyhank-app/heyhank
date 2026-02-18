@@ -874,7 +874,7 @@ export function Playground() {
         </Section>
 
         {/* ─── Composer ──────────────────────────────── */}
-        <Section title="Composer" description="Message input bar with mode toggle, image upload, and send/stop buttons">
+        <Section title="Composer" description="Message input bar with mode toggle, image upload, saved prompts (@), and send/stop buttons">
           <div className="max-w-3xl">
             <Card label="Connected — code mode">
               <div className="border-t border-cc-border bg-cc-card px-4 py-3">
@@ -913,6 +913,39 @@ export function Playground() {
               </div>
             </Card>
             <div className="mt-4" />
+            <Card label="@ prompt insertion">
+              <div className="border-t border-cc-border bg-cc-card px-4 py-3">
+                <div className="relative bg-cc-input-bg/95 border border-cc-border rounded-[14px] shadow-[0_10px_30px_rgba(0,0,0,0.10)] overflow-visible">
+                  <div className="absolute left-2 right-2 bottom-full mb-1 max-h-[180px] overflow-y-auto bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-20 py-1">
+                    <div className="px-3 py-2 flex items-center gap-2.5 bg-cc-hover">
+                      <span className="flex items-center justify-center w-6 h-6 rounded-md bg-cc-hover text-cc-muted shrink-0">@</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] font-medium text-cc-fg truncate">@review-pr</div>
+                        <div className="text-[11px] text-cc-muted truncate">Review this PR and list risks, regressions, and missing tests.</div>
+                      </div>
+                      <span className="text-[10px] text-cc-muted shrink-0">project</span>
+                    </div>
+                  </div>
+                  <div className="flex items-end gap-2 px-2.5 py-2">
+                    <textarea
+                      readOnly
+                      value="@rev"
+                      rows={1}
+                      className="flex-1 min-w-0 px-2 py-1.5 text-sm bg-transparent resize-none text-cc-fg font-sans-ui"
+                      style={{ minHeight: "36px" }}
+                    />
+                    <div className="mb-0.5 flex items-center gap-1.5">
+                      <div className="flex items-center justify-center w-9 h-9 rounded-lg border border-cc-border text-cc-muted">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                          <path d="M4 2.75h8A1.25 1.25 0 0113.25 4v9.25L8 10.5l-5.25 2.75V4A1.25 1.25 0 014 2.75z" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+            <div className="mt-4" />
             <Card label="Plan mode active">
               <div className="border-t border-cc-border bg-cc-card px-4 py-3">
                 <div className="relative bg-cc-input-bg/95 border border-cc-primary/40 rounded-[14px] shadow-[0_10px_30px_rgba(0,0,0,0.10)] overflow-visible">
@@ -927,7 +960,7 @@ export function Playground() {
                     <textarea
                       readOnly
                       value=""
-                      placeholder="Type a message... (/ for commands)"
+                      placeholder="Type a message... (/ + @)"
                       rows={1}
                       className="flex-1 min-w-0 px-2 py-1.5 text-sm bg-transparent resize-none text-cc-fg font-sans-ui placeholder:text-cc-muted"
                       style={{ minHeight: "36px" }}

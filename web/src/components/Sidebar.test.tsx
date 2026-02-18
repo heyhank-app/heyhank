@@ -427,6 +427,12 @@ describe("Sidebar", () => {
     expect(window.location.hash).toBe("#/settings");
   });
 
+  it("navigates to prompts page when Prompts is clicked", () => {
+    render(<Sidebar />);
+    fireEvent.click(screen.getByText("Prompts").closest("button")!);
+    expect(window.location.hash).toBe("#/prompts");
+  });
+
   it("navigates to terminal page when Terminal is clicked", () => {
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Terminal").closest("button")!);

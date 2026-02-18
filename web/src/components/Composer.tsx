@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useStore } from "../store.js";
 import { sendToSession } from "../ws.js";
 import { CLAUDE_MODES, CODEX_MODES } from "../utils/backends.js";
+import { api, type SavedPrompt } from "../api.js";
 import type { ModeOption } from "../utils/backends.js";
 
 let idCounter = 0;
@@ -30,14 +31,30 @@ interface CommandItem {
   type: "command" | "skill";
 }
 
+interface MentionContext {
+  query: string;
+  start: number;
+  end: number;
+}
+
 export function Composer({ sessionId }: { sessionId: string }) {
   const [text, setText] = useState("");
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
+  const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
+  const [mentionMenuIndex, setMentionMenuIndex] = useState(0);
+  const [savePromptOpen, setSavePromptOpen] = useState(false);
+  const [savePromptName, setSavePromptName] = useState("");
+  const [savePromptError, setSavePromptError] = useState<string | null>(null);
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
+  const [promptsLoading, setPromptsLoading] = useState(false);
+  const [caretPos, setCaretPos] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const mentionMenuRef = useRef<HTMLDivElement>(null);
+  const pendingSelectionRef = useRef<number | null>(null);
   const cliConnected = useStore((s) => s.cliConnected);
   const sessionData = useStore((s) => s.sessions.get(sessionId));
   const previousMode = useStore((s) => s.previousPermissionMode.get(sessionId) || "acceptEdits");
@@ -48,6 +65,22 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const isCodex = sessionData?.backend_type === "codex";
   const modes: ModeOption[] = isCodex ? CODEX_MODES : CLAUDE_MODES;
   const modeLabel = modes.find((m) => m.value === currentMode)?.label?.toLowerCase() || currentMode;
+
+  const refreshPrompts = useCallback(async () => {
+    setPromptsLoading(true);
+    try {
+      const prompts = await api.listPrompts(sessionData?.cwd, "global");
+      setSavedPrompts(prompts.filter((p) => !!p.name.trim()));
+    } catch {
+      setSavedPrompts([]);
+    } finally {
+      setPromptsLoading(false);
+    }
+  }, [sessionData?.cwd]);
+
+  useEffect(() => {
+    void refreshPrompts();
+  }, [refreshPrompts]);
 
   // Build command list from session data
   const allCommands = useMemo<CommandItem[]>(() => {
@@ -76,6 +109,29 @@ export function Composer({ sessionId }: { sessionId: string }) {
     return allCommands.filter((cmd) => cmd.name.toLowerCase().includes(query));
   }, [text, slashMenuOpen, allCommands]);
 
+  const mentionContext = useMemo<MentionContext | null>(() => {
+    const prefix = text.slice(0, caretPos);
+    const match = prefix.match(/(^|\s)@([^\s@]*)$/);
+    if (!match || match.index === undefined) return null;
+    const start = prefix.length - match[0].length + match[1].length;
+    return {
+      query: match[2] || "",
+      start,
+      end: caretPos,
+    };
+  }, [text, caretPos]);
+
+  const filteredPrompts = useMemo(() => {
+    if (!mentionMenuOpen || !mentionContext) return [];
+    const query = mentionContext.query.toLowerCase();
+    if (!query) return savedPrompts;
+    const startsWith = savedPrompts.filter((p) => p.name.toLowerCase().startsWith(query));
+    const includes = savedPrompts.filter(
+      (p) => !p.name.toLowerCase().startsWith(query) && p.name.toLowerCase().includes(query),
+    );
+    return [...startsWith, ...includes];
+  }, [mentionMenuOpen, mentionContext, savedPrompts]);
+
   // Open/close menu based on text
   useEffect(() => {
     const shouldOpen = text.startsWith("/") && /^\/\S*$/.test(text) && allCommands.length > 0;
@@ -87,12 +143,28 @@ export function Composer({ sessionId }: { sessionId: string }) {
     }
   }, [text, allCommands.length, slashMenuOpen]);
 
+  useEffect(() => {
+    const shouldOpen = !slashMenuOpen && !!mentionContext;
+    if (shouldOpen && !mentionMenuOpen) {
+      setMentionMenuOpen(true);
+      setMentionMenuIndex(0);
+    } else if (!shouldOpen && mentionMenuOpen) {
+      setMentionMenuOpen(false);
+    }
+  }, [slashMenuOpen, mentionContext, mentionMenuOpen]);
+
   // Keep selected index in bounds
   useEffect(() => {
     if (slashMenuIndex >= filteredCommands.length) {
       setSlashMenuIndex(Math.max(0, filteredCommands.length - 1));
     }
   }, [filteredCommands.length, slashMenuIndex]);
+
+  useEffect(() => {
+    if (mentionMenuIndex >= filteredPrompts.length) {
+      setMentionMenuIndex(Math.max(0, filteredPrompts.length - 1));
+    }
+  }, [filteredPrompts.length, mentionMenuIndex]);
 
   // Scroll selected item into view
   useEffect(() => {
@@ -104,11 +176,39 @@ export function Composer({ sessionId }: { sessionId: string }) {
     }
   }, [slashMenuIndex, slashMenuOpen]);
 
+  useEffect(() => {
+    if (!mentionMenuRef.current || !mentionMenuOpen) return;
+    const items = mentionMenuRef.current.querySelectorAll("[data-prompt-index]");
+    const selected = items[mentionMenuIndex];
+    if (selected) {
+      selected.scrollIntoView({ block: "nearest" });
+    }
+  }, [mentionMenuIndex, mentionMenuOpen]);
+
+  useEffect(() => {
+    if (pendingSelectionRef.current === null || !textareaRef.current) return;
+    const next = pendingSelectionRef.current;
+    textareaRef.current.setSelectionRange(next, next);
+    pendingSelectionRef.current = null;
+  }, [text]);
+
   const selectCommand = useCallback((cmd: CommandItem) => {
     setText(`/${cmd.name} `);
     setSlashMenuOpen(false);
     textareaRef.current?.focus();
   }, []);
+
+  const selectPrompt = useCallback((prompt: SavedPrompt) => {
+    if (!mentionContext) return;
+    const insertion = `${prompt.content} `;
+    const nextText = `${text.slice(0, mentionContext.start)}${insertion}${text.slice(mentionContext.end)}`;
+    const nextCursor = mentionContext.start + insertion.length;
+    pendingSelectionRef.current = nextCursor;
+    setText(nextText);
+    setMentionMenuOpen(false);
+    setCaretPos(nextCursor);
+    textareaRef.current?.focus();
+  }, [mentionContext, text]);
 
   function handleSend() {
     const msg = text.trim();
@@ -132,6 +232,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
     setText("");
     setImages([]);
     setSlashMenuOpen(false);
+    setMentionMenuOpen(false);
 
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -169,6 +270,41 @@ export function Composer({ sessionId }: { sessionId: string }) {
       }
     }
 
+    if (mentionMenuOpen) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionMenuOpen(false);
+        return;
+      }
+    }
+
+    if (mentionMenuOpen && filteredPrompts.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionMenuIndex((i) => (i + 1) % filteredPrompts.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionMenuIndex((i) => (i - 1 + filteredPrompts.length) % filteredPrompts.length);
+        return;
+      }
+      if ((e.key === "Tab" && !e.shiftKey) || (e.key === "Enter" && !e.shiftKey)) {
+        e.preventDefault();
+        selectPrompt(filteredPrompts[mentionMenuIndex]);
+        return;
+      }
+    }
+
+    if (
+      mentionMenuOpen
+      && filteredPrompts.length === 0
+      && ((e.key === "Enter" && !e.shiftKey) || (e.key === "Tab" && !e.shiftKey))
+    ) {
+      e.preventDefault();
+      return;
+    }
+
     if (e.key === "Tab" && e.shiftKey) {
       e.preventDefault();
       toggleMode();
@@ -182,9 +318,15 @@ export function Composer({ sessionId }: { sessionId: string }) {
 
   function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setText(e.target.value);
+    setCaretPos(e.target.selectionStart ?? e.target.value.length);
     const ta = e.target;
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
+  }
+
+  function syncCaret() {
+    if (!textareaRef.current) return;
+    setCaretPos(textareaRef.current.selectionStart ?? 0);
   }
 
   function handleInterrupt() {
@@ -236,6 +378,27 @@ export function Composer({ sessionId }: { sessionId: string }) {
       const restoreMode = previousMode || "acceptEdits";
       sendToSession(sessionId, { type: "set_permission_mode", mode: restoreMode });
       store.updateSession(sessionId, { permissionMode: restoreMode });
+    }
+  }
+
+  async function handleCreatePrompt() {
+    const content = text.trim();
+    const name = savePromptName.trim();
+    if (!content || !name) return;
+    const payload: { name: string; content: string; scope: "global" | "project"; cwd?: string } = {
+      name,
+      content,
+      scope: "global",
+    };
+    try {
+      await api.createPrompt(payload);
+      await refreshPrompts();
+      setSavePromptOpen(false);
+      setSavePromptName("");
+      setSavePromptError(null);
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : "Could not save prompt.";
+      setSavePromptError(message);
     }
   }
 
@@ -322,6 +485,90 @@ export function Composer({ sessionId }: { sessionId: string }) {
             </div>
           )}
 
+          {/* @ prompt menu */}
+          {mentionMenuOpen && (
+            <div
+              ref={mentionMenuRef}
+              className="absolute left-2 right-2 bottom-full mb-1 max-h-[240px] overflow-y-auto bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-20 py-1"
+            >
+              {promptsLoading ? (
+                <div className="px-3 py-2 text-[12px] text-cc-muted">
+                  Searching prompts...
+                </div>
+              ) : filteredPrompts.length > 0 ? (
+                filteredPrompts.map((prompt, i) => (
+                  <button
+                    key={prompt.id}
+                    data-prompt-index={i}
+                    onClick={() => selectPrompt(prompt)}
+                    className={`w-full px-3 py-2 text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
+                      i === mentionMenuIndex
+                        ? "bg-cc-hover"
+                        : "hover:bg-cc-hover/50"
+                    }`}
+                  >
+                    <span className="flex items-center justify-center w-6 h-6 rounded-md bg-cc-hover text-cc-muted shrink-0">
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
+                        <path d="M2.5 8a5.5 5.5 0 1111 0v3a2.5 2.5 0 01-2.5 2.5h-1" strokeLinecap="round" />
+                        <circle cx="8" cy="8" r="1.75" fill="currentColor" stroke="none" />
+                      </svg>
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] font-medium text-cc-fg truncate">@{prompt.name}</div>
+                      <div className="text-[11px] text-cc-muted truncate">{prompt.content}</div>
+                    </div>
+                    <span className="text-[10px] text-cc-muted shrink-0">{prompt.scope}</span>
+                  </button>
+                ))
+              ) : (
+                <div className="px-3 py-2 text-[12px] text-cc-muted">
+                  No prompts found.
+                </div>
+              )}
+            </div>
+          )}
+
+          {savePromptOpen && (
+            <div className="absolute left-2 right-2 bottom-full mb-1 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-20 p-3 space-y-2">
+              <div className="text-xs font-semibold text-cc-fg">Save prompt</div>
+              <input
+                value={savePromptName}
+                onChange={(e) => {
+                  setSavePromptName(e.target.value);
+                  if (savePromptError) setSavePromptError(null);
+                }}
+                placeholder="Prompt title"
+                className="w-full px-2 py-1.5 text-sm bg-cc-input-bg border border-cc-border rounded-md text-cc-fg focus:outline-none focus:border-cc-primary/40"
+              />
+              <div className="text-[11px] text-cc-muted">Scope: global • stored locally</div>
+              {savePromptError ? (
+                <div className="text-[11px] text-cc-error">{savePromptError}</div>
+              ) : null}
+              <div className="flex items-center gap-1.5 justify-end">
+                <button
+                  onClick={() => {
+                    setSavePromptOpen(false);
+                    setSavePromptError(null);
+                  }}
+                  className="px-2 py-1 text-[11px] rounded-md border border-cc-border text-cc-muted hover:text-cc-fg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreatePrompt}
+                  disabled={!savePromptName.trim() || !text.trim()}
+                  className={`px-2 py-1 text-[11px] rounded-md border ${
+                    savePromptName.trim() && text.trim()
+                      ? "border-cc-primary/40 text-cc-primary bg-cc-primary/8 cursor-pointer"
+                      : "border-cc-border text-cc-muted cursor-not-allowed"
+                  }`}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-end gap-2 px-2.5 py-2">
             <button
               onClick={toggleMode}
@@ -354,9 +601,11 @@ export function Composer({ sessionId }: { sessionId: string }) {
               value={text}
               onChange={handleInput}
               onKeyDown={handleKeyDown}
+              onClick={syncCaret}
+              onKeyUp={syncCaret}
               onPaste={handlePaste}
               placeholder={isConnected
-                ? "Type a message... (/ for commands)"
+                ? "Type a message... (/ + @)"
                 : "Waiting for CLI connection..."}
               disabled={!isConnected}
               rows={1}
@@ -366,6 +615,26 @@ export function Composer({ sessionId }: { sessionId: string }) {
 
             {/* Right: image + send/stop */}
             <div className="mb-0.5 flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => {
+                  const defaultName = text.trim().slice(0, 32);
+                  setSavePromptName(defaultName || "");
+                  setSavePromptError(null);
+                  setSavePromptOpen((v) => !v);
+                }}
+                disabled={!isConnected || !text.trim()}
+                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-colors ${
+                  isConnected && text.trim()
+                    ? "text-cc-muted border-cc-border hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
+                    : "text-cc-muted opacity-30 border-cc-border/60 cursor-not-allowed"
+                }`}
+                title="Save as prompt"
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                  <path d="M4 2.75h8A1.25 1.25 0 0113.25 4v9.25L8 10.5l-5.25 2.75V4A1.25 1.25 0 014 2.75z" />
+                </svg>
+              </button>
+
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={!isConnected}

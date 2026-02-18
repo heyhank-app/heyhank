@@ -10,6 +10,14 @@ vi.mock("./env-manager.js", () => ({
   deleteEnv: vi.fn(),
 }));
 
+vi.mock("./prompt-manager.js", () => ({
+  listPrompts: vi.fn(() => []),
+  getPrompt: vi.fn(() => null),
+  createPrompt: vi.fn(),
+  updatePrompt: vi.fn(),
+  deletePrompt: vi.fn(() => false),
+}));
+
 vi.mock("node:child_process", () => ({
   execSync: vi.fn(() => ""),
 }));
@@ -124,6 +132,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createRoutes } from "./routes.js";
 import * as envManager from "./env-manager.js";
+import * as promptManager from "./prompt-manager.js";
 import * as gitUtils from "./git-utils.js";
 import * as sessionNames from "./session-names.js";
 import * as settingsManager from "./settings-manager.js";
@@ -1024,6 +1033,96 @@ describe("DELETE /api/envs/:slug", () => {
     expect(res.status).toBe(404);
     const json = await res.json();
     expect(json).toEqual({ error: "Environment not found" });
+  });
+});
+
+describe("Saved prompts API", () => {
+  it("lists prompts with cwd filter", async () => {
+    // Confirms route passes cwd/scope filter through to prompt manager.
+    const prompts = [
+      {
+        id: "p1",
+        name: "Review",
+        content: "Review this PR",
+        scope: "global" as const,
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    ];
+    vi.mocked(promptManager.listPrompts).mockReturnValue(prompts);
+
+    const res = await app.request("/api/prompts?cwd=%2Frepo", { method: "GET" });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual(prompts);
+    expect(promptManager.listPrompts).toHaveBeenCalledWith({ cwd: "/repo", scope: undefined });
+  });
+
+  it("creates a prompt", async () => {
+    // Confirms payload mapping for prompt creation including project cwd.
+    const created = {
+      id: "p1",
+      name: "Review",
+      content: "Review this PR",
+      scope: "project" as const,
+      projectPath: "/repo",
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    vi.mocked(promptManager.createPrompt).mockReturnValue(created);
+
+    const res = await app.request("/api/prompts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Review",
+        content: "Review this PR",
+        scope: "project",
+        cwd: "/repo",
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(promptManager.createPrompt).toHaveBeenCalledWith(
+      "Review",
+      "Review this PR",
+      "project",
+      "/repo",
+    );
+  });
+
+  it("updates a prompt", async () => {
+    // Confirms update fields are forwarded verbatim.
+    vi.mocked(promptManager.updatePrompt).mockReturnValue({
+      id: "p1",
+      name: "Updated",
+      content: "Updated content",
+      scope: "global",
+      createdAt: 1,
+      updatedAt: 2,
+    });
+
+    const res = await app.request("/api/prompts/p1", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Updated", content: "Updated content" }),
+    });
+    expect(res.status).toBe(200);
+    expect(promptManager.updatePrompt).toHaveBeenCalledWith("p1", {
+      name: "Updated",
+      content: "Updated content",
+    });
+  });
+
+  it("deletes a prompt", async () => {
+    // Confirms delete endpoint calls manager and returns ok shape.
+    vi.mocked(promptManager.deletePrompt).mockReturnValue(true);
+
+    const res = await app.request("/api/prompts/p1", { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({ ok: true });
+    expect(promptManager.deletePrompt).toHaveBeenCalledWith("p1");
   });
 });
 

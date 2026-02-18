@@ -29,6 +29,7 @@ export function Sidebar() {
   const toggleProjectCollapse = useStore((s) => s.toggleProjectCollapse);
   const route = parseHash(hash);
   const isSettingsPage = route.page === "settings";
+  const isPromptsPage = route.page === "prompts";
   const isTerminalPage = route.page === "terminal";
   const isEnvironmentsPage = route.page === "environments";
   const isScheduledPage = route.page === "scheduled";
@@ -395,6 +396,22 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="p-3 border-t border-cc-border space-y-0.5">
+        <button
+          onClick={() => {
+            useStore.getState().closeTerminal();
+            window.location.hash = "#/prompts";
+          }}
+          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm transition-colors cursor-pointer ${
+            isPromptsPage
+              ? "bg-cc-active text-cc-fg"
+              : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+          }`}
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
+            <path d="M3 2.5A1.5 1.5 0 014.5 1h5.879c.398 0 .779.158 1.06.44l1.621 1.62c.281.282.44.663.44 1.061V13.5A1.5 1.5 0 0112 15H4.5A1.5 1.5 0 013 13.5v-11zM4.5 2a.5.5 0 00-.5.5v11a.5.5 0 00.5.5H12a.5.5 0 00.5-.5V4.121a.5.5 0 00-.146-.353l-1.621-1.621A.5.5 0 0010.379 2H4.5zm1.25 4.25a.75.75 0 01.75-.75h3a.75.75 0 010 1.5h-3a.75.75 0 01-.75-.75zm0 3a.75.75 0 01.75-.75h3.5a.75.75 0 010 1.5H6.5a.75.75 0 01-.75-.75z" />
+          </svg>
+          <span>Prompts</span>
+        </button>
         <button
           onClick={() => {
             window.location.hash = "#/terminal";
