@@ -535,7 +535,11 @@ describe("POST /api/sessions/create", () => {
 
     expect(res.status).toBe(200);
     expect(launcher.launch).toHaveBeenCalledWith(
-      expect.objectContaining({ backendType: "codex", containerId: "cid-codex" }),
+      expect.objectContaining({
+        backendType: "codex",
+        containerId: "cid-codex",
+        containerCwd: "/workspace",
+      }),
     );
   });
 
@@ -2020,6 +2024,12 @@ describe("POST /api/sessions/create-stream", () => {
 
     expect(steps).toContain("creating_container");
     expect(steps).toContain("launching_cli");
+    expect(launcher.launch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        containerId: "cid-stream",
+        containerCwd: "/workspace",
+      }),
+    );
 
     // Done event should include sessionId
     const doneEvent = events.find((e) => e.event === "done");
@@ -2071,6 +2081,12 @@ describe("POST /api/sessions/create-stream", () => {
 
     // Should have pulling_image step
     expect(steps).toContain("pulling_image");
+    expect(launcher.launch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        containerId: "cid-pulled",
+        containerCwd: "/workspace",
+      }),
+    );
     expect(mockImagePullEnsureImage).toHaveBeenCalledWith("the-companion:latest");
     expect(mockImagePullWaitForReady).toHaveBeenCalled();
   });
