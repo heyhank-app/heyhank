@@ -2,6 +2,15 @@ import { create } from "zustand";
 import type { SessionState, PermissionRequest, ChatMessage, SdkSessionInfo, TaskItem, McpServerDetail } from "./types.js";
 import type { UpdateInfo, PRStatusResponse, CreationProgressEvent } from "./api.js";
 
+export interface QuickTerminalTab {
+  id: string;
+  label: string;
+  cwd: string;
+  containerId?: string;
+}
+
+export type QuickTerminalPlacement = "top" | "right" | "bottom" | "left";
+
 interface AppState {
   // Sessions
   sessions: Map<string, SessionState>;
@@ -152,6 +161,22 @@ interface AppState {
   setActiveTab: (tab: "chat" | "diff") => void;
   setDiffPanelSelectedFile: (sessionId: string, filePath: string | null) => void;
 
+  // Session quick terminal (docked in session workspace)
+  quickTerminalOpen: boolean;
+  quickTerminalTabs: QuickTerminalTab[];
+  activeQuickTerminalTabId: string | null;
+  quickTerminalPlacement: QuickTerminalPlacement;
+  quickTerminalNextHostIndex: number;
+  quickTerminalNextDockerIndex: number;
+
+  // Session quick terminal actions
+  setQuickTerminalOpen: (open: boolean) => void;
+  openQuickTerminal: (opts: { target: "host" | "docker"; cwd: string; containerId?: string; reuseIfExists?: boolean }) => void;
+  closeQuickTerminalTab: (tabId: string) => void;
+  setActiveQuickTerminalTabId: (tabId: string | null) => void;
+  setQuickTerminalPlacement: (placement: QuickTerminalPlacement) => void;
+  resetQuickTerminal: () => void;
+
   // Terminal state
   terminalOpen: boolean;
   terminalCwd: string | null;
@@ -221,6 +246,13 @@ function getInitialCollapsedProjects(): Set<string> {
   }
 }
 
+function getInitialQuickTerminalPlacement(): QuickTerminalPlacement {
+  if (typeof window === "undefined") return "bottom";
+  const stored = window.localStorage.getItem("cc-terminal-placement");
+  if (stored === "top" || stored === "right" || stored === "bottom" || stored === "left") return stored;
+  return "bottom";
+}
+
 export const useStore = create<AppState>((set) => ({
   sessions: new Map(),
   sdkSessions: [],
@@ -257,6 +289,12 @@ export const useStore = create<AppState>((set) => ({
   homeResetKey: 0,
   activeTab: "chat",
   diffPanelSelectedFile: new Map(),
+  quickTerminalOpen: false,
+  quickTerminalTabs: [],
+  activeQuickTerminalTabId: null,
+  quickTerminalPlacement: getInitialQuickTerminalPlacement(),
+  quickTerminalNextHostIndex: 1,
+  quickTerminalNextDockerIndex: 1,
   terminalOpen: false,
   terminalCwd: null,
   terminalId: null,
@@ -658,6 +696,69 @@ export const useStore = create<AppState>((set) => ({
       return { diffPanelSelectedFile };
     }),
 
+  setQuickTerminalOpen: (open) => set({ quickTerminalOpen: open }),
+  openQuickTerminal: (opts) =>
+    set((s) => {
+      if (opts.reuseIfExists) {
+        const existing = s.quickTerminalTabs.find((t) =>
+          t.cwd === opts.cwd
+          && t.containerId === opts.containerId,
+        );
+        if (existing) {
+          return {
+            quickTerminalOpen: true,
+            activeQuickTerminalTabId: existing.id,
+          };
+        }
+      }
+
+      const isDocker = opts.target === "docker";
+      const hostIndex = s.quickTerminalNextHostIndex;
+      const dockerIndex = s.quickTerminalNextDockerIndex;
+      const nextHostIndex = isDocker ? hostIndex : hostIndex + 1;
+      const nextDockerIndex = isDocker ? dockerIndex + 1 : dockerIndex;
+      const nextTab: QuickTerminalTab = {
+        id: `${opts.target}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        label: isDocker
+          ? `Docker ${dockerIndex}`
+          : (hostIndex === 1 ? "Terminal" : `Terminal ${hostIndex}`),
+        cwd: opts.cwd,
+        containerId: opts.containerId,
+      };
+      return {
+        quickTerminalOpen: true,
+        quickTerminalTabs: [...s.quickTerminalTabs, nextTab],
+        activeQuickTerminalTabId: nextTab.id,
+        quickTerminalNextHostIndex: nextHostIndex,
+        quickTerminalNextDockerIndex: nextDockerIndex,
+      };
+    }),
+  closeQuickTerminalTab: (tabId) =>
+    set((s) => {
+      const nextTabs = s.quickTerminalTabs.filter((t) => t.id !== tabId);
+      const nextActive = s.activeQuickTerminalTabId === tabId ? (nextTabs[0]?.id || null) : s.activeQuickTerminalTabId;
+      return {
+        quickTerminalTabs: nextTabs,
+        activeQuickTerminalTabId: nextActive,
+        quickTerminalOpen: nextTabs.length > 0 ? s.quickTerminalOpen : false,
+      };
+    }),
+  setActiveQuickTerminalTabId: (tabId) => set({ activeQuickTerminalTabId: tabId }),
+  setQuickTerminalPlacement: (placement) => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("cc-terminal-placement", placement);
+    }
+    set({ quickTerminalPlacement: placement });
+  },
+  resetQuickTerminal: () =>
+    set({
+      quickTerminalOpen: false,
+      quickTerminalTabs: [],
+      activeQuickTerminalTabId: null,
+      quickTerminalNextHostIndex: 1,
+      quickTerminalNextDockerIndex: 1,
+    }),
+
   setTerminalOpen: (open) => set({ terminalOpen: open }),
   setTerminalCwd: (cwd) => set({ terminalCwd: cwd }),
   setTerminalId: (id) => set({ terminalId: id }),
@@ -688,6 +789,12 @@ export const useStore = create<AppState>((set) => ({
       prStatus: new Map(),
       activeTab: "chat" as const,
       diffPanelSelectedFile: new Map(),
+      quickTerminalOpen: false,
+      quickTerminalTabs: [],
+      activeQuickTerminalTabId: null,
+      quickTerminalPlacement: getInitialQuickTerminalPlacement(),
+      quickTerminalNextHostIndex: 1,
+      quickTerminalNextDockerIndex: 1,
       terminalOpen: false,
       terminalCwd: null,
       terminalId: null,

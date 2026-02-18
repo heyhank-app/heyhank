@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 vi.mock("../api.js", () => ({
@@ -18,6 +18,11 @@ interface MockStoreState {
   setTaskPanelOpen: ReturnType<typeof vi.fn>;
   activeTab: "chat" | "diff";
   setActiveTab: ReturnType<typeof vi.fn>;
+  quickTerminalOpen: boolean;
+  quickTerminalTabs: { id: string; label: string; cwd: string; containerId?: string }[];
+  openQuickTerminal: ReturnType<typeof vi.fn>;
+  setQuickTerminalOpen: ReturnType<typeof vi.fn>;
+  resetQuickTerminal: ReturnType<typeof vi.fn>;
   sessions: Map<string, { cwd?: string; is_containerized?: boolean }>;
   sdkSessions: { sessionId: string; cwd?: string; containerId?: string }[];
   changedFiles: Map<string, Set<string>>;
@@ -36,6 +41,11 @@ function resetStore(overrides: Partial<MockStoreState> = {}) {
     setTaskPanelOpen: vi.fn(),
     activeTab: "chat",
     setActiveTab: vi.fn(),
+    quickTerminalOpen: false,
+    quickTerminalTabs: [],
+    openQuickTerminal: vi.fn(),
+    setQuickTerminalOpen: vi.fn(),
+    resetQuickTerminal: vi.fn(),
     sessions: new Map([["s1", { cwd: "/repo" }]]),
     sdkSessions: [],
     changedFiles: new Map(),
@@ -52,6 +62,7 @@ import { TopBar } from "./TopBar.js";
 beforeEach(() => {
   vi.clearAllMocks();
   resetStore();
+  window.localStorage.clear();
 });
 
 describe("TopBar", () => {
@@ -77,5 +88,43 @@ describe("TopBar", () => {
 
     render(<TopBar />);
     expect(screen.queryByText("1")).not.toBeInTheDocument();
+  });
+
+  it("opens quick terminal on click (not on hover)", () => {
+    render(<TopBar />);
+
+    const btn = screen.getByRole("button", { name: "Terminal" });
+    fireEvent.mouseOver(btn);
+    expect(storeState.openQuickTerminal).not.toHaveBeenCalled();
+
+    fireEvent.click(btn);
+    expect(storeState.openQuickTerminal).toHaveBeenCalledWith({ target: "host", cwd: "/repo", reuseIfExists: true });
+  });
+
+  it("opens docker quick terminal in containerized sessions", () => {
+    resetStore({
+      sdkSessions: [{ sessionId: "s1", cwd: "/repo", containerId: "ctr-1" }],
+    });
+    render(<TopBar />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Terminal" }));
+    expect(storeState.openQuickTerminal).toHaveBeenCalledWith({
+      target: "docker",
+      cwd: "/workspace",
+      containerId: "ctr-1",
+      reuseIfExists: true,
+    });
+  });
+
+  it("toggles quick terminal closed when already open with tabs", () => {
+    resetStore({
+      quickTerminalOpen: true,
+      quickTerminalTabs: [{ id: "t1", label: "Terminal", cwd: "/repo" }],
+    });
+    render(<TopBar />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Terminal" }));
+    expect(storeState.setQuickTerminalOpen).toHaveBeenCalledWith(false);
+    expect(storeState.openQuickTerminal).not.toHaveBeenCalled();
   });
 });
