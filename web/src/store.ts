@@ -84,7 +84,8 @@ interface AppState {
   sidebarOpen: boolean;
   taskPanelOpen: boolean;
   homeResetKey: number;
-  activeTab: "chat" | "diff";
+  activeTab: "chat" | "diff" | "terminal";
+  chatTabReentryTickBySession: Map<string, number>;
   diffPanelSelectedFile: Map<string, string>;
 
   // Actions
@@ -156,7 +157,8 @@ interface AppState {
   dismissUpdate: (version: string) => void;
 
   // Diff panel actions
-  setActiveTab: (tab: "chat" | "diff") => void;
+  setActiveTab: (tab: "chat" | "diff" | "terminal") => void;
+  markChatTabReentry: (sessionId: string) => void;
   setDiffPanelSelectedFile: (sessionId: string, filePath: string | null) => void;
 
   // Session quick terminal (docked in session workspace)
@@ -277,9 +279,10 @@ export const useStore = create<AppState>((set) => ({
   notificationSound: getInitialNotificationSound(),
   notificationDesktop: getInitialNotificationDesktop(),
   sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 768 : true,
-  taskPanelOpen: typeof window !== "undefined" ? window.innerWidth >= 1024 : false,
+  taskPanelOpen: typeof window !== "undefined" ? window.innerWidth >= 1024 : true,
   homeResetKey: 0,
   activeTab: "chat",
+  chatTabReentryTickBySession: new Map(),
   diffPanelSelectedFile: new Map(),
   quickTerminalOpen: false,
   quickTerminalTabs: [],
@@ -667,6 +670,13 @@ export const useStore = create<AppState>((set) => ({
   },
 
   setActiveTab: (tab) => set({ activeTab: tab }),
+  markChatTabReentry: (sessionId) =>
+    set((s) => {
+      const chatTabReentryTickBySession = new Map(s.chatTabReentryTickBySession);
+      const nextTick = (chatTabReentryTickBySession.get(sessionId) ?? 0) + 1;
+      chatTabReentryTickBySession.set(sessionId, nextTick);
+      return { chatTabReentryTickBySession };
+    }),
 
   setDiffPanelSelectedFile: (sessionId, filePath) =>
     set((s) => {
@@ -770,6 +780,7 @@ export const useStore = create<AppState>((set) => ({
       toolProgress: new Map(),
       prStatus: new Map(),
       activeTab: "chat" as const,
+      chatTabReentryTickBySession: new Map(),
       diffPanelSelectedFile: new Map(),
       quickTerminalOpen: false,
       quickTerminalTabs: [],
