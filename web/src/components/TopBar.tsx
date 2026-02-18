@@ -1,12 +1,38 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useStore } from "../store.js";
 import { ClaudeMdEditor } from "./ClaudeMdEditor.js";
 import { parseHash } from "../utils/routing.js";
+
+type WorkspaceTab = "chat" | "diff" | "terminal";
 
 function getActiveTabSurfaceColor(tab: "chat" | "diff" | "terminal"): string {
   // Deterministic mapping to the primary surface of the active workspace pane.
   if (tab === "terminal") return "var(--cc-card)";
   return "var(--cc-bg)";
+}
+
+function isVisibleColor(value: string | null | undefined): value is string {
+  if (!value) return false;
+  const color = value.trim().toLowerCase();
+  return color !== "transparent" && color !== "rgba(0, 0, 0, 0)" && color !== "rgba(0,0,0,0)";
+}
+
+function sampleColorBelowTab(button: HTMLButtonElement | null): string | null {
+  if (!button || typeof document.elementsFromPoint !== "function") return null;
+  const rect = button.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  const x = Math.min(Math.max(rect.left + rect.width / 2, 0), Math.max(window.innerWidth - 1, 0));
+  const y = Math.min(Math.max(rect.bottom + 1, 0), Math.max(window.innerHeight - 1, 0));
+
+  const stack = document.elementsFromPoint(x, y);
+  for (const element of stack) {
+    if (button.contains(element)) continue;
+    const color = window.getComputedStyle(element).backgroundColor;
+    if (isVisibleColor(color)) return color;
+  }
+
+  const bodyColor = window.getComputedStyle(document.body).backgroundColor;
+  return isVisibleColor(bodyColor) ? bodyColor : null;
 }
 
 export function TopBar() {
@@ -78,6 +104,10 @@ export function TopBar() {
   const status = currentSessionId ? (sessionStatus.get(currentSessionId) ?? null) : null;
   const isConnected = currentSessionId ? (cliConnected.get(currentSessionId) ?? false) : false;
   const activeTabSurfaceColor = useMemo(() => getActiveTabSurfaceColor(activeTab), [activeTab]);
+  const chatTabRef = useRef<HTMLButtonElement>(null);
+  const diffTabRef = useRef<HTMLButtonElement>(null);
+  const terminalTabRef = useRef<HTMLButtonElement>(null);
+  const [sampledTabColors, setSampledTabColors] = useState<Partial<Record<WorkspaceTab, string>>>({});
   const sessionName = currentSessionId
     ? (sessionNames?.get(currentSessionId) ||
       sdkSessions.find((s) => s.sessionId === currentSessionId)?.name ||
@@ -114,6 +144,51 @@ export function TopBar() {
   }, [currentSessionId, resetQuickTerminal]);
 
   useEffect(() => {
+    if (!showWorkspaceControls) return;
+
+    const measure = () => {
+      setSampledTabColors((prev) => {
+        const next: Partial<Record<WorkspaceTab, string>> = {};
+        const chatColor = sampleColorBelowTab(chatTabRef.current);
+        const diffColor = sampleColorBelowTab(diffTabRef.current);
+        const terminalColor = sampleColorBelowTab(terminalTabRef.current);
+        if (chatColor) next.chat = chatColor;
+        if (diffColor) next.diff = diffColor;
+        if (terminalColor) next.terminal = terminalColor;
+        if (
+          prev.chat === next.chat &&
+          prev.diff === next.diff &&
+          prev.terminal === next.terminal
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    };
+
+    let scheduled = false;
+    const scheduleMeasure = () => {
+      if (scheduled) return;
+      scheduled = true;
+      window.requestAnimationFrame(() => {
+        scheduled = false;
+        measure();
+      });
+    };
+
+    const raf = window.requestAnimationFrame(measure);
+    const interval = window.setInterval(scheduleMeasure, 5000);
+    window.addEventListener("resize", scheduleMeasure);
+    document.addEventListener("scroll", scheduleMeasure, true);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearInterval(interval);
+      window.removeEventListener("resize", scheduleMeasure);
+      document.removeEventListener("scroll", scheduleMeasure, true);
+    };
+  }, [showWorkspaceControls, activeTab, currentSessionId, taskPanelOpen, sidebarOpen]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "j") return;
       if (!showWorkspaceControls) return;
@@ -148,13 +223,14 @@ export function TopBar() {
           <div className="flex-1 min-w-0">
             <div className="flex items-end gap-1 min-w-0">
               <button
+                ref={chatTabRef}
                 onClick={() => activateWorkspaceTab("chat")}
                 className={`h-9 px-3.5 border text-[12px] font-semibold transition-colors cursor-pointer min-w-0 max-w-[44vw] sm:max-w-[30vw] truncate ${
                   activeTab === "chat"
                     ? "relative z-10 h-9 -mb-px text-cc-fg border-cc-border/80 border-b-transparent rounded-[14px_14px_0_0]"
                     : "h-8 mb-px bg-transparent text-cc-muted border-transparent rounded-[8px_8px_0_0] hover:bg-cc-hover/70 hover:text-cc-fg"
                 }`}
-                style={activeTab === "chat" ? { backgroundColor: activeTabSurfaceColor } : undefined}
+                style={activeTab === "chat" ? { backgroundColor: sampledTabColors.chat || activeTabSurfaceColor } : undefined}
                 title={sessionName || "Session"}
                 aria-label="Session tab"
               >
@@ -172,13 +248,14 @@ export function TopBar() {
                 </span>
               </button>
               <button
+                ref={diffTabRef}
                 onClick={() => activateWorkspaceTab("diff")}
                 className={`px-3.5 border text-[12px] font-semibold transition-colors cursor-pointer flex items-center gap-1.5 ${
                   activeTab === "diff"
                     ? "relative z-10 h-9 -mb-px text-cc-fg border-cc-border/80 border-b-transparent rounded-[14px_14px_0_0]"
                     : "h-8 mb-px bg-transparent text-cc-muted border-transparent rounded-[8px_8px_0_0] hover:bg-cc-hover/70 hover:text-cc-fg"
                 }`}
-                style={activeTab === "diff" ? { backgroundColor: activeTabSurfaceColor } : undefined}
+                style={activeTab === "diff" ? { backgroundColor: sampledTabColors.diff || activeTabSurfaceColor } : undefined}
                 aria-label="Diffs tab"
               >
                 Diffs
@@ -189,6 +266,7 @@ export function TopBar() {
                 )}
               </button>
               <button
+                ref={terminalTabRef}
                 onClick={() => activateWorkspaceTab("terminal")}
                 disabled={!cwd}
                 className={`px-3.5 border text-[12px] font-semibold transition-colors ${
@@ -198,7 +276,7 @@ export function TopBar() {
                       ? "relative z-10 h-9 -mb-px text-cc-fg border-cc-border/80 border-b-transparent rounded-[14px_14px_0_0] cursor-pointer"
                       : "h-8 mb-px bg-transparent text-cc-muted border-transparent rounded-[8px_8px_0_0] hover:bg-cc-hover/70 hover:text-cc-fg cursor-pointer"
                 }`}
-                style={activeTab === "terminal" ? { backgroundColor: activeTabSurfaceColor } : undefined}
+                style={activeTab === "terminal" ? { backgroundColor: sampledTabColors.terminal || activeTabSurfaceColor } : undefined}
                 title={terminalButtonTitle}
                 aria-label="Shell tab"
               >

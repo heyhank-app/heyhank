@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 vi.mock("../api.js", () => ({
@@ -169,5 +169,55 @@ describe("TopBar", () => {
 
     fireEvent.keyDown(window, { key: "j", metaKey: true });
     expect(storeState.setActiveTab).toHaveBeenCalledWith("diff");
+  });
+
+  it("samples the active tab background color from the pixel below it", async () => {
+    resetStore({ activeTab: "diff" });
+    const underlay = document.createElement("div");
+    underlay.style.backgroundColor = "rgb(12, 34, 56)";
+    document.body.appendChild(underlay);
+
+    const originalElementsFromPoint = (document as Document & {
+      elementsFromPoint?: (x: number, y: number) => Element[];
+    }).elementsFromPoint;
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      writable: true,
+      value: () => [underlay],
+    });
+
+    render(<TopBar />);
+
+    const diffTab = screen.getByRole("button", { name: "Diffs tab" });
+    vi.spyOn(diffTab, "getBoundingClientRect").mockReturnValue({
+      x: 10,
+      y: 10,
+      left: 10,
+      top: 10,
+      right: 110,
+      bottom: 40,
+      width: 100,
+      height: 30,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    await waitFor(() => {
+      expect(diffTab).toHaveStyle({ backgroundColor: "rgb(12, 34, 56)" });
+    });
+
+    if (originalElementsFromPoint) {
+      Object.defineProperty(document, "elementsFromPoint", {
+        configurable: true,
+        writable: true,
+        value: originalElementsFromPoint,
+      });
+    } else {
+      Reflect.deleteProperty(document as unknown as Record<string, unknown>, "elementsFromPoint");
+    }
+    underlay.remove();
   });
 });
