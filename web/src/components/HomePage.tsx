@@ -320,7 +320,7 @@ export function HomePage() {
         if (!active) return;
         setLinearSearching(false);
       });
-    }, 220);
+    }, 400);
 
     return () => {
       active = false;
@@ -355,7 +355,7 @@ export function HomePage() {
         if (!active) return;
         setGlobalSearching(false);
       });
-    }, 250);
+    }, 400);
 
     return () => {
       active = false;

@@ -551,7 +551,7 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
       }).finally(() => {
         if (active) setSearching(false);
       });
-    }, 250);
+    }, 400);
     return () => { active = false; clearTimeout(timer); };
   }, [searchQuery, showSearch]);
 
