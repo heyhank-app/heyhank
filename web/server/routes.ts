@@ -153,7 +153,10 @@ export function createRoutes(
           }
 
           if (repoInfo.currentBranch !== body.branch) {
-            gitUtils.checkoutBranch(repoInfo.repoRoot, body.branch);
+            gitUtils.checkoutOrCreateBranch(repoInfo.repoRoot, body.branch, {
+              createBranch: body.createBranch,
+              defaultBranch: repoInfo.defaultBranch,
+            });
           }
 
           const pullResult = gitUtils.gitPull(repoInfo.repoRoot);
@@ -411,17 +414,10 @@ export function createRoutes(
 
             if (repoInfo.currentBranch !== body.branch) {
               await emitProgress(stream, "checkout_branch", `Checking out ${body.branch}...`, "in_progress");
-              try {
-                gitUtils.checkoutBranch(repoInfo.repoRoot, body.branch);
-              } catch {
-                // Branch doesn't exist locally — create it if requested
-                if (body.createBranch) {
-                  const base = repoInfo.defaultBranch;
-                  gitUtils.createAndCheckoutBranch(repoInfo.repoRoot, body.branch, base);
-                } else {
-                  throw new Error(`Branch "${body.branch}" does not exist. Enable "create branch" to create it.`);
-                }
-              }
+              gitUtils.checkoutOrCreateBranch(repoInfo.repoRoot, body.branch, {
+                createBranch: body.createBranch,
+                defaultBranch: repoInfo.defaultBranch,
+              });
               await emitProgress(stream, "checkout_branch", `On branch ${body.branch}`, "done");
             }
 

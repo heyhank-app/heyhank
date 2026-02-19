@@ -276,9 +276,15 @@ export function ensureWorktree(
   }
 
   if (options?.createBranch !== false) {
-    // Create new branch from base
+    // Create new branch from base — prefer remote ref (up-to-date after fetch)
+    // over the potentially stale local ref
     const base = options?.baseBranch || resolveDefaultBranch(repoRoot);
-    git(`worktree add -b ${branchName} "${targetPath}" ${base}`, repoRoot);
+    const remoteRef = `origin/${base}`;
+    const startPoint =
+      gitSafe(`rev-parse --verify refs/remotes/${remoteRef}`, repoRoot) !== null
+        ? remoteRef
+        : base;
+    git(`worktree add -b ${branchName} "${targetPath}" ${startPoint}`, repoRoot);
     return { worktreePath: targetPath, branch: branchName, actualBranch: branchName, isNew: true };
   }
 
@@ -370,8 +376,35 @@ export function checkoutBranch(cwd: string, branchName: string): void {
   git(`checkout ${branchName}`, cwd);
 }
 
-export function createAndCheckoutBranch(cwd: string, branchName: string, baseBranch: string): void {
-  git(`checkout -b ${branchName} ${baseBranch}`, cwd);
+/**
+ * Checkout an existing branch, or create a new one from origin/{defaultBranch}
+ * (falling back to local defaultBranch if no remote ref exists).
+ */
+export function checkoutOrCreateBranch(
+  cwd: string,
+  branchName: string,
+  options?: { createBranch?: boolean; defaultBranch?: string },
+): { created: boolean } {
+  // Try regular checkout first (works for existing local and remote-tracking branches)
+  const checkoutResult = gitSafe(`checkout ${branchName}`, cwd);
+  if (checkoutResult !== null) {
+    return { created: false };
+  }
+
+  // Branch doesn't exist — create it if allowed
+  if (!options?.createBranch) {
+    throw new Error(`Branch "${branchName}" does not exist. Pass createBranch to create it.`);
+  }
+
+  const base = options.defaultBranch || resolveDefaultBranch(cwd);
+  // Prefer remote ref (up-to-date after fetch) over potentially stale local ref
+  const remoteRef = `origin/${base}`;
+  const startPoint =
+    gitSafe(`rev-parse --verify refs/remotes/${remoteRef}`, cwd) !== null
+      ? remoteRef
+      : base;
+  git(`checkout -b ${branchName} ${startPoint}`, cwd);
+  return { created: true };
 }
 
 export function getBranchStatus(

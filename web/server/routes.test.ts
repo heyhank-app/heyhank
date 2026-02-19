@@ -44,7 +44,7 @@ vi.mock("./git-utils.js", () => ({
   gitFetch: vi.fn(() => ({ success: true, output: "" })),
   gitPull: vi.fn(() => ({ success: true, output: "" })),
   checkoutBranch: vi.fn(),
-  createAndCheckoutBranch: vi.fn(),
+  checkoutOrCreateBranch: vi.fn(() => ({ created: false })),
   removeWorktree: vi.fn(),
   isWorktreeDirty: vi.fn(() => false),
 }));
@@ -307,7 +307,7 @@ describe("POST /api/sessions/create", () => {
 
     expect(res.status).toBe(200);
     expect(gitUtils.gitFetch).toHaveBeenCalledWith("/repo");
-    expect(gitUtils.checkoutBranch).not.toHaveBeenCalled();
+    expect(gitUtils.checkoutOrCreateBranch).not.toHaveBeenCalled();
     expect(gitUtils.gitPull).toHaveBeenCalledWith("/repo");
   });
 
@@ -328,12 +328,15 @@ describe("POST /api/sessions/create", () => {
 
     expect(res.status).toBe(200);
     expect(gitUtils.gitFetch).toHaveBeenCalledWith("/repo");
-    expect(gitUtils.checkoutBranch).toHaveBeenCalledWith("/repo", "main");
+    expect(gitUtils.checkoutOrCreateBranch).toHaveBeenCalledWith("/repo", "main", {
+      createBranch: undefined,
+      defaultBranch: "main",
+    });
     expect(gitUtils.gitPull).toHaveBeenCalledWith("/repo");
     expect(vi.mocked(gitUtils.gitFetch).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(gitUtils.checkoutBranch).mock.invocationCallOrder[0],
+      vi.mocked(gitUtils.checkoutOrCreateBranch).mock.invocationCallOrder[0],
     );
-    expect(vi.mocked(gitUtils.checkoutBranch).mock.invocationCallOrder[0]).toBeLessThan(
+    expect(vi.mocked(gitUtils.checkoutOrCreateBranch).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(gitUtils.gitPull).mock.invocationCallOrder[0],
     );
   });
@@ -2223,17 +2226,15 @@ describe("POST /api/sessions/create-stream", () => {
     expect(steps).toContain("launching_cli");
   });
 
-  it("creates branch via createAndCheckoutBranch when checkout fails and createBranch is true", async () => {
+  it("creates branch via checkoutOrCreateBranch when createBranch is true", async () => {
     // Simulates the Linear auto-branch flow: branch doesn't exist yet,
-    // checkoutBranch fails, and createAndCheckoutBranch is called as fallback
+    // checkoutOrCreateBranch handles try-then-create internally
     vi.mocked(gitUtils.getRepoInfo).mockReturnValueOnce({
       repoRoot: "/test",
       currentBranch: "main",
       defaultBranch: "main",
     } as any);
-    vi.mocked(gitUtils.checkoutBranch).mockImplementationOnce(() => {
-      throw new Error("error: pathspec 'the-138-fix-auth' did not match any file(s) known to git");
-    });
+    vi.mocked(gitUtils.checkoutOrCreateBranch).mockReturnValueOnce({ created: true });
 
     const res = await app.request("/api/sessions/create-stream", {
       method: "POST",
@@ -2247,25 +2248,28 @@ describe("POST /api/sessions/create-stream", () => {
       .filter((e) => e.event === "progress")
       .map((e) => JSON.parse(e.data).step);
 
-    // Should succeed with checkout_branch step (createAndCheckoutBranch fallback)
+    // Should succeed with checkout_branch step
     expect(steps).toContain("checkout_branch");
     expect(steps).toContain("launching_cli");
-    expect(gitUtils.createAndCheckoutBranch).toHaveBeenCalledWith("/test", "the-138-fix-auth", "main");
+    expect(gitUtils.checkoutOrCreateBranch).toHaveBeenCalledWith("/test", "the-138-fix-auth", {
+      createBranch: true,
+      defaultBranch: "main",
+    });
 
     // No error event
     const errorEvent = events.find((e) => e.event === "error");
     expect(errorEvent).toBeUndefined();
   });
 
-  it("emits error when checkout fails and createBranch is not set", async () => {
-    // When checkout fails and createBranch is falsy, should error out
+  it("emits error when checkoutOrCreateBranch throws and createBranch is not set", async () => {
+    // When checkout fails and createBranch is falsy, checkoutOrCreateBranch throws
     vi.mocked(gitUtils.getRepoInfo).mockReturnValueOnce({
       repoRoot: "/test",
       currentBranch: "main",
       defaultBranch: "main",
     } as any);
-    vi.mocked(gitUtils.checkoutBranch).mockImplementationOnce(() => {
-      throw new Error("error: pathspec 'nonexistent' did not match");
+    vi.mocked(gitUtils.checkoutOrCreateBranch).mockImplementationOnce(() => {
+      throw new Error('Branch "nonexistent" does not exist. Pass createBranch to create it.');
     });
 
     const res = await app.request("/api/sessions/create-stream", {
@@ -2279,7 +2283,6 @@ describe("POST /api/sessions/create-stream", () => {
     const errorEvent = events.find((e) => e.event === "error");
     expect(errorEvent).toBeDefined();
     expect(JSON.parse(errorEvent!.data).error).toContain("does not exist");
-    expect(gitUtils.createAndCheckoutBranch).not.toHaveBeenCalled();
   });
 
   it("emits worktree progress events when useWorktree is set", async () => {

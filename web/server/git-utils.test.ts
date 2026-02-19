@@ -421,17 +421,20 @@ describe("ensureWorktree", () => {
     expect((addCall![0] as string)).toContain("origin/feat/remote");
   });
 
-  it("creates new branch from base when branch does not exist anywhere", () => {
+  it("creates new branch from origin/base when branch does not exist anywhere", () => {
+    // When neither the requested branch nor its remote counterpart exist,
+    // but origin/{baseBranch} is available (after fetch), use origin/{baseBranch}
+    // as the start point instead of the potentially stale local ref.
     mockExecSync.mockImplementation((cmd: string) => {
       if (cmd.includes("worktree list --porcelain")) {
         return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
       }
       if (cmd.includes("status --porcelain")) return "";
-      // Neither local nor remote branch exists
-      if (cmd.includes("rev-parse --verify")) throw new Error("not found");
-      // resolveDefaultBranch
-      if (cmd.includes("symbolic-ref refs/remotes/origin/HEAD"))
-        return "refs/remotes/origin/main";
+      // Neither local nor remote branch exists for feat/new
+      if (cmd.includes("rev-parse --verify refs/heads/feat/new")) throw new Error("not found");
+      if (cmd.includes("rev-parse --verify refs/remotes/origin/feat/new")) throw new Error("not found");
+      // Remote ref for the base branch exists (up-to-date after fetch)
+      if (cmd.includes("rev-parse --verify refs/remotes/origin/develop")) return "abc123";
       // worktree add -b
       if (cmd.includes("worktree add -b")) return "";
       throw new Error(`Unmocked: ${cmd}`);
@@ -448,7 +451,37 @@ describe("ensureWorktree", () => {
       (c[0] as string).includes("worktree add -b"),
     );
     expect(addCall).toBeDefined();
+    // Should use origin/develop (remote ref), NOT local develop
+    expect((addCall![0] as string)).toContain("origin/develop");
+  });
+
+  it("falls back to local base branch when origin ref does not exist", () => {
+    // When origin/{baseBranch} is not available (e.g. no remote), fall back
+    // to the local base branch ref.
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("worktree list --porcelain")) {
+        return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
+      }
+      if (cmd.includes("status --porcelain")) return "";
+      // Neither local nor remote branch exists for feat/new, and no origin/develop
+      if (cmd.includes("rev-parse --verify")) throw new Error("not found");
+      // worktree add -b
+      if (cmd.includes("worktree add -b")) return "";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+    // Target path doesn't exist yet
+    mockExistsSync.mockReturnValue(false);
+
+    const result = gitUtils.ensureWorktree("/repo", "feat/new", { baseBranch: "develop" });
+    expect(result.isNew).toBe(true);
+
+    const addCall = mockExecSync.mock.calls.find((c: unknown[]) =>
+      (c[0] as string).includes("worktree add -b"),
+    );
+    expect(addCall).toBeDefined();
+    // Should fall back to local "develop" since origin/develop doesn't exist
     expect((addCall![0] as string)).toContain("develop");
+    expect((addCall![0] as string)).not.toContain("origin/develop");
   });
 
   it("throws when createBranch=false and branch does not exist", () => {
@@ -832,30 +865,74 @@ describe("getBranchStatus", () => {
   });
 });
 
-// ─── createAndCheckoutBranch ──────────────────────────────────────────────────
+// ─── checkoutOrCreateBranch ─────────────────────────────────────────────────
 
-describe("createAndCheckoutBranch", () => {
-  it("runs git checkout -b with the given branch and base", () => {
-    // Verify createAndCheckoutBranch creates a new branch from a base branch
-    mockGitCommand("checkout -b", "Switched to a new branch 'the-123-fix-auth'");
+describe("checkoutOrCreateBranch", () => {
+  it("checks out an existing branch without creating", () => {
+    mockGitCommand("checkout feat/existing", "Switched to branch 'feat/existing'");
 
-    gitUtils.createAndCheckoutBranch("/repo", "the-123-fix-auth", "main");
-
-    const call = mockExecSync.mock.calls.find((c: unknown[]) =>
-      (c[0] as string).includes("checkout -b"),
-    );
-    expect(call).toBeDefined();
-    expect((call![0] as string)).toContain("the-123-fix-auth");
-    expect((call![0] as string)).toContain("main");
+    const result = gitUtils.checkoutOrCreateBranch("/repo", "feat/existing");
+    expect(result.created).toBe(false);
   });
 
-  it("throws when base branch does not exist", () => {
-    mockExecSync.mockImplementation(() => {
-      throw new Error("fatal: 'nonexistent' is not a commit");
+  it("creates branch from origin/defaultBranch when checkout fails and createBranch=true", () => {
+    // Checkout fails (branch doesn't exist), but origin/main is available
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("checkout feat/new") && !cmd.includes("-b"))
+        throw new Error("error: pathspec 'feat/new' did not match any file(s) known to git");
+      if (cmd.includes("rev-parse --verify refs/remotes/origin/main")) return "abc123";
+      if (cmd.includes("checkout -b feat/new origin/main")) return "";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+
+    const result = gitUtils.checkoutOrCreateBranch("/repo", "feat/new", {
+      createBranch: true,
+      defaultBranch: "main",
+    });
+    expect(result.created).toBe(true);
+
+    // Verify the correct git command was called
+    const createCall = mockExecSync.mock.calls.find((c: unknown[]) =>
+      (c[0] as string).includes("checkout -b"),
+    );
+    expect(createCall).toBeDefined();
+    expect((createCall![0] as string)).toContain("origin/main");
+  });
+
+  it("falls back to local defaultBranch when origin ref does not exist", () => {
+    // Checkout fails, and origin/main is not available either
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("checkout feat/new") && !cmd.includes("-b"))
+        throw new Error("error: pathspec 'feat/new' did not match any file(s) known to git");
+      if (cmd.includes("rev-parse --verify refs/remotes/origin/main"))
+        throw new Error("not found");
+      if (cmd.includes("checkout -b feat/new main")) return "";
+      throw new Error(`Unmocked: ${cmd}`);
+    });
+
+    const result = gitUtils.checkoutOrCreateBranch("/repo", "feat/new", {
+      createBranch: true,
+      defaultBranch: "main",
+    });
+    expect(result.created).toBe(true);
+
+    const createCall = mockExecSync.mock.calls.find((c: unknown[]) =>
+      (c[0] as string).includes("checkout -b"),
+    );
+    expect(createCall).toBeDefined();
+    expect((createCall![0] as string)).toContain("main");
+    expect((createCall![0] as string)).not.toContain("origin/main");
+  });
+
+  it("throws when branch does not exist and createBranch is not set", () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("checkout feat/missing"))
+        throw new Error("error: pathspec 'feat/missing' did not match any file(s) known to git");
+      throw new Error(`Unmocked: ${cmd}`);
     });
 
     expect(() =>
-      gitUtils.createAndCheckoutBranch("/repo", "new-branch", "nonexistent"),
-    ).toThrow();
+      gitUtils.checkoutOrCreateBranch("/repo", "feat/missing"),
+    ).toThrow('Branch "feat/missing" does not exist');
   });
 });
