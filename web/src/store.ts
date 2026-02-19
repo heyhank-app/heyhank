@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { SessionState, PermissionRequest, ChatMessage, SdkSessionInfo, TaskItem, McpServerDetail } from "./types.js";
 import type { UpdateInfo, PRStatusResponse, CreationProgressEvent, LinearIssue } from "./api.js";
+import { type TaskPanelConfig, getInitialTaskPanelConfig, getDefaultConfig, persistTaskPanelConfig, SECTION_DEFINITIONS } from "./components/task-panel-sections.js";
 
 export interface QuickTerminalTab {
   id: string;
@@ -88,6 +89,8 @@ interface AppState {
   notificationDesktop: boolean;
   sidebarOpen: boolean;
   taskPanelOpen: boolean;
+  taskPanelConfig: TaskPanelConfig;
+  taskPanelConfigMode: boolean;
   homeResetKey: number;
   activeTab: "chat" | "diff" | "terminal";
   chatTabReentryTickBySession: Map<string, number>;
@@ -102,6 +105,11 @@ interface AppState {
   toggleNotificationDesktop: () => void;
   setSidebarOpen: (v: boolean) => void;
   setTaskPanelOpen: (open: boolean) => void;
+  setTaskPanelConfigMode: (open: boolean) => void;
+  toggleSectionEnabled: (sectionId: string) => void;
+  moveSectionUp: (sectionId: string) => void;
+  moveSectionDown: (sectionId: string) => void;
+  resetTaskPanelConfig: () => void;
   newSession: () => void;
 
   // Session actions
@@ -302,6 +310,8 @@ export const useStore = create<AppState>((set) => ({
   notificationDesktop: getInitialNotificationDesktop(),
   sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 768 : true,
   taskPanelOpen: typeof window !== "undefined" ? window.innerWidth >= 1024 : true,
+  taskPanelConfig: getInitialTaskPanelConfig(),
+  taskPanelConfigMode: false,
   homeResetKey: 0,
   activeTab: "chat",
   chatTabReentryTickBySession: new Map(),
@@ -363,6 +373,41 @@ export const useStore = create<AppState>((set) => ({
     }),
   setSidebarOpen: (v) => set({ sidebarOpen: v }),
   setTaskPanelOpen: (open) => set({ taskPanelOpen: open }),
+  setTaskPanelConfigMode: (open) => set({ taskPanelConfigMode: open }),
+  toggleSectionEnabled: (sectionId) =>
+    set((s) => {
+      const config: TaskPanelConfig = {
+        order: [...s.taskPanelConfig.order],
+        enabled: { ...s.taskPanelConfig.enabled, [sectionId]: !s.taskPanelConfig.enabled[sectionId] },
+      };
+      persistTaskPanelConfig(config);
+      return { taskPanelConfig: config };
+    }),
+  moveSectionUp: (sectionId) =>
+    set((s) => {
+      const order = [...s.taskPanelConfig.order];
+      const idx = order.indexOf(sectionId);
+      if (idx <= 0) return s;
+      [order[idx - 1], order[idx]] = [order[idx], order[idx - 1]];
+      const config: TaskPanelConfig = { ...s.taskPanelConfig, order };
+      persistTaskPanelConfig(config);
+      return { taskPanelConfig: config };
+    }),
+  moveSectionDown: (sectionId) =>
+    set((s) => {
+      const order = [...s.taskPanelConfig.order];
+      const idx = order.indexOf(sectionId);
+      if (idx < 0 || idx >= order.length - 1) return s;
+      [order[idx], order[idx + 1]] = [order[idx + 1], order[idx]];
+      const config: TaskPanelConfig = { ...s.taskPanelConfig, order };
+      persistTaskPanelConfig(config);
+      return { taskPanelConfig: config };
+    }),
+  resetTaskPanelConfig: () => {
+    const config = getDefaultConfig();
+    persistTaskPanelConfig(config);
+    set({ taskPanelConfig: config });
+  },
   newSession: () => {
     localStorage.removeItem("cc-current-session");
     set((s) => ({ currentSessionId: null, homeResetKey: s.homeResetKey + 1 }));
@@ -823,6 +868,7 @@ export const useStore = create<AppState>((set) => ({
       toolProgress: new Map(),
       prStatus: new Map(),
       linkedLinearIssues: new Map(),
+      taskPanelConfigMode: false,
       activeTab: "chat" as const,
       chatTabReentryTickBySession: new Map(),
       diffPanelSelectedFile: new Map(),

@@ -1,9 +1,10 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, type ComponentType } from "react";
 import { useStore } from "../store.js";
 import { api, type UsageLimits, type GitHubPRInfo, type LinearIssue, type LinearComment } from "../api.js";
 import type { TaskItem } from "../types.js";
 import { McpSection } from "./McpPanel.js";
 import { LinearLogo } from "./LinearLogo.js";
+import { SECTION_DEFINITIONS } from "./task-panel-sections.js";
 
 const EMPTY_TASKS: TaskItem[] = [];
 const POLL_INTERVAL = 60_000;
@@ -807,22 +808,30 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
   );
 }
 
-// ─── Task Panel ──────────────────────────────────────────────────────────────
+// ─── Extracted Section Components ─────────────────────────────────────────────
 
-export { CodexRateLimitsSection, CodexTokenDetailsSection };
-
-export function TaskPanel({ sessionId }: { sessionId: string }) {
-  const tasks = useStore((s) => s.sessionTasks.get(sessionId) || EMPTY_TASKS);
+/** Wrapper that renders the correct usage/rate-limit component based on backend type */
+function UsageLimitsRenderer({ sessionId }: { sessionId: string }) {
   const session = useStore((s) => s.sessions.get(sessionId));
   const sdk = useStore((s) => s.sdkSessions.find((x) => x.sessionId === sessionId));
-  const sdkBackendType = sdk?.backendType;
-  const taskPanelOpen = useStore((s) => s.taskPanelOpen);
-  const setTaskPanelOpen = useStore((s) => s.setTaskPanelOpen);
-  if (!taskPanelOpen) return null;
+  const isCodex = (session?.backend_type || sdk?.backendType) === "codex";
 
-  const completedCount = tasks.filter((t) => t.status === "completed").length;
-  const isCodex = (session?.backend_type || sdkBackendType) === "codex";
-  const showTasks = !!session && !isCodex;
+  if (isCodex) {
+    return (
+      <>
+        <CodexRateLimitsSection sessionId={sessionId} />
+        <CodexTokenDetailsSection sessionId={sessionId} />
+      </>
+    );
+  }
+  return <UsageLimitsSection sessionId={sessionId} />;
+}
+
+/** Git branch info — extracted from inline JSX in TaskPanel */
+function GitBranchSection({ sessionId }: { sessionId: string }) {
+  const session = useStore((s) => s.sessions.get(sessionId));
+  const sdk = useStore((s) => s.sdkSessions.find((x) => x.sessionId === sessionId));
+
   const branch = session?.git_branch || sdk?.gitBranch;
   const branchAhead = session?.git_ahead || 0;
   const branchBehind = session?.git_behind || 0;
@@ -830,15 +839,259 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
   const lineRemoves = session?.total_lines_removed || 0;
   const branchCwd = session?.repo_root || session?.cwd || sdk?.cwd;
 
+  if (!branch) return null;
+
+  return (
+    <div className="shrink-0 px-4 py-3 border-b border-cc-border space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-cc-muted uppercase tracking-wider">
+          Branch
+        </span>
+        {session?.is_containerized && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">container</span>
+        )}
+      </div>
+      <p className="text-xs font-mono-code text-cc-fg truncate" title={branch}>
+        {branch}
+      </p>
+      {(branchAhead > 0 || branchBehind > 0 || lineAdds > 0 || lineRemoves > 0) && (
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-[11px]">
+            {branchAhead > 0 && <span className="text-green-500">{branchAhead}&#8593;</span>}
+            {branchBehind > 0 && <span className="text-cc-warning">{branchBehind}&#8595;</span>}
+            {lineAdds > 0 && <span className="text-green-500">+{lineAdds}</span>}
+            {lineRemoves > 0 && <span className="text-red-400">-{lineRemoves}</span>}
+          </div>
+          {branchBehind > 0 && branchCwd && (
+            <button
+              type="button"
+              className="text-[11px] font-medium text-cc-warning hover:text-amber-400 transition-colors cursor-pointer"
+              onClick={() => {
+                api.gitPull(branchCwd).then((r) => {
+                  useStore.getState().updateSession(sessionId, {
+                    git_ahead: r.git_ahead,
+                    git_behind: r.git_behind,
+                  });
+                  if (!r.success) console.warn("[git pull]", r.output);
+                }).catch((e) => console.error("[git pull]", e));
+              }}
+              title="Pull latest changes"
+            >
+              Pull
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Tasks section — only visible for Claude Code sessions */
+function TasksSection({ sessionId }: { sessionId: string }) {
+  const tasks = useStore((s) => s.sessionTasks.get(sessionId) || EMPTY_TASKS);
+  const session = useStore((s) => s.sessions.get(sessionId));
+  const sdk = useStore((s) => s.sdkSessions.find((x) => x.sessionId === sessionId));
+  const isCodex = (session?.backend_type || sdk?.backendType) === "codex";
+
+  if (!session || isCodex) return null;
+
+  const completedCount = tasks.filter((t) => t.status === "completed").length;
+
+  return (
+    <>
+      {/* Task section header */}
+      <div className="px-4 py-2.5 border-b border-cc-border flex items-center justify-between">
+        <span className="text-[12px] font-semibold text-cc-fg">Tasks</span>
+        {tasks.length > 0 && (
+          <span className="text-[11px] text-cc-muted tabular-nums">
+            {completedCount}/{tasks.length}
+          </span>
+        )}
+      </div>
+
+      {/* Task list */}
+      <div className="px-3 py-2">
+        {tasks.length === 0 ? (
+          <p className="text-xs text-cc-muted text-center py-8">No tasks yet</p>
+        ) : (
+          <div className="space-y-0.5">
+            {tasks.map((task) => (
+              <TaskRow key={task.id} task={task} />
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ─── Section Component Map ───────────────────────────────────────────────────
+
+const SECTION_COMPONENTS: Record<string, ComponentType<{ sessionId: string }>> = {
+  "usage-limits": UsageLimitsRenderer,
+  "git-branch": GitBranchSection,
+  "github-pr": GitHubPRSection,
+  "linear-issue": LinearIssueSection,
+  "mcp-servers": McpSection,
+  "tasks": TasksSection,
+};
+
+// ─── Panel Config View ───────────────────────────────────────────────────────
+
+function TaskPanelConfigView({ isCodex }: { isCodex: boolean }) {
+  const config = useStore((s) => s.taskPanelConfig);
+  const toggleSectionEnabled = useStore((s) => s.toggleSectionEnabled);
+  const moveSectionUp = useStore((s) => s.moveSectionUp);
+  const moveSectionDown = useStore((s) => s.moveSectionDown);
+  const resetTaskPanelConfig = useStore((s) => s.resetTaskPanelConfig);
+  const setConfigMode = useStore((s) => s.setTaskPanelConfigMode);
+
+  const backendFilter = isCodex ? "codex" : "claude";
+
+  // Only show sections applicable to the current backend
+  const applicableOrder = config.order.filter((id) => {
+    const def = SECTION_DEFINITIONS.find((d) => d.id === id);
+    if (!def) return false;
+    if (def.backends && !def.backends.includes(backendFilter)) return false;
+    return true;
+  });
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-1">
+        {applicableOrder.map((sectionId, index) => {
+          const def = SECTION_DEFINITIONS.find((d) => d.id === sectionId)!;
+          const enabled = config.enabled[sectionId] ?? true;
+          const isFirst = index === 0;
+          const isLast = index === applicableOrder.length - 1;
+
+          return (
+            <div
+              key={sectionId}
+              data-testid={`config-section-${sectionId}`}
+              className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border border-cc-border transition-opacity ${
+                enabled ? "bg-cc-bg" : "bg-cc-hover/50 opacity-60"
+              }`}
+            >
+              {/* Move up/down buttons */}
+              <div className="flex flex-col gap-0.5 shrink-0">
+                <button
+                  onClick={() => moveSectionUp(sectionId)}
+                  disabled={isFirst}
+                  className="w-5 h-4 flex items-center justify-center text-cc-muted hover:text-cc-fg disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  title="Move up"
+                  data-testid={`move-up-${sectionId}`}
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                    <path d="M8 4l4 4H4l4-4z" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => moveSectionDown(sectionId)}
+                  disabled={isLast}
+                  className="w-5 h-4 flex items-center justify-center text-cc-muted hover:text-cc-fg disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  title="Move down"
+                  data-testid={`move-down-${sectionId}`}
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                    <path d="M8 12l4-4H4l4 4z" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Section info */}
+              <div className="flex-1 min-w-0">
+                <span className="text-[12px] font-medium text-cc-fg block">
+                  {def.label}
+                </span>
+                <span className="text-[10px] text-cc-muted block truncate">
+                  {def.description}
+                </span>
+              </div>
+
+              {/* Toggle switch */}
+              <button
+                onClick={() => toggleSectionEnabled(sectionId)}
+                className={`shrink-0 w-8 h-[18px] rounded-full transition-colors cursor-pointer relative ${
+                  enabled ? "bg-cc-primary" : "bg-cc-hover"
+                }`}
+                title={enabled ? "Hide section" : "Show section"}
+                role="switch"
+                aria-checked={enabled}
+                data-testid={`toggle-${sectionId}`}
+              >
+                <span
+                  className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform ${
+                    enabled ? "translate-x-[16px]" : "translate-x-[2px]"
+                  }`}
+                />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Footer buttons */}
+      <div className="shrink-0 border-t border-cc-border px-3 py-2.5 flex items-center justify-between">
+        <button
+          onClick={() => resetTaskPanelConfig()}
+          className="text-[11px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+          data-testid="reset-panel-config"
+        >
+          Reset to defaults
+        </button>
+        <button
+          onClick={() => setConfigMode(false)}
+          className="text-[11px] font-medium text-cc-primary hover:text-cc-primary-hover transition-colors cursor-pointer"
+          data-testid="config-done"
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Task Panel ──────────────────────────────────────────────────────────────
+
+export { CodexRateLimitsSection, CodexTokenDetailsSection };
+
+export function TaskPanel({ sessionId }: { sessionId: string }) {
+  const session = useStore((s) => s.sessions.get(sessionId));
+  const sdk = useStore((s) => s.sdkSessions.find((x) => x.sessionId === sessionId));
+  const taskPanelOpen = useStore((s) => s.taskPanelOpen);
+  const setTaskPanelOpen = useStore((s) => s.setTaskPanelOpen);
+  const configMode = useStore((s) => s.taskPanelConfigMode);
+  const config = useStore((s) => s.taskPanelConfig);
+
+  if (!taskPanelOpen) return null;
+
+  const isCodex = (session?.backend_type || sdk?.backendType) === "codex";
+  const backendFilter = isCodex ? "codex" : "claude";
+
+  // Filter and order sections based on config + backend compatibility
+  const applicableSections = config.order.filter((sectionId) => {
+    const def = SECTION_DEFINITIONS.find((d) => d.id === sectionId);
+    if (!def) return false;
+    if (def.backends && !def.backends.includes(backendFilter)) return false;
+    return true;
+  });
+
   return (
     <aside className="w-[320px] h-full flex flex-col overflow-hidden bg-cc-card border-l border-cc-border">
       {/* Header */}
       <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-cc-border">
         <span className="text-sm font-semibold text-cc-fg tracking-tight">
-          Context
+          {configMode ? "Panel Settings" : "Context"}
         </span>
         <button
-          onClick={() => setTaskPanelOpen(false)}
+          onClick={() => {
+            if (configMode) {
+              useStore.getState().setTaskPanelConfigMode(false);
+            } else {
+              setTaskPanelOpen(false);
+            }
+          }}
           className="flex items-center justify-center w-6 h-6 rounded-lg text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
         >
           <svg
@@ -853,98 +1106,36 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
         </button>
       </div>
 
-      <div data-testid="task-panel-content" className="min-h-0 flex-1 overflow-y-auto">
-        {/* Usage limits — Claude Code uses REST-polled limits, Codex uses streamed rate limits */}
-        {isCodex ? (
-          <>
-            <CodexRateLimitsSection sessionId={sessionId} />
-            <CodexTokenDetailsSection sessionId={sessionId} />
-          </>
-        ) : (
-          <UsageLimitsSection sessionId={sessionId} />
-        )}
-
-        {/* Git branch snapshot — moved from composer for cleaner input surface */}
-        {branch && (
-          <div className="shrink-0 px-4 py-3 border-b border-cc-border space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] text-cc-muted uppercase tracking-wider">
-                Branch
-              </span>
-              {session?.is_containerized && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">container</span>
-              )}
-            </div>
-            <p className="text-xs font-mono-code text-cc-fg truncate" title={branch}>
-              {branch}
-            </p>
-            {(branchAhead > 0 || branchBehind > 0 || lineAdds > 0 || lineRemoves > 0) && (
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-[11px]">
-                  {branchAhead > 0 && <span className="text-green-500">{branchAhead}&#8593;</span>}
-                  {branchBehind > 0 && <span className="text-cc-warning">{branchBehind}&#8595;</span>}
-                  {lineAdds > 0 && <span className="text-green-500">+{lineAdds}</span>}
-                  {lineRemoves > 0 && <span className="text-red-400">-{lineRemoves}</span>}
-                </div>
-                {branchBehind > 0 && branchCwd && (
-                  <button
-                    type="button"
-                    className="text-[11px] font-medium text-cc-warning hover:text-amber-400 transition-colors cursor-pointer"
-                    onClick={() => {
-                      api.gitPull(branchCwd).then((r) => {
-                        useStore.getState().updateSession(sessionId, {
-                          git_ahead: r.git_ahead,
-                          git_behind: r.git_behind,
-                        });
-                        if (!r.success) console.warn("[git pull]", r.output);
-                      }).catch((e) => console.error("[git pull]", e));
-                    }}
-                    title="Pull latest changes"
-                  >
-                    Pull
-                  </button>
-                )}
-              </div>
-            )}
+      {configMode ? (
+        <TaskPanelConfigView isCodex={isCodex} />
+      ) : (
+        <>
+          <div data-testid="task-panel-content" className="min-h-0 flex-1 overflow-y-auto">
+            {applicableSections
+              .filter((id) => config.enabled[id] !== false)
+              .map((sectionId) => {
+                const Component = SECTION_COMPONENTS[sectionId];
+                if (!Component) return null;
+                return <Component key={sectionId} sessionId={sessionId} />;
+              })}
           </div>
-        )}
 
-        {/* GitHub PR status */}
-        <GitHubPRSection sessionId={sessionId} />
-
-        {/* Linear issue */}
-        <LinearIssueSection sessionId={sessionId} />
-
-        {/* MCP servers */}
-        <McpSection sessionId={sessionId} />
-
-        {showTasks && (
-          <>
-            {/* Task section header */}
-            <div className="px-4 py-2.5 border-b border-cc-border flex items-center justify-between">
-              <span className="text-[12px] font-semibold text-cc-fg">Tasks</span>
-              {tasks.length > 0 && (
-                <span className="text-[11px] text-cc-muted tabular-nums">
-                  {completedCount}/{tasks.length}
-                </span>
-              )}
-            </div>
-
-            {/* Task list */}
-            <div className="px-3 py-2">
-              {tasks.length === 0 ? (
-                <p className="text-xs text-cc-muted text-center py-8">No tasks yet</p>
-              ) : (
-                <div className="space-y-0.5">
-                  {tasks.map((task) => (
-                    <TaskRow key={task.id} task={task} />
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
+          {/* Settings button at bottom */}
+          <div className="shrink-0 border-t border-cc-border px-4 py-2">
+            <button
+              onClick={() => useStore.getState().setTaskPanelConfigMode(true)}
+              className="flex items-center gap-1.5 text-[11px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+              title="Configure panel sections"
+              data-testid="customize-panel-btn"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                <path fillRule="evenodd" d="M7.429 1.525a6.593 6.593 0 011.142 0c.036.003.108.036.137.146l.289 1.105c.147.56.55.967.997 1.189.174.086.341.183.501.29.417.278.97.423 1.53.27l1.102-.303c.11-.03.175.016.195.046.219.31.41.641.573.989.014.031.022.11-.059.19l-.815.806c-.411.406-.562.957-.53 1.456a4.588 4.588 0 010 .582c-.032.499.119 1.05.53 1.456l.815.806c.08.08.073.159.059.19a6.494 6.494 0 01-.573.99c-.02.029-.086.074-.195.045l-1.103-.303c-.559-.153-1.112-.008-1.529.27-.16.107-.327.204-.5.29-.449.222-.851.628-.998 1.189l-.289 1.105c-.029.11-.101.143-.137.146a6.613 6.613 0 01-1.142 0c-.036-.003-.108-.037-.137-.146l-.289-1.105c-.147-.56-.55-.967-.997-1.189a4.502 4.502 0 01-.501-.29c-.417-.278-.97-.423-1.53-.27l-1.102.303c-.11.03-.175-.016-.195-.046a6.492 6.492 0 01-.573-.989c-.014-.031-.022-.11.059-.19l.815-.806c.411-.406.562-.957.53-1.456a4.587 4.587 0 010-.582c.032-.499-.119-1.05-.53-1.456l-.815-.806c-.08-.08-.073-.159-.059-.19a6.44 6.44 0 01.573-.99c.02-.029.086-.074.195-.045l1.103.303c.559.153 1.112.008 1.529-.27.16-.107.327-.204.5-.29.449-.222.851-.628.998-1.189l.289-1.105c.029-.11.101-.143.137-.146zM8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" clipRule="evenodd" />
+              </svg>
+              Customize panel
+            </button>
+          </div>
+        </>
+      )}
     </aside>
   );
 }

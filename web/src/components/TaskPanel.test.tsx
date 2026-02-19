@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { getDefaultConfig, type TaskPanelConfig } from "./task-panel-sections.js";
 
 vi.mock("../api.js", () => ({
   api: {
@@ -40,6 +41,13 @@ interface MockStoreState {
   sdkSessions: { sessionId: string; backendType?: string; cwd?: string; gitBranch?: string }[];
   taskPanelOpen: boolean;
   setTaskPanelOpen: ReturnType<typeof vi.fn>;
+  taskPanelConfig: TaskPanelConfig;
+  taskPanelConfigMode: boolean;
+  setTaskPanelConfigMode: ReturnType<typeof vi.fn>;
+  toggleSectionEnabled: ReturnType<typeof vi.fn>;
+  moveSectionUp: ReturnType<typeof vi.fn>;
+  moveSectionDown: ReturnType<typeof vi.fn>;
+  resetTaskPanelConfig: ReturnType<typeof vi.fn>;
   prStatus: Map<string, { available: boolean; pr?: unknown } | null>;
   linkedLinearIssues: Map<string, unknown>;
 }
@@ -53,6 +61,13 @@ function resetStore(overrides: Partial<MockStoreState> = {}) {
     sdkSessions: [],
     taskPanelOpen: true,
     setTaskPanelOpen: vi.fn(),
+    taskPanelConfig: getDefaultConfig(),
+    taskPanelConfigMode: false,
+    setTaskPanelConfigMode: vi.fn(),
+    toggleSectionEnabled: vi.fn(),
+    moveSectionUp: vi.fn(),
+    moveSectionDown: vi.fn(),
+    resetTaskPanelConfig: vi.fn(),
     prStatus: new Map(),
     linkedLinearIssues: new Map(),
     ...overrides,
@@ -60,7 +75,10 @@ function resetStore(overrides: Partial<MockStoreState> = {}) {
 }
 
 vi.mock("../store.js", () => ({
-  useStore: (selector: (s: MockStoreState) => unknown) => selector(mockState),
+  useStore: Object.assign(
+    (selector: (s: MockStoreState) => unknown) => selector(mockState),
+    { getState: () => mockState },
+  ),
 }));
 
 import { TaskPanel, CodexRateLimitsSection, CodexTokenDetailsSection } from "./TaskPanel.js";
@@ -85,6 +103,110 @@ describe("TaskPanel", () => {
     expect(screen.getByTestId("mcp-section")).toBeInTheDocument();
     expect(screen.getByTestId("task-panel-content")).toHaveClass("overflow-y-auto");
     expect(container.querySelectorAll(".overflow-y-auto")).toHaveLength(1);
+  });
+
+  it("shows 'Customize panel' button in normal mode", () => {
+    // Verify the settings button appears at the bottom of the panel
+    render(<TaskPanel sessionId="s1" />);
+    expect(screen.getByTestId("customize-panel-btn")).toBeInTheDocument();
+    expect(screen.getByText("Customize panel")).toBeInTheDocument();
+  });
+
+  it("shows 'Panel Settings' header when in config mode", () => {
+    // Config mode should replace the normal panel content with the config view
+    resetStore({ taskPanelConfigMode: true });
+    render(<TaskPanel sessionId="s1" />);
+    expect(screen.getByText("Panel Settings")).toBeInTheDocument();
+    expect(screen.queryByTestId("task-panel-content")).not.toBeInTheDocument();
+  });
+
+  it("does not show tasks section for Codex sessions (backend filter)", () => {
+    // The "tasks" section is claude-only — it should not appear for Codex
+    resetStore({
+      sessions: new Map([["s1", { backend_type: "codex" }]]),
+      taskPanelConfigMode: true,
+    });
+    render(<TaskPanel sessionId="s1" />);
+    // Tasks section config row should not exist for Codex
+    expect(screen.queryByTestId("config-section-tasks")).not.toBeInTheDocument();
+    // Other sections should still be present
+    expect(screen.getByTestId("config-section-usage-limits")).toBeInTheDocument();
+  });
+
+  it("shows tasks section config for Claude sessions", () => {
+    // "tasks" section should appear in config for Claude Code backend
+    resetStore({
+      sessions: new Map([["s1", { backend_type: "claude" }]]),
+      taskPanelConfigMode: true,
+    });
+    render(<TaskPanel sessionId="s1" />);
+    expect(screen.getByTestId("config-section-tasks")).toBeInTheDocument();
+  });
+
+  it("hides disabled sections from the main panel content", () => {
+    // When a section is disabled in config, it should not render in normal mode
+    const config = getDefaultConfig();
+    config.enabled["mcp-servers"] = false;
+    resetStore({ taskPanelConfig: config });
+    render(<TaskPanel sessionId="s1" />);
+    // MCP section should be hidden since it's disabled
+    expect(screen.queryByTestId("mcp-section")).not.toBeInTheDocument();
+  });
+
+  it("renders config view with Done and Reset buttons", () => {
+    // Verify config mode footer buttons
+    resetStore({ taskPanelConfigMode: true });
+    render(<TaskPanel sessionId="s1" />);
+    expect(screen.getByTestId("config-done")).toBeInTheDocument();
+    expect(screen.getByTestId("reset-panel-config")).toBeInTheDocument();
+  });
+
+  it("renders toggle switches for all applicable sections in config mode", () => {
+    // Codex should see 5 sections (all except "tasks" which is claude-only)
+    resetStore({ taskPanelConfigMode: true });
+    render(<TaskPanel sessionId="s1" />);
+    expect(screen.getByTestId("toggle-usage-limits")).toBeInTheDocument();
+    expect(screen.getByTestId("toggle-git-branch")).toBeInTheDocument();
+    expect(screen.getByTestId("toggle-github-pr")).toBeInTheDocument();
+    expect(screen.getByTestId("toggle-linear-issue")).toBeInTheDocument();
+    expect(screen.getByTestId("toggle-mcp-servers")).toBeInTheDocument();
+  });
+
+  it("calls toggleSectionEnabled when toggle is clicked", () => {
+    // Clicking a toggle should call the store action
+    resetStore({ taskPanelConfigMode: true });
+    render(<TaskPanel sessionId="s1" />);
+    fireEvent.click(screen.getByTestId("toggle-git-branch"));
+    expect(mockState.toggleSectionEnabled).toHaveBeenCalledWith("git-branch");
+  });
+
+  it("calls moveSectionUp when up arrow is clicked", () => {
+    // Clicking the up arrow should call the store action
+    resetStore({ taskPanelConfigMode: true });
+    render(<TaskPanel sessionId="s1" />);
+    fireEvent.click(screen.getByTestId("move-up-git-branch"));
+    expect(mockState.moveSectionUp).toHaveBeenCalledWith("git-branch");
+  });
+
+  it("calls moveSectionDown when down arrow is clicked", () => {
+    // Clicking the down arrow should call the store action
+    resetStore({ taskPanelConfigMode: true });
+    render(<TaskPanel sessionId="s1" />);
+    fireEvent.click(screen.getByTestId("move-down-git-branch"));
+    expect(mockState.moveSectionDown).toHaveBeenCalledWith("git-branch");
+  });
+
+  it("renders sections in the configured order", () => {
+    // When config order is changed, sections should render in that order
+    const config = getDefaultConfig();
+    config.order = ["mcp-servers", "usage-limits", "git-branch", "github-pr", "linear-issue", "tasks"];
+    resetStore({ taskPanelConfig: config, taskPanelConfigMode: true });
+    render(<TaskPanel sessionId="s1" />);
+
+    // Verify the first config row is MCP servers (since we reordered)
+    const rows = screen.getAllByTestId(/^config-section-/);
+    expect(rows[0]).toHaveAttribute("data-testid", "config-section-mcp-servers");
+    expect(rows[1]).toHaveAttribute("data-testid", "config-section-usage-limits");
   });
 });
 

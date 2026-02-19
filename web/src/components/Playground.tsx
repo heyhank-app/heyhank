@@ -935,6 +935,72 @@ export function Playground() {
           </div>
         </Section>
 
+        {/* ─── Panel Config View ──────────────────────────── */}
+        <Section title="Panel Config View" description="Inline configuration for the right sidebar — toggle sections on/off and reorder them">
+          <div className="space-y-4">
+            <Card label="Config mode with mixed enabled/disabled sections">
+              <div className="w-[320px] border border-cc-border rounded-xl overflow-hidden bg-cc-card">
+                {/* Header */}
+                <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-cc-border">
+                  <span className="text-sm font-semibold text-cc-fg tracking-tight">Panel Settings</span>
+                  <button className="flex items-center justify-center w-6 h-6 rounded-lg text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
+                      <path d="M4 4l8 8M12 4l-8 8" />
+                    </svg>
+                  </button>
+                </div>
+                {/* Section rows */}
+                <div className="px-3 py-3 space-y-1">
+                  {[
+                    { id: "git-branch", label: "Git Branch", desc: "Current branch, ahead/behind, and line changes", enabled: true },
+                    { id: "usage-limits", label: "Usage Limits", desc: "API usage and rate limit meters", enabled: true },
+                    { id: "github-pr", label: "GitHub PR", desc: "Pull request status, CI checks, and reviews", enabled: false },
+                    { id: "linear-issue", label: "Linear Issue", desc: "Linked Linear ticket and comments", enabled: true },
+                    { id: "mcp-servers", label: "MCP Servers", desc: "Model Context Protocol server connections", enabled: false },
+                    { id: "tasks", label: "Tasks", desc: "Agent task list and progress", enabled: true },
+                  ].map((s, i, arr) => (
+                    <div
+                      key={s.id}
+                      className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border border-cc-border transition-opacity ${
+                        s.enabled ? "bg-cc-bg" : "bg-cc-hover/50 opacity-60"
+                      }`}
+                    >
+                      <div className="flex flex-col gap-0.5 shrink-0">
+                        <button disabled={i === 0} className="w-5 h-4 flex items-center justify-center text-cc-muted hover:text-cc-fg disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer transition-colors">
+                          <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3"><path d="M8 4l4 4H4l4-4z" /></svg>
+                        </button>
+                        <button disabled={i === arr.length - 1} className="w-5 h-4 flex items-center justify-center text-cc-muted hover:text-cc-fg disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer transition-colors">
+                          <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3"><path d="M8 12l4-4H4l4 4z" /></svg>
+                        </button>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-[12px] font-medium text-cc-fg block">{s.label}</span>
+                        <span className="text-[10px] text-cc-muted block truncate">{s.desc}</span>
+                      </div>
+                      <button
+                        className={`shrink-0 w-8 h-[18px] rounded-full transition-colors cursor-pointer relative ${
+                          s.enabled ? "bg-cc-primary" : "bg-cc-hover"
+                        }`}
+                        role="switch"
+                        aria-checked={s.enabled}
+                      >
+                        <span className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform ${
+                          s.enabled ? "translate-x-[16px]" : "translate-x-[2px]"
+                        }`} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                {/* Footer */}
+                <div className="shrink-0 border-t border-cc-border px-3 py-2.5 flex items-center justify-between">
+                  <button className="text-[11px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer">Reset to defaults</button>
+                  <button className="text-[11px] font-medium text-cc-primary hover:text-cc-primary-hover transition-colors cursor-pointer">Done</button>
+                </div>
+              </div>
+            </Card>
+          </div>
+        </Section>
+
         {/* ─── Codex Session Details ──────────────────────── */}
         <Section title="Codex Session Details" description="Rate limits and token details for Codex (OpenAI) sessions — streamed via session_update">
           <div className="space-y-4">
