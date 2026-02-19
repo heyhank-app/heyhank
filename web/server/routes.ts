@@ -17,6 +17,7 @@ import * as promptManager from "./prompt-manager.js";
 import * as cronStore from "./cron-store.js";
 import * as gitUtils from "./git-utils.js";
 import * as sessionNames from "./session-names.js";
+import * as sessionLinearIssues from "./session-linear-issues.js";
 import { containerManager, ContainerManager, type ContainerConfig, type ContainerInfo } from "./container-manager.js";
 import type { CreationStepId } from "./session-types.js";
 import { hasContainerClaudeAuth } from "./claude-container-auth.js";
@@ -726,6 +727,7 @@ export function createRoutes(
 
     const worktreeResult = cleanupWorktree(id, true);
     prPoller?.unwatch(id);
+    sessionLinearIssues.removeLinearIssue(id);
     launcher.removeSession(id);
     wsBridge.closeSession(id);
     return c.json({ ok: true, worktree: worktreeResult });
@@ -1506,6 +1508,223 @@ export function createRoutes(
       viewerEmail: json.data?.viewer?.email || "",
       teamName: firstTeam?.name || "",
       teamKey: firstTeam?.key || "",
+    });
+  });
+
+  // ─── Linear issue <-> session association ───────────────────────────
+
+  api.put("/sessions/:id/linear-issue", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    if (!body.id || !body.identifier || !body.title || !body.url) {
+      return c.json({ error: "id, identifier, title, and url are required" }, 400);
+    }
+    sessionLinearIssues.setLinearIssue(id, {
+      id: String(body.id),
+      identifier: String(body.identifier),
+      title: String(body.title),
+      description: String(body.description || ""),
+      url: String(body.url),
+      branchName: String(body.branchName || ""),
+      priorityLabel: String(body.priorityLabel || ""),
+      stateName: String(body.stateName || ""),
+      stateType: String(body.stateType || ""),
+      teamName: String(body.teamName || ""),
+      teamKey: String(body.teamKey || ""),
+      teamId: String(body.teamId || ""),
+      assigneeName: body.assigneeName ? String(body.assigneeName) : undefined,
+      updatedAt: body.updatedAt ? String(body.updatedAt) : undefined,
+    });
+    return c.json({ ok: true });
+  });
+
+  api.get("/sessions/:id/linear-issue", async (c) => {
+    const id = c.req.param("id");
+    const stored = sessionLinearIssues.getLinearIssue(id);
+    if (!stored) return c.json({ issue: null });
+
+    const refresh = c.req.query("refresh") === "true";
+    if (!refresh) return c.json({ issue: stored });
+
+    // Fetch fresh data from Linear API
+    const settings = getSettings();
+    const linearApiKey = settings.linearApiKey.trim();
+    if (!linearApiKey) return c.json({ issue: stored });
+
+    try {
+      const response = await fetch("https://api.linear.app/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: linearApiKey,
+        },
+        body: JSON.stringify({
+          query: `
+            query CompanionIssueFetch($id: String!) {
+              issue(id: $id) {
+                id identifier title description url branchName priorityLabel
+                state { name type }
+                team { id key name }
+                comments(last: 5) {
+                  nodes {
+                    id body createdAt
+                    user { id name displayName avatarUrl }
+                  }
+                }
+                assignee { id name displayName avatarUrl }
+                labels { nodes { id name color } }
+              }
+            }
+          `,
+          variables: { id: stored.id },
+        }),
+      });
+
+      const json = await response.json().catch(() => ({})) as {
+        data?: {
+          issue?: {
+            id: string;
+            identifier: string;
+            title: string;
+            description?: string | null;
+            url: string;
+            branchName?: string | null;
+            priorityLabel?: string | null;
+            state?: { name?: string | null; type?: string | null } | null;
+            team?: { id?: string | null; key?: string | null; name?: string | null } | null;
+            comments?: { nodes?: Array<{
+              id: string;
+              body: string;
+              createdAt: string;
+              user?: { name?: string | null; displayName?: string | null; avatarUrl?: string | null } | null;
+            }> } | null;
+            assignee?: { name?: string | null; displayName?: string | null; avatarUrl?: string | null } | null;
+            labels?: { nodes?: Array<{ id: string; name: string; color: string }> } | null;
+          } | null;
+        };
+        errors?: Array<{ message?: string }>;
+      };
+
+      const issue = json.data?.issue;
+      if (issue) {
+        const updated = {
+          id: issue.id,
+          identifier: issue.identifier,
+          title: issue.title,
+          description: issue.description || "",
+          url: issue.url,
+          branchName: issue.branchName || "",
+          priorityLabel: issue.priorityLabel || "",
+          stateName: issue.state?.name || "",
+          stateType: issue.state?.type || "",
+          teamName: issue.team?.name || "",
+          teamKey: issue.team?.key || "",
+          teamId: issue.team?.id || "",
+          assigneeName: issue.assignee?.displayName || issue.assignee?.name || "",
+          updatedAt: new Date().toISOString(),
+        };
+        sessionLinearIssues.setLinearIssue(id, updated);
+        return c.json({
+          issue: updated,
+          comments: (issue.comments?.nodes || []).map((comment) => ({
+            id: comment.id,
+            body: comment.body,
+            createdAt: comment.createdAt,
+            userName: comment.user?.displayName || comment.user?.name || "Unknown",
+            userAvatarUrl: comment.user?.avatarUrl || null,
+          })),
+          assignee: issue.assignee ? {
+            name: issue.assignee.displayName || issue.assignee.name || "",
+            avatarUrl: issue.assignee.avatarUrl || null,
+          } : null,
+          labels: (issue.labels?.nodes || []).map((l) => ({
+            id: l.id,
+            name: l.name,
+            color: l.color,
+          })),
+        });
+      }
+    } catch {
+      // Fall through to return stored data on error
+    }
+
+    return c.json({ issue: stored });
+  });
+
+  api.delete("/sessions/:id/linear-issue", (c) => {
+    const id = c.req.param("id");
+    sessionLinearIssues.removeLinearIssue(id);
+    return c.json({ ok: true });
+  });
+
+  api.post("/linear/issues/:issueId/comments", async (c) => {
+    const issueId = c.req.param("issueId");
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    if (typeof body.body !== "string" || !body.body.trim()) {
+      return c.json({ error: "body is required" }, 400);
+    }
+
+    const settings = getSettings();
+    const linearApiKey = settings.linearApiKey.trim();
+    if (!linearApiKey) {
+      return c.json({ error: "Linear API key is not configured" }, 400);
+    }
+
+    const response = await fetch("https://api.linear.app/graphql", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: linearApiKey,
+      },
+      body: JSON.stringify({
+        query: `
+          mutation CompanionAddComment($issueId: String!, $body: String!) {
+            commentCreate(input: { issueId: $issueId, body: $body }) {
+              success
+              comment { id body createdAt user { name displayName } }
+            }
+          }
+        `,
+        variables: { issueId, body: body.body.trim() },
+      }),
+    }).catch((e: unknown) => {
+      throw new Error(`Failed to connect to Linear: ${e instanceof Error ? e.message : String(e)}`);
+    });
+
+    const json = await response.json().catch(() => ({})) as {
+      data?: {
+        commentCreate?: {
+          success?: boolean;
+          comment?: {
+            id: string;
+            body: string;
+            createdAt: string;
+            user?: { name?: string | null; displayName?: string | null } | null;
+          };
+        };
+      };
+      errors?: Array<{ message?: string }>;
+    };
+
+    if (!response.ok || (json.errors && json.errors.length > 0)) {
+      const firstError = json.errors?.[0]?.message || response.statusText || "Comment creation failed";
+      return c.json({ error: firstError }, 502);
+    }
+
+    const result = json.data?.commentCreate;
+    if (!result?.success || !result.comment) {
+      return c.json({ error: "Comment creation failed" }, 502);
+    }
+
+    return c.json({
+      ok: true,
+      comment: {
+        id: result.comment.id,
+        body: result.comment.body,
+        createdAt: result.comment.createdAt,
+        userName: result.comment.user?.displayName || result.comment.user?.name || "You",
+        userAvatarUrl: null,
+      },
     });
   });
 

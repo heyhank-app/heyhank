@@ -11,8 +11,9 @@ import { ChatView } from "./ChatView.js";
 import { api } from "../api.js";
 import type { PermissionRequest, ChatMessage, ContentBlock, SessionState, McpServerDetail } from "../types.js";
 import type { TaskItem } from "../types.js";
-import type { UpdateInfo, GitHubPRInfo } from "../api.js";
+import type { UpdateInfo, GitHubPRInfo, LinearIssue, LinearComment } from "../api.js";
 import { GitHubPRDisplay, CodexRateLimitsSection, CodexTokenDetailsSection } from "./TaskPanel.js";
+import { LinearLogo } from "./LinearLogo.js";
 import { SessionCreationProgress } from "./SessionCreationProgress.js";
 import { SessionLaunchOverlay } from "./SessionLaunchOverlay.js";
 import type { CreationProgressEvent } from "../types.js";
@@ -431,6 +432,43 @@ const MOCK_MCP_SERVERS: McpServerDetail[] = [
   },
 ];
 
+// Linear issue mock data
+const MOCK_LINEAR_ISSUE_ACTIVE: LinearIssue = {
+  id: "issue-1",
+  identifier: "THE-147",
+  title: "Associer un ticket Linear a une session dans le panneau lateral droit",
+  description: "Pouvoir associer un ticket Linear a une session.",
+  url: "https://linear.app/thevibecompany/issue/THE-147",
+  branchName: "the-147-associer-un-ticket-linear",
+  priorityLabel: "High",
+  stateName: "In Progress",
+  stateType: "started",
+  teamName: "Thevibecompany",
+  teamKey: "THE",
+  teamId: "team-the",
+};
+
+const MOCK_LINEAR_ISSUE_DONE: LinearIssue = {
+  id: "issue-2",
+  identifier: "ENG-256",
+  title: "Fix authentication flow for SSO users",
+  description: "SSO users get a blank page after login redirect.",
+  url: "https://linear.app/team/issue/ENG-256",
+  branchName: "eng-256-fix-auth-flow-sso",
+  priorityLabel: "Urgent",
+  stateName: "Done",
+  stateType: "completed",
+  teamName: "Engineering",
+  teamKey: "ENG",
+  teamId: "team-eng",
+};
+
+const MOCK_LINEAR_COMMENTS: LinearComment[] = [
+  { id: "c1", body: "Started working on the sidebar integration", createdAt: new Date(Date.now() - 3600_000).toISOString(), userName: "Alice" },
+  { id: "c2", body: "Added the search component, LGTM", createdAt: new Date(Date.now() - 1800_000).toISOString(), userName: "Bob" },
+  { id: "c3", body: "Testing the polling flow now", createdAt: new Date(Date.now() - 300_000).toISOString(), userName: "Alice" },
+];
+
 // ─── Playground Component ───────────────────────────────────────────────────
 
 export function Playground() {
@@ -765,6 +803,102 @@ export function Playground() {
             <Card label="Merged PR">
               <div className="w-[280px] border border-cc-border rounded-xl overflow-hidden bg-cc-card">
                 <GitHubPRDisplay pr={MOCK_PR_MERGED} />
+              </div>
+            </Card>
+          </div>
+        </Section>
+
+        {/* ─── Linear Issue (TaskPanel) ────────────────── */}
+        <Section title="Linear Issue (TaskPanel)" description="Linear issue linked to a session — displayed in TaskPanel with status, comments, and actions">
+          <div className="space-y-4">
+            <Card label="Active issue — In Progress with comments">
+              <div className="w-[280px] border border-cc-border rounded-xl overflow-hidden bg-cc-card">
+                <div className="px-4 py-3 space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <LinearLogo className="w-3.5 h-3.5 text-cc-muted shrink-0" />
+                    <span className="text-[12px] font-semibold text-cc-fg font-mono-code">{MOCK_LINEAR_ISSUE_ACTIVE.identifier}</span>
+                    <span className="text-[9px] font-medium px-1.5 rounded-full leading-[16px] text-blue-400 bg-blue-400/10">
+                      {MOCK_LINEAR_ISSUE_ACTIVE.stateName}
+                    </span>
+                    <button className="ml-auto flex items-center justify-center w-5 h-5 rounded text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer" title="Unlink">
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-cc-muted truncate">{MOCK_LINEAR_ISSUE_ACTIVE.title}</p>
+                  <div className="flex items-center gap-2 text-[10px] text-cc-muted">
+                    <span>{MOCK_LINEAR_ISSUE_ACTIVE.priorityLabel}</span>
+                    <span>&middot;</span>
+                    <span>{MOCK_LINEAR_ISSUE_ACTIVE.teamName}</span>
+                    <span>&middot;</span>
+                    <span>@ Alice</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: "#bb87fc20", color: "#bb87fc" }}>feature</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: "#f2994a20", color: "#f2994a" }}>frontend</span>
+                  </div>
+                </div>
+                {/* Comments */}
+                <div className="px-4 py-2 border-t border-cc-border space-y-1.5 max-h-36 overflow-y-auto">
+                  <span className="text-[10px] text-cc-muted uppercase tracking-wider">Comments</span>
+                  {MOCK_LINEAR_COMMENTS.map((c) => (
+                    <div key={c.id} className="text-[11px]">
+                      <div className="flex items-center gap-1">
+                        <span className="font-medium text-cc-fg">{c.userName}</span>
+                        <span className="text-[9px] text-cc-muted">just now</span>
+                      </div>
+                      <p className="text-cc-muted line-clamp-2">{c.body}</p>
+                    </div>
+                  ))}
+                </div>
+                {/* Comment input */}
+                <div className="px-4 py-2 border-t border-cc-border flex items-center gap-1.5">
+                  <input type="text" placeholder="Add a comment..." className="flex-1 text-[11px] bg-transparent border border-cc-border rounded-md px-2 py-1.5 text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50" />
+                  <button className="flex items-center justify-center w-6 h-6 rounded text-cc-primary cursor-pointer">
+                    <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5"><path d="M1.724 1.053a.5.5 0 0 0-.714.545l1.403 4.85a.5.5 0 0 0 .397.354l5.19.736-5.19.737a.5.5 0 0 0-.397.353L1.01 13.48a.5.5 0 0 0 .714.545l13-6.5a.5.5 0 0 0 0-.894l-13-6.5z" /></svg>
+                  </button>
+                </div>
+              </div>
+            </Card>
+
+            <Card label="Completed issue — Done warning banner">
+              <div className="w-[280px] border border-cc-border rounded-xl overflow-hidden bg-cc-card">
+                <div className="px-4 py-3 space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <LinearLogo className="w-3.5 h-3.5 text-cc-muted shrink-0" />
+                    <span className="text-[12px] font-semibold text-cc-fg font-mono-code">{MOCK_LINEAR_ISSUE_DONE.identifier}</span>
+                    <span className="text-[9px] font-medium px-1.5 rounded-full leading-[16px] text-cc-success bg-cc-success/10">
+                      {MOCK_LINEAR_ISSUE_DONE.stateName}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-cc-muted truncate">{MOCK_LINEAR_ISSUE_DONE.title}</p>
+                  <div className="flex items-center gap-2 text-[10px] text-cc-muted">
+                    <span>{MOCK_LINEAR_ISSUE_DONE.priorityLabel}</span>
+                    <span>&middot;</span>
+                    <span>{MOCK_LINEAR_ISSUE_DONE.teamName}</span>
+                  </div>
+                </div>
+                {/* Done warning */}
+                <div className="px-4 py-2 bg-cc-success/10 border-t border-cc-success/20 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-cc-success font-medium">Issue completed</p>
+                    <p className="text-[10px] text-cc-success/80">Ticket moved to done.</p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button className="text-[10px] text-cc-muted hover:text-cc-fg px-1.5 py-0.5 rounded cursor-pointer">Dismiss</button>
+                    <button className="text-[10px] text-cc-success font-medium px-2 py-0.5 rounded bg-cc-success/20 hover:bg-cc-success/30 cursor-pointer">Close session</button>
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            <Card label="No linked issue — Link button">
+              <div className="w-[280px] border border-cc-border rounded-xl overflow-hidden bg-cc-card">
+                <div className="shrink-0 px-4 py-3 border-b border-cc-border">
+                  <button className="flex items-center gap-1.5 text-[11px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer">
+                    <LinearLogo className="w-3.5 h-3.5" />
+                    Link Linear issue
+                  </button>
+                </div>
               </div>
             </Card>
           </div>

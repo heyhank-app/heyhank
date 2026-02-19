@@ -353,6 +353,21 @@ export interface LinearConnectionInfo {
   teamKey: string;
 }
 
+export interface LinearComment {
+  id: string;
+  body: string;
+  createdAt: string;
+  userName: string;
+  userAvatarUrl?: string | null;
+}
+
+export interface LinearIssueDetail {
+  issue: LinearIssue | null;
+  comments?: LinearComment[];
+  assignee?: { name: string; avatarUrl?: string | null } | null;
+  labels?: { id: string; name: string; color: string }[];
+}
+
 export interface LinearProject {
   id: string;
   name: string;
@@ -617,6 +632,21 @@ export const api = {
   }) => put<{ mapping: LinearProjectMapping }>("/linear/project-mappings", data),
   removeLinearProjectMapping: (repoRoot: string) =>
     del<{ ok: boolean }>("/linear/project-mappings", { repoRoot }),
+
+  // Linear issue <-> session association
+  linkLinearIssue: (sessionId: string, issue: LinearIssue) =>
+    put<{ ok: boolean }>(`/sessions/${encodeURIComponent(sessionId)}/linear-issue`, issue),
+  unlinkLinearIssue: (sessionId: string) =>
+    del<{ ok: boolean }>(`/sessions/${encodeURIComponent(sessionId)}/linear-issue`),
+  getLinkedLinearIssue: (sessionId: string, refresh = false) =>
+    get<LinearIssueDetail>(
+      `/sessions/${encodeURIComponent(sessionId)}/linear-issue${refresh ? "?refresh=true" : ""}`,
+    ),
+  addLinearComment: (issueId: string, body: string) =>
+    post<{ ok: boolean; comment: LinearComment }>(
+      `/linear/issues/${encodeURIComponent(issueId)}/comments`,
+      { body },
+    ),
 
   // Git operations
   getRepoInfo: (path: string) =>

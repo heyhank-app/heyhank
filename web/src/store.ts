@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { SessionState, PermissionRequest, ChatMessage, SdkSessionInfo, TaskItem, McpServerDetail } from "./types.js";
-import type { UpdateInfo, PRStatusResponse, CreationProgressEvent } from "./api.js";
+import type { UpdateInfo, PRStatusResponse, CreationProgressEvent, LinearIssue } from "./api.js";
 
 export interface QuickTerminalTab {
   id: string;
@@ -55,6 +55,9 @@ interface AppState {
 
   // PR status per session (pushed by server via WebSocket)
   prStatus: Map<string, PRStatusResponse>;
+
+  // Linear issues linked to sessions
+  linkedLinearIssues: Map<string, LinearIssue>;
 
   // MCP servers per session
   mcpServers: Map<string, McpServerDetail[]>;
@@ -135,6 +138,9 @@ interface AppState {
 
   // PR status action
   setPRStatus: (sessionId: string, status: PRStatusResponse) => void;
+
+  // Linear issue actions
+  setLinkedLinearIssue: (sessionId: string, issue: LinearIssue | null) => void;
 
   // MCP actions
   setMcpServers: (sessionId: string, servers: McpServerDetail[]) => void;
@@ -281,6 +287,7 @@ export const useStore = create<AppState>((set) => ({
   sessionNames: getInitialSessionNames(),
   recentlyRenamed: new Set(),
   prStatus: new Map(),
+  linkedLinearIssues: new Map(),
   mcpServers: new Map(),
   toolProgress: new Map(),
   collapsedProjects: getInitialCollapsedProjects(),
@@ -425,6 +432,8 @@ export const useStore = create<AppState>((set) => ({
       toolProgress.delete(sessionId);
       const prStatus = new Map(s.prStatus);
       prStatus.delete(sessionId);
+      const linkedLinearIssues = new Map(s.linkedLinearIssues);
+      linkedLinearIssues.delete(sessionId);
       localStorage.setItem("cc-session-names", JSON.stringify(Array.from(sessionNames.entries())));
       if (s.currentSessionId === sessionId) {
         localStorage.removeItem("cc-current-session");
@@ -448,6 +457,7 @@ export const useStore = create<AppState>((set) => ({
         mcpServers,
         toolProgress,
         prStatus,
+        linkedLinearIssues,
         sdkSessions: s.sdkSessions.filter((sdk) => sdk.sessionId !== sessionId),
         currentSessionId: s.currentSessionId === sessionId ? null : s.currentSessionId,
       };
@@ -605,6 +615,17 @@ export const useStore = create<AppState>((set) => ({
       const prStatus = new Map(s.prStatus);
       prStatus.set(sessionId, status);
       return { prStatus };
+    }),
+
+  setLinkedLinearIssue: (sessionId, issue) =>
+    set((s) => {
+      const linkedLinearIssues = new Map(s.linkedLinearIssues);
+      if (issue) {
+        linkedLinearIssues.set(sessionId, issue);
+      } else {
+        linkedLinearIssues.delete(sessionId);
+      }
+      return { linkedLinearIssues };
     }),
 
   setMcpServers: (sessionId, servers) =>
@@ -801,6 +822,7 @@ export const useStore = create<AppState>((set) => ({
       mcpServers: new Map(),
       toolProgress: new Map(),
       prStatus: new Map(),
+      linkedLinearIssues: new Map(),
       activeTab: "chat" as const,
       chatTabReentryTickBySession: new Map(),
       diffPanelSelectedFile: new Map(),

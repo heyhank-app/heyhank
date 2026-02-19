@@ -6,6 +6,7 @@ vi.mock("../api.js", () => ({
   api: {
     getSessionUsageLimits: vi.fn().mockRejectedValue(new Error("skip")),
     getPRStatus: vi.fn().mockRejectedValue(new Error("skip")),
+    getLinkedLinearIssue: vi.fn().mockResolvedValue({ issue: null }),
   },
 }));
 
@@ -40,6 +41,7 @@ interface MockStoreState {
   taskPanelOpen: boolean;
   setTaskPanelOpen: ReturnType<typeof vi.fn>;
   prStatus: Map<string, { available: boolean; pr?: unknown } | null>;
+  linkedLinearIssues: Map<string, unknown>;
 }
 
 let mockState: MockStoreState;
@@ -52,6 +54,7 @@ function resetStore(overrides: Partial<MockStoreState> = {}) {
     taskPanelOpen: true,
     setTaskPanelOpen: vi.fn(),
     prStatus: new Map(),
+    linkedLinearIssues: new Map(),
     ...overrides,
   };
 }

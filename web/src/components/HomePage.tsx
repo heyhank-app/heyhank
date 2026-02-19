@@ -603,8 +603,12 @@ export function HomePage() {
         timestamp: Date.now(),
       });
 
-      // Fire-and-forget: transition Linear issue to configured status
+      // Auto-link Linear issue if one was selected
       if (selectedLinearIssue) {
+        api.linkLinearIssue(sessionId, selectedLinearIssue)
+          .then(() => useStore.getState().setLinkedLinearIssue(sessionId, selectedLinearIssue))
+          .catch(() => console.warn("[HomePage] Failed to link Linear issue"));
+        // Fire-and-forget: transition Linear issue to configured status
         api.transitionLinearIssue(selectedLinearIssue.id).catch((err) => {
           console.warn("[Linear] Failed to transition issue:", err);
         });
