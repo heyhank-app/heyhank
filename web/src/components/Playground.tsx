@@ -16,6 +16,7 @@ import { GitHubPRDisplay, CodexRateLimitsSection, CodexTokenDetailsSection } fro
 import { LinearLogo } from "./LinearLogo.js";
 import { SessionCreationProgress } from "./SessionCreationProgress.js";
 import { SessionLaunchOverlay } from "./SessionLaunchOverlay.js";
+import { PlaygroundUpdateOverlay } from "./UpdateOverlay.js";
 import type { CreationProgressEvent } from "../types.js";
 
 // ─── Mock Data ──────────────────────────────────────────────────────────────
@@ -1460,6 +1461,31 @@ export function Playground() {
                   backend="codex"
                   onCancel={() => {}}
                 />
+              </div>
+            </Card>
+          </div>
+        </Section>
+        {/* ─── Update Overlay ──────────────────────────── */}
+        <Section title="Update Overlay" description="Full-screen overlay shown when auto-update is in progress, polls server and reloads when ready">
+          <div className="space-y-4">
+            <Card label="Installing phase">
+              <div className="relative h-[360px] bg-cc-bg rounded-lg overflow-hidden border border-cc-border">
+                <PlaygroundUpdateOverlay phase="installing" />
+              </div>
+            </Card>
+            <Card label="Restarting phase">
+              <div className="relative h-[360px] bg-cc-bg rounded-lg overflow-hidden border border-cc-border">
+                <PlaygroundUpdateOverlay phase="restarting" />
+              </div>
+            </Card>
+            <Card label="Waiting for server">
+              <div className="relative h-[360px] bg-cc-bg rounded-lg overflow-hidden border border-cc-border">
+                <PlaygroundUpdateOverlay phase="waiting" />
+              </div>
+            </Card>
+            <Card label="Update complete">
+              <div className="relative h-[360px] bg-cc-bg rounded-lg overflow-hidden border border-cc-border">
+                <PlaygroundUpdateOverlay phase="ready" />
               </div>
             </Card>
           </div>

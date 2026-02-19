@@ -21,6 +21,7 @@ import { CronManager } from "./components/CronManager.js";
 import { TerminalPage } from "./components/TerminalPage.js";
 import { SessionLaunchOverlay } from "./components/SessionLaunchOverlay.js";
 import { SessionTerminalDock } from "./components/SessionTerminalDock.js";
+import { UpdateOverlay } from "./components/UpdateOverlay.js";
 
 function useHash() {
   return useSyncExternalStore(
@@ -40,6 +41,7 @@ export default function App() {
   const sessionCreatingBackend = useStore((s) => s.sessionCreatingBackend);
   const creationProgress = useStore((s) => s.creationProgress);
   const creationError = useStore((s) => s.creationError);
+  const updateOverlayActive = useStore((s) => s.updateOverlayActive);
   const hash = useHash();
   const route = useMemo(() => parseHash(hash), [hash]);
   const isSettingsPage = route.page === "settings";
@@ -248,6 +250,7 @@ export default function App() {
           </div>
         </>
       )}
+      <UpdateOverlay active={updateOverlayActive} />
     </div>
   );
 }

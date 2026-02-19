@@ -15,6 +15,8 @@ export function UpdateBanner() {
     setUpdating(true);
     try {
       await api.triggerUpdate();
+      // Show the full-screen updating overlay
+      useStore.getState().setUpdateOverlayActive(true);
     } catch (err) {
       console.error("Update failed:", err);
       setUpdating(false);
