@@ -26,6 +26,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const setNotificationDesktop = useStore((s) => s.setNotificationDesktop);
   const updateInfo = useStore((s) => s.updateInfo);
   const setUpdateInfo = useStore((s) => s.setUpdateInfo);
+  const setUpdateOverlayActive = useStore((s) => s.setUpdateOverlayActive);
   const notificationApiAvailable = typeof Notification !== "undefined";
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updatingApp, setUpdatingApp] = useState(false);
@@ -96,6 +97,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
     try {
       const res = await api.triggerUpdate();
       setUpdateStatus(res.message);
+      setUpdateOverlayActive(true);
     } catch (err: unknown) {
       setUpdateError(err instanceof Error ? err.message : String(err));
       setUpdatingApp(false);
