@@ -311,6 +311,21 @@ export interface AppSettings {
   openrouterApiKeyConfigured: boolean;
   openrouterModel: string;
   linearApiKeyConfigured: boolean;
+  linearAutoTransition: boolean;
+  linearAutoTransitionStateName: string;
+}
+
+export interface LinearWorkflowState {
+  id: string;
+  name: string;
+  type: string;
+}
+
+export interface LinearTeamStates {
+  id: string;
+  key: string;
+  name: string;
+  states: LinearWorkflowState[];
 }
 
 export interface LinearIssue {
@@ -325,6 +340,7 @@ export interface LinearIssue {
   stateType: string;
   teamName: string;
   teamKey: string;
+  teamId: string;
   assigneeName?: string;
   updatedAt?: string;
 }
@@ -566,13 +582,25 @@ export const api = {
 
   // Settings
   getSettings: () => get<AppSettings>("/settings"),
-  updateSettings: (data: { openrouterApiKey?: string; openrouterModel?: string; linearApiKey?: string }) =>
-    put<AppSettings>("/settings", data),
+  updateSettings: (data: {
+    openrouterApiKey?: string;
+    openrouterModel?: string;
+    linearApiKey?: string;
+    linearAutoTransition?: boolean;
+    linearAutoTransitionStateId?: string;
+    linearAutoTransitionStateName?: string;
+  }) => put<AppSettings>("/settings", data),
   searchLinearIssues: (query: string, limit = 8) =>
     get<{ issues: LinearIssue[] }>(
       `/linear/issues?query=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(limit))}`,
     ),
   getLinearConnection: () => get<LinearConnectionInfo>("/linear/connection"),
+  getLinearStates: () => get<{ teams: LinearTeamStates[] }>("/linear/states"),
+  transitionLinearIssue: (issueId: string) =>
+    post<{ ok: boolean; skipped: boolean }>(
+      `/linear/issues/${encodeURIComponent(issueId)}/transition`,
+      {},
+    ),
   listLinearProjects: () => get<{ projects: LinearProject[] }>("/linear/projects"),
   getLinearProjectIssues: (projectId: string, limit = 15) =>
     get<{ issues: LinearIssue[] }>(

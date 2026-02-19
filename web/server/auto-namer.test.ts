@@ -17,6 +17,9 @@ beforeEach(() => {
     openrouterApiKey: "or-key",
     openrouterModel: "openrouter/free",
     linearApiKey: "",
+    linearAutoTransition: false,
+    linearAutoTransitionStateId: "",
+    linearAutoTransitionStateName: "",
     updatedAt: 0,
   });
 });
@@ -40,6 +43,9 @@ describe("generateSessionTitle", () => {
       openrouterApiKey: "",
       openrouterModel: "openrouter/free",
       linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 0,
     });
 
@@ -70,6 +76,9 @@ describe("generateSessionTitle", () => {
       openrouterApiKey: "or-key",
       openrouterModel: "openai/gpt-4o-mini",
       linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 0,
     });
     mockFetch.mockResolvedValueOnce({
@@ -141,6 +150,9 @@ describe("generateSessionTitle", () => {
       openrouterApiKey: "or-key",
       openrouterModel: "",
       linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 0,
     });
     mockFetch.mockResolvedValueOnce({

@@ -13,6 +13,9 @@ export interface CompanionSettings {
   openrouterApiKey: string;
   openrouterModel: string;
   linearApiKey: string;
+  linearAutoTransition: boolean;
+  linearAutoTransitionStateId: string;
+  linearAutoTransitionStateName: string;
   updatedAt: number;
 }
 
@@ -24,6 +27,9 @@ let settings: CompanionSettings = {
   openrouterApiKey: "",
   openrouterModel: DEFAULT_OPENROUTER_MODEL,
   linearApiKey: "",
+  linearAutoTransition: false,
+  linearAutoTransitionStateId: "",
+  linearAutoTransitionStateName: "",
   updatedAt: 0,
 };
 
@@ -35,6 +41,9 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
         ? raw.openrouterModel
         : DEFAULT_OPENROUTER_MODEL,
     linearApiKey: typeof raw?.linearApiKey === "string" ? raw.linearApiKey : "",
+    linearAutoTransition: typeof raw?.linearAutoTransition === "boolean" ? raw.linearAutoTransition : false,
+    linearAutoTransitionStateId: typeof raw?.linearAutoTransitionStateId === "string" ? raw.linearAutoTransitionStateId : "",
+    linearAutoTransitionStateName: typeof raw?.linearAutoTransitionStateName === "string" ? raw.linearAutoTransitionStateName : "",
     updatedAt: typeof raw?.updatedAt === "number" ? raw.updatedAt : 0,
   };
 }
@@ -63,13 +72,16 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "openrouterApiKey" | "openrouterModel" | "linearApiKey">>,
+  patch: Partial<Pick<CompanionSettings, "openrouterApiKey" | "openrouterModel" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
     openrouterApiKey: patch.openrouterApiKey ?? settings.openrouterApiKey,
     openrouterModel: patch.openrouterModel ?? settings.openrouterModel,
     linearApiKey: patch.linearApiKey ?? settings.linearApiKey,
+    linearAutoTransition: patch.linearAutoTransition ?? settings.linearAutoTransition,
+    linearAutoTransitionStateId: patch.linearAutoTransitionStateId ?? settings.linearAutoTransitionStateId,
+    linearAutoTransitionStateName: patch.linearAutoTransitionStateName ?? settings.linearAutoTransitionStateName,
     updatedAt: Date.now(),
   });
   persist();

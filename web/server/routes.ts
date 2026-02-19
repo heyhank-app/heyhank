@@ -1307,6 +1307,8 @@ export function createRoutes(
       openrouterApiKeyConfigured: !!settings.openrouterApiKey.trim(),
       openrouterModel: settings.openrouterModel || DEFAULT_OPENROUTER_MODEL,
       linearApiKeyConfigured: !!settings.linearApiKey.trim(),
+      linearAutoTransition: settings.linearAutoTransition,
+      linearAutoTransitionStateName: settings.linearAutoTransitionStateName,
     });
   });
 
@@ -1321,7 +1323,19 @@ export function createRoutes(
     if (body.linearApiKey !== undefined && typeof body.linearApiKey !== "string") {
       return c.json({ error: "linearApiKey must be a string" }, 400);
     }
-    if (body.openrouterApiKey === undefined && body.openrouterModel === undefined && body.linearApiKey === undefined) {
+    if (body.linearAutoTransition !== undefined && typeof body.linearAutoTransition !== "boolean") {
+      return c.json({ error: "linearAutoTransition must be a boolean" }, 400);
+    }
+    if (body.linearAutoTransitionStateId !== undefined && typeof body.linearAutoTransitionStateId !== "string") {
+      return c.json({ error: "linearAutoTransitionStateId must be a string" }, 400);
+    }
+    if (body.linearAutoTransitionStateName !== undefined && typeof body.linearAutoTransitionStateName !== "string") {
+      return c.json({ error: "linearAutoTransitionStateName must be a string" }, 400);
+    }
+    const hasAnyField = body.openrouterApiKey !== undefined || body.openrouterModel !== undefined
+      || body.linearApiKey !== undefined || body.linearAutoTransition !== undefined
+      || body.linearAutoTransitionStateId !== undefined || body.linearAutoTransitionStateName !== undefined;
+    if (!hasAnyField) {
       return c.json({ error: "At least one settings field is required" }, 400);
     }
 
@@ -1338,12 +1352,26 @@ export function createRoutes(
         typeof body.linearApiKey === "string"
           ? body.linearApiKey.trim()
           : undefined,
+      linearAutoTransition:
+        typeof body.linearAutoTransition === "boolean"
+          ? body.linearAutoTransition
+          : undefined,
+      linearAutoTransitionStateId:
+        typeof body.linearAutoTransitionStateId === "string"
+          ? body.linearAutoTransitionStateId.trim()
+          : undefined,
+      linearAutoTransitionStateName:
+        typeof body.linearAutoTransitionStateName === "string"
+          ? body.linearAutoTransitionStateName.trim()
+          : undefined,
     });
 
     return c.json({
       openrouterApiKeyConfigured: !!settings.openrouterApiKey.trim(),
       openrouterModel: settings.openrouterModel || DEFAULT_OPENROUTER_MODEL,
       linearApiKeyConfigured: !!settings.linearApiKey.trim(),
+      linearAutoTransition: settings.linearAutoTransition,
+      linearAutoTransitionStateName: settings.linearAutoTransitionStateName,
     });
   });
 
@@ -1380,7 +1408,7 @@ export function createRoutes(
                 branchName
                 priorityLabel
                 state { name type }
-                team { key name }
+                team { id key name }
               }
             }
           }
@@ -1403,7 +1431,7 @@ export function createRoutes(
             branchName?: string | null;
             priorityLabel?: string | null;
             state?: { name?: string | null; type?: string | null } | null;
-            team?: { key?: string | null; name?: string | null } | null;
+            team?: { id?: string | null; key?: string | null; name?: string | null } | null;
           }>;
         };
       };
@@ -1427,6 +1455,7 @@ export function createRoutes(
       stateType: issue.state?.type || "",
       teamName: issue.team?.name || "",
       teamKey: issue.team?.key || "",
+      teamId: issue.team?.id || "",
     }));
 
     return c.json({ issues });
@@ -1478,6 +1507,82 @@ export function createRoutes(
       teamName: firstTeam?.name || "",
       teamKey: firstTeam?.key || "",
     });
+  });
+
+  api.get("/linear/states", async (c) => {
+    const settings = getSettings();
+    const linearApiKey = settings.linearApiKey.trim();
+    if (!linearApiKey) {
+      return c.json({ error: "Linear API key is not configured" }, 400);
+    }
+
+    const response = await fetch("https://api.linear.app/graphql", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: linearApiKey,
+      },
+      body: JSON.stringify({
+        query: `
+          query CompanionWorkflowStates {
+            teams {
+              nodes {
+                id
+                key
+                name
+                states {
+                  nodes {
+                    id
+                    name
+                    type
+                  }
+                }
+              }
+            }
+          }
+        `,
+      }),
+    }).catch((e: unknown) => {
+      throw new Error(`Failed to connect to Linear: ${e instanceof Error ? e.message : String(e)}`);
+    });
+
+    const json = await response.json().catch(() => ({})) as {
+      data?: {
+        teams?: {
+          nodes?: Array<{
+            id?: string;
+            key?: string | null;
+            name?: string | null;
+            states?: {
+              nodes?: Array<{
+                id?: string;
+                name?: string | null;
+                type?: string | null;
+              }>;
+            };
+          }>;
+        };
+      };
+      errors?: Array<{ message?: string }>;
+    };
+
+    if (!response.ok || (json.errors && json.errors.length > 0)) {
+      const firstError = json.errors?.[0]?.message || response.statusText || "Linear request failed";
+      return c.json({ error: firstError }, 502);
+    }
+
+    const teams = (json.data?.teams?.nodes || []).map((team) => ({
+      id: team.id || "",
+      key: team.key || "",
+      name: team.name || "",
+      states: (team.states?.nodes || []).map((state) => ({
+        id: state.id || "",
+        name: state.name || "",
+        type: state.type || "",
+      })),
+    }));
+
+    return c.json({ teams });
   });
 
   // ─── Linear projects ────────────────────────────────────────────────
@@ -1657,6 +1762,87 @@ export function createRoutes(
     const removed = linearProjectManager.removeMapping(body.repoRoot);
     if (!removed) return c.json({ error: "Mapping not found" }, 404);
     return c.json({ ok: true });
+  });
+
+  api.post("/linear/issues/:id/transition", async (c) => {
+    const issueId = c.req.param("id");
+    if (!issueId) {
+      return c.json({ error: "Issue ID is required" }, 400);
+    }
+
+    const settings = getSettings();
+    const linearApiKey = settings.linearApiKey.trim();
+    if (!linearApiKey) {
+      return c.json({ error: "Linear API key is not configured" }, 400);
+    }
+
+    if (!settings.linearAutoTransition) {
+      return c.json({ ok: true, skipped: true, reason: "auto_transition_disabled" });
+    }
+
+    const stateId = settings.linearAutoTransitionStateId.trim();
+    if (!stateId) {
+      return c.json({ ok: true, skipped: true, reason: "no_target_state_configured" });
+    }
+
+    try {
+      const updateResponse = await fetch("https://api.linear.app/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: linearApiKey,
+        },
+        body: JSON.stringify({
+          query: `
+            mutation CompanionTransitionIssue($issueId: String!, $stateId: String!) {
+              issueUpdate(id: $issueId, input: { stateId: $stateId }) {
+                success
+                issue {
+                  id
+                  identifier
+                  state { name type }
+                }
+              }
+            }
+          `,
+          variables: { issueId, stateId },
+        }),
+      });
+
+      const updateJson = await updateResponse.json().catch(() => ({})) as {
+        data?: {
+          issueUpdate?: {
+            success?: boolean;
+            issue?: {
+              id?: string;
+              identifier?: string;
+              state?: { name?: string; type?: string };
+            };
+          };
+        };
+        errors?: Array<{ message?: string }>;
+      };
+
+      if (!updateResponse.ok || (updateJson.errors && updateJson.errors.length > 0)) {
+        const errMsg = updateJson.errors?.[0]?.message || updateResponse.statusText || "Failed to update issue state";
+        return c.json({ error: errMsg }, 502);
+      }
+
+      const updatedIssue = updateJson.data?.issueUpdate?.issue;
+      return c.json({
+        ok: true,
+        skipped: false,
+        issue: {
+          id: updatedIssue?.id || issueId,
+          identifier: updatedIssue?.identifier || "",
+          stateName: updatedIssue?.state?.name || "",
+          stateType: updatedIssue?.state?.type || "",
+        },
+      });
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      return c.json({ error: `Linear transition failed: ${errMsg}` }, 502);
+    }
   });
 
   // ─── Git operations ─────────────────────────────────────────────────

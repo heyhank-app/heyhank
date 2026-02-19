@@ -606,6 +606,13 @@ export function HomePage() {
         timestamp: Date.now(),
       });
 
+      // Fire-and-forget: transition Linear issue to configured status
+      if (selectedLinearIssue) {
+        api.transitionLinearIssue(selectedLinearIssue.id).catch((err) => {
+          console.warn("[Linear] Failed to transition issue:", err);
+        });
+      }
+
       // Clear progress on success
       useStore.getState().clearCreation();
     } catch (e: unknown) {

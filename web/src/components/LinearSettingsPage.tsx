@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api.js";
+import { api, type LinearWorkflowState, type LinearTeamStates } from "../api.js";
 import { navigateHome, navigateToSession } from "../utils/routing.js";
 import { useStore } from "../store.js";
 import { LinearLogo } from "./LinearLogo.js";
@@ -20,6 +20,17 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
   const [saved, setSaved] = useState(false);
   const [connectionNote, setConnectionNote] = useState("");
 
+  // Auto-transition state
+  const [autoTransition, setAutoTransition] = useState(false);
+  const [selectedStateId, setSelectedStateId] = useState("");
+  const [selectedStateName, setSelectedStateName] = useState("");
+  const [teams, setTeams] = useState<LinearTeamStates[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState("");
+  const [workflowStates, setWorkflowStates] = useState<LinearWorkflowState[]>([]);
+  const [loadingStates, setLoadingStates] = useState(false);
+  const [savingAutoTransition, setSavingAutoTransition] = useState(false);
+  const [autoTransitionSaved, setAutoTransitionSaved] = useState(false);
+
   async function refreshConnectionStatus() {
     setCheckingConnection(true);
     setError("");
@@ -28,7 +39,7 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
       const info = await api.getLinearConnection();
       setConnected(info.connected);
       const label = info.viewerName || info.viewerEmail || "Connected account";
-      const team = info.teamName ? ` • ${info.teamName}` : "";
+      const team = info.teamName ? ` \u2022 ${info.teamName}` : "";
       setViewerLabel(`${label}${team}`);
       setConnectionNote("Linear connection verified.");
     } catch (e: unknown) {
@@ -41,17 +52,60 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
     }
   }
 
+  async function fetchWorkflowStates() {
+    setLoadingStates(true);
+    try {
+      const result = await api.getLinearStates();
+      setTeams(result.teams);
+      // Default to first team if none selected
+      const firstTeam = result.teams[0];
+      if (firstTeam && !selectedTeamId) {
+        setSelectedTeamId(firstTeam.id);
+        setWorkflowStates(firstTeam.states);
+      }
+    } catch {
+      // Non-critical — states dropdown just won't populate
+    } finally {
+      setLoadingStates(false);
+    }
+  }
+
   useEffect(() => {
     api.getSettings()
       .then((settings) => {
         setConfigured(settings.linearApiKeyConfigured);
+        setAutoTransition(settings.linearAutoTransition);
+        setSelectedStateName(settings.linearAutoTransitionStateName);
         if (settings.linearApiKeyConfigured) {
-          refreshConnectionStatus().catch(() => {});
+          refreshConnectionStatus().then(() => {
+            fetchWorkflowStates().then(() => {
+              // Once states are loaded, sync selectedStateId from the saved name
+              // This is done inside the effect chain because we need the states list
+            }).catch(() => {});
+          }).catch(() => {});
         }
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
   }, []);
+
+  // Sync workflowStates when selectedTeamId changes
+  useEffect(() => {
+    const team = teams.find((t) => t.id === selectedTeamId);
+    if (team) {
+      setWorkflowStates(team.states);
+    }
+  }, [teams, selectedTeamId]);
+
+  // Sync selectedStateId when workflowStates or selectedStateName changes
+  useEffect(() => {
+    if (workflowStates.length > 0 && selectedStateName) {
+      const match = workflowStates.find((s) => s.name === selectedStateName);
+      if (match) {
+        setSelectedStateId(match.id);
+      }
+    }
+  }, [workflowStates, selectedStateName]);
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
@@ -71,6 +125,7 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
       setLinearApiKey("");
       setSaved(true);
       await refreshConnectionStatus();
+      await fetchWorkflowStates();
       setTimeout(() => setSaved(false), 1800);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -90,11 +145,35 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
       setConnected(false);
       setViewerLabel("");
       setLinearApiKey("");
+      setTeams([]);
+      setSelectedTeamId("");
+      setWorkflowStates([]);
+      setAutoTransition(false);
+      setSelectedStateId("");
+      setSelectedStateName("");
       setConnectionNote("Linear disconnected.");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function onSaveAutoTransition() {
+    setSavingAutoTransition(true);
+    setAutoTransitionSaved(false);
+    try {
+      await api.updateSettings({
+        linearAutoTransition: autoTransition,
+        linearAutoTransitionStateId: selectedStateId,
+        linearAutoTransitionStateName: selectedStateName,
+      });
+      setAutoTransitionSaved(true);
+      setTimeout(() => setAutoTransitionSaved(false), 1800);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingAutoTransition(false);
     }
   }
 
@@ -250,6 +329,112 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
             </div>
           </div>
         </form>
+
+        {connected && (
+          <div className="mt-4 bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-4">
+            <h2 className="text-sm font-semibold text-cc-fg">Auto-transition</h2>
+            <p className="text-xs text-cc-muted">
+              Automatically move the linked issue to a chosen status when starting a session.
+            </p>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoTransition}
+                onClick={() => setAutoTransition(!autoTransition)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                  autoTransition ? "bg-cc-primary" : "bg-cc-hover"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+                    autoTransition ? "translate-x-4" : "translate-x-0"
+                  }`}
+                />
+              </button>
+              <span className="text-sm text-cc-fg">
+                {autoTransition ? "Enabled" : "Disabled"}
+              </span>
+            </div>
+
+            {autoTransition && teams.length > 1 && (
+              <div>
+                <label className="block text-sm font-medium mb-1.5" htmlFor="transition-team">
+                  Team
+                </label>
+                <select
+                  id="transition-team"
+                  value={selectedTeamId}
+                  onChange={(e) => {
+                    setSelectedTeamId(e.target.value);
+                    setSelectedStateId("");
+                    setSelectedStateName("");
+                  }}
+                  className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg focus:outline-none focus:border-cc-primary/60"
+                >
+                  {teams.map((team) => (
+                    <option key={team.id} value={team.id}>
+                      {team.name} ({team.key})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {autoTransition && (
+              <div>
+                <label className="block text-sm font-medium mb-1.5" htmlFor="transition-state">
+                  Target status
+                </label>
+                {loadingStates ? (
+                  <p className="text-xs text-cc-muted">Loading workflow states...</p>
+                ) : workflowStates.length === 0 ? (
+                  <p className="text-xs text-cc-muted">No workflow states found.</p>
+                ) : (
+                  <select
+                    id="transition-state"
+                    value={selectedStateId}
+                    onChange={(e) => {
+                      const state = workflowStates.find((s) => s.id === e.target.value);
+                      setSelectedStateId(e.target.value);
+                      setSelectedStateName(state?.name || "");
+                    }}
+                    className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg focus:outline-none focus:border-cc-primary/60"
+                  >
+                    <option value="">Select a status...</option>
+                    {workflowStates.map((state) => (
+                      <option key={state.id} value={state.id}>
+                        {state.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+
+            {autoTransitionSaved && (
+              <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
+                Auto-transition settings saved.
+              </div>
+            )}
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={onSaveAutoTransition}
+                disabled={savingAutoTransition || (autoTransition && !selectedStateId)}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  savingAutoTransition || (autoTransition && !selectedStateId)
+                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                    : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+                }`}
+              >
+                {savingAutoTransition ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        )}
 
         <section className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="bg-cc-card border border-cc-border rounded-xl p-4">

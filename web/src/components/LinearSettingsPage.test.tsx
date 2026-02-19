@@ -66,7 +66,9 @@ describe("LinearSettingsPage", () => {
     fireEvent.change(screen.getByLabelText("Linear API Key"), {
       target: { value: "  lin_api_123  " },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    // Click the credentials Save button (first one; the second is auto-transition Save)
+    const saveButtons = screen.getAllByRole("button", { name: "Save" });
+    fireEvent.click(saveButtons[0]);
 
     await waitFor(() => {
       expect(mockApi.updateSettings).toHaveBeenCalledWith({ linearApiKey: "lin_api_123" });
@@ -78,7 +80,9 @@ describe("LinearSettingsPage", () => {
   it("shows an error when saving empty key", async () => {
     render(<LinearSettingsPage />);
     await screen.findByText("Linear key configured");
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    // Click the credentials Save button (first one)
+    const saveButtons = screen.getAllByRole("button", { name: "Save" });
+    fireEvent.click(saveButtons[0]);
     expect(await screen.findByText("Please enter a Linear API key.")).toBeInTheDocument();
     expect(mockApi.updateSettings).not.toHaveBeenCalled();
   });

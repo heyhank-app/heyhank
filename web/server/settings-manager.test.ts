@@ -28,6 +28,9 @@ describe("settings-manager", () => {
       openrouterApiKey: "",
       openrouterModel: DEFAULT_OPENROUTER_MODEL,
       linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 0,
     });
   });
@@ -63,6 +66,9 @@ describe("settings-manager", () => {
       openrouterApiKey: "existing",
       openrouterModel: "openai/gpt-4o-mini",
       linearApiKey: "lin_api_abc",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 123,
     });
   });
@@ -105,6 +111,9 @@ describe("settings-manager", () => {
       openrouterApiKey: "",
       openrouterModel: DEFAULT_OPENROUTER_MODEL,
       linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 0,
     });
   });

@@ -50,6 +50,7 @@ function makeIssue(overrides: Partial<LinearIssue> = {}): LinearIssue {
     stateType: "backlog",
     teamName: "Engineering",
     teamKey: "ENG",
+    teamId: "team-eng-1",
     ...overrides,
   };
 }

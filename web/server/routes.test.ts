@@ -1203,6 +1203,9 @@ describe("GET /api/settings", () => {
       openrouterApiKey: "or-secret",
       openrouterModel: "openrouter/free",
       linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 123,
     });
 
@@ -1214,6 +1217,8 @@ describe("GET /api/settings", () => {
       openrouterApiKeyConfigured: true,
       openrouterModel: "openrouter/free",
       linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
     });
   });
 
@@ -1222,6 +1227,9 @@ describe("GET /api/settings", () => {
       openrouterApiKey: "",
       openrouterModel: "openai/gpt-4o-mini",
       linearApiKey: "lin_api_123",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 123,
     });
 
@@ -1233,6 +1241,8 @@ describe("GET /api/settings", () => {
       openrouterApiKeyConfigured: false,
       openrouterModel: "openai/gpt-4o-mini",
       linearApiKeyConfigured: true,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
     });
   });
 });
@@ -1243,6 +1253,9 @@ describe("PUT /api/settings", () => {
       openrouterApiKey: "new-key",
       openrouterModel: "openrouter/free",
       linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 456,
     });
 
@@ -1257,12 +1270,17 @@ describe("PUT /api/settings", () => {
       openrouterApiKey: "new-key",
       openrouterModel: undefined,
       linearApiKey: undefined,
+      linearAutoTransition: undefined,
+      linearAutoTransitionStateId: undefined,
+      linearAutoTransitionStateName: undefined,
     });
     const json = await res.json();
     expect(json).toEqual({
       openrouterApiKeyConfigured: true,
       openrouterModel: "openrouter/free",
       linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
     });
   });
 
@@ -1271,6 +1289,9 @@ describe("PUT /api/settings", () => {
       openrouterApiKey: "trimmed-key",
       openrouterModel: "openrouter/free",
       linearApiKey: "lin_api_trimmed",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 789,
     });
 
@@ -1285,6 +1306,9 @@ describe("PUT /api/settings", () => {
       openrouterApiKey: "trimmed-key",
       openrouterModel: "openrouter/free",
       linearApiKey: "lin_api_trimmed",
+      linearAutoTransition: undefined,
+      linearAutoTransitionStateId: undefined,
+      linearAutoTransitionStateName: undefined,
     });
   });
 
@@ -1293,6 +1317,9 @@ describe("PUT /api/settings", () => {
       openrouterApiKey: "existing-key",
       openrouterModel: "openai/gpt-4o-mini",
       linearApiKey: "lin_api_existing",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 999,
     });
 
@@ -1307,6 +1334,9 @@ describe("PUT /api/settings", () => {
       openrouterApiKey: undefined,
       openrouterModel: "openai/gpt-4o-mini",
       linearApiKey: undefined,
+      linearAutoTransition: undefined,
+      linearAutoTransitionStateId: undefined,
+      linearAutoTransitionStateName: undefined,
     });
   });
 
@@ -1372,6 +1402,9 @@ describe("GET /api/linear/issues", () => {
       openrouterApiKey: "",
       openrouterModel: "openrouter/free",
       linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 0,
     });
 
@@ -1386,6 +1419,9 @@ describe("GET /api/linear/issues", () => {
       openrouterApiKey: "",
       openrouterModel: "openrouter/free",
       linearApiKey: "lin_api_123",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 0,
     });
 
@@ -1404,7 +1440,7 @@ describe("GET /api/linear/issues", () => {
               branchName: "eng-123-fix-auth-flow",
               priorityLabel: "High",
               state: { name: "In Progress", type: "started" },
-              team: { key: "ENG", name: "Engineering" },
+              team: { id: "team-eng-1", key: "ENG", name: "Engineering" },
             }],
           },
         },
@@ -1428,6 +1464,7 @@ describe("GET /api/linear/issues", () => {
         stateType: "started",
         teamName: "Engineering",
         teamKey: "ENG",
+        teamId: "team-eng-1",
       }],
     });
     expect(fetchMock).toHaveBeenCalledWith(
@@ -1453,6 +1490,9 @@ describe("GET /api/linear/issues", () => {
       openrouterApiKey: "",
       openrouterModel: "openrouter/free",
       linearApiKey: "lin_api_123",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 0,
     });
 
@@ -1493,6 +1533,9 @@ describe("GET /api/linear/connection", () => {
       openrouterApiKey: "",
       openrouterModel: "openrouter/free",
       linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 0,
     });
 
@@ -1507,6 +1550,9 @@ describe("GET /api/linear/connection", () => {
       openrouterApiKey: "",
       openrouterModel: "openrouter/free",
       linearApiKey: "lin_api_123",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 0,
     });
 
@@ -1536,6 +1582,163 @@ describe("GET /api/linear/connection", () => {
   });
 });
 
+describe("POST /api/linear/issues/:id/transition", () => {
+  // Skips when auto-transition is disabled in settings
+  it("skips when auto-transition is disabled", async () => {
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      openrouterApiKey: "",
+      openrouterModel: "openrouter/free",
+      linearApiKey: "lin_api_123",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "state-123",
+      linearAutoTransitionStateName: "In Progress",
+      updatedAt: 0,
+    });
+
+    const res = await app.request("/api/linear/issues/issue-123/transition", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({ ok: true, skipped: true, reason: "auto_transition_disabled" });
+  });
+
+  // Skips when no target state is configured
+  it("skips when no target state is configured", async () => {
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      openrouterApiKey: "",
+      openrouterModel: "openrouter/free",
+      linearApiKey: "lin_api_123",
+      linearAutoTransition: true,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
+      updatedAt: 0,
+    });
+
+    const res = await app.request("/api/linear/issues/issue-123/transition", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({ ok: true, skipped: true, reason: "no_target_state_configured" });
+  });
+
+  it("returns 400 when linear key is not configured", async () => {
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      openrouterApiKey: "",
+      openrouterModel: "openrouter/free",
+      linearApiKey: "",
+      linearAutoTransition: true,
+      linearAutoTransitionStateId: "state-123",
+      linearAutoTransitionStateName: "In Progress",
+      updatedAt: 0,
+    });
+
+    const res = await app.request("/api/linear/issues/issue-123/transition", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "Linear API key is not configured" });
+  });
+
+  // Happy path: uses configured stateId to update the issue directly
+  it("transitions issue to configured state", async () => {
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      openrouterApiKey: "",
+      openrouterModel: "openrouter/free",
+      linearApiKey: "lin_api_123",
+      linearAutoTransition: true,
+      linearAutoTransitionStateId: "state-doing",
+      linearAutoTransitionStateName: "Doing",
+      updatedAt: 0,
+    });
+
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      statusText: "OK",
+      json: async () => ({
+        data: {
+          issueUpdate: {
+            success: true,
+            issue: {
+              id: "issue-123",
+              identifier: "ENG-456",
+              state: { name: "Doing", type: "started" },
+            },
+          },
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await app.request("/api/linear/issues/issue-123/transition", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({
+      ok: true,
+      skipped: false,
+      issue: {
+        id: "issue-123",
+        identifier: "ENG-456",
+        stateName: "Doing",
+        stateType: "started",
+      },
+    });
+
+    // Verify only one GraphQL call (no states query needed)
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body ?? "{}"));
+    expect(body.query).toContain("issueUpdate");
+    expect(body.variables).toEqual({ issueId: "issue-123", stateId: "state-doing" });
+
+    vi.unstubAllGlobals();
+  });
+
+  // Error case: Linear API returns an error when updating issue state
+  it("returns 502 when issue update fails", async () => {
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      openrouterApiKey: "",
+      openrouterModel: "openrouter/free",
+      linearApiKey: "lin_api_123",
+      linearAutoTransition: true,
+      linearAutoTransitionStateId: "state-doing",
+      linearAutoTransitionStateName: "Doing",
+      updatedAt: 0,
+    });
+
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      statusText: "Bad Request",
+      json: async () => ({
+        errors: [{ message: "Issue not found" }],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await app.request("/api/linear/issues/issue-123/transition", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(502);
+    const json = await res.json();
+    expect(json).toEqual({ error: "Issue not found" });
+
+    vi.unstubAllGlobals();
+  });
+});
+
 // ─── Linear projects ─────────────────────────────────────────────────────────
 
 describe("GET /api/linear/projects", () => {
@@ -1544,6 +1747,9 @@ describe("GET /api/linear/projects", () => {
       openrouterApiKey: "",
       openrouterModel: "openrouter/free",
       linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 0,
     });
 
@@ -1558,6 +1764,9 @@ describe("GET /api/linear/projects", () => {
       openrouterApiKey: "",
       openrouterModel: "openrouter/free",
       linearApiKey: "lin_api_123",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 0,
     });
 
@@ -1603,6 +1812,9 @@ describe("GET /api/linear/project-issues", () => {
       openrouterApiKey: "",
       openrouterModel: "openrouter/free",
       linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 0,
     });
 
@@ -1617,6 +1829,9 @@ describe("GET /api/linear/project-issues", () => {
       openrouterApiKey: "",
       openrouterModel: "openrouter/free",
       linearApiKey: "lin_api_123",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
       updatedAt: 0,
     });
 
@@ -1792,7 +2007,6 @@ describe("DELETE /api/linear/project-mappings", () => {
     expect(linearProjectManager.removeMapping).toHaveBeenCalledWith("/home/user/project");
   });
 });
-
 // ─── Git ─────────────────────────────────────────────────────────────────────
 
 describe("GET /api/git/repo-info", () => {
