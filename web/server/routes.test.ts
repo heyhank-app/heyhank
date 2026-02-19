@@ -1376,7 +1376,7 @@ describe("GET /api/linear/issues", () => {
       statusText: "OK",
       json: async () => ({
         data: {
-          issueSearch: {
+          searchIssues: {
             nodes: [{
               id: "issue-id",
               identifier: "ENG-123",
@@ -1417,6 +1417,10 @@ describe("GET /api/linear/issues", () => {
         headers: expect.objectContaining({ Authorization: "lin_api_123" }),
       }),
     );
+    const [, requestInit] = vi.mocked(fetchMock).mock.calls[0];
+    const requestBody = JSON.parse(String(requestInit?.body ?? "{}"));
+    expect(requestBody.query).toContain("searchIssues(term: $term, first: $first)");
+    expect(requestBody.variables).toEqual({ term: "auth", first: 5 });
     vi.unstubAllGlobals();
   });
 });

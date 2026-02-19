@@ -1362,8 +1362,8 @@ export function createRoutes(
       },
       body: JSON.stringify({
         query: `
-          query CompanionIssueSearch($query: String!, $first: Int!) {
-            issueSearch(query: $query, first: $first) {
+          query CompanionIssueSearch($term: String!, $first: Int!) {
+            searchIssues(term: $term, first: $first) {
               nodes {
                 id
                 identifier
@@ -1377,7 +1377,7 @@ export function createRoutes(
             }
           }
         `,
-        variables: { query, first: limit },
+        variables: { term: query, first: limit },
       }),
     }).catch((e: unknown) => {
       throw new Error(`Failed to connect to Linear: ${e instanceof Error ? e.message : String(e)}`);
@@ -1385,7 +1385,7 @@ export function createRoutes(
 
     const json = await response.json().catch(() => ({})) as {
       data?: {
-        issueSearch?: {
+        searchIssues?: {
           nodes?: Array<{
             id: string;
             identifier: string;
@@ -1406,7 +1406,7 @@ export function createRoutes(
       return c.json({ error: firstError }, 502);
     }
 
-    const issues = (json.data?.issueSearch?.nodes || []).map((issue) => ({
+    const issues = (json.data?.searchIssues?.nodes || []).map((issue) => ({
       id: issue.id,
       identifier: issue.identifier,
       title: issue.title,

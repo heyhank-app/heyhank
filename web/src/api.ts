@@ -68,7 +68,8 @@ async function get<T = unknown>(path: string): Promise<T> {
   try {
     const res = await fetch(`${BASE}${path}`);
     if (!res.ok) {
-      const apiError = new Error(res.statusText);
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      const apiError = new Error(err.error || res.statusText);
       trackApiFailure("GET", path, nowMs() - startedAt, apiError, res.status);
       failureTracked = true;
       throw apiError;

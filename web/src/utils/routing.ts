@@ -3,6 +3,7 @@ export type Route =
   | { page: "session"; sessionId: string }
   | { page: "settings" }
   | { page: "integrations" }
+  | { page: "integration-linear" }
   | { page: "prompts" }
   | { page: "terminal" }
   | { page: "environments" }
@@ -17,6 +18,7 @@ const SESSION_PREFIX = "#/session/";
 export function parseHash(hash: string): Route {
   if (hash === "#/settings") return { page: "settings" };
   if (hash === "#/integrations") return { page: "integrations" };
+  if (hash === "#/integrations/linear") return { page: "integration-linear" };
   if (hash === "#/prompts") return { page: "prompts" };
   if (hash === "#/terminal") return { page: "terminal" };
   if (hash === "#/environments") return { page: "environments" };

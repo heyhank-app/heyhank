@@ -14,6 +14,7 @@ import { Playground } from "./components/Playground.js";
 import { UpdateBanner } from "./components/UpdateBanner.js";
 import { SettingsPage } from "./components/SettingsPage.js";
 import { IntegrationsPage } from "./components/IntegrationsPage.js";
+import { LinearSettingsPage } from "./components/LinearSettingsPage.js";
 import { PromptsPage } from "./components/PromptsPage.js";
 import { EnvManager } from "./components/EnvManager.js";
 import { CronManager } from "./components/CronManager.js";
@@ -44,6 +45,7 @@ export default function App() {
   const isSettingsPage = route.page === "settings";
   const isPromptsPage = route.page === "prompts";
   const isIntegrationsPage = route.page === "integrations";
+  const isLinearIntegrationPage = route.page === "integration-linear";
   const isTerminalPage = route.page === "terminal";
   const isEnvironmentsPage = route.page === "environments";
   const isScheduledPage = route.page === "scheduled";
@@ -144,6 +146,12 @@ export default function App() {
           {isIntegrationsPage && (
             <div className="absolute inset-0">
               <IntegrationsPage embedded />
+            </div>
+          )}
+
+          {isLinearIntegrationPage && (
+            <div className="absolute inset-0">
+              <LinearSettingsPage embedded />
             </div>
           )}
 

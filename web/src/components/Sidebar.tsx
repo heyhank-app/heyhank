@@ -30,7 +30,7 @@ export function Sidebar() {
   const route = parseHash(hash);
   const isSettingsPage = route.page === "settings";
   const isPromptsPage = route.page === "prompts";
-  const isIntegrationsPage = route.page === "integrations";
+  const isIntegrationsPage = route.page === "integrations" || route.page === "integration-linear";
   const isTerminalPage = route.page === "terminal";
   const isEnvironmentsPage = route.page === "environments";
   const isScheduledPage = route.page === "scheduled";

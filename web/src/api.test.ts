@@ -287,6 +287,12 @@ describe("settings", () => {
     expect(result).toEqual(data);
   });
 
+  it("surfaces backend error message for Linear issue search", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ error: "Linear token invalid" }, 502));
+
+    await expect(api.searchLinearIssues("auth bug", 5)).rejects.toThrow("Linear token invalid");
+  });
+
   it("gets Linear connection status", async () => {
     const data = {
       connected: true,

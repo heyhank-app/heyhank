@@ -9,94 +9,35 @@ interface IntegrationsPageProps {
 }
 
 export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
-  const [linearApiKey, setLinearApiKey] = useState("");
-  const [configured, setConfigured] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [viewerLabel, setViewerLabel] = useState("");
+  const [linearConfigured, setLinearConfigured] = useState(false);
+  const [linearConnected, setLinearConnected] = useState(false);
+  const [linearViewerLabel, setLinearViewerLabel] = useState("");
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [checkingConnection, setCheckingConnection] = useState(false);
   const [error, setError] = useState("");
-  const [saved, setSaved] = useState(false);
-  const [connectionNote, setConnectionNote] = useState("");
-
-  async function refreshConnectionStatus() {
-    setCheckingConnection(true);
-    setError("");
-    setConnectionNote("");
-    try {
-      const info = await api.getLinearConnection();
-      setConnected(info.connected);
-      const label = info.viewerName || info.viewerEmail || "Connected account";
-      const team = info.teamName ? ` • ${info.teamName}` : "";
-      setViewerLabel(`${label}${team}`);
-      setConnectionNote("Linear connection verified.");
-    } catch (e: unknown) {
-      setConnected(false);
-      setViewerLabel("");
-      setConnectionNote("");
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCheckingConnection(false);
-    }
-  }
 
   useEffect(() => {
     api.getSettings()
       .then((settings) => {
-        setConfigured(settings.linearApiKeyConfigured);
-        if (settings.linearApiKeyConfigured) {
-          refreshConnectionStatus().catch(() => {});
-        }
+        setLinearConfigured(settings.linearApiKeyConfigured);
+        if (!settings.linearApiKeyConfigured) return;
+        return api.getLinearConnection().then((info) => {
+          setLinearConnected(info.connected);
+          const label = info.viewerName || info.viewerEmail || "Connected account";
+          const team = info.teamName ? ` • ${info.teamName}` : "";
+          setLinearViewerLabel(`${label}${team}`);
+        });
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
   }, []);
 
-  async function onSave(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = linearApiKey.trim();
-    if (!trimmed) {
-      setError("Please enter a Linear API key.");
-      return;
-    }
-
-    setSaving(true);
-    setError("");
-    setSaved(false);
-    setConnectionNote("");
-    try {
-      const settings = await api.updateSettings({ linearApiKey: trimmed });
-      setConfigured(settings.linearApiKeyConfigured);
-      setLinearApiKey("");
-      setSaved(true);
-      await refreshConnectionStatus();
-      setTimeout(() => setSaved(false), 1800);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function onDisconnect() {
-    setSaving(true);
-    setError("");
-    setSaved(false);
-    setConnectionNote("");
-    try {
-      const settings = await api.updateSettings({ linearApiKey: "" });
-      setConfigured(settings.linearApiKeyConfigured);
-      setConnected(false);
-      setViewerLabel("");
-      setLinearApiKey("");
-      setConnectionNote("Linear disconnected.");
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  }
+  const linearStatus = loading
+    ? "Checking..."
+    : linearConnected
+      ? "Connected"
+      : linearConfigured
+        ? "Needs verification"
+        : "Not connected";
 
   return (
     <div className={`${embedded ? "h-full" : "h-[100dvh]"} bg-cc-bg text-cc-fg font-sans-ui antialiased overflow-y-auto`}>
@@ -105,7 +46,7 @@ export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
           <div>
             <h1 className="text-xl font-semibold text-cc-fg">Integrations</h1>
             <p className="mt-1 text-sm text-cc-muted">
-              Connect third-party tools and make them available in session setup.
+              Connect tools and open their dedicated settings pages.
             </p>
           </div>
           {!embedded && (
@@ -125,134 +66,54 @@ export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
           )}
         </div>
 
-        <section className="relative overflow-hidden bg-cc-card border border-cc-border rounded-xl p-4 sm:p-6 mb-4">
-          <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_top_right,rgba(124,58,237,0.1),transparent_45%)]" />
-          <div className="relative flex items-start justify-between gap-4 flex-wrap">
+        {error && (
+          <div className="mb-4 px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
+            {error}
+          </div>
+        )}
+
+        <section className="group relative overflow-hidden rounded-3xl border border-cc-border/80 bg-cc-card p-5 pb-16 sm:p-7 sm:pb-7 transition-all duration-300 hover:border-cc-primary/35 hover:shadow-[0_18px_44px_rgba(0,0,0,0.18)]">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(80%_140%_at_100%_0%,rgba(251,146,60,0.18),transparent_52%)]" />
+          <div className="pointer-events-none absolute inset-0 opacity-30 bg-[linear-gradient(120deg,transparent_0%,rgba(255,255,255,0.04)_35%,transparent_62%)]" />
+          <div className="relative min-w-0">
             <div className="min-w-0">
-              <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-cc-border bg-cc-hover/60 text-xs text-cc-muted">
-                <LinearLogo className="w-3.5 h-3.5 text-cc-fg" />
-                <span>Linear Integration</span>
+              <div className="inline-flex items-center gap-2 rounded-full border border-cc-border bg-cc-hover/55 px-3 py-1.5 text-xs tracking-wide text-cc-muted">
+                <LinearLogo className="h-3.5 w-3.5 text-cc-fg" />
+                <span>Linear</span>
+                {linearConnected && (
+                  <span
+                    className="inline-block h-1.5 w-1.5 rounded-full bg-cc-success shadow-[0_0_0_3px_rgba(34,197,94,0.15)]"
+                    aria-label="Connected"
+                    title="Connected"
+                  />
+                )}
               </div>
-              <h2 className="mt-3 text-lg sm:text-xl font-semibold text-cc-fg">
-                Turn issues into concrete session context
-              </h2>
-              <p className="mt-1.5 text-sm text-cc-muted max-w-2xl">
-                Search and attach the right Linear issue before the first prompt, so the companion starts with scope, state, and links.
+              <div className="mt-4 flex flex-wrap items-center gap-2.5">
+                <h2 className="text-[clamp(1.45rem,2.6vw,2rem)] font-semibold leading-[1.12] tracking-tight text-cc-fg">
+                  Issue context before first prompt
+                </h2>
+              </div>
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-cc-muted sm:text-[15px]">
+                Connect your workspace, search an issue from Home, and inject scope automatically when a session starts.
               </p>
-              <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-                <span className="px-2 py-1 rounded-md bg-cc-hover text-cc-muted">Issue lookup on Home</span>
-                <span className="px-2 py-1 rounded-md bg-cc-hover text-cc-muted">Context injection on start</span>
-                <span className="px-2 py-1 rounded-md bg-cc-hover text-cc-muted">No key exposure in API responses</span>
+              <div className="mt-4 inline-flex max-w-full items-center rounded-lg border border-cc-border/80 bg-black/10 px-3 py-1.5 text-xs text-cc-muted/95">
+                <span className="truncate">{linearViewerLabel || "No workspace linked yet"}</span>
               </div>
             </div>
-            <div className="shrink-0 rounded-xl border border-cc-border bg-cc-bg px-3 py-2 text-right min-w-[170px]">
-              <p className="text-[11px] text-cc-muted uppercase tracking-wide">Status</p>
-              <p className={`mt-1 text-sm font-medium ${connected ? "text-cc-success" : configured ? "text-amber-500" : "text-cc-muted"}`}>
-                {connected ? "Connected" : configured ? "Needs verification" : "Not connected"}
-              </p>
-              <p className="mt-0.5 text-[11px] text-cc-muted truncate">{viewerLabel || "No workspace linked yet"}</p>
-            </div>
-          </div>
-        </section>
-
-        <form onSubmit={onSave} className="bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-cc-fg flex items-center gap-2">
-            <LinearLogo className="w-4 h-4 text-cc-fg" />
-            <span>Linear Credentials</span>
-          </h2>
-          <div>
-            <label className="block text-sm font-medium mb-1.5" htmlFor="linear-key">
-              Linear API Key
-            </label>
-            <input
-              id="linear-key"
-              type="password"
-              value={linearApiKey}
-              onChange={(e) => setLinearApiKey(e.target.value)}
-              placeholder={configured ? "Configured. Enter a new key to replace." : "lin_api_..."}
-              className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/60"
-            />
-            <p className="mt-1.5 text-xs text-cc-muted">
-              Used to search Linear issues from the home page and inject issue context at session start.
-            </p>
-          </div>
-
-          {error && (
-            <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
-              {error}
-            </div>
-          )}
-
-          {connectionNote && (
-            <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
-              {connectionNote}
-            </div>
-          )}
-
-          {saved && (
-            <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
-              Integration saved.
-            </div>
-          )}
-
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <span className="text-xs text-cc-muted">
-              {loading ? "Loading..." : configured ? "Linear key configured" : "Linear key not configured"}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onDisconnect}
-                disabled={saving || loading || !configured}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  saving || loading || !configured
-                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                    : "bg-cc-error/10 hover:bg-cc-error/20 text-cc-error cursor-pointer"
-                }`}
-              >
-                Disconnect
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  refreshConnectionStatus().catch(() => {});
-                }}
-                disabled={checkingConnection || loading || !configured}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  checkingConnection || loading || !configured
-                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                    : "bg-cc-hover hover:bg-cc-active text-cc-fg cursor-pointer"
-                }`}
-              >
-                {checkingConnection ? "Checking..." : "Verify"}
-              </button>
-              <button
-                type="submit"
-                disabled={saving || loading}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  saving || loading
-                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                    : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
-                }`}
-              >
-                {saving ? "Saving..." : "Save"}
-              </button>
-            </div>
-          </div>
-        </form>
-
-        <section className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="bg-cc-card border border-cc-border rounded-xl p-4">
-            <p className="text-[11px] uppercase tracking-wide text-cc-muted">1. Configure</p>
-            <p className="mt-1 text-sm text-cc-fg">Add a Linear API key and verify the connection.</p>
-          </div>
-          <div className="bg-cc-card border border-cc-border rounded-xl p-4">
-            <p className="text-[11px] uppercase tracking-wide text-cc-muted">2. Select</p>
-            <p className="mt-1 text-sm text-cc-fg">From Home, search an issue by key or title in one click.</p>
-          </div>
-          <div className="bg-cc-card border border-cc-border rounded-xl p-4">
-            <p className="text-[11px] uppercase tracking-wide text-cc-muted">3. Start</p>
-            <p className="mt-1 text-sm text-cc-fg">The issue details are injected as startup context.</p>
+            <button
+              type="button"
+              onClick={() => {
+                window.location.hash = "#/integrations/linear";
+              }}
+              aria-label="Open Linear settings"
+              title="Open Linear settings"
+              className="absolute bottom-0 right-0 sm:bottom-0 sm:right-0 inline-flex h-10 w-10 items-center justify-center rounded-full border border-cc-primary/28 bg-cc-primary/12 text-cc-fg transition-colors hover:border-cc-primary/50 hover:bg-cc-primary/20 focus:outline-none focus:ring-2 focus:ring-cc-primary/35 cursor-pointer"
+            >
+              <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <path d="M9.67 4.53 10 2h4l.33 2.53a7.9 7.9 0 0 1 1.7.7l2.03-1.55 2.83 2.83-1.55 2.03c.28.54.51 1.1.7 1.7L22 10v4l-2.53.33a7.9 7.9 0 0 1-.7 1.7l1.55 2.03-2.83 2.83-2.03-1.55c-.54.28-1.1.51-1.7.7L14 22h-4l-.33-2.53a7.9 7.9 0 0 1-1.7-.7l-2.03 1.55-2.83-2.83 1.55-2.03a7.9 7.9 0 0 1-.7-1.7L2 14v-4l2.53-.33c.19-.6.42-1.16.7-1.7L3.68 5.94 6.5 3.1l2.03 1.55c.54-.28 1.1-.51 1.7-.7Z" />
+                <circle cx="12" cy="12" r="3.2" />
+              </svg>
+            </button>
           </div>
         </section>
       </div>
