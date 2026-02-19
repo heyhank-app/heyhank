@@ -910,6 +910,8 @@ describe("POST /api/sessions/:id/editor/start", () => {
     vi.spyOn(containerManager, "hasBinaryInContainer").mockReturnValue(true);
     vi.spyOn(containerManager, "isContainerAlive").mockReturnValue("running");
     const execSpy = vi.spyOn(containerManager, "execInContainer").mockReturnValue("");
+    // Mock fetch so the readiness poll resolves immediately instead of timing out
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok", { status: 200 }));
 
     const res = await app.request("/api/sessions/s1/editor/start", { method: "POST" });
 
@@ -926,6 +928,7 @@ describe("POST /api/sessions/:id/editor/start", () => {
       expect.arrayContaining(["sh", "-lc"]),
       10_000,
     );
+    fetchSpy.mockRestore();
   });
 });
 

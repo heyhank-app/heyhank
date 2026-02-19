@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type EditorStartResult } from "../api.js";
+import { useStore } from "../store.js";
 
 interface SessionEditorPaneProps {
   sessionId: string;
@@ -8,6 +9,7 @@ interface SessionEditorPaneProps {
 export function SessionEditorPane({ sessionId }: SessionEditorPaneProps) {
   const [state, setState] = useState<EditorStartResult | null>(null);
   const [loading, setLoading] = useState(true);
+  const setEditorUrl = useStore((s) => s.setEditorUrl);
 
   useEffect(() => {
     let cancelled = false;
@@ -18,6 +20,9 @@ export function SessionEditorPane({ sessionId }: SessionEditorPaneProps) {
       .then((res) => {
         if (cancelled) return;
         setState(res);
+        if (res.available && res.url) {
+          setEditorUrl(sessionId, res.url);
+        }
       })
       .catch((err) => {
         if (cancelled) return;

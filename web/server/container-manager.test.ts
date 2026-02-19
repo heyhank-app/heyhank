@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockExecSync = vi.hoisted(() => vi.fn((..._args: unknown[]) => ""));
 const mockExistsSync = vi.hoisted(() => vi.fn((..._args: unknown[]) => false));
+const mockSpawn = vi.hoisted(() => vi.fn());
 
 vi.mock("node:child_process", () => ({
   execSync: mockExecSync,
@@ -16,6 +17,21 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 import { ContainerManager } from "./container-manager.js";
+
+function createMockProc(exitCode: number, stderrText = "") {
+  return {
+    exited: Promise.resolve(exitCode),
+    stderr: new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(stderrText));
+        controller.close();
+      },
+    }),
+    kill: vi.fn(),
+  };
+}
+
+vi.stubGlobal("Bun", { spawn: mockSpawn });
 
 describe("ContainerManager git auth seeding", () => {
   beforeEach(() => {
@@ -184,5 +200,40 @@ describe("ContainerManager Codex file seeding", () => {
     expect(() => {
       (manager as unknown as Record<string, (id: string) => void>)["seedCodexFiles"]("container999");
     }).not.toThrow();
+  });
+});
+
+describe("ContainerManager workspace copy", () => {
+  beforeEach(() => {
+    mockSpawn.mockReset();
+  });
+
+  it("uses tar stream + docker exec to copy workspace content", async () => {
+    // Validates the fast path used for large workspaces (especially on macOS):
+    // tar the host directory and stream directly into /workspace in-container.
+    mockSpawn.mockReturnValue(createMockProc(0));
+
+    const manager = new ContainerManager();
+    await expect(manager.copyWorkspaceToContainer("container123", "/tmp/my-workspace")).resolves.toBeUndefined();
+
+    expect(mockSpawn).toHaveBeenCalledOnce();
+    const [args, options] = mockSpawn.mock.calls[0] as [string[], Record<string, unknown>];
+
+    expect(args[0]).toBe("bash");
+    expect(args[1]).toBe("-lc");
+    expect(args[2]).toContain("set -o pipefail");
+    expect(args[2]).toContain("COPYFILE_DISABLE=1 tar -C /tmp/my-workspace -cf - .");
+    expect(args[2]).toContain("docker exec -i container123 tar -xf - -C /workspace");
+    expect(options.stdout).toBe("pipe");
+    expect(options.stderr).toBe("pipe");
+  });
+
+  it("throws a descriptive error when copy command fails", async () => {
+    // Ensures stderr from the tar/docker pipeline is surfaced to users.
+    mockSpawn.mockReturnValue(createMockProc(2, "tar: write error"));
+
+    const manager = new ContainerManager();
+    await expect(manager.copyWorkspaceToContainer("container123", "/tmp/my-workspace"))
+      .rejects.toThrow("workspace copy failed (exit 2): tar: write error");
   });
 });

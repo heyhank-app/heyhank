@@ -21,6 +21,7 @@ import { CronManager } from "./components/CronManager.js";
 import { TerminalPage } from "./components/TerminalPage.js";
 import { SessionLaunchOverlay } from "./components/SessionLaunchOverlay.js";
 import { SessionTerminalDock } from "./components/SessionTerminalDock.js";
+import { SessionEditorPane } from "./components/SessionEditorPane.js";
 import { UpdateOverlay } from "./components/UpdateOverlay.js";
 
 function useHash() {
@@ -187,13 +188,15 @@ export default function App() {
                         onClosePanel={() => useStore.getState().setActiveTab("chat")}
                       />
                     )
-                    : (
-                      <SessionTerminalDock sessionId={currentSessionId} suppressPanel>
-                        {activeTab === "diff"
-                          ? <DiffPanel sessionId={currentSessionId} />
-                          : <ChatView sessionId={currentSessionId} />}
-                      </SessionTerminalDock>
-                    )
+                    : activeTab === "editor"
+                      ? <SessionEditorPane sessionId={currentSessionId} />
+                      : (
+                        <SessionTerminalDock sessionId={currentSessionId} suppressPanel>
+                          {activeTab === "diff"
+                            ? <DiffPanel sessionId={currentSessionId} />
+                            : <ChatView sessionId={currentSessionId} />}
+                        </SessionTerminalDock>
+                      )
                 ) : (
                   <HomePage key={homeResetKey} />
                 )}

@@ -1,8 +1,6 @@
 import { useMemo } from "react";
 import { useStore, type QuickTerminalPlacement } from "../store.js";
 import { TerminalView } from "./TerminalView.js";
-import { SessionEditorPane } from "./SessionEditorPane.js";
-
 interface SessionTerminalDockProps {
   sessionId: string;
   children?: React.ReactNode;
@@ -202,13 +200,8 @@ export function SessionTerminalDock({
 
   if (terminalOnly) {
     return (
-      <div className="h-full min-h-0 bg-cc-card flex flex-col lg:flex-row">
-        <div className="flex-1 min-h-[220px] lg:min-h-0 border-b lg:border-b-0 lg:border-r border-cc-border">
-          <SessionEditorPane sessionId={sessionId} />
-        </div>
-        <div className="flex-1 min-h-[220px] lg:min-h-0">
-          {terminalPanel}
-        </div>
+      <div className="h-full min-h-0 bg-cc-card">
+        {terminalPanel}
       </div>
     );
   }

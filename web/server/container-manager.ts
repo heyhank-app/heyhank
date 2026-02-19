@@ -52,6 +52,7 @@ const EXEC_OPTS: ExecSyncOptionsWithStringEncoding = {
 const QUICK_EXEC_TIMEOUT_MS = 8_000;
 const STANDARD_EXEC_TIMEOUT_MS = 30_000;
 const CONTAINER_BOOT_TIMEOUT_MS = 20_000;
+const WORKSPACE_COPY_TIMEOUT_MS = 15 * 60_000; // 15 min for large repos
 const IMAGE_PULL_TIMEOUT_MS = 300_000; // 5 min for pulling images
 
 const DOCKER_REGISTRY = "docker.io/stangirard";
@@ -378,8 +379,8 @@ export class ContainerManager {
 
   /**
    * Copy host workspace files into a running container's /workspace volume.
-   * Uses `docker cp` which works with both running and stopped containers.
-   * The trailing `/.` ensures directory contents are copied (not the directory itself).
+   * Uses a tar stream piped into `docker exec` for better throughput on Docker
+   * Desktop (macOS) while preserving file structure and dotfiles.
    */
   async copyWorkspaceToContainer(
     containerId: string,
@@ -387,20 +388,33 @@ export class ContainerManager {
   ): Promise<void> {
     validateContainerId(containerId);
 
-    const src = hostCwd.endsWith("/") ? `${hostCwd}.` : `${hostCwd}/.`;
-    const cmd = `docker cp ${shellEscape(src)} ${shellEscape(containerId)}:/workspace`;
+    const cmd = [
+      "set -o pipefail",
+      `COPYFILE_DISABLE=1 tar -C ${shellEscape(hostCwd)} -cf - . | ` +
+        `docker exec -i ${shellEscape(containerId)} tar -xf - -C /workspace`,
+    ].join("; ");
 
-    const proc = Bun.spawn(["sh", "-c", cmd], {
+    const proc = Bun.spawn(["bash", "-lc", cmd], {
       stdout: "pipe",
       stderr: "pipe",
     });
 
-    const stderrText = await new Response(proc.stderr).text();
-    const exitCode = await proc.exited;
+    const timeout = new Promise<number>((resolve) => {
+      setTimeout(() => resolve(-1), WORKSPACE_COPY_TIMEOUT_MS);
+    });
+
+    const stderrPromise = new Response(proc.stderr).text();
+    const exitCode = await Promise.race([proc.exited, timeout]);
+
+    if (exitCode === -1) {
+      try { proc.kill(); } catch { /* best-effort */ }
+      throw new Error(`workspace copy timed out after ${Math.floor(WORKSPACE_COPY_TIMEOUT_MS / 1000)}s`);
+    }
 
     if (exitCode !== 0) {
+      const stderrText = await stderrPromise;
       throw new Error(
-        `docker cp failed (exit ${exitCode}): ${stderrText.trim() || "unknown error"}`,
+        `workspace copy failed (exit ${exitCode}): ${stderrText.trim() || "unknown error"}`,
       );
     }
   }

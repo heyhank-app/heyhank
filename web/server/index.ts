@@ -40,6 +40,7 @@ import { DEFAULT_PORT_DEV, DEFAULT_PORT_PROD } from "./constants.js";
 
 const defaultPort = process.env.NODE_ENV === "production" ? DEFAULT_PORT_PROD : DEFAULT_PORT_DEV;
 const port = Number(process.env.PORT) || defaultPort;
+const idleTimeoutSeconds = Number(process.env.COMPANION_IDLE_TIMEOUT_SECONDS || "120");
 const sessionStore = new SessionStore(process.env.COMPANION_SESSION_DIR);
 const wsBridge = new WsBridge();
 const launcher = new CliLauncher(port);
@@ -130,6 +131,7 @@ if (process.env.NODE_ENV === "production") {
 
 const server = Bun.serve<SocketData>({
   port,
+  idleTimeout: idleTimeoutSeconds,
   async fetch(req, server) {
     const url = new URL(req.url);
 

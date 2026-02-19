@@ -93,7 +93,8 @@ interface AppState {
   taskPanelConfig: TaskPanelConfig;
   taskPanelConfigMode: boolean;
   homeResetKey: number;
-  activeTab: "chat" | "diff" | "terminal";
+  activeTab: "chat" | "diff" | "terminal" | "editor";
+  editorUrls: Map<string, string>;
   chatTabReentryTickBySession: Map<string, number>;
   diffPanelSelectedFile: Map<string, string>;
 
@@ -175,7 +176,8 @@ interface AppState {
   setUpdateOverlayActive: (active: boolean) => void;
 
   // Diff panel actions
-  setActiveTab: (tab: "chat" | "diff" | "terminal") => void;
+  setActiveTab: (tab: "chat" | "diff" | "terminal" | "editor") => void;
+  setEditorUrl: (sessionId: string, url: string) => void;
   markChatTabReentry: (sessionId: string) => void;
   setDiffPanelSelectedFile: (sessionId: string, filePath: string | null) => void;
 
@@ -317,6 +319,7 @@ export const useStore = create<AppState>((set) => ({
   taskPanelConfigMode: false,
   homeResetKey: 0,
   activeTab: "chat",
+  editorUrls: new Map(),
   chatTabReentryTickBySession: new Map(),
   diffPanelSelectedFile: new Map(),
   quickTerminalOpen: false,
@@ -756,6 +759,12 @@ export const useStore = create<AppState>((set) => ({
   setUpdateOverlayActive: (active) => set({ updateOverlayActive: active }),
 
   setActiveTab: (tab) => set({ activeTab: tab }),
+  setEditorUrl: (sessionId, url) =>
+    set((s) => {
+      const next = new Map(s.editorUrls);
+      next.set(sessionId, url);
+      return { editorUrls: next };
+    }),
   markChatTabReentry: (sessionId) =>
     set((s) => {
       const chatTabReentryTickBySession = new Map(s.chatTabReentryTickBySession);
@@ -874,6 +883,7 @@ export const useStore = create<AppState>((set) => ({
       linkedLinearIssues: new Map(),
       taskPanelConfigMode: false,
       activeTab: "chat" as const,
+      editorUrls: new Map(),
       chatTabReentryTickBySession: new Map(),
       diffPanelSelectedFile: new Map(),
       quickTerminalOpen: false,

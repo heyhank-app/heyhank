@@ -712,80 +712,87 @@ export function createRoutes(
     return c.json(session);
   });
 
-  api.post("/sessions/:id/editor/start", (c) => {
+  api.post("/sessions/:id/editor/start", async (c) => {
     const id = c.req.param("id");
     const session = launcher.getSession(id);
     if (!session) return c.json({ error: "Session not found" }, 404);
 
-    const editorFolder = session.containerId ? "/workspace" : session.cwd;
-    const editorPathSuffix = `?folder=${encodeURIComponent(editorFolder)}`;
+    // For container sessions, try code-server inside the container first.
+    // If unavailable, fall through to host code-server with the host-mapped cwd.
+    let hostFallbackCwd = session.cwd;
 
     if (session.containerId) {
       const container = containerManager.getContainer(id);
-      if (!container) {
-        return c.json({
-          available: false,
-          installed: false,
-          mode: "container",
-          message: "Session container is unavailable. Relaunch the session and try again.",
-        });
-      }
+      const hasContainerCodeServer = container
+        && containerManager.hasBinaryInContainer(container.containerId, "code-server");
 
-      if (!containerManager.hasBinaryInContainer(container.containerId, "code-server")) {
-        return c.json({
-          available: false,
-          installed: false,
-          mode: "container",
-          message: "VS Code editor is not installed in this container image.",
-        });
-      }
-
-      const portMapping = container.portMappings.find(
-        (p) => p.containerPort === VSCODE_EDITOR_CONTAINER_PORT,
-      );
-      if (!portMapping) {
-        return c.json({
-          available: false,
-          installed: true,
-          mode: "container",
-          message: "Container editor port is missing. Start a new session to enable the VS Code editor.",
-        });
-      }
-
-      try {
-        const alive = containerManager.isContainerAlive(container.containerId);
-        if (alive === "stopped") {
-          containerManager.startContainer(container.containerId);
-        } else if (alive === "missing") {
+      if (container && hasContainerCodeServer) {
+        const editorPathSuffix = `?folder=${encodeURIComponent("/workspace")}`;
+        const portMapping = container.portMappings.find(
+          (p) => p.containerPort === VSCODE_EDITOR_CONTAINER_PORT,
+        );
+        if (!portMapping) {
           return c.json({
             available: false,
             installed: true,
             mode: "container",
-            message: "Session container no longer exists. Start a new session to use the editor.",
+            message: "Container editor port is missing. Start a new session to enable the VS Code editor.",
           });
         }
 
-        const startCmd = [
-          `if ! pgrep -f ${shellEscapeArg(`code-server.*--bind-addr 0.0.0.0:${VSCODE_EDITOR_CONTAINER_PORT}`)} >/dev/null 2>&1; then`,
-          `nohup code-server --auth none --disable-telemetry --bind-addr 0.0.0.0:${VSCODE_EDITOR_CONTAINER_PORT} /workspace >/tmp/companion-code-server.log 2>&1 &`,
-          "fi",
-        ].join(" ");
-        containerManager.execInContainer(container.containerId, ["sh", "-lc", startCmd], 10_000);
+        try {
+          const alive = containerManager.isContainerAlive(container.containerId);
+          if (alive === "stopped") {
+            containerManager.startContainer(container.containerId);
+          } else if (alive === "missing") {
+            return c.json({
+              available: false,
+              installed: true,
+              mode: "container",
+              message: "Session container no longer exists. Start a new session to use the editor.",
+            });
+          }
 
-        return c.json({
-          available: true,
-          installed: true,
-          mode: "container",
-          url: `http://localhost:${portMapping.hostPort}${editorPathSuffix}`,
-        });
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        return c.json({
-          available: false,
-          installed: true,
-          mode: "container",
-          message: `Failed to start VS Code editor in container: ${message}`,
-        });
+          const startCmd = [
+            `if ! pgrep -f ${shellEscapeArg(`code-server.*--bind-addr 0.0.0.0:${VSCODE_EDITOR_CONTAINER_PORT}`)} >/dev/null 2>&1; then`,
+            `nohup code-server --auth none --disable-telemetry --bind-addr 0.0.0.0:${VSCODE_EDITOR_CONTAINER_PORT} /workspace >/tmp/companion-code-server.log 2>&1 &`,
+            "fi",
+          ].join(" ");
+          containerManager.execInContainer(container.containerId, ["sh", "-lc", startCmd], 10_000);
+
+          // Wait for code-server to be ready (up to 5s)
+          const containerEditorUrl = `http://localhost:${portMapping.hostPort}${editorPathSuffix}`;
+          for (let i = 0; i < 25; i++) {
+            try {
+              const res = await fetch(`http://127.0.0.1:${portMapping.hostPort}/healthz`);
+              if (res.ok || res.status === 302 || res.status === 200) break;
+            } catch {
+              // not ready yet
+            }
+            await new Promise((r) => setTimeout(r, 200));
+          }
+
+          return c.json({
+            available: true,
+            installed: true,
+            mode: "container",
+            url: containerEditorUrl,
+          });
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          return c.json({
+            available: false,
+            installed: true,
+            mode: "container",
+            message: `Failed to start VS Code editor in container: ${message}`,
+          });
+        }
+      }
+
+      // Container doesn't have code-server — fall through to host code-server
+      // using the host-mapped workspace path
+      if (container) {
+        hostFallbackCwd = container.hostCwd;
       }
     }
 
@@ -795,26 +802,40 @@ export function createRoutes(
         available: false,
         installed: false,
         mode: "host",
-        message: "VS Code editor is not installed on this machine. Install code-server to enable it.",
+        message: "VS Code editor is not installed. Install it with: brew install code-server",
       });
     }
+
+    const editorPathSuffix = `?folder=${encodeURIComponent(hostFallbackCwd)}`;
 
     try {
       const companionDir = join(homedir(), ".companion");
       const logFile = join(companionDir, "code-server-host.log");
-      const startHostCmd = [
-        `mkdir -p ${shellEscapeArg(companionDir)}`,
+      const startCmd = [
         `if ! pgrep -f ${shellEscapeArg(`code-server.*--bind-addr 127.0.0.1:${VSCODE_EDITOR_HOST_PORT}`)} >/dev/null 2>&1; then`,
-        `nohup ${shellEscapeArg(hostCodeServer)} --auth none --disable-telemetry --bind-addr 127.0.0.1:${VSCODE_EDITOR_HOST_PORT} ${shellEscapeArg(session.cwd)} >> ${shellEscapeArg(logFile)} 2>&1 &`,
+        `nohup ${shellEscapeArg(hostCodeServer)} --auth none --disable-telemetry --bind-addr 127.0.0.1:${VSCODE_EDITOR_HOST_PORT} ${shellEscapeArg(hostFallbackCwd)} >> ${shellEscapeArg(logFile)} 2>&1 &`,
         "fi",
-      ].join(" && ");
+      ].join(" ");
+      const startHostCmd = `mkdir -p ${shellEscapeArg(companionDir)} && ${startCmd}`;
       execSync(startHostCmd, { encoding: "utf-8", timeout: 10_000 });
+
+      // Wait for code-server to be ready (up to 5s)
+      const editorUrl = `http://localhost:${VSCODE_EDITOR_HOST_PORT}${editorPathSuffix}`;
+      for (let i = 0; i < 25; i++) {
+        try {
+          const res = await fetch(`http://127.0.0.1:${VSCODE_EDITOR_HOST_PORT}/healthz`);
+          if (res.ok || res.status === 302 || res.status === 200) break;
+        } catch {
+          // not ready yet
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
 
       return c.json({
         available: true,
         installed: true,
         mode: "host",
-        url: `http://localhost:${VSCODE_EDITOR_HOST_PORT}${editorPathSuffix}`,
+        url: editorUrl,
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);

@@ -3,11 +3,11 @@ import { useStore } from "../store.js";
 import { ClaudeMdEditor } from "./ClaudeMdEditor.js";
 import { parseHash } from "../utils/routing.js";
 
-type WorkspaceTab = "chat" | "diff" | "terminal";
+type WorkspaceTab = "chat" | "diff" | "terminal" | "editor";
 
-function getActiveTabSurfaceColor(tab: "chat" | "diff" | "terminal"): string {
+function getActiveTabSurfaceColor(tab: WorkspaceTab): string {
   // Deterministic mapping to the primary surface of the active workspace pane.
-  if (tab === "terminal") return "var(--cc-card)";
+  if (tab === "terminal" || tab === "editor") return "var(--cc-card)";
   return "var(--cc-bg)";
 }
 
@@ -57,6 +57,7 @@ export function TopBar() {
   const activeTab = useStore((s) => s.activeTab);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const markChatTabReentry = useStore((s) => s.markChatTabReentry);
+  const editorUrl = useStore((s) => currentSessionId ? s.editorUrls.get(currentSessionId) : undefined);
   const [claudeMdOpen, setClaudeMdOpen] = useState(false);
   const quickTerminalOpen = useStore((s) => s.quickTerminalOpen);
   const quickTerminalTabs = useStore((s) => s.quickTerminalTabs);
@@ -107,6 +108,7 @@ export function TopBar() {
   const chatTabRef = useRef<HTMLButtonElement>(null);
   const diffTabRef = useRef<HTMLButtonElement>(null);
   const terminalTabRef = useRef<HTMLButtonElement>(null);
+  const editorTabRef = useRef<HTMLButtonElement>(null);
   const [sampledTabColors, setSampledTabColors] = useState<Partial<Record<WorkspaceTab, string>>>({});
   const sessionName = currentSessionId
     ? (sessionNames?.get(currentSessionId) ||
@@ -116,19 +118,23 @@ export function TopBar() {
   const showWorkspaceControls = !!(currentSessionId && isSessionView);
   const showContextToggle = route.page === "session" && !!currentSessionId;
   const workspaceTabs = useMemo(() => {
-    const tabs: Array<"chat" | "diff" | "terminal"> = ["chat"];
-    tabs.push("diff");
-    tabs.push("terminal");
+    const tabs: WorkspaceTab[] = ["chat", "diff", "terminal", "editor"];
     return tabs;
   }, []);
 
-  const activateWorkspaceTab = (tab: "chat" | "diff" | "terminal") => {
+  const activateWorkspaceTab = (tab: WorkspaceTab) => {
     if (tab === "terminal") {
       if (!cwd) return;
       if (!quickTerminalOpen || quickTerminalTabs.length === 0) {
         openQuickTerminal({ ...defaultTerminalOpts, reuseIfExists: true });
       }
       setActiveTab("terminal");
+      return;
+    }
+
+    if (tab === "editor") {
+      if (!cwd) return;
+      setActiveTab("editor");
       return;
     }
 
@@ -153,13 +159,16 @@ export function TopBar() {
         const chatColor = sampleColorBelowTab(chatTabRef.current);
         const diffColor = sampleColorBelowTab(diffTabRef.current);
         const terminalColor = sampleColorBelowTab(terminalTabRef.current);
+        const editorColor = sampleColorBelowTab(editorTabRef.current);
         if (chatColor) next.chat = chatColor;
         if (diffColor) next.diff = diffColor;
         if (terminalColor) next.terminal = terminalColor;
+        if (editorColor) next.editor = editorColor;
         if (
           prev.chat === next.chat &&
           prev.diff === next.diff &&
-          prev.terminal === next.terminal
+          prev.terminal === next.terminal &&
+          prev.editor === next.editor
         ) {
           return prev;
         }
@@ -283,6 +292,38 @@ export function TopBar() {
               >
                 Shell
               </button>
+              <button
+                ref={editorTabRef}
+                onClick={() => activateWorkspaceTab("editor")}
+                disabled={!cwd}
+                className={`px-3.5 border text-[12px] font-semibold transition-colors ${
+                  !cwd
+                    ? "h-8 mb-px bg-transparent text-cc-muted/50 border-transparent rounded-[8px_8px_0_0] cursor-not-allowed"
+                    : activeTab === "editor"
+                      ? "relative z-10 h-9 -mb-px text-cc-fg border-cc-border/80 border-b-transparent rounded-[14px_14px_0_0] cursor-pointer"
+                      : "h-8 mb-px bg-transparent text-cc-muted border-transparent rounded-[8px_8px_0_0] hover:bg-cc-hover/70 hover:text-cc-fg cursor-pointer"
+                }`}
+                style={activeTab === "editor" ? { backgroundColor: sampledTabColors.editor || activeTabSurfaceColor } : undefined}
+                title={!cwd ? "Editor unavailable while session is reconnecting" : "VS Code editor"}
+                aria-label="Editor tab"
+              >
+                Editor
+              </button>
+              {editorUrl && (
+                <a
+                  href={editorUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="h-8 mb-px px-1.5 flex items-center rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover/70 transition-colors"
+                  title="Open editor in new window"
+                  aria-label="Open editor in new window"
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                    <path d="M6.22 8.72a.75.75 0 001.06 1.06l5.22-5.22v1.69a.75.75 0 001.5 0v-3.5a.75.75 0 00-.75-.75h-3.5a.75.75 0 000 1.5h1.69L6.22 8.72z" />
+                    <path d="M3.5 6.75c0-.69.56-1.25 1.25-1.25H7A.75.75 0 007 4H4.75A2.75 2.75 0 002 6.75v4.5A2.75 2.75 0 004.75 14h4.5A2.75 2.75 0 0012 11.25V9a.75.75 0 00-1.5 0v2.25c0 .69-.56 1.25-1.25 1.25h-4.5c-.69 0-1.25-.56-1.25-1.25v-4.5z" />
+                  </svg>
+                </a>
+              )}
               <div
                 className="hidden lg:flex h-8 mb-px items-center pl-2"
                 title="Switch tabs with Ctrl/Cmd + J"
