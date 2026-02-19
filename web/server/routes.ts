@@ -22,6 +22,7 @@ import type { CreationStepId } from "./session-types.js";
 import { hasContainerClaudeAuth } from "./claude-container-auth.js";
 import { hasContainerCodexAuth } from "./codex-container-auth.js";
 import { DEFAULT_OPENROUTER_MODEL, getSettings, updateSettings } from "./settings-manager.js";
+import * as linearProjectManager from "./linear-project-manager.js";
 import { getUsageLimits } from "./usage-limits.js";
 import {
   getUpdateState,
@@ -1477,6 +1478,185 @@ export function createRoutes(
       teamName: firstTeam?.name || "",
       teamKey: firstTeam?.key || "",
     });
+  });
+
+  // ─── Linear projects ────────────────────────────────────────────────
+
+  api.get("/linear/projects", async (c) => {
+    const settings = getSettings();
+    const linearApiKey = settings.linearApiKey.trim();
+    if (!linearApiKey) {
+      return c.json({ error: "Linear API key is not configured" }, 400);
+    }
+
+    const response = await fetch("https://api.linear.app/graphql", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: linearApiKey,
+      },
+      body: JSON.stringify({
+        query: `
+          query CompanionListProjects {
+            projects(first: 50, orderBy: updatedAt) {
+              nodes { id name state }
+            }
+          }
+        `,
+      }),
+    }).catch((e: unknown) => {
+      throw new Error(`Failed to connect to Linear: ${e instanceof Error ? e.message : String(e)}`);
+    });
+
+    const json = await response.json().catch(() => ({})) as {
+      data?: {
+        projects?: { nodes?: Array<{ id?: string; name?: string | null; state?: string | null }> } | null;
+      };
+      errors?: Array<{ message?: string }>;
+    };
+
+    if (!response.ok || (json.errors && json.errors.length > 0)) {
+      const firstError = json.errors?.[0]?.message || response.statusText || "Linear request failed";
+      return c.json({ error: firstError }, 502);
+    }
+
+    const projects = (json.data?.projects?.nodes || []).map((p) => ({
+      id: p.id || "",
+      name: p.name || "",
+      state: p.state || "",
+    }));
+
+    return c.json({ projects });
+  });
+
+  // ─── Linear project issues (recent, non-done) ─────────────────────
+
+  api.get("/linear/project-issues", async (c) => {
+    const projectId = (c.req.query("projectId") || "").trim();
+    const limitRaw = Number(c.req.query("limit") || "15");
+    const limit = Math.min(50, Math.max(1, Number.isFinite(limitRaw) ? Math.floor(limitRaw) : 15));
+    if (!projectId) return c.json({ error: "projectId is required" }, 400);
+
+    const settings = getSettings();
+    const linearApiKey = settings.linearApiKey.trim();
+    if (!linearApiKey) {
+      return c.json({ error: "Linear API key is not configured" }, 400);
+    }
+
+    const response = await fetch("https://api.linear.app/graphql", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: linearApiKey,
+      },
+      body: JSON.stringify({
+        query: `
+          query CompanionProjectIssues($projectId: ID!, $first: Int!) {
+            issues(
+              filter: {
+                project: { id: { eq: $projectId } }
+                state: { type: { nin: ["completed", "cancelled"] } }
+              }
+              orderBy: updatedAt
+              first: $first
+            ) {
+              nodes {
+                id
+                identifier
+                title
+                description
+                url
+                priorityLabel
+                state { name type }
+                team { key name }
+                assignee { name }
+                updatedAt
+              }
+            }
+          }
+        `,
+        variables: { projectId, first: limit },
+      }),
+    }).catch((e: unknown) => {
+      throw new Error(`Failed to connect to Linear: ${e instanceof Error ? e.message : String(e)}`);
+    });
+
+    const json = await response.json().catch(() => ({})) as {
+      data?: {
+        issues?: {
+          nodes?: Array<{
+            id: string;
+            identifier: string;
+            title: string;
+            description?: string | null;
+            url: string;
+            priorityLabel?: string | null;
+            state?: { name?: string | null; type?: string | null } | null;
+            team?: { key?: string | null; name?: string | null } | null;
+            assignee?: { name?: string | null } | null;
+            updatedAt?: string | null;
+          }>;
+        };
+      };
+      errors?: Array<{ message?: string }>;
+    };
+
+    if (!response.ok || (json.errors && json.errors.length > 0)) {
+      const firstError = json.errors?.[0]?.message || response.statusText || "Linear request failed";
+      return c.json({ error: firstError }, 502);
+    }
+
+    const issues = (json.data?.issues?.nodes || []).map((issue) => ({
+      id: issue.id,
+      identifier: issue.identifier,
+      title: issue.title,
+      description: issue.description || "",
+      url: issue.url,
+      priorityLabel: issue.priorityLabel || "",
+      stateName: issue.state?.name || "",
+      stateType: issue.state?.type || "",
+      teamName: issue.team?.name || "",
+      teamKey: issue.team?.key || "",
+      assigneeName: issue.assignee?.name || "",
+      updatedAt: issue.updatedAt || "",
+    }));
+
+    return c.json({ issues });
+  });
+
+  // ─── Linear project mappings ──────────────────────────────────────
+
+  api.get("/linear/project-mappings", (c) => {
+    const repoRoot = c.req.query("repoRoot");
+    if (repoRoot) {
+      const mapping = linearProjectManager.getMapping(repoRoot);
+      return c.json({ mapping: mapping || null });
+    }
+    return c.json({ mappings: linearProjectManager.listMappings() });
+  });
+
+  api.put("/linear/project-mappings", async (c) => {
+    const body = await c.req.json().catch(() => ({})) as {
+      repoRoot?: string;
+      projectId?: string;
+      projectName?: string;
+    };
+    if (!body.repoRoot || !body.projectId || !body.projectName) {
+      return c.json({ error: "repoRoot, projectId, and projectName are required" }, 400);
+    }
+    const mapping = linearProjectManager.upsertMapping(body.repoRoot, {
+      projectId: body.projectId,
+      projectName: body.projectName,
+    });
+    return c.json({ mapping });
+  });
+
+  api.delete("/linear/project-mappings", async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { repoRoot?: string };
+    if (!body.repoRoot) return c.json({ error: "repoRoot is required" }, 400);
+    const removed = linearProjectManager.removeMapping(body.repoRoot);
+    if (!removed) return c.json({ error: "Mapping not found" }, 404);
+    return c.json({ ok: true });
   });
 
   // ─── Git operations ─────────────────────────────────────────────────

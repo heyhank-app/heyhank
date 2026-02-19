@@ -325,6 +325,8 @@ export interface LinearIssue {
   stateType: string;
   teamName: string;
   teamKey: string;
+  assigneeName?: string;
+  updatedAt?: string;
 }
 
 export interface LinearConnectionInfo {
@@ -333,6 +335,20 @@ export interface LinearConnectionInfo {
   viewerEmail: string;
   teamName: string;
   teamKey: string;
+}
+
+export interface LinearProject {
+  id: string;
+  name: string;
+  state: string;
+}
+
+export interface LinearProjectMapping {
+  repoRoot: string;
+  projectId: string;
+  projectName: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface GitHubPRInfo {
@@ -557,6 +573,22 @@ export const api = {
       `/linear/issues?query=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(limit))}`,
     ),
   getLinearConnection: () => get<LinearConnectionInfo>("/linear/connection"),
+  listLinearProjects: () => get<{ projects: LinearProject[] }>("/linear/projects"),
+  getLinearProjectIssues: (projectId: string, limit = 15) =>
+    get<{ issues: LinearIssue[] }>(
+      `/linear/project-issues?projectId=${encodeURIComponent(projectId)}&limit=${encodeURIComponent(String(limit))}`,
+    ),
+  getLinearProjectMapping: (repoRoot: string) =>
+    get<{ mapping: LinearProjectMapping | null }>(
+      `/linear/project-mappings?repoRoot=${encodeURIComponent(repoRoot)}`,
+    ),
+  upsertLinearProjectMapping: (data: {
+    repoRoot: string;
+    projectId: string;
+    projectName: string;
+  }) => put<{ mapping: LinearProjectMapping }>("/linear/project-mappings", data),
+  removeLinearProjectMapping: (repoRoot: string) =>
+    del<{ ok: boolean }>("/linear/project-mappings", { repoRoot }),
 
   // Git operations
   getRepoInfo: (path: string) =>

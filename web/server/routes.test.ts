@@ -73,6 +73,19 @@ vi.mock("./settings-manager.js", () => ({
   })),
 }));
 
+vi.mock("./linear-project-manager.js", () => ({
+  listMappings: vi.fn(() => []),
+  getMapping: vi.fn(() => null),
+  upsertMapping: vi.fn((repoRoot: string, data: { projectId: string; projectName: string }) => ({
+    repoRoot,
+    ...data,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  })),
+  removeMapping: vi.fn(() => false),
+  _resetForTest: vi.fn(),
+}));
+
 const mockGetUsageLimits = vi.hoisted(() => vi.fn());
 const mockUpdateCheckerState = vi.hoisted(() => ({
   currentVersion: "0.22.1",
@@ -139,6 +152,7 @@ import * as promptManager from "./prompt-manager.js";
 import * as gitUtils from "./git-utils.js";
 import * as sessionNames from "./session-names.js";
 import * as settingsManager from "./settings-manager.js";
+import * as linearProjectManager from "./linear-project-manager.js";
 import { containerManager } from "./container-manager.js";
 
 // ─── Mock factories ──────────────────────────────────────────────────────────
@@ -1519,6 +1533,263 @@ describe("GET /api/linear/connection", () => {
       teamKey: "ENG",
     });
     vi.unstubAllGlobals();
+  });
+});
+
+// ─── Linear projects ─────────────────────────────────────────────────────────
+
+describe("GET /api/linear/projects", () => {
+  it("returns 400 when linear key is not configured", async () => {
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      openrouterApiKey: "",
+      openrouterModel: "openrouter/free",
+      linearApiKey: "",
+      updatedAt: 0,
+    });
+
+    const res = await app.request("/api/linear/projects", { method: "GET" });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "Linear API key is not configured" });
+  });
+
+  it("returns project list from Linear API", async () => {
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      openrouterApiKey: "",
+      openrouterModel: "openrouter/free",
+      linearApiKey: "lin_api_123",
+      updatedAt: 0,
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      statusText: "OK",
+      json: async () => ({
+        data: {
+          projects: {
+            nodes: [
+              { id: "p1", name: "My Feature", state: "started" },
+              { id: "p2", name: "Backend Rework", state: "planned" },
+            ],
+          },
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await app.request("/api/linear/projects", { method: "GET" });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({
+      projects: [
+        { id: "p1", name: "My Feature", state: "started" },
+        { id: "p2", name: "Backend Rework", state: "planned" },
+      ],
+    });
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("GET /api/linear/project-issues", () => {
+  it("returns 400 when projectId is missing", async () => {
+    const res = await app.request("/api/linear/project-issues", { method: "GET" });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "projectId is required" });
+  });
+
+  it("returns 400 when linear key is not configured", async () => {
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      openrouterApiKey: "",
+      openrouterModel: "openrouter/free",
+      linearApiKey: "",
+      updatedAt: 0,
+    });
+
+    const res = await app.request("/api/linear/project-issues?projectId=p1", { method: "GET" });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "Linear API key is not configured" });
+  });
+
+  it("returns recent non-done issues for a project", async () => {
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      openrouterApiKey: "",
+      openrouterModel: "openrouter/free",
+      linearApiKey: "lin_api_123",
+      updatedAt: 0,
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      statusText: "OK",
+      json: async () => ({
+        data: {
+          issues: {
+            nodes: [{
+              id: "issue-1",
+              identifier: "ENG-42",
+              title: "Implement dark mode",
+              description: "Add theme support",
+              url: "https://linear.app/acme/issue/ENG-42",
+              priorityLabel: "Medium",
+              state: { name: "In Progress", type: "started" },
+              team: { key: "ENG", name: "Engineering" },
+              assignee: { name: "Ada" },
+              updatedAt: "2026-02-19T10:00:00Z",
+            }],
+          },
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await app.request("/api/linear/project-issues?projectId=p1&limit=5", { method: "GET" });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({
+      issues: [{
+        id: "issue-1",
+        identifier: "ENG-42",
+        title: "Implement dark mode",
+        description: "Add theme support",
+        url: "https://linear.app/acme/issue/ENG-42",
+        priorityLabel: "Medium",
+        stateName: "In Progress",
+        stateType: "started",
+        teamName: "Engineering",
+        teamKey: "ENG",
+        assigneeName: "Ada",
+        updatedAt: "2026-02-19T10:00:00Z",
+      }],
+    });
+
+    // Verify the GraphQL query uses projectId variable and correct limit
+    const [, requestInit] = vi.mocked(fetchMock).mock.calls[0];
+    const requestBody = JSON.parse(String(requestInit?.body ?? "{}"));
+    expect(requestBody.variables).toEqual({ projectId: "p1", first: 5 });
+    vi.unstubAllGlobals();
+  });
+});
+
+// ─── Linear project mappings ─────────────────────────────────────────────────
+
+describe("GET /api/linear/project-mappings", () => {
+  it("returns mapping for a specific repoRoot", async () => {
+    const mockMapping = {
+      repoRoot: "/home/user/project",
+      projectId: "p1",
+      projectName: "My Feature",
+      createdAt: 1000,
+      updatedAt: 1000,
+    };
+    vi.mocked(linearProjectManager.getMapping).mockReturnValue(mockMapping);
+
+    const res = await app.request(
+      "/api/linear/project-mappings?repoRoot=%2Fhome%2Fuser%2Fproject",
+      { method: "GET" },
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({ mapping: mockMapping });
+    expect(linearProjectManager.getMapping).toHaveBeenCalledWith("/home/user/project");
+  });
+
+  it("returns null mapping when repoRoot has no mapping", async () => {
+    vi.mocked(linearProjectManager.getMapping).mockReturnValue(null);
+
+    const res = await app.request(
+      "/api/linear/project-mappings?repoRoot=%2Funknown",
+      { method: "GET" },
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({ mapping: null });
+  });
+
+  it("returns all mappings when no repoRoot specified", async () => {
+    const mockMappings = [
+      { repoRoot: "/repo-a", projectId: "p1", projectName: "My Feature", createdAt: 1000, updatedAt: 1000 },
+      { repoRoot: "/repo-b", projectId: "p2", projectName: "Backend Rework", createdAt: 2000, updatedAt: 2000 },
+    ];
+    vi.mocked(linearProjectManager.listMappings).mockReturnValue(mockMappings);
+
+    const res = await app.request("/api/linear/project-mappings", { method: "GET" });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({ mappings: mockMappings });
+  });
+});
+
+describe("PUT /api/linear/project-mappings", () => {
+  it("returns 400 when required fields are missing", async () => {
+    const res = await app.request("/api/linear/project-mappings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repoRoot: "/repo" }),
+    });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "repoRoot, projectId, and projectName are required" });
+  });
+
+  it("creates a mapping successfully", async () => {
+    const res = await app.request("/api/linear/project-mappings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repoRoot: "/home/user/project",
+        projectId: "p1",
+        projectName: "My Feature",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.mapping).toBeDefined();
+    expect(json.mapping.repoRoot).toBe("/home/user/project");
+    expect(json.mapping.projectName).toBe("My Feature");
+    expect(linearProjectManager.upsertMapping).toHaveBeenCalledWith(
+      "/home/user/project",
+      { projectId: "p1", projectName: "My Feature" },
+    );
+  });
+});
+
+describe("DELETE /api/linear/project-mappings", () => {
+  it("returns 400 when repoRoot is missing", async () => {
+    const res = await app.request("/api/linear/project-mappings", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "repoRoot is required" });
+  });
+
+  it("returns 404 when mapping not found", async () => {
+    vi.mocked(linearProjectManager.removeMapping).mockReturnValue(false);
+
+    const res = await app.request("/api/linear/project-mappings", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repoRoot: "/unknown" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("removes mapping successfully", async () => {
+    vi.mocked(linearProjectManager.removeMapping).mockReturnValue(true);
+
+    const res = await app.request("/api/linear/project-mappings", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repoRoot: "/home/user/project" }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({ ok: true });
+    expect(linearProjectManager.removeMapping).toHaveBeenCalledWith("/home/user/project");
   });
 });
 
