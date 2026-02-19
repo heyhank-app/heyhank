@@ -83,6 +83,17 @@ describe("TopBar", () => {
     expect(screen.queryByText("3")).not.toBeInTheDocument();
   });
 
+  it("uses theme-safe classes for the diff badge in dark mode", () => {
+    resetStore({
+      changedFiles: new Map([["s1", new Set(["/repo/src/a.ts"])]]),
+    });
+    render(<TopBar />);
+    const badge = screen.getByText("1");
+    expect(badge.className).toContain("bg-amber-100");
+    expect(badge.className).toContain("dark:bg-amber-950");
+    expect(badge.className).not.toContain("bg-cc-warning");
+  });
+
   it("hides diff badge when all changed files are out of scope", () => {
     resetStore({
       changedFiles: new Map([["s1", new Set(["/Users/stan/.claude/plans/plan.md"])]]),

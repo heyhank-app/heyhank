@@ -270,7 +270,7 @@ export function TopBar() {
               >
                 Diffs
                 {changedFilesCount > 0 && (
-                  <span className="text-[10px] bg-cc-warning text-white rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center font-semibold leading-none">
+                  <span className="text-[10px] rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center font-semibold leading-none border border-amber-300/70 bg-amber-100 text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
                     {changedFilesCount}
                   </span>
                 )}
