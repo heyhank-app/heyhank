@@ -6,6 +6,7 @@ vi.mock("node:crypto", () => ({ randomUUID: () => "test-uuid" }));
 
 import { WsBridge, type SocketData } from "./ws-bridge.js";
 import { SessionStore } from "./session-store.js";
+import { containerManager } from "./container-manager.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -338,12 +339,8 @@ describe("CLI handlers", () => {
     // markContainerized sets the host cwd and is_containerized before CLI connects
     bridge.markContainerized("s1", "/Users/stan/Dev/myproject");
 
-    mockExecSync.mockImplementation((cmd: string) => {
-      if (cmd.includes("--abbrev-ref HEAD")) return "main\n";
-      if (cmd.includes("--git-dir")) return ".git\n";
-      if (cmd.includes("--show-toplevel")) return "/Users/stan/Dev/myproject\n";
-      if (cmd.includes("--left-right --count")) return "0\t0\n";
-      throw new Error("unknown git cmd");
+    mockExecSync.mockImplementation(() => {
+      throw new Error("container not tracked");
     });
 
     const cli = makeCliSocket("s1");
@@ -355,8 +352,66 @@ describe("CLI handlers", () => {
     const state = bridge.getSession("s1")!.state;
     expect(state.cwd).toBe("/Users/stan/Dev/myproject");
     expect(state.is_containerized).toBe(true);
-    expect(state.git_branch).toBe("main");
-    expect(state.repo_root).toBe("/Users/stan/Dev/myproject");
+  });
+
+  it("handleCLIMessage: keeps previous git info when container metadata is temporarily unavailable", () => {
+    const session = bridge.getOrCreateSession("s1");
+    session.state.git_branch = "existing-branch";
+    session.state.repo_root = "/workspace";
+    session.state.git_ahead = 2;
+    session.state.git_behind = 1;
+    bridge.markContainerized("s1", "/Users/stan/Dev/myproject");
+
+    mockExecSync.mockImplementation(() => {
+      throw new Error("container not tracked");
+    });
+
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/workspace" }));
+
+    const state = bridge.getSession("s1")!.state;
+    expect(state.git_branch).toBe("existing-branch");
+    expect(state.repo_root).toBe("/workspace");
+    expect(state.git_ahead).toBe(2);
+    expect(state.git_behind).toBe(1);
+  });
+
+  it("handleCLIMessage: resolves git info from container for containerized sessions", () => {
+    bridge.markContainerized("s1", "/Users/stan/Dev/myproject");
+    const getContainerSpy = vi.spyOn(containerManager, "getContainer").mockReturnValue({
+      containerId: "abc123def456",
+      name: "companion-test",
+      image: "the-companion:latest",
+      portMappings: [],
+      hostCwd: "/Users/stan/Dev/myproject",
+      containerCwd: "/workspace",
+      state: "running",
+    });
+
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (!cmd.startsWith("docker exec abc123def456 sh -lc ")) {
+        throw new Error(`unexpected command: ${cmd}`);
+      }
+      if (cmd.includes("--abbrev-ref HEAD")) return "container-branch\n";
+      if (cmd.includes("--git-dir")) return ".git\n";
+      if (cmd.includes("--show-toplevel")) return "/workspace\n";
+      if (cmd.includes("--left-right --count")) return "1\t3\n";
+      throw new Error(`unknown git cmd: ${cmd}`);
+    });
+
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/workspace" }));
+
+    const state = bridge.getSession("s1")!.state;
+    expect(state.cwd).toBe("/Users/stan/Dev/myproject");
+    expect(state.git_branch).toBe("container-branch");
+    expect(state.repo_root).toBe("/workspace");
+    expect(state.git_behind).toBe(1);
+    expect(state.git_ahead).toBe(3);
+    expect(getContainerSpy).toHaveBeenCalledWith("s1");
+    getContainerSpy.mockRestore();
   });
 
   it("handleCLIMessage: system.init resolves git info via execSync", () => {
