@@ -60,8 +60,7 @@ export const CLAUDE_MODES: ModeOption[] = [
 
 export const CODEX_MODES: ModeOption[] = [
   { value: "bypassPermissions", label: "Auto" },
-  { value: "acceptEdits", label: "Accept Edits" },
-  { value: "plan", label: "Suggest" },
+  { value: "plan", label: "Plan" },
 ];
 
 // ─── Getters ─────────────────────────────────────────────────────────────────

@@ -286,10 +286,8 @@ export function createRoutes(
         cwd,
         claudeBinary: body.claudeBinary,
         codexBinary: body.codexBinary,
-        codexInternetAccess: backend === "codex" && body.codexInternetAccess === true,
-        codexSandbox: backend === "codex" && body.codexInternetAccess === true
-          ? "danger-full-access"
-          : "workspace-write",
+        codexInternetAccess: backend === "codex",
+        codexSandbox: backend === "codex" ? "danger-full-access" : undefined,
         allowedTools: body.allowedTools,
         env: envVars,
         backendType: backend,
@@ -600,10 +598,8 @@ export function createRoutes(
           cwd,
           claudeBinary: body.claudeBinary,
           codexBinary: body.codexBinary,
-          codexInternetAccess: backend === "codex" && body.codexInternetAccess === true,
-          codexSandbox: backend === "codex" && body.codexInternetAccess === true
-            ? "danger-full-access"
-            : "workspace-write",
+          codexInternetAccess: backend === "codex",
+          codexSandbox: backend === "codex" ? "danger-full-access" : undefined,
           allowedTools: body.allowedTools,
           env: envVars,
           backendType: backend,

@@ -242,6 +242,95 @@ describe("CodexAdapter", () => {
     expect(result.data.subtype).toBe("success");
   });
 
+  it("translates turn/plan/updated into TodoWrite tool_use for /plan", async () => {
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+
+    await new Promise((r) => setTimeout(r, 50));
+    stdout.push(JSON.stringify({ id: 1, result: { userAgent: "codex" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Structured plan payload should map directly to TodoWrite todos for TaskPanel reuse.
+    stdout.push(JSON.stringify({
+      method: "turn/plan/updated",
+      params: {
+        turnId: "turn_plan_1",
+        plan: {
+          steps: [
+            { content: "Inspect code", status: "completed" },
+            { content: "Implement support", status: "in_progress", activeForm: "Implementing support" },
+            { content: "Run tests", status: "pending" },
+          ],
+        },
+      },
+    }) + "\n");
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const assistant = messages.filter((m) => m.type === "assistant") as Array<{
+      message: { content: Array<{ type: string; name?: string; input?: Record<string, unknown> }> };
+    }>;
+
+    const todoWrite = assistant.find((m) =>
+      m.message.content.some((c) => c.type === "tool_use" && c.name === "TodoWrite")
+    );
+
+    expect(todoWrite).toBeDefined();
+    const toolUse = todoWrite!.message.content.find((c) => c.type === "tool_use" && c.name === "TodoWrite");
+    const todos = toolUse?.input?.todos as Array<{ content: string; status: string; activeForm?: string }>;
+    expect(Array.isArray(todos)).toBe(true);
+    expect(todos[0]).toEqual({ content: "Inspect code", status: "completed" });
+    expect(todos[1]).toEqual({
+      content: "Implement support",
+      status: "in_progress",
+      activeForm: "Implementing support",
+    });
+    expect(todos[2]).toEqual({ content: "Run tests", status: "pending" });
+  });
+
+  it("uses item/plan/delta markdown as fallback when turn/plan/updated has no structured plan", async () => {
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+
+    await new Promise((r) => setTimeout(r, 50));
+    stdout.push(JSON.stringify({ id: 1, result: { userAgent: "codex" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Some /plan updates arrive as markdown deltas first; keep this as fallback parsing.
+    stdout.push(JSON.stringify({
+      method: "item/plan/delta",
+      params: { turnId: "turn_plan_2", delta: "- [x] Done step\n- Next step\n" },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+
+    stdout.push(JSON.stringify({
+      method: "turn/plan/updated",
+      params: { turnId: "turn_plan_2" },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const assistant = messages.filter((m) => m.type === "assistant") as Array<{
+      message: { content: Array<{ type: string; name?: string; input?: Record<string, unknown> }> };
+    }>;
+    const todoWrite = assistant.find((m) =>
+      m.message.content.some((c) => c.type === "tool_use" && c.name === "TodoWrite")
+    );
+
+    expect(todoWrite).toBeDefined();
+    const toolUse = todoWrite!.message.content.find((c) => c.type === "tool_use" && c.name === "TodoWrite");
+    const todos = toolUse?.input?.todos as Array<{ content: string; status: string }>;
+    expect(todos).toEqual([
+      { content: "Done step", status: "completed" },
+      { content: "Next step", status: "pending" },
+    ]);
+  });
+
   it("translates command_execution item to Bash tool_use with stream_event", async () => {
     const messages: BrowserIncomingMessage[] = [];
     const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
@@ -588,7 +677,8 @@ describe("CodexAdapter", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(adapter.sendBrowserMessage({ type: "set_model", model: "gpt-5.3-codex" })).toBe(false);
-    expect(adapter.sendBrowserMessage({ type: "set_permission_mode", mode: "plan" })).toBe(false);
+    // set_permission_mode IS supported for Codex (runtime Auto↔Plan toggle)
+    expect(adapter.sendBrowserMessage({ type: "set_permission_mode", mode: "plan" })).toBe(true);
   });
 
   it("translates webSearch item to WebSearch tool_use", async () => {
@@ -732,19 +822,21 @@ describe("CodexAdapter", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     const allWritten = stdin.chunks.join("");
-    expect(allWritten).toContain('"sandbox":"workspace-write"');
+    // All Codex modes use danger-full-access (full autonomy, no permission prompts)
+    expect(allWritten).toContain('"sandbox":"danger-full-access"');
     // Reject camelCase variants
     expect(allWritten).not.toContain('"sandbox":"workspaceWrite"');
     expect(allWritten).not.toContain('"sandbox":"readOnly"');
     expect(allWritten).not.toContain('"sandbox":"dangerFullAccess"');
   });
 
+  // All Codex modes map to approvalPolicy="never" for full autonomy (no permission prompts).
   it.each([
     { approvalMode: "bypassPermissions", expected: "never" },
-    { approvalMode: "plan", expected: "untrusted" },
-    { approvalMode: "acceptEdits", expected: "untrusted" },
-    { approvalMode: "default", expected: "untrusted" },
-    { approvalMode: undefined, expected: "untrusted" },
+    { approvalMode: "plan", expected: "never" },
+    { approvalMode: "acceptEdits", expected: "never" },
+    { approvalMode: "default", expected: "never" },
+    { approvalMode: undefined, expected: "never" },
   ])("maps approvalMode=$approvalMode to kebab-case approvalPolicy=$expected", async ({ approvalMode, expected }) => {
     const mock = createMockProcess();
 

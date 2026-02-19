@@ -107,6 +107,12 @@ interface CodexContextCompactionItem extends CodexItem {
   type: "contextCompaction";
 }
 
+interface PlanTodo {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  activeForm?: string;
+}
+
 interface CodexMcpServerStatus {
   name: string;
   tools?: Record<string, { name?: string; annotations?: unknown }>;
@@ -328,6 +334,18 @@ export class CodexAdapter {
   // Track command execution start times for progress indicator
   private commandStartTimes = new Map<string, number>();
 
+  // Track requested runtime mode for subsequent turns.
+  private currentPermissionMode: string;
+  private lastNonPlanPermissionMode: string;
+  private currentCollaborationModeKind: "default" | "plan";
+  // Track what we last sent to Codex so we only send on transitions.
+  // null = nothing sent yet (first turn needs to send if starting in plan).
+  private lastSentCollaborationModeKind: "default" | "plan" | null = null;
+
+  // Track Codex plan deltas and updates per turn (used by /plan).
+  private planDeltaByTurnId = new Map<string, string>();
+  private planUpdateCountByTurnId = new Map<string, number>();
+
   // Accumulate reasoning text by item ID so we can emit final thinking blocks.
   private reasoningTextByItemId = new Map<string, string>();
 
@@ -367,6 +385,13 @@ export class CodexAdapter {
     this.proc = proc;
     this.sessionId = sessionId;
     this.options = options;
+    this.currentPermissionMode = options.approvalMode || "default";
+    this.lastNonPlanPermissionMode = this.currentPermissionMode === "plan"
+      ? "acceptEdits"
+      : this.currentPermissionMode;
+    this.currentCollaborationModeKind = this.currentPermissionMode === "plan"
+      ? "plan"
+      : "default";
 
     const stdout = proc.stdout;
     const stdin = proc.stdin;
@@ -455,8 +480,8 @@ export class CodexAdapter {
         console.warn("[codex-adapter] Runtime model switching not supported by Codex");
         return false;
       case "set_permission_mode":
-        console.warn("[codex-adapter] Runtime permission mode switching not supported by Codex");
-        return false;
+        this.handleOutgoingSetPermissionMode(msg.mode);
+        return true;
       case "mcp_get_status":
         this.handleOutgoingMcpGetStatus();
         return true;
@@ -521,7 +546,7 @@ export class CodexAdapter {
           version: "1.0.0",
         },
         capabilities: {
-          experimentalApi: false,
+          experimentalApi: true,
         },
       }) as Record<string, unknown>;
 
@@ -532,14 +557,17 @@ export class CodexAdapter {
       this.initialized = true;
 
       // Step 3: Start or resume a thread
+      // Note: thread/start and thread/resume use `sandbox` (SandboxMode string),
+      // while turn/start uses `sandboxPolicy` (SandboxPolicy object) — these are
+      // different Codex API fields by design.
       if (this.options.threadId) {
         // Resume an existing thread
         const resumeResult = await this.transport.call("thread/resume", {
           threadId: this.options.threadId,
           model: this.options.model,
           cwd: this.getExecutionCwd(),
-          approvalPolicy: this.mapApprovalPolicy(this.options.approvalMode),
-          sandbox: this.options.sandbox || this.mapSandboxPolicy(this.options.approvalMode),
+          approvalPolicy: this.mapApprovalPolicy(this.currentPermissionMode),
+          sandbox: this.options.sandbox || this.mapSandboxPolicy(this.currentPermissionMode),
         }) as { thread: { id: string } };
         this.threadId = resumeResult.thread.id;
       } else {
@@ -547,8 +575,8 @@ export class CodexAdapter {
         const threadResult = await this.transport.call("thread/start", {
           model: this.options.model,
           cwd: this.getExecutionCwd(),
-          approvalPolicy: this.mapApprovalPolicy(this.options.approvalMode),
-          sandbox: this.options.sandbox || this.mapSandboxPolicy(this.options.approvalMode),
+          approvalPolicy: this.mapApprovalPolicy(this.currentPermissionMode),
+          sandbox: this.options.sandbox || this.mapSandboxPolicy(this.currentPermissionMode),
         }) as { thread: { id: string } };
         this.threadId = threadResult.thread.id;
       }
@@ -567,7 +595,7 @@ export class CodexAdapter {
         model: this.options.model || "",
         cwd: this.options.cwd || "",
         tools: [],
-        permissionMode: this.options.approvalMode || "suggest",
+        permissionMode: this.currentPermissionMode,
         claude_code_version: "",
         mcp_servers: [],
         agents: [],
@@ -640,11 +668,25 @@ export class CodexAdapter {
     input.push({ type: "text", text: msg.content });
 
     try {
-      const result = await this.transport.call("turn/start", {
+      // Only send collaborationMode on mode transitions — sending it every turn
+      // in "default" mode overrides approvalPolicy and re-enables permission prompts.
+      // The server persists collaborationMode across turns, so we only need to send
+      // it when switching (e.g. auto→plan or plan→auto).
+      // approvalPolicy and sandboxPolicy are static ("never" / dangerFullAccess) so
+      // resending them each turn is idempotent and ensures consistency if the server
+      // resets state. collaborationMode is only sent on transitions (see below).
+      const turnParams: Record<string, unknown> = {
         threadId: this.threadId,
         input,
         cwd: this.getExecutionCwd(),
-      }) as { turn: { id: string } };
+        approvalPolicy: this.mapApprovalPolicy(this.currentPermissionMode),
+        sandboxPolicy: this.mapSandboxPolicyObject(this.currentPermissionMode),
+      };
+      if (this.currentCollaborationModeKind !== this.lastSentCollaborationModeKind) {
+        turnParams.collaborationMode = this.mapCollaborationMode(this.currentCollaborationModeKind);
+        this.lastSentCollaborationModeKind = this.currentCollaborationModeKind;
+      }
+      const result = await this.transport.call("turn/start", turnParams) as { turn: { id: string } };
 
       this.currentTurnId = result.turn.id;
     } catch (err) {
@@ -724,6 +766,25 @@ export class CodexAdapter {
     } catch (err) {
       console.warn("[codex-adapter] Interrupt failed:", err);
     }
+  }
+
+  private handleOutgoingSetPermissionMode(mode: string): void {
+    const nextMode = mode === "default"
+      ? this.lastNonPlanPermissionMode
+      : mode;
+
+    this.currentPermissionMode = nextMode;
+    if (nextMode === "plan") {
+      this.currentCollaborationModeKind = "plan";
+    } else {
+      this.currentCollaborationModeKind = "default";
+      this.lastNonPlanPermissionMode = nextMode;
+    }
+
+    this.emit({
+      type: "session_update",
+      session: { permissionMode: this.currentPermissionMode },
+    });
   }
 
   private async handleOutgoingMcpGetStatus(): Promise<void> {
@@ -875,7 +936,7 @@ export class CodexAdapter {
         break;
       }
       case "item/plan/delta":
-        // Plan updates — could display in future.
+        this.handlePlanDelta(params);
         break;
       case "item/updated":
         this.handleItemUpdated(params);
@@ -887,13 +948,13 @@ export class CodexAdapter {
         // Raw model response — internal, not needed for UI.
         break;
       case "turn/started":
-        // Turn started, nothing to emit
+        this.handleTurnStarted(params);
         break;
       case "turn/completed":
         this.handleTurnCompleted(params);
         break;
       case "turn/plan/updated":
-        // Could emit as tool_progress or similar
+        this.handleTurnPlanUpdated(params);
         break;
       case "turn/diff/updated":
         // Could show diff, but not needed for MVP
@@ -977,6 +1038,27 @@ export class CodexAdapter {
     } catch (err) {
       console.error(`[codex-adapter] Error handling request ${method}:`, err);
     }
+  }
+
+  private handleTurnStarted(params: Record<string, unknown>): void {
+    const turn = this.asRecord(params.turn);
+    const collab = this.asRecord(turn?.collaborationMode);
+    const fromObject = collab?.mode;
+    const fromFlat = turn?.collaborationModeKind;
+    const kind = fromObject === "plan" || fromObject === "default"
+      ? fromObject
+      : (fromFlat === "plan" || fromFlat === "default" ? fromFlat : null);
+
+    if (!kind) return;
+    this.currentCollaborationModeKind = kind;
+    const nextMode = kind === "plan" ? "plan" : this.lastNonPlanPermissionMode;
+    if (nextMode === this.currentPermissionMode) return;
+
+    this.currentPermissionMode = nextMode;
+    this.emit({
+      type: "session_update",
+      session: { permissionMode: this.currentPermissionMode },
+    });
   }
 
   private handleCommandApproval(jsonRpcId: number, params: Record<string, unknown>): void {
@@ -1338,6 +1420,161 @@ export class CodexAdapter {
     }
   }
 
+  private handlePlanDelta(params: Record<string, unknown>): void {
+    const turnId = typeof params.turnId === "string" ? params.turnId : null;
+    const delta = typeof params.delta === "string" ? params.delta : null;
+    if (!turnId || !delta) return;
+    const current = this.planDeltaByTurnId.get(turnId) || "";
+    this.planDeltaByTurnId.set(turnId, current + delta);
+  }
+
+  private handleTurnPlanUpdated(params: Record<string, unknown>): void {
+    const turnObj = params.turn as Record<string, unknown> | undefined;
+    const turnId = typeof params.turnId === "string"
+      ? params.turnId
+      : (typeof turnObj?.id === "string" ? turnObj.id : this.currentTurnId);
+    if (!turnId) return;
+
+    const todos = this.extractPlanTodos(params, turnId);
+    if (todos.length === 0) return;
+
+    const nextCount = (this.planUpdateCountByTurnId.get(turnId) || 0) + 1;
+    this.planUpdateCountByTurnId.set(turnId, nextCount);
+    const toolUseId = `codex-plan-${turnId}-${nextCount}`;
+
+    this.emitToolUseTracked(toolUseId, "TodoWrite", { todos });
+  }
+
+  private extractPlanTodos(params: Record<string, unknown>, turnId: string): PlanTodo[] {
+    const directPlan = params.plan;
+    const turnObj = params.turn as Record<string, unknown> | undefined;
+    const nestedPlan = turnObj?.plan;
+
+    const fromPlanObject = this.extractPlanTodosFromUnknown(
+      directPlan !== undefined ? directPlan : nestedPlan,
+    );
+    if (fromPlanObject.length > 0) {
+      return fromPlanObject;
+    }
+
+    const fallbackDelta = this.planDeltaByTurnId.get(turnId);
+    if (!fallbackDelta) return [];
+    return this.extractPlanTodosFromMarkdown(fallbackDelta);
+  }
+
+  private extractPlanTodosFromUnknown(input: unknown): PlanTodo[] {
+    if (typeof input === "string") {
+      return this.extractPlanTodosFromMarkdown(input);
+    }
+
+    if (!input || typeof input !== "object") {
+      return [];
+    }
+
+    const obj = input as Record<string, unknown>;
+    const stepArrayCandidates = [
+      obj.steps,
+      obj.items,
+      obj.planSteps,
+      (obj.plan as Record<string, unknown> | undefined)?.steps,
+      (obj.plan as Record<string, unknown> | undefined)?.items,
+    ];
+
+    for (const candidate of stepArrayCandidates) {
+      if (!Array.isArray(candidate)) continue;
+      const todos: PlanTodo[] = [];
+      for (const step of candidate) {
+        if (typeof step === "string") {
+          const trimmed = step.trim();
+          if (trimmed) todos.push({ content: trimmed, status: "pending" });
+          continue;
+        }
+        if (!step || typeof step !== "object") continue;
+        const stepObj = step as Record<string, unknown>;
+        const content = this.firstString(stepObj, ["content", "text", "title", "description", "step", "name"]);
+        if (!content) continue;
+        const status = this.normalizePlanStatus(this.firstString(stepObj, ["status", "state", "phase"]));
+        const activeForm = this.firstString(stepObj, ["activeForm", "active_form", "inProgressText", "in_progress_text"]);
+        todos.push({
+          content,
+          status,
+          ...(activeForm ? { activeForm } : {}),
+        });
+      }
+      if (todos.length > 0) return todos;
+    }
+
+    const markdown = this.firstString(obj, ["markdown", "text", "content"]);
+    if (markdown) {
+      return this.extractPlanTodosFromMarkdown(markdown);
+    }
+
+    return [];
+  }
+
+  private extractPlanTodosFromMarkdown(markdown: string): PlanTodo[] {
+    const todos: PlanTodo[] = [];
+    for (const rawLine of markdown.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      let match = line.match(/^[-*]\s+\[(x|X|~|>| )\]\s+(.+)$/);
+      if (match) {
+        const marker = match[1].toLowerCase();
+        const status = marker === "x" ? "completed"
+          : (marker === "~" || marker === ">") ? "in_progress"
+          : "pending";
+        todos.push({ content: match[2].trim(), status });
+        continue;
+      }
+
+      match = line.match(/^[-*]\s+(.+)$/);
+      if (match) {
+        todos.push({ content: match[1].trim(), status: "pending" });
+        continue;
+      }
+
+      match = line.match(/^\d+\.\s+(.+)$/);
+      if (match) {
+        todos.push({ content: match[1].trim(), status: "pending" });
+      }
+    }
+    return todos;
+  }
+
+  private firstString(obj: Record<string, unknown>, keys: string[]): string | null {
+    for (const key of keys) {
+      const value = obj[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+    return null;
+  }
+
+  private normalizePlanStatus(statusRaw: string | null): "pending" | "in_progress" | "completed" {
+    const status = (statusRaw || "").toLowerCase();
+    if (
+      status === "completed"
+      || status === "done"
+      || status === "complete"
+      || status === "success"
+      || status === "succeeded"
+    ) {
+      return "completed";
+    }
+    if (
+      status === "in_progress"
+      || status === "inprogress"
+      || status === "active"
+      || status === "running"
+      || status === "current"
+    ) {
+      return "in_progress";
+    }
+    return "pending";
+  }
+
   private handleAgentMessageDelta(params: Record<string, unknown>): void {
     const delta = params.delta as string;
     if (!delta) return;
@@ -1552,6 +1789,12 @@ export class CodexAdapter {
     };
 
     this.emit({ type: "result", data: result });
+
+    // Clean up per-turn plan tracking now that the turn is complete.
+    if (turn?.id) {
+      this.planDeltaByTurnId.delete(turn.id);
+      this.planUpdateCountByTurnId.delete(turn.id);
+    }
     this.currentTurnId = null;
   }
 
@@ -1728,25 +1971,25 @@ export class CodexAdapter {
     return `codex-${kind}-${randomUUID()}`;
   }
 
-  private mapApprovalPolicy(mode?: string): string {
-    switch (mode) {
-      case "bypassPermissions":
-        return "never";
-      case "plan":
-      case "acceptEdits":
-      case "default":
-      default:
-        return "untrusted";
-    }
+  private mapApprovalPolicy(_mode?: string): string {
+    // Always "never" — the user never wants permission prompts in Codex,
+    // regardless of whether the collaboration mode is Auto or Plan.
+    return "never";
   }
 
-  private mapSandboxPolicy(mode?: string): string {
-    switch (mode) {
-      case "bypassPermissions":
-        return "danger-full-access";
-      default:
-        return "workspace-write";
-    }
+  private mapSandboxPolicy(_mode?: string): string {
+    // Always full access — matches approvalPolicy: "never" for full autonomy.
+    return "danger-full-access";
+  }
+
+  /** Map permission mode to SandboxPolicy object (for turn/start's sandboxPolicy field). */
+  private mapSandboxPolicyObject(_mode?: string): { type: string } {
+    // Always full access — matches approvalPolicy: "never" for full autonomy.
+    return { type: "dangerFullAccess" };
+  }
+
+  private mapCollaborationMode(kind: "default" | "plan"): { mode: "default" | "plan"; settings: { model: string } } {
+    return { mode: kind, settings: { model: this.options.model || "" } };
   }
 
   private async listAllMcpServerStatuses(): Promise<CodexMcpServerStatus[]> {

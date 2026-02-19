@@ -562,7 +562,7 @@ export class CliLauncher {
     }
 
     const args: string[] = ["app-server"];
-    const internetEnabled = options.codexInternetAccess === true;
+    const internetEnabled = options.codexInternetAccess !== false;
     args.push("-c", `tools.webSearch=${internetEnabled ? "true" : "false"}`);
     const codexHome = resolveCompanionCodexSessionHome(
       sessionId,
