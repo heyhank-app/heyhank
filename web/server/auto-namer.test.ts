@@ -20,6 +20,7 @@ beforeEach(() => {
     linearAutoTransition: false,
     linearAutoTransitionStateId: "",
     linearAutoTransitionStateName: "",
+    editorTabEnabled: false,
     updatedAt: 0,
   });
 });
@@ -46,6 +47,7 @@ describe("generateSessionTitle", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -79,6 +81,7 @@ describe("generateSessionTitle", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
     mockFetch.mockResolvedValueOnce({
@@ -153,6 +156,7 @@ describe("generateSessionTitle", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
     mockFetch.mockResolvedValueOnce({

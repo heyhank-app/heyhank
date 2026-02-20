@@ -31,6 +31,7 @@ describe("settings-manager", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
   });
@@ -69,6 +70,7 @@ describe("settings-manager", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 123,
     });
   });
@@ -114,6 +116,7 @@ describe("settings-manager", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
   });
@@ -138,5 +141,10 @@ describe("settings-manager", () => {
     expect(updated.openrouterApiKey).toBe("or-key");
     expect(updated.openrouterModel).toBe("openai/gpt-4o-mini");
     expect(updated.linearApiKey).toBe("lin_api_123");
+  });
+
+  it("updates editorTabEnabled", () => {
+    const updated = updateSettings({ editorTabEnabled: true });
+    expect(updated.editorTabEnabled).toBe(true);
   });
 });

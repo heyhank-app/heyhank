@@ -38,6 +38,8 @@
     "test:codex-contract": "vitest run server/codex-protocol-*.test.ts"
   },
   "dependencies": {
+    "@codemirror/view": "^6.39.15",
+    "@uiw/react-codemirror": "^4.25.4",
     "croner": "^10.0.1",
     "diff": "^8.0.3",
     "hono": "^4.7.0",

@@ -38,6 +38,9 @@ export default function App() {
   const taskPanelOpen = useStore((s) => s.taskPanelOpen);
   const homeResetKey = useStore((s) => s.homeResetKey);
   const activeTab = useStore((s) => s.activeTab);
+  const editorTabEnabled = useStore((s) => s.editorTabEnabled);
+  const setEditorTabEnabled = useStore((s) => s.setEditorTabEnabled);
+  const setActiveTab = useStore((s) => s.setActiveTab);
   const sessionCreating = useStore((s) => s.sessionCreating);
   const sessionCreatingBackend = useStore((s) => s.sessionCreatingBackend);
   const creationProgress = useStore((s) => s.creationProgress);
@@ -61,6 +64,18 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
   }, [darkMode]);
+
+  useEffect(() => {
+    api.getSettings().then((settings) => {
+      setEditorTabEnabled(settings.editorTabEnabled);
+    }).catch(() => {});
+  }, [setEditorTabEnabled]);
+
+  useEffect(() => {
+    if (!editorTabEnabled && activeTab === "editor") {
+      setActiveTab("chat");
+    }
+  }, [editorTabEnabled, activeTab, setActiveTab]);
 
   // Capture the localStorage-restored session ID during render (before any effects run)
   // so the mount logic can use it even if the hash-sync branch would clear it.
@@ -188,7 +203,7 @@ export default function App() {
                         onClosePanel={() => useStore.getState().setActiveTab("chat")}
                       />
                     )
-                    : activeTab === "editor"
+                    : activeTab === "editor" && editorTabEnabled
                       ? <SessionEditorPane sessionId={currentSessionId} />
                       : (
                         <SessionTerminalDock sessionId={currentSessionId} suppressPanel>

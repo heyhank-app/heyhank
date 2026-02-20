@@ -16,6 +16,7 @@ export interface CompanionSettings {
   linearAutoTransition: boolean;
   linearAutoTransitionStateId: string;
   linearAutoTransitionStateName: string;
+  editorTabEnabled: boolean;
   updatedAt: number;
 }
 
@@ -30,6 +31,7 @@ let settings: CompanionSettings = {
   linearAutoTransition: false,
   linearAutoTransitionStateId: "",
   linearAutoTransitionStateName: "",
+  editorTabEnabled: false,
   updatedAt: 0,
 };
 
@@ -44,6 +46,7 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
     linearAutoTransition: typeof raw?.linearAutoTransition === "boolean" ? raw.linearAutoTransition : false,
     linearAutoTransitionStateId: typeof raw?.linearAutoTransitionStateId === "string" ? raw.linearAutoTransitionStateId : "",
     linearAutoTransitionStateName: typeof raw?.linearAutoTransitionStateName === "string" ? raw.linearAutoTransitionStateName : "",
+    editorTabEnabled: typeof raw?.editorTabEnabled === "boolean" ? raw.editorTabEnabled : false,
     updatedAt: typeof raw?.updatedAt === "number" ? raw.updatedAt : 0,
   };
 }
@@ -72,7 +75,7 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "openrouterApiKey" | "openrouterModel" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName">>,
+  patch: Partial<Pick<CompanionSettings, "openrouterApiKey" | "openrouterModel" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "editorTabEnabled">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
@@ -82,6 +85,7 @@ export function updateSettings(
     linearAutoTransition: patch.linearAutoTransition ?? settings.linearAutoTransition,
     linearAutoTransitionStateId: patch.linearAutoTransitionStateId ?? settings.linearAutoTransitionStateId,
     linearAutoTransitionStateName: patch.linearAutoTransitionStateName ?? settings.linearAutoTransitionStateName,
+    editorTabEnabled: patch.editorTabEnabled ?? settings.editorTabEnabled,
     updatedAt: Date.now(),
   });
   persist();

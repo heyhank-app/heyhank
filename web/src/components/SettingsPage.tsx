@@ -11,6 +11,7 @@ interface SettingsPageProps {
 export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [openrouterApiKey, setOpenrouterApiKey] = useState("");
   const [openrouterModel, setOpenrouterModel] = useState("openrouter/free");
+  const [editorTabEnabled, setEditorTabEnabled] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -27,6 +28,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const updateInfo = useStore((s) => s.updateInfo);
   const setUpdateInfo = useStore((s) => s.setUpdateInfo);
   const setUpdateOverlayActive = useStore((s) => s.setUpdateOverlayActive);
+  const setStoreEditorTabEnabled = useStore((s) => s.setEditorTabEnabled);
   const notificationApiAvailable = typeof Notification !== "undefined";
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updatingApp, setUpdatingApp] = useState(false);
@@ -40,6 +42,8 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
       .then((s) => {
         setConfigured(s.openrouterApiKeyConfigured);
         setOpenrouterModel(s.openrouterModel || "openrouter/free");
+        setEditorTabEnabled(s.editorTabEnabled);
+        setStoreEditorTabEnabled(s.editorTabEnabled);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
@@ -52,8 +56,9 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
     setSaved(false);
     try {
       const nextKey = openrouterApiKey.trim();
-      const payload: { openrouterApiKey?: string; openrouterModel: string } = {
+      const payload: { openrouterApiKey?: string; openrouterModel: string; editorTabEnabled: boolean } = {
         openrouterModel: openrouterModel.trim() || "openrouter/free",
+        editorTabEnabled,
       };
       if (nextKey) {
         payload.openrouterApiKey = nextKey;
@@ -61,6 +66,8 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
 
       const res = await api.updateSettings(payload);
       setConfigured(res.openrouterApiKeyConfigured);
+      setEditorTabEnabled(res.editorTabEnabled);
+      setStoreEditorTabEnabled(res.editorTabEnabled);
       setOpenrouterApiKey("");
       setSaved(true);
       setTimeout(() => setSaved(false), 1800);
@@ -165,6 +172,20 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
               placeholder="openrouter/free"
               className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/60"
             />
+          </div>
+
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => setEditorTabEnabled((v) => !v)}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm bg-cc-hover text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
+            >
+              <span>Enable Editor tab (CodeMirror)</span>
+              <span className="text-xs text-cc-muted">{editorTabEnabled ? "On" : "Off"}</span>
+            </button>
+            <p className="mt-1.5 text-xs text-cc-muted">
+              Shows a simple in-app file editor in the session tabs.
+            </p>
           </div>
 
           {error && (

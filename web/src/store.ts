@@ -93,6 +93,7 @@ interface AppState {
   taskPanelConfig: TaskPanelConfig;
   taskPanelConfigMode: boolean;
   homeResetKey: number;
+  editorTabEnabled: boolean;
   activeTab: "chat" | "diff" | "terminal" | "editor";
   editorUrls: Map<string, string>;
   chatTabReentryTickBySession: Map<string, number>;
@@ -174,6 +175,7 @@ interface AppState {
   setUpdateInfo: (info: UpdateInfo | null) => void;
   dismissUpdate: (version: string) => void;
   setUpdateOverlayActive: (active: boolean) => void;
+  setEditorTabEnabled: (enabled: boolean) => void;
 
   // Diff panel actions
   setActiveTab: (tab: "chat" | "diff" | "terminal" | "editor") => void;
@@ -318,6 +320,7 @@ export const useStore = create<AppState>((set) => ({
   taskPanelConfig: getInitialTaskPanelConfig(),
   taskPanelConfigMode: false,
   homeResetKey: 0,
+  editorTabEnabled: false,
   activeTab: "chat",
   editorUrls: new Map(),
   chatTabReentryTickBySession: new Map(),
@@ -757,6 +760,7 @@ export const useStore = create<AppState>((set) => ({
     set({ updateDismissedVersion: version });
   },
   setUpdateOverlayActive: (active) => set({ updateOverlayActive: active }),
+  setEditorTabEnabled: (enabled) => set({ editorTabEnabled: enabled }),
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   setEditorUrl: (sessionId, url) =>
@@ -882,6 +886,7 @@ export const useStore = create<AppState>((set) => ({
       prStatus: new Map(),
       linkedLinearIssues: new Map(),
       taskPanelConfigMode: false,
+      editorTabEnabled: false,
       activeTab: "chat" as const,
       editorUrls: new Map(),
       chatTabReentryTickBySession: new Map(),

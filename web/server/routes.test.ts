@@ -63,12 +63,20 @@ vi.mock("./settings-manager.js", () => ({
     openrouterApiKey: "",
     openrouterModel: "openrouter/free",
     linearApiKey: "",
+    linearAutoTransition: false,
+    linearAutoTransitionStateId: "",
+    linearAutoTransitionStateName: "",
+    editorTabEnabled: false,
     updatedAt: 0,
   })),
   updateSettings: vi.fn((patch) => ({
     openrouterApiKey: patch.openrouterApiKey ?? "",
     openrouterModel: patch.openrouterModel ?? "openrouter/free",
     linearApiKey: patch.linearApiKey ?? "",
+    linearAutoTransition: patch.linearAutoTransition ?? false,
+    linearAutoTransitionStateId: patch.linearAutoTransitionStateId ?? "",
+    linearAutoTransitionStateName: patch.linearAutoTransitionStateName ?? "",
+    editorTabEnabled: patch.editorTabEnabled ?? false,
     updatedAt: Date.now(),
   })),
 }));
@@ -1352,6 +1360,7 @@ describe("GET /api/settings", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 123,
     });
 
@@ -1365,6 +1374,7 @@ describe("GET /api/settings", () => {
       linearApiKeyConfigured: false,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
     });
   });
 
@@ -1376,6 +1386,7 @@ describe("GET /api/settings", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 123,
     });
 
@@ -1389,6 +1400,7 @@ describe("GET /api/settings", () => {
       linearApiKeyConfigured: true,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
     });
   });
 });
@@ -1402,6 +1414,7 @@ describe("PUT /api/settings", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 456,
     });
 
@@ -1419,6 +1432,7 @@ describe("PUT /api/settings", () => {
       linearAutoTransition: undefined,
       linearAutoTransitionStateId: undefined,
       linearAutoTransitionStateName: undefined,
+      editorTabEnabled: undefined,
     });
     const json = await res.json();
     expect(json).toEqual({
@@ -1427,6 +1441,7 @@ describe("PUT /api/settings", () => {
       linearApiKeyConfigured: false,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
     });
   });
 
@@ -1438,6 +1453,7 @@ describe("PUT /api/settings", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 789,
     });
 
@@ -1455,6 +1471,7 @@ describe("PUT /api/settings", () => {
       linearAutoTransition: undefined,
       linearAutoTransitionStateId: undefined,
       linearAutoTransitionStateName: undefined,
+      editorTabEnabled: undefined,
     });
   });
 
@@ -1466,6 +1483,7 @@ describe("PUT /api/settings", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 999,
     });
 
@@ -1483,6 +1501,7 @@ describe("PUT /api/settings", () => {
       linearAutoTransition: undefined,
       linearAutoTransitionStateId: undefined,
       linearAutoTransitionStateName: undefined,
+      editorTabEnabled: undefined,
     });
   });
 
@@ -1522,6 +1541,18 @@ describe("PUT /api/settings", () => {
     expect(json).toEqual({ error: "openrouterApiKey must be a string" });
   });
 
+  it("returns 400 for non-boolean editor tab setting", async () => {
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ editorTabEnabled: "yes" }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "editorTabEnabled must be a boolean" });
+  });
+
   it("returns 400 when no settings fields are provided", async () => {
     const res = await app.request("/api/settings", {
       method: "PUT",
@@ -1551,6 +1582,7 @@ describe("GET /api/linear/issues", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -1568,6 +1600,7 @@ describe("GET /api/linear/issues", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -1639,6 +1672,7 @@ describe("GET /api/linear/issues", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -1717,6 +1751,7 @@ describe("GET /api/linear/issues", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -1760,6 +1795,7 @@ describe("GET /api/linear/connection", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -1777,6 +1813,7 @@ describe("GET /api/linear/connection", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -1816,6 +1853,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "state-123",
       linearAutoTransitionStateName: "In Progress",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -1838,6 +1876,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearAutoTransition: true,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -1859,6 +1898,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearAutoTransition: true,
       linearAutoTransitionStateId: "state-123",
       linearAutoTransitionStateName: "In Progress",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -1881,6 +1921,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearAutoTransition: true,
       linearAutoTransitionStateId: "state-doing",
       linearAutoTransitionStateName: "Doing",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -1938,6 +1979,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearAutoTransition: true,
       linearAutoTransitionStateId: "state-doing",
       linearAutoTransitionStateName: "Doing",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -1974,6 +2016,7 @@ describe("GET /api/linear/projects", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -1991,6 +2034,7 @@ describe("GET /api/linear/projects", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -2039,6 +2083,7 @@ describe("GET /api/linear/project-issues", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -2056,6 +2101,7 @@ describe("GET /api/linear/project-issues", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
@@ -2119,6 +2165,7 @@ describe("GET /api/linear/project-issues", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
       updatedAt: 0,
     });
 
