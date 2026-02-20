@@ -47,13 +47,16 @@ export function ProjectGroup({
   editInputRef,
   isFirst,
 }: ProjectGroupProps) {
-  // Build summary badges
-  const summaryParts: string[] = [];
-  if (group.runningCount > 0) summaryParts.push(`${group.runningCount} running`);
-  if (group.permCount > 0) summaryParts.push(`${group.permCount} waiting`);
+  // Build collapsed preview: first 2 session names
+  const collapsedPreview = isCollapsed
+    ? group.sessions
+        .slice(0, 2)
+        .map((s) => sessionNames.get(s.id) || s.model || s.id.slice(0, 8))
+        .join(", ") + (group.sessions.length > 2 ? ", ..." : "")
+    : "";
 
   return (
-    <div className={!isFirst ? "mt-1 pt-1 border-t border-cc-border/50" : ""}>
+    <div className={!isFirst ? "my-2 pt-2 border-t border-cc-separator" : ""}>
       {/* Group header */}
       <button
         onClick={() => onToggleCollapse(group.key)}
@@ -62,33 +65,44 @@ export function ProjectGroup({
         <svg
           viewBox="0 0 16 16"
           fill="currentColor"
-          className={`w-3 h-3 text-cc-muted transition-transform ${isCollapsed ? "" : "rotate-90"}`}
+          className={`w-2.5 h-2.5 text-cc-muted transition-transform ${isCollapsed ? "" : "rotate-90"}`}
         >
           <path d="M6 4l4 4-4 4" />
         </svg>
-        <span className="text-[11px] font-semibold text-cc-fg/80 truncate">
+        {/* Folder icon */}
+        <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-muted/60 shrink-0">
+          <path d="M1 3.5A1.5 1.5 0 012.5 2h3.879a1.5 1.5 0 011.06.44l.622.621a.5.5 0 00.354.146H13.5A1.5 1.5 0 0115 4.707V12.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" />
+        </svg>
+        <span className="text-[12px] font-semibold text-cc-fg/80 truncate">
           {group.label}
         </span>
-        {summaryParts.length > 0 && (
-          <span className="text-[10px] text-cc-muted ml-auto shrink-0">
-            {summaryParts.map((part, i) => (
-              <span key={i}>
-                {i > 0 && ", "}
-                <span className={part.includes("running") ? "text-cc-success" : "text-cc-warning"}>
-                  {part}
-                </span>
-              </span>
-            ))}
-          </span>
-        )}
-        <span className="text-[10px] text-cc-muted/60 shrink-0 ml-1">
+
+        {/* Status dots */}
+        <span className="flex items-center gap-1 ml-auto shrink-0">
+          {group.runningCount > 0 && (
+            <span className="w-1 h-1 rounded-full bg-cc-success" title={`${group.runningCount} running`} />
+          )}
+          {group.permCount > 0 && (
+            <span className="w-1 h-1 rounded-full bg-cc-warning" title={`${group.permCount} waiting`} />
+          )}
+        </span>
+
+        {/* Count badge */}
+        <span className="text-[10px] bg-cc-hover rounded-full px-1.5 py-0.5 text-cc-muted shrink-0">
           {group.sessions.length}
         </span>
       </button>
 
+      {/* Collapsed preview */}
+      {isCollapsed && collapsedPreview && (
+        <div className="text-[10px] text-cc-muted/70 truncate pl-7 pb-1">
+          {collapsedPreview}
+        </div>
+      )}
+
       {/* Session list */}
       {!isCollapsed && (
-        <div className="space-y-0.5 mt-0.5">
+        <div className="space-y-px mt-1">
           {group.sessions.map((s) => {
             const permCount = pendingPermissions.get(s.id)?.size ?? 0;
             return (

@@ -874,6 +874,8 @@ describe("POST /api/sessions/:id/editor/start", () => {
       cwd: "/repo/my app",
     });
     mockResolveBinary.mockImplementation((name: string) => (name === "code-server" ? "/usr/bin/code-server" : null));
+    // Mock fetch so the readiness poll resolves immediately instead of timing out
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok", { status: 200 }));
 
     const res = await app.request("/api/sessions/s1/editor/start", { method: "POST" });
 
@@ -889,6 +891,7 @@ describe("POST /api/sessions/:id/editor/start", () => {
       expect.stringContaining("--bind-addr 127.0.0.1:13338"),
       expect.objectContaining({ timeout: 10_000 }),
     );
+    fetchSpy.mockRestore();
   });
 
   it("starts container editor and returns mapped host URL", async () => {

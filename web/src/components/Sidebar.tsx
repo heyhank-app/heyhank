@@ -7,6 +7,72 @@ import { ProjectGroup } from "./ProjectGroup.js";
 import { SessionItem } from "./SessionItem.js";
 import { groupSessionsByProject, type SessionItem as SessionItemType } from "../utils/project-grouping.js";
 
+interface NavItem {
+  id: string;
+  label: string;
+  shortLabel: string;
+  hash: string;
+  viewBox: string;
+  iconPath: string;
+  activePages?: string[];
+  fillRule?: "evenodd";
+  clipRule?: "evenodd";
+}
+
+const NAV_ITEMS: NavItem[] = [
+  {
+    id: "prompts",
+    label: "Prompts",
+    shortLabel: "Prompts",
+    hash: "#/prompts",
+    viewBox: "0 0 16 16",
+    iconPath: "M3 2.5A1.5 1.5 0 014.5 1h5.879c.398 0 .779.158 1.06.44l1.621 1.62c.281.282.44.663.44 1.061V13.5A1.5 1.5 0 0112 15H4.5A1.5 1.5 0 013 13.5v-11zM4.5 2a.5.5 0 00-.5.5v11a.5.5 0 00.5.5H12a.5.5 0 00.5-.5V4.121a.5.5 0 00-.146-.353l-1.621-1.621A.5.5 0 0010.379 2H4.5zm1.25 4.25a.75.75 0 01.75-.75h3a.75.75 0 010 1.5h-3a.75.75 0 01-.75-.75zm0 3a.75.75 0 01.75-.75h3.5a.75.75 0 010 1.5H6.5a.75.75 0 01-.75-.75z",
+  },
+  {
+    id: "integrations",
+    label: "Integrations",
+    shortLabel: "Integr.",
+    hash: "#/integrations",
+    activePages: ["integrations", "integration-linear"],
+    viewBox: "0 0 16 16",
+    iconPath: "M2.5 3A1.5 1.5 0 001 4.5v2A1.5 1.5 0 002.5 8h2A1.5 1.5 0 006 6.5v-2A1.5 1.5 0 004.5 3h-2zm0 1h2a.5.5 0 01.5.5v2a.5.5 0 01-.5.5h-2a.5.5 0 01-.5-.5v-2a.5.5 0 01.5-.5zm9 0A1.5 1.5 0 0010 5.5v2A1.5 1.5 0 0011.5 9h2A1.5 1.5 0 0015 7.5v-2A1.5 1.5 0 0013.5 4h-2zm0 1h2a.5.5 0 01.5.5v2a.5.5 0 01-.5.5h-2a.5.5 0 01-.5-.5v-2a.5.5 0 01.5-.5zM2.5 10A1.5 1.5 0 001 11.5v2A1.5 1.5 0 002.5 15h2A1.5 1.5 0 006 13.5v-2A1.5 1.5 0 004.5 10h-2zm0 1h2a.5.5 0 01.5.5v2a.5.5 0 01-.5.5h-2a.5.5 0 01-.5-.5v-2a.5.5 0 01.5-.5zM8.5 12a.5.5 0 100 1h5a.5.5 0 100-1h-5zm0-2a.5.5 0 100 1h2a.5.5 0 100-1h-2z",
+  },
+  {
+    id: "terminal",
+    label: "Terminal",
+    shortLabel: "Terminal",
+    hash: "#/terminal",
+    viewBox: "0 0 16 16",
+    iconPath: "M2 3a1 1 0 011-1h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3zm2 1.5l3 2.5-3 2.5V4.5zM8.5 10h3v1h-3v-1z",
+  },
+  {
+    id: "environments",
+    label: "Environments",
+    shortLabel: "Envs",
+    hash: "#/environments",
+    viewBox: "0 0 16 16",
+    iconPath: "M8 1a2 2 0 012 2v1h2a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h2V3a2 2 0 012-2zm0 1.5a.5.5 0 00-.5.5v1h1V3a.5.5 0 00-.5-.5zM4 5.5a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V6a.5.5 0 00-.5-.5H4z",
+  },
+  {
+    id: "scheduled",
+    label: "Scheduled",
+    shortLabel: "Sched.",
+    hash: "#/scheduled",
+    viewBox: "0 0 16 16",
+    iconPath: "M8 2a6 6 0 100 12A6 6 0 008 2zM0 8a8 8 0 1116 0A8 8 0 010 8zm9-3a1 1 0 10-2 0v3a1 1 0 00.293.707l2 2a1 1 0 001.414-1.414L9 7.586V5z",
+  },
+  {
+    id: "settings",
+    label: "Settings",
+    shortLabel: "Settings",
+    hash: "#/settings",
+    viewBox: "0 0 20 20",
+    iconPath: "M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.53 1.53 0 01-2.29.95c-1.35-.8-2.92.77-2.12 2.12.54.9.07 2.04-.95 2.29-1.56.38-1.56 2.6 0 2.98 1.02.25 1.49 1.39.95 2.29-.8 1.35.77 2.92 2.12 2.12.9-.54 2.04-.07 2.29.95.38 1.56 2.6 1.56 2.98 0 .25-1.02 1.39-1.49 2.29-.95 1.35.8 2.92-.77 2.12-2.12-.54-.9-.07-2.04.95-2.29 1.56-.38 1.56-2.6 0-2.98-1.02-.25-1.49-1.39-.95-2.29.8-1.35-.77-2.92-2.12-2.12-.9.54-2.04.07-2.29-.95zM10 13a3 3 0 100-6 3 3 0 000 6z",
+    fillRule: "evenodd",
+    clipRule: "evenodd",
+  },
+];
+
 export function Sidebar() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
@@ -28,12 +94,6 @@ export function Sidebar() {
   const collapsedProjects = useStore((s) => s.collapsedProjects);
   const toggleProjectCollapse = useStore((s) => s.toggleProjectCollapse);
   const route = parseHash(hash);
-  const isSettingsPage = route.page === "settings";
-  const isPromptsPage = route.page === "prompts";
-  const isIntegrationsPage = route.page === "integrations" || route.page === "integration-linear";
-  const isTerminalPage = route.page === "terminal";
-  const isEnvironmentsPage = route.page === "environments";
-  const isScheduledPage = route.page === "scheduled";
 
   // Poll for SDK sessions on mount
   useEffect(() => {
@@ -259,22 +319,21 @@ export function Sidebar() {
   return (
     <aside className="w-[260px] h-full flex flex-col bg-cc-sidebar border-r border-cc-border">
       {/* Header */}
-      <div className="p-4 pb-3">
-        <div className="flex items-center gap-2 mb-4">
-          <img src={logoSrc} alt="" className="w-7 h-7" />
-          <span className="text-sm font-semibold text-cc-fg tracking-tight">The Companion</span>
+      <div className="p-3 pb-2">
+        <div className="flex items-center gap-2">
+          <img src={logoSrc} alt="" className="w-6 h-6" />
+          <span className="text-[13px] font-semibold text-cc-fg tracking-tight">The Companion</span>
+          <button
+            onClick={handleNewSession}
+            title="New Session"
+            aria-label="New Session"
+            className="ml-auto w-7 h-7 rounded-lg bg-cc-primary hover:bg-cc-primary-hover text-white flex items-center justify-center transition-colors duration-150 cursor-pointer"
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-3.5 h-3.5">
+              <path d="M8 3v10M3 8h10" />
+            </svg>
+          </button>
         </div>
-
-        <button
-          onClick={handleNewSession}
-          className="w-full py-2 px-3 text-sm font-medium rounded-[10px] bg-cc-primary hover:bg-cc-primary-hover text-white transition-colors duration-150 flex items-center justify-center gap-1.5 cursor-pointer"
-        >
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
-            <path d="M8 3v10M3 8h10" />
-          </svg>
-          New Session
-        </button>
-
       </div>
 
       {/* Container archive confirmation */}
@@ -396,105 +455,39 @@ export function Sidebar() {
       </div>
 
       {/* Footer */}
-      <div className="p-3 border-t border-cc-border space-y-0.5">
-        <button
-          onClick={() => {
-            useStore.getState().closeTerminal();
-            window.location.hash = "#/prompts";
-          }}
-          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm transition-colors cursor-pointer ${
-            isPromptsPage
-              ? "bg-cc-active text-cc-fg"
-              : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
-          }`}
-        >
-          <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
-            <path d="M3 2.5A1.5 1.5 0 014.5 1h5.879c.398 0 .779.158 1.06.44l1.621 1.62c.281.282.44.663.44 1.061V13.5A1.5 1.5 0 0112 15H4.5A1.5 1.5 0 013 13.5v-11zM4.5 2a.5.5 0 00-.5.5v11a.5.5 0 00.5.5H12a.5.5 0 00.5-.5V4.121a.5.5 0 00-.146-.353l-1.621-1.621A.5.5 0 0010.379 2H4.5zm1.25 4.25a.75.75 0 01.75-.75h3a.75.75 0 010 1.5h-3a.75.75 0 01-.75-.75zm0 3a.75.75 0 01.75-.75h3.5a.75.75 0 010 1.5H6.5a.75.75 0 01-.75-.75z" />
-          </svg>
-          <span>Prompts</span>
-        </button>
-        <button
-          onClick={() => {
-            useStore.getState().closeTerminal();
-            window.location.hash = "#/integrations";
-          }}
-          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm transition-colors cursor-pointer ${
-            isIntegrationsPage
-              ? "bg-cc-active text-cc-fg"
-              : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
-          }`}
-        >
-          <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
-            <path d="M2.5 3A1.5 1.5 0 001 4.5v2A1.5 1.5 0 002.5 8h2A1.5 1.5 0 006 6.5v-2A1.5 1.5 0 004.5 3h-2zm0 1h2a.5.5 0 01.5.5v2a.5.5 0 01-.5.5h-2a.5.5 0 01-.5-.5v-2a.5.5 0 01.5-.5zm9 0A1.5 1.5 0 0010 5.5v2A1.5 1.5 0 0011.5 9h2A1.5 1.5 0 0015 7.5v-2A1.5 1.5 0 0013.5 4h-2zm0 1h2a.5.5 0 01.5.5v2a.5.5 0 01-.5.5h-2a.5.5 0 01-.5-.5v-2a.5.5 0 01.5-.5zM2.5 10A1.5 1.5 0 001 11.5v2A1.5 1.5 0 002.5 15h2A1.5 1.5 0 006 13.5v-2A1.5 1.5 0 004.5 10h-2zm0 1h2a.5.5 0 01.5.5v2a.5.5 0 01-.5.5h-2a.5.5 0 01-.5-.5v-2a.5.5 0 01.5-.5zM8.5 12a.5.5 0 100 1h5a.5.5 0 100-1h-5zm0-2a.5.5 0 100 1h2a.5.5 0 100-1h-2z" />
-          </svg>
-          <span>Integrations</span>
-        </button>
-        <button
-          onClick={() => {
-            window.location.hash = "#/terminal";
-            if (window.innerWidth < 768) {
-              useStore.getState().setSidebarOpen(false);
-            }
-          }}
-          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm transition-colors cursor-pointer ${
-            isTerminalPage
-              ? "bg-cc-active text-cc-fg"
-              : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
-          }`}
-        >
-          <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
-            <path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3zm2 1.5l3 2.5-3 2.5V4.5zM8.5 10h3v1h-3v-1z" />
-          </svg>
-          <span>Terminal</span>
-        </button>
-        <button
-          onClick={() => {
-            useStore.getState().closeTerminal();
-            window.location.hash = "#/environments";
-          }}
-          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm transition-colors cursor-pointer ${
-            isEnvironmentsPage
-              ? "bg-cc-active text-cc-fg"
-              : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
-          }`}
-        >
-          <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
-            <path d="M8 1a2 2 0 012 2v1h2a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h2V3a2 2 0 012-2zm0 1.5a.5.5 0 00-.5.5v1h1V3a.5.5 0 00-.5-.5zM4 5.5a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V6a.5.5 0 00-.5-.5H4z" />
-          </svg>
-          <span>Environments</span>
-        </button>
-        <button
-          onClick={() => {
-            useStore.getState().closeTerminal();
-            window.location.hash = "#/scheduled";
-          }}
-          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm transition-colors cursor-pointer ${
-            isScheduledPage
-              ? "bg-cc-active text-cc-fg"
-              : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
-          }`}
-        >
-          <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
-            <path d="M8 2a6 6 0 100 12A6 6 0 008 2zM0 8a8 8 0 1116 0A8 8 0 010 8zm9-3a1 1 0 10-2 0v3a1 1 0 00.293.707l2 2a1 1 0 001.414-1.414L9 7.586V5z" />
-          </svg>
-          <span>Scheduled</span>
-        </button>
-        <button
-          onClick={() => {
-            useStore.getState().closeTerminal();
-            window.location.hash = "#/settings";
-          }}
-          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-sm transition-colors cursor-pointer ${
-            isSettingsPage
-              ? "bg-cc-active text-cc-fg"
-              : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
-          }`}
-        >
-          <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-            <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.53 1.53 0 01-2.29.95c-1.35-.8-2.92.77-2.12 2.12.54.9.07 2.04-.95 2.29-1.56.38-1.56 2.6 0 2.98 1.02.25 1.49 1.39.95 2.29-.8 1.35.77 2.92 2.12 2.12.9-.54 2.04-.07 2.29.95.38 1.56 2.6 1.56 2.98 0 .25-1.02 1.39-1.49 2.29-.95 1.35.8 2.92-.77 2.12-2.12-.54-.9-.07-2.04.95-2.29 1.56-.38 1.56-2.6 0-2.98-1.02-.25-1.49-1.39-.95-2.29.8-1.35-.77-2.92-2.12-2.12-.9.54-2.04.07-2.29-.95zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-          </svg>
-          <span>Settings</span>
-        </button>
+      <div className="p-2 border-t border-cc-border bg-cc-sidebar-footer">
+        <div className="grid grid-cols-3 gap-1">
+          {NAV_ITEMS.map((item) => {
+            const isActive = item.activePages
+              ? item.activePages.some((p) => route.page === p)
+              : route.page === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  if (item.id !== "terminal") {
+                    useStore.getState().closeTerminal();
+                  }
+                  window.location.hash = item.hash;
+                  if (item.id === "terminal" && window.innerWidth < 768) {
+                    useStore.getState().setSidebarOpen(false);
+                  }
+                }}
+                title={item.label}
+                className={`flex flex-col items-center justify-center gap-0.5 py-2 px-1 rounded-lg transition-colors cursor-pointer ${
+                  isActive
+                    ? "bg-cc-active text-cc-fg"
+                    : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+                }`}
+              >
+                <svg viewBox={item.viewBox} fill="currentColor" className="w-4 h-4">
+                  <path d={item.iconPath} fillRule={item.fillRule} clipRule={item.clipRule} />
+                </svg>
+                <span className="text-[9px] font-medium leading-none">{item.shortLabel}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </aside>
   );
