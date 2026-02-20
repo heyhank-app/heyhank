@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef, type RefObject } from "react";
 import type { SessionItem as SessionItemType } from "../utils/project-grouping.js";
-import { timeAgo } from "../utils/time-ago.js";
 
 interface SessionItemProps {
   session: SessionItemType;
@@ -21,6 +20,57 @@ interface SessionItemProps {
   onConfirmRename: () => void;
   onCancelRename: () => void;
   editInputRef: RefObject<HTMLInputElement | null>;
+}
+
+type DerivedStatus = "awaiting" | "running" | "idle" | "exited";
+
+function deriveStatus(s: SessionItemType): DerivedStatus {
+  if (s.permCount > 0) return "awaiting";
+  if ((s.status === "running" || s.status === "compacting") && s.isConnected) return "running";
+  if (s.isConnected) return "idle";
+  return "exited";
+}
+
+function StatusDot({ status, permCount }: { status: DerivedStatus; permCount: number }) {
+  switch (status) {
+    case "running":
+      return (
+        <span className="relative shrink-0 w-2 h-2">
+          <span className="absolute inset-0 rounded-full bg-cc-success animate-[pulse-dot_1.5s_ease-in-out_infinite]" />
+          <span className="w-2 h-2 rounded-full bg-cc-success block" />
+        </span>
+      );
+    case "awaiting":
+      return (
+        <span className="relative shrink-0 w-2 h-2">
+          <span className="w-2 h-2 rounded-full bg-cc-warning block animate-[ring-pulse_1.5s_ease-out_infinite]" />
+          {permCount > 0 && (
+            <span className="absolute -top-1.5 -right-2.5 min-w-[14px] h-[14px] flex items-center justify-center rounded-full bg-cc-warning text-white text-[9px] font-bold leading-none px-0.5">
+              {permCount}
+            </span>
+          )}
+        </span>
+      );
+    case "idle":
+      return <span className="w-2 h-2 rounded-full bg-cc-muted/40 shrink-0" />;
+    case "exited":
+      return <span className="w-2 h-2 rounded-full border border-cc-muted/25 shrink-0" />;
+  }
+}
+
+function BackendBadge({ type }: { type: "claude" | "codex" }) {
+  if (type === "codex") {
+    return (
+      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-500 leading-none">
+        CX
+      </span>
+    );
+  }
+  return (
+    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#5BA8A0]/15 text-[#5BA8A0] leading-none">
+      CC
+    </span>
+  );
 }
 
 export function SessionItem({
@@ -45,39 +95,12 @@ export function SessionItem({
 }: SessionItemProps) {
   const shortId = s.id.slice(0, 8);
   const label = sessionName || s.model || shortId;
-  const isRunning = s.status === "running";
-  const isCompacting = s.status === "compacting";
   const isEditing = editingSessionId === s.id;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
 
-  // Status bar color
-  const statusBarClass = archived
-    ? "bg-cc-muted/20"
-    : permCount > 0
-    ? "bg-cc-warning"
-    : s.sdkState === "exited"
-    ? "bg-cc-muted/30"
-    : isRunning
-    ? "bg-cc-success"
-    : isCompacting
-    ? "bg-cc-warning/60"
-    : "bg-cc-success/60";
-
-  // Pulse animation for running or permissions
-  const showPulse = !archived && (
-    permCount > 0 || (isRunning && s.isConnected)
-  );
-  const pulseClass = permCount > 0
-    ? "bg-cc-warning/40"
-    : "bg-cc-success/40";
-
-  // Backend dot color
-  const backendDotColor = s.backendType === "codex"
-    ? "bg-blue-500"
-    : "bg-[#5BA8A0]";
-  const backendLabel = s.backendType === "codex" ? "Codex" : "Claude";
+  const derivedStatus = archived ? ("exited" as DerivedStatus) : deriveStatus(s);
 
   // Close menu on click outside or Escape
   useEffect(() => {
@@ -108,9 +131,6 @@ export function SessionItem({
     action();
   }, []);
 
-  // Whether row 2 (metadata) has any content
-  const hasMetadata = s.gitBranch || s.gitAhead > 0 || s.gitBehind > 0 || s.linesAdded > 0 || s.linesRemoved > 0;
-
   return (
     <div className={`relative group ${archived ? "opacity-50" : ""}`}>
       <button
@@ -119,113 +139,86 @@ export function SessionItem({
           e.preventDefault();
           onStartRename(s.id, label);
         }}
-        className={`w-full py-1.5 pl-3 pr-8 min-h-[44px] text-left rounded-lg transition-all duration-100 cursor-pointer ${
+        className={`w-full flex items-center gap-2 py-2 px-2.5 min-h-[44px] rounded-lg transition-colors duration-100 cursor-pointer ${
           isActive
             ? "bg-cc-active"
             : "hover:bg-cc-hover"
         }`}
       >
-        {/* Left status bar */}
-        <span className={`absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full ${statusBarClass} transition-colors`} />
-        {showPulse && (
-          <span className={`absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full ${pulseClass} animate-[pulse-dot_1.5s_ease-in-out_infinite]`} />
+        {/* Status dot */}
+        {!isEditing && (
+          <StatusDot status={derivedStatus} permCount={permCount} />
         )}
 
-        {/* Row 1: Name + timestamp */}
-        <div className="flex items-center gap-2">
-          {isEditing ? (
-            <input
-              ref={editInputRef}
-              value={editingName}
-              onChange={(e) => setEditingName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  onConfirmRename();
-                } else if (e.key === "Escape") {
-                  e.preventDefault();
-                  onCancelRename();
-                }
-                e.stopPropagation();
-              }}
-              onBlur={onConfirmRename}
-              onClick={(e) => e.stopPropagation()}
-              onDoubleClick={(e) => e.stopPropagation()}
-              className="text-[13px] font-medium flex-1 min-w-0 text-cc-fg bg-transparent border border-cc-border rounded px-1 py-0 outline-none focus:border-cc-primary/50"
-            />
-          ) : (
-            <>
-              <span
-                className={`text-[13px] font-medium truncate text-cc-fg leading-snug flex-1 min-w-0 ${
-                  isRecentlyRenamed ? "animate-name-appear" : ""
-                }`}
-                onAnimationEnd={() => onClearRecentlyRenamed(s.id)}
-              >
-                {label}
-              </span>
-              {s.createdAt > 0 && (
-                <span className="text-[10px] text-cc-muted shrink-0 tabular-nums">
-                  {timeAgo(s.createdAt)}
-                </span>
-              )}
-            </>
-          )}
-        </div>
+        {/* Session name / edit input */}
+        {isEditing ? (
+          <input
+            ref={editInputRef}
+            value={editingName}
+            onChange={(e) => setEditingName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onConfirmRename();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                onCancelRename();
+              }
+              e.stopPropagation();
+            }}
+            onBlur={onConfirmRename}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            className="text-[13px] font-medium flex-1 min-w-0 text-cc-fg bg-transparent border border-cc-border rounded px-1.5 py-0.5 outline-none focus:border-cc-primary/50 focus:ring-1 focus:ring-cc-primary/20"
+          />
+        ) : (
+          <span
+            className={`text-[13px] font-medium truncate text-cc-fg leading-snug flex-1 min-w-0 ${
+              isRecentlyRenamed ? "animate-name-appear" : ""
+            }`}
+            onAnimationEnd={() => onClearRecentlyRenamed(s.id)}
+          >
+            {label}
+          </span>
+        )}
 
-        {/* Row 2: Branch + backend dot + badges + git stats */}
-        {(hasMetadata || !isEditing) && (
-          <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
-            {s.gitBranch && (
-              <div className="flex items-center gap-1 text-[11px] text-cc-muted leading-tight truncate min-w-0 flex-1">
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 shrink-0 opacity-50">
-                  <path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.116.862a2.25 2.25 0 10-.862.862A4.48 4.48 0 007.25 7.5h-1.5A2.25 2.25 0 003.5 9.75v.318a2.25 2.25 0 101.5 0V9.75a.75.75 0 01.75-.75h1.5a5.98 5.98 0 003.884-1.435A2.25 2.25 0 109.634 3.362zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
-                </svg>
-                <span className="truncate">{s.gitBranch}</span>
-              </div>
-            )}
-            {!s.gitBranch && <div className="flex-1" />}
-
-            {/* Backend dot indicator */}
-            {!isEditing && (
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${backendDotColor}`} title={backendLabel} />
-            )}
-
-            {/* Docker icon */}
-            {s.isContainerized && !isEditing && (
-              <span title="Docker" className="shrink-0 flex items-center">
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-blue-400">
+        {/* Badges: backend type + Docker + Cron */}
+        {!isEditing && (
+          <span className="flex items-center gap-1 shrink-0">
+            <BackendBadge type={s.backendType} />
+            {s.isContainerized && (
+              <span className="flex items-center px-1 py-0.5 rounded bg-blue-400/10" title="Docker">
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 text-blue-400">
                   <path d="M8.5 1a.5.5 0 00-.5.5V3H6V1.5a.5.5 0 00-1 0V3H3.5a.5.5 0 000 1H5v2H3.5a.5.5 0 000 1H5v1.5a.5.5 0 001 0V7h2v1.5a.5.5 0 001 0V7h1.5a.5.5 0 000-1H9V4h1.5a.5.5 0 000-1H9V1.5a.5.5 0 00-.5-.5zM8 4v2H6V4h2z" />
                 </svg>
               </span>
             )}
-
-            {/* Cron icon */}
-            {s.cronJobId && !isEditing && (
-              <span title="Cron" className="shrink-0 flex items-center">
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-violet-400">
+            {s.cronJobId && (
+              <span className="flex items-center px-1 py-0.5 rounded bg-violet-400/10" title="Scheduled">
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 text-violet-400">
                   <path d="M8 2a6 6 0 100 12A6 6 0 008 2zM0 8a8 8 0 1116 0A8 8 0 010 8zm9-3a1 1 0 10-2 0v3a1 1 0 00.293.707l2 2a1 1 0 001.414-1.414L9 7.586V5z" />
                 </svg>
               </span>
             )}
-
-            {/* Inline git stats */}
-            {(s.gitAhead > 0 || s.gitBehind > 0 || s.linesAdded > 0 || s.linesRemoved > 0) && !isEditing && (
-              <span className="flex items-center gap-1 text-[10px] text-cc-muted shrink-0">
-                {s.gitAhead > 0 && <span className="text-green-500">{s.gitAhead}&#8593;</span>}
-                {s.gitBehind > 0 && <span className="text-cc-warning">{s.gitBehind}&#8595;</span>}
-                {s.linesAdded > 0 && <span className="text-green-500">+{s.linesAdded}</span>}
-                {s.linesRemoved > 0 && <span className="text-red-400">-{s.linesRemoved}</span>}
-              </span>
-            )}
-          </div>
+          </span>
         )}
       </button>
 
-      {/* Permission badge */}
-      {!archived && permCount > 0 && !menuOpen && (
-        <span className="absolute right-2 top-1/2 -translate-y-1/2 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-cc-warning text-white text-[10px] font-bold leading-none px-1 sm:group-hover:opacity-0 transition-opacity pointer-events-none">
-          {permCount}
-        </span>
+      {/* Archive button — hover reveal (desktop), always visible (mobile) */}
+      {!archived && !isEditing && !menuOpen && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onArchive(e, s.id);
+          }}
+          className="absolute right-7 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-0 sm:group-hover:opacity-100 hover:bg-cc-border text-cc-muted hover:text-cc-fg transition-all cursor-pointer"
+          title="Archive"
+          aria-label="Archive session"
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+            <path d="M2 4a1 1 0 011-1h10a1 1 0 011 1v1H2V4zm1 2h10v6a1 1 0 01-1 1H4a1 1 0 01-1-1V6zm3 2a.5.5 0 000 1h4a.5.5 0 000-1H6z" />
+          </svg>
+        </button>
       )}
 
       {/* Three-dot menu button */}

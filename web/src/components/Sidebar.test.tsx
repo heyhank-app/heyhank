@@ -208,7 +208,9 @@ describe("Sidebar", () => {
     expect(screen.getByText("myapp")).toBeInTheDocument();
   });
 
-  it("session items show git branch when available", () => {
+  it("session items do not show git branch (removed in redesign)", () => {
+    // Git branch was intentionally removed from session items in the sidebar redesign.
+    // The data is still in the store but no longer rendered in the session row.
     const session = makeSession("s1", { git_branch: "feature/awesome" });
     const sdk = makeSdkSession("s1");
     mockState = createMockState({
@@ -217,7 +219,7 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    expect(screen.getByText("feature/awesome")).toBeInTheDocument();
+    expect(screen.queryByText("feature/awesome")).not.toBeInTheDocument();
   });
 
   it("session items show container badge when is_containerized is true", () => {
@@ -232,28 +234,13 @@ describe("Sidebar", () => {
     expect(screen.getByTitle("Docker")).toBeInTheDocument();
   });
 
-  it("session items show ahead/behind counts", () => {
+  it("session items do not show git stats (removed in redesign)", () => {
+    // Git ahead/behind and lines added/removed were intentionally removed
+    // from session items in the sidebar redesign.
     const session = makeSession("s1", {
       git_branch: "main",
       git_ahead: 3,
       git_behind: 2,
-    });
-    const sdk = makeSdkSession("s1");
-    mockState = createMockState({
-      sessions: new Map([["s1", session]]),
-      sdkSessions: [sdk],
-    });
-
-    render(<Sidebar />);
-    // The component renders "3↑" and "2↓" using HTML entities in a stats row
-    const sessionButton = screen.getByText("main").closest("button")!;
-    expect(sessionButton.textContent).toContain("3");
-    expect(sessionButton.textContent).toContain("2");
-  });
-
-  it("session items show lines added/removed", () => {
-    const session = makeSession("s1", {
-      git_branch: "main",
       total_lines_added: 42,
       total_lines_removed: 7,
     });
@@ -264,8 +251,8 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    expect(screen.getByText("+42")).toBeInTheDocument();
-    expect(screen.getByText("-7")).toBeInTheDocument();
+    expect(screen.queryByText("+42")).not.toBeInTheDocument();
+    expect(screen.queryByText("-7")).not.toBeInTheDocument();
   });
 
   it("active session has highlighted styling (bg-cc-active class)", () => {
@@ -373,21 +360,23 @@ describe("Sidebar", () => {
     expect(menuButton).toHaveClass("sm:group-hover:opacity-100");
   });
 
-  it("permission badge uses consistent positioning", () => {
+  it("permission count renders on the status dot when permissions are pending", () => {
+    // The redesigned session item shows permission count as a superscript
+    // badge on the status dot, not as a separate positioned element.
     const session = makeSession("s1");
     const sdk = makeSdkSession("s1");
     mockState = createMockState({
       sessions: new Map([["s1", session]]),
       sdkSessions: [sdk],
       pendingPermissions: new Map([["s1", new Map([["p1", {}]])]]),
+      cliConnected: new Map([["s1", true]]),
     });
 
     render(<Sidebar />);
-    const permissionBadge = screen.getAllByText("1").find((node) =>
-      node.classList.contains("bg-cc-warning") && node.classList.contains("px-1"),
-    )!;
-    expect(permissionBadge).toHaveClass("right-2");
-    expect(permissionBadge).toHaveClass("sm:group-hover:opacity-0");
+    const permBadge = screen.getAllByText("1").find((node) =>
+      node.classList.contains("bg-cc-warning") && node.classList.contains("rounded-full"),
+    );
+    expect(permBadge).toBeTruthy();
   });
 
   it("archived sessions section shows count", () => {
@@ -570,8 +559,9 @@ describe("Sidebar", () => {
     expect(screen.getByText("2")).toBeInTheDocument();
   });
 
-  it("session shows git branch from sdkInfo when bridgeState is unavailable", () => {
-    // No bridgeState — only sdkInfo (REST API) data available
+  it("session does not render git data from sdkInfo (redesign removes git display)", () => {
+    // Git branch and stats are no longer rendered in the session row.
+    // The data still flows through the store but is not displayed.
     const sdk = makeSdkSession("s1", {
       gitBranch: "feature/from-rest",
       gitAhead: 5,
@@ -580,53 +570,33 @@ describe("Sidebar", () => {
       totalLinesRemoved: 20,
     });
     mockState = createMockState({
-      sessions: new Map(), // no bridge state
+      sessions: new Map(),
       sdkSessions: [sdk],
     });
 
     render(<Sidebar />);
-    expect(screen.getByText("feature/from-rest")).toBeInTheDocument();
-    const sessionButton = screen.getByText("feature/from-rest").closest("button")!;
-    expect(sessionButton.textContent).toContain("5");
-    expect(sessionButton.textContent).toContain("2");
-    expect(sessionButton.textContent).toContain("+100");
-    expect(sessionButton.textContent).toContain("-20");
+    expect(screen.queryByText("feature/from-rest")).not.toBeInTheDocument();
+    expect(screen.queryByText("+100")).not.toBeInTheDocument();
+    expect(screen.queryByText("-20")).not.toBeInTheDocument();
   });
 
-  it("session prefers bridgeState git data over sdkInfo", () => {
-    const session = makeSession("s1", {
-      git_branch: "from-bridge",
-      git_ahead: 1,
-    });
-    const sdk = makeSdkSession("s1", {
-      gitBranch: "from-rest",
-      gitAhead: 99,
-    });
-    mockState = createMockState({
-      sessions: new Map([["s1", session]]),
-      sdkSessions: [sdk],
-    });
-
-    render(<Sidebar />);
-    // Bridge data should win over REST API data
-    expect(screen.getByText("from-bridge")).toBeInTheDocument();
-    expect(screen.queryByText("from-rest")).not.toBeInTheDocument();
-  });
-
-  it("codex session shows Codex indicator when bridgeState is missing", () => {
-    // Only sdkInfo available (no WS session_init received yet)
+  it("codex session shows CX badge when bridgeState is missing", () => {
+    // Only sdkInfo available (no WS session_init received yet).
+    // The redesigned session item uses text badges ("CC" / "CX") instead
+    // of colored dots with title attributes.
     const sdk = makeSdkSession("s1", { backendType: "codex" });
     mockState = createMockState({
-      sessions: new Map(), // no bridge state
+      sessions: new Map(),
       sdkSessions: [sdk],
     });
 
     render(<Sidebar />);
-    // Should show "Codex" as backend dot title
-    expect(screen.getByTitle("Codex")).toBeInTheDocument();
+    expect(screen.getByText("CX")).toBeInTheDocument();
   });
 
-  it("session shows correct backend indicator based on backendType", () => {
+  it("session shows correct backend badge based on backendType", () => {
+    // The redesigned session item uses "CC" for Claude and "CX" for Codex
+    // as small pill badges instead of colored dots.
     const session1 = makeSession("s1", { backend_type: "claude" });
     const session2 = makeSession("s2", { backend_type: "codex" });
     const sdk1 = makeSdkSession("s1", { backendType: "claude" });
@@ -637,11 +607,8 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    // Both backend dots should be present (title attributes)
-    const claudeDots = screen.getAllByTitle("Claude");
-    const codexDots = screen.getAllByTitle("Codex");
-    expect(claudeDots.length).toBeGreaterThanOrEqual(1);
-    expect(codexDots.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("CC").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("CX").length).toBeGreaterThanOrEqual(1);
   });
 
   it("sessions are grouped by project directory", () => {
@@ -730,7 +697,9 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Archive")).not.toBeInTheDocument();
   });
 
-  it("session item shows relative timestamp", () => {
+  it("session item does not show timestamp (removed in redesign)", () => {
+    // Timestamps were intentionally removed from session items in the sidebar
+    // redesign to reduce visual clutter.
     const now = Date.now();
     const session = makeSession("s1");
     const sdk = makeSdkSession("s1", { createdAt: now - 3600000 }); // 1 hour ago
@@ -740,8 +709,7 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    // Should show "1h ago" for a session created 1 hour ago
-    expect(screen.getByText("1h ago")).toBeInTheDocument();
+    expect(screen.queryByText("1h ago")).not.toBeInTheDocument();
   });
 
   it("footer nav uses a 3x2 grid layout with short labels", () => {

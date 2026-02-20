@@ -97,6 +97,12 @@
   }
 }
 
+@keyframes ring-pulse {
+  0% { box-shadow: 0 0 0 0 var(--color-cc-warning); }
+  70% { box-shadow: 0 0 0 4px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
 /* Dark mode overrides */
 .dark {
   --color-cc-bg: #2b2a27;

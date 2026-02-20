@@ -17,7 +17,9 @@ import { LinearLogo } from "./LinearLogo.js";
 import { SessionCreationProgress } from "./SessionCreationProgress.js";
 import { SessionLaunchOverlay } from "./SessionLaunchOverlay.js";
 import { PlaygroundUpdateOverlay } from "./UpdateOverlay.js";
+import { SessionItem } from "./SessionItem.js";
 import type { CreationProgressEvent } from "../types.js";
+import type { SessionItem as SessionItemType } from "../utils/project-grouping.js";
 
 // ─── Mock Data ──────────────────────────────────────────────────────────────
 
@@ -1501,7 +1503,157 @@ export function Playground() {
             </Card>
           </div>
         </Section>
+        {/* ─── Session Items ──────────────────────────────────── */}
+        <Section title="Session Items" description="Sidebar session rows — status dot, backend badge, Docker indicator, archive on hover">
+          <PlaygroundSessionItems />
+        </Section>
       </div>
+    </div>
+  );
+}
+
+// ─── Session Item Playground ─────────────────────────────────────────────────
+
+function mockSession(overrides: Partial<SessionItemType>): SessionItemType {
+  return {
+    id: `mock-${Math.random().toString(36).slice(2, 8)}`,
+    model: "claude-sonnet-4-20250514",
+    cwd: "/Users/dev/project",
+    gitBranch: "main",
+    isContainerized: false,
+    gitAhead: 0,
+    gitBehind: 0,
+    linesAdded: 0,
+    linesRemoved: 0,
+    isConnected: false,
+    status: null,
+    sdkState: null,
+    createdAt: Date.now(),
+    archived: false,
+    backendType: "claude",
+    repoRoot: "/Users/dev/project",
+    permCount: 0,
+    ...overrides,
+  };
+}
+
+const noopRef = { current: null };
+const noopSessionItemProps = {
+  onSelect: () => {},
+  onStartRename: () => {},
+  onArchive: (e: React.MouseEvent) => e.stopPropagation(),
+  onUnarchive: (e: React.MouseEvent) => e.stopPropagation(),
+  onDelete: (e: React.MouseEvent) => e.stopPropagation(),
+  onClearRecentlyRenamed: () => {},
+  editingSessionId: null,
+  editingName: "",
+  setEditingName: () => {},
+  onConfirmRename: () => {},
+  onCancelRename: () => {},
+  editInputRef: noopRef,
+};
+
+function PlaygroundSessionItems() {
+  return (
+    <div className="space-y-4 max-w-sm">
+      {/* Running — Claude Code */}
+      <Card label="Running — Claude Code">
+        <div className="bg-cc-sidebar rounded-lg p-1">
+          <SessionItem
+            session={mockSession({ isConnected: true, status: "running", backendType: "claude" })}
+            isActive={false}
+            sessionName="Refactor auth module"
+            permCount={0}
+            isRecentlyRenamed={false}
+            {...noopSessionItemProps}
+          />
+        </div>
+      </Card>
+
+      {/* Running — Codex + Docker */}
+      <Card label="Running — Codex + Docker">
+        <div className="bg-cc-sidebar rounded-lg p-1">
+          <SessionItem
+            session={mockSession({ isConnected: true, status: "running", backendType: "codex", isContainerized: true })}
+            isActive={false}
+            sessionName="Add payment flow"
+            permCount={0}
+            isRecentlyRenamed={false}
+            {...noopSessionItemProps}
+          />
+        </div>
+      </Card>
+
+      {/* Awaiting Input — 2 permissions */}
+      <Card label="Awaiting Input — 2 permissions pending">
+        <div className="bg-cc-sidebar rounded-lg p-1">
+          <SessionItem
+            session={mockSession({ isConnected: true, status: "running", backendType: "claude", permCount: 2 })}
+            isActive={false}
+            sessionName="Fix login bug"
+            permCount={2}
+            isRecentlyRenamed={false}
+            {...noopSessionItemProps}
+          />
+        </div>
+      </Card>
+
+      {/* Idle */}
+      <Card label="Idle — connected, not running">
+        <div className="bg-cc-sidebar rounded-lg p-1">
+          <SessionItem
+            session={mockSession({ isConnected: true, status: "idle", backendType: "claude" })}
+            isActive={false}
+            sessionName="Review PR #42"
+            permCount={0}
+            isRecentlyRenamed={false}
+            {...noopSessionItemProps}
+          />
+        </div>
+      </Card>
+
+      {/* Exited */}
+      <Card label="Exited — session stopped">
+        <div className="bg-cc-sidebar rounded-lg p-1">
+          <SessionItem
+            session={mockSession({ sdkState: "exited", backendType: "codex" })}
+            isActive={false}
+            sessionName="Deploy to staging"
+            permCount={0}
+            isRecentlyRenamed={false}
+            {...noopSessionItemProps}
+          />
+        </div>
+      </Card>
+
+      {/* Active (selected) */}
+      <Card label="Active (selected session)">
+        <div className="bg-cc-sidebar rounded-lg p-1">
+          <SessionItem
+            session={mockSession({ isConnected: true, status: "running", backendType: "claude", isContainerized: true })}
+            isActive={true}
+            sessionName="Build new dashboard"
+            permCount={0}
+            isRecentlyRenamed={false}
+            {...noopSessionItemProps}
+          />
+        </div>
+      </Card>
+
+      {/* Archived */}
+      <Card label="Archived session">
+        <div className="bg-cc-sidebar rounded-lg p-1">
+          <SessionItem
+            session={mockSession({ archived: true, backendType: "claude" })}
+            isActive={false}
+            isArchived={true}
+            sessionName="Old migration script"
+            permCount={0}
+            isRecentlyRenamed={false}
+            {...noopSessionItemProps}
+          />
+        </div>
+      </Card>
     </div>
   );
 }
