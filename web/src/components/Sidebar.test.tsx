@@ -360,9 +360,7 @@ describe("Sidebar", () => {
     expect(menuButton).toHaveClass("sm:group-hover:opacity-100");
   });
 
-  it("permission count renders on the status dot when permissions are pending", () => {
-    // The redesigned session item shows permission count as a superscript
-    // badge on the status dot, not as a separate positioned element.
+  it("pending permissions render a yellow awaiting status dot", () => {
     const session = makeSession("s1");
     const sdk = makeSdkSession("s1");
     mockState = createMockState({
@@ -373,10 +371,8 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    const permBadge = screen.getAllByText("1").find((node) =>
-      node.classList.contains("bg-cc-warning") && node.classList.contains("rounded-full"),
-    );
-    expect(permBadge).toBeTruthy();
+    const awaitingDot = document.querySelector(".bg-cc-warning.animate-\\[ring-pulse_1\\.5s_ease-out_infinite\\]");
+    expect(awaitingDot).toBeTruthy();
   });
 
   it("archived sessions section shows count", () => {
@@ -540,7 +536,7 @@ describe("Sidebar", () => {
     expect(otherElement.closest(".animate-name-appear")).toBeFalsy();
   });
 
-  it("permission badge shows count for sessions with pending permissions", () => {
+  it("session keeps awaiting state with multiple pending permissions", () => {
     const session = makeSession("s1");
     const sdk = makeSdkSession("s1");
     const permMap = new Map<string, unknown>([
@@ -555,8 +551,25 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    // The permission count badge shows "2"
-    expect(screen.getByText("2")).toBeInTheDocument();
+    const awaitingDot = document.querySelector(".bg-cc-warning.animate-\\[ring-pulse_1\\.5s_ease-out_infinite\\]");
+    expect(awaitingDot).toBeTruthy();
+  });
+
+  it("archived session row is clickable after opening archived section", () => {
+    const sdk = makeSdkSession("s1", { archived: true, model: "archived-clickable" });
+    mockState = createMockState({
+      sdkSessions: [sdk],
+    });
+
+    render(<Sidebar />);
+    fireEvent.click(screen.getByText(/Archived \(1\)/));
+
+    const archivedRowButton = screen.getByText("archived-clickable").closest("button");
+    expect(archivedRowButton).toBeInTheDocument();
+    if (!archivedRowButton) throw new Error("Archived row button not found");
+
+    fireEvent.click(archivedRowButton);
+    expect(window.location.hash).toBe("#/session/s1");
   });
 
   it("session does not render git data from sdkInfo (redesign removes git display)", () => {

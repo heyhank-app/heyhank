@@ -31,7 +31,7 @@ function deriveStatus(s: SessionItemType): DerivedStatus {
   return "exited";
 }
 
-function StatusDot({ status, permCount }: { status: DerivedStatus; permCount: number }) {
+function StatusDot({ status }: { status: DerivedStatus }) {
   switch (status) {
     case "running":
       return (
@@ -44,11 +44,6 @@ function StatusDot({ status, permCount }: { status: DerivedStatus; permCount: nu
       return (
         <span className="relative shrink-0 w-2 h-2">
           <span className="w-2 h-2 rounded-full bg-cc-warning block animate-[ring-pulse_1.5s_ease-out_infinite]" />
-          {permCount > 0 && (
-            <span className="absolute -top-1.5 -right-2.5 min-w-[14px] h-[14px] flex items-center justify-center rounded-full bg-cc-warning text-white text-[9px] font-bold leading-none px-0.5">
-              {permCount}
-            </span>
-          )}
         </span>
       );
     case "idle":
@@ -139,7 +134,7 @@ export function SessionItem({
           e.preventDefault();
           onStartRename(s.id, label);
         }}
-        className={`w-full flex items-center gap-2 py-2 px-2.5 min-h-[44px] rounded-lg transition-colors duration-100 cursor-pointer ${
+        className={`w-full flex items-center gap-2 py-2 pl-2.5 pr-12 min-h-[44px] rounded-lg transition-colors duration-100 cursor-pointer ${
           isActive
             ? "bg-cc-active"
             : "hover:bg-cc-hover"
@@ -147,7 +142,7 @@ export function SessionItem({
       >
         {/* Status dot */}
         {!isEditing && (
-          <StatusDot status={derivedStatus} permCount={permCount} />
+          <StatusDot status={derivedStatus} />
         )}
 
         {/* Session name / edit input */}
@@ -211,7 +206,7 @@ export function SessionItem({
             e.stopPropagation();
             onArchive(e, s.id);
           }}
-          className="absolute right-7 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-0 sm:group-hover:opacity-100 hover:bg-cc-border text-cc-muted hover:text-cc-fg transition-all cursor-pointer"
+          className="absolute right-7 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-0 pointer-events-none sm:group-hover:opacity-100 sm:group-hover:pointer-events-auto hover:bg-cc-border text-cc-muted hover:text-cc-fg transition-all cursor-pointer"
           title="Archive"
           aria-label="Archive session"
         >
@@ -228,7 +223,7 @@ export function SessionItem({
           e.stopPropagation();
           setMenuOpen(!menuOpen);
         }}
-        className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:bg-cc-border text-cc-muted hover:text-cc-fg transition-all cursor-pointer"
+        className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-100 pointer-events-auto sm:opacity-0 sm:pointer-events-none sm:group-hover:opacity-100 sm:group-hover:pointer-events-auto hover:bg-cc-border text-cc-muted hover:text-cc-fg transition-all cursor-pointer"
         title="Session actions"
         aria-label="Session actions"
       >
