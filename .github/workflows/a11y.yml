@@ -1,11 +1,13 @@
-name: Coverage Gate
+name: Accessibility
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
 jobs:
-  coverage:
+  a11y:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,6 +22,6 @@ jobs:
         working-directory: web
         run: bun install
 
-      - name: Run coverage gate (enforces thresholds from vitest.config.ts)
+      - name: Run accessibility tests (axe-core + ARIA)
         working-directory: web
-        run: bun run test -- --coverage
+        run: bun run test:a11y
