@@ -156,7 +156,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-[100dvh] flex font-sans-ui bg-cc-bg text-cc-fg antialiased">
+    <div className="h-[100dvh] flex font-sans-ui bg-cc-bg text-cc-fg antialiased pt-safe">
       {/* Mobile overlay backdrop */}
       {sidebarOpen && (
         <div

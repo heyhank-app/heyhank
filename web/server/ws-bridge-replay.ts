@@ -38,6 +38,7 @@ export function isHistoryBackedEvent(msg: ReplayableBrowserIncomingMessage): boo
   return msg.type === "assistant"
     || msg.type === "result"
     || msg.type === "user_message"
+    || (msg.type === "system_event" && msg.event.subtype !== "hook_progress")
     || msg.type === "error";
 }
 

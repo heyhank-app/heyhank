@@ -319,22 +319,210 @@ export function registerFsRoutes(api: Hono): void {
     const cwd = c.req.query("cwd");
     if (!cwd) return c.json({ error: "cwd required" }, 400);
     const resolvedCwd = resolve(cwd);
-    const candidates = [
-      join(resolvedCwd, "CLAUDE.md"),
-      join(resolvedCwd, ".claude", "CLAUDE.md"),
-    ];
 
+    // Find the git repo root so we can search upward from cwd.
+    let repoRoot: string | null = null;
+    try {
+      repoRoot = execSync("git rev-parse --show-toplevel", {
+        cwd: resolvedCwd,
+        encoding: "utf-8",
+        timeout: 3000,
+      }).trim();
+    } catch {
+      // Not a git repo — only search the exact cwd
+    }
+
+    // Collect candidate directories: cwd, then each parent up to repo root.
+    const searchDirs: string[] = [];
+    let dir = resolvedCwd;
+    const stop = repoRoot ? resolve(repoRoot) : resolvedCwd;
+    while (true) {
+      searchDirs.push(dir);
+      if (dir === stop) break;
+      const parent = dirname(dir);
+      if (parent === dir) break; // filesystem root
+      dir = parent;
+    }
+
+    // Check CLAUDE.md and .claude/CLAUDE.md in each directory.
+    const seen = new Set<string>();
     const files: { path: string; content: string }[] = [];
-    for (const p of candidates) {
-      try {
-        const content = await readFile(p, "utf-8");
-        files.push({ path: p, content });
-      } catch {
-        // file doesn't exist — skip
+    for (const d of searchDirs) {
+      for (const rel of ["CLAUDE.md", join(".claude", "CLAUDE.md")]) {
+        const p = join(d, rel);
+        if (seen.has(p)) continue;
+        seen.add(p);
+        try {
+          const content = await readFile(p, "utf-8");
+          files.push({ path: p, content });
+        } catch {
+          // file doesn't exist — skip
+        }
       }
     }
 
     return c.json({ cwd: resolvedCwd, files });
+  });
+
+  api.get("/fs/claude-config", async (c) => {
+    const cwd = c.req.query("cwd");
+    if (!cwd) return c.json({ error: "cwd required" }, 400);
+    const resolvedCwd = resolve(cwd);
+
+    // Find repo root
+    let repoRoot: string | null = null;
+    try {
+      repoRoot = execSync("git rev-parse --show-toplevel", {
+        cwd: resolvedCwd,
+        encoding: "utf-8",
+        timeout: 3000,
+      }).trim();
+    } catch {
+      // Not a git repo
+    }
+    const projectRoot = repoRoot ? resolve(repoRoot) : resolvedCwd;
+
+    // ── Project-level items ─────────────────────────────────────────────
+    // CLAUDE.md files — reuse walk-up logic
+    const searchDirs: string[] = [];
+    let dir = resolvedCwd;
+    const stop = projectRoot;
+    while (true) {
+      searchDirs.push(dir);
+      if (dir === stop) break;
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    const seen = new Set<string>();
+    const projectClaudeMd: { path: string; content: string }[] = [];
+    for (const d of searchDirs) {
+      for (const rel of ["CLAUDE.md", join(".claude", "CLAUDE.md")]) {
+        const p = join(d, rel);
+        if (seen.has(p)) continue;
+        seen.add(p);
+        try {
+          const content = await readFile(p, "utf-8");
+          projectClaudeMd.push({ path: p, content });
+        } catch {
+          // file doesn't exist
+        }
+      }
+    }
+
+    // settings.json / settings.local.json
+    const claudeDir = join(projectRoot, ".claude");
+    let projectSettings: { path: string; content: string } | null = null;
+    let projectSettingsLocal: { path: string; content: string } | null = null;
+    try {
+      const p = join(claudeDir, "settings.json");
+      projectSettings = { path: p, content: await readFile(p, "utf-8") };
+    } catch { /* missing */ }
+    try {
+      const p = join(claudeDir, "settings.local.json");
+      projectSettingsLocal = { path: p, content: await readFile(p, "utf-8") };
+    } catch { /* missing */ }
+
+    // commands/*.md
+    const projectCommands: { name: string; path: string }[] = [];
+    try {
+      const commandsDir = join(claudeDir, "commands");
+      const entries = await readdir(commandsDir, { withFileTypes: true });
+      for (const e of entries) {
+        if (e.isFile() && e.name.endsWith(".md")) {
+          projectCommands.push({ name: e.name.replace(/\.md$/, ""), path: join(commandsDir, e.name) });
+        }
+      }
+      projectCommands.sort((a, b) => a.name.localeCompare(b.name));
+    } catch { /* missing dir */ }
+
+    // ── User-level items ────────────────────────────────────────────────
+    const userRoot = join(homedir(), ".claude");
+
+    // User CLAUDE.md
+    let userClaudeMd: { path: string; content: string } | null = null;
+    try {
+      const p = join(userRoot, "CLAUDE.md");
+      userClaudeMd = { path: p, content: await readFile(p, "utf-8") };
+    } catch { /* missing */ }
+
+    // Skills
+    const userSkills: { slug: string; name: string; description: string; path: string }[] = [];
+    try {
+      const skillsDir = join(userRoot, "skills");
+      const entries = await readdir(skillsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const skillMdPath = join(skillsDir, entry.name, "SKILL.md");
+        try {
+          const content = await readFile(skillMdPath, "utf-8");
+          const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+          let name = entry.name;
+          let description = "";
+          if (fmMatch) {
+            for (const line of fmMatch[1].split("\n")) {
+              const nameMatch = line.match(/^name:\s*(.+)/);
+              if (nameMatch) name = nameMatch[1].trim().replace(/^["']|["']$/g, "");
+              const descMatch = line.match(/^description:\s*["']?(.+?)["']?\s*$/);
+              if (descMatch) description = descMatch[1];
+            }
+          }
+          userSkills.push({ slug: entry.name, name, description, path: skillMdPath });
+        } catch { /* no SKILL.md */ }
+      }
+      userSkills.sort((a, b) => a.name.localeCompare(b.name));
+    } catch { /* missing dir */ }
+
+    // Agents
+    const userAgents: { name: string; path: string }[] = [];
+    try {
+      const agentsDir = join(userRoot, "agents");
+      const entries = await readdir(agentsDir, { withFileTypes: true });
+      for (const e of entries) {
+        if (e.isFile() && e.name.endsWith(".md")) {
+          userAgents.push({ name: e.name.replace(/\.md$/, ""), path: join(agentsDir, e.name) });
+        }
+      }
+      userAgents.sort((a, b) => a.name.localeCompare(b.name));
+    } catch { /* missing dir */ }
+
+    // User settings.json
+    let userSettings: { path: string; content: string } | null = null;
+    try {
+      const p = join(userRoot, "settings.json");
+      userSettings = { path: p, content: await readFile(p, "utf-8") };
+    } catch { /* missing */ }
+
+    // User commands/*.md
+    const userCommands: { name: string; path: string }[] = [];
+    try {
+      const commandsDir = join(userRoot, "commands");
+      const entries = await readdir(commandsDir, { withFileTypes: true });
+      for (const e of entries) {
+        if (e.isFile() && e.name.endsWith(".md")) {
+          userCommands.push({ name: e.name.replace(/\.md$/, ""), path: join(commandsDir, e.name) });
+        }
+      }
+      userCommands.sort((a, b) => a.name.localeCompare(b.name));
+    } catch { /* missing dir */ }
+
+    return c.json({
+      project: {
+        root: projectRoot,
+        claudeMd: projectClaudeMd,
+        settings: projectSettings,
+        settingsLocal: projectSettingsLocal,
+        commands: projectCommands,
+      },
+      user: {
+        root: userRoot,
+        claudeMd: userClaudeMd,
+        skills: userSkills,
+        agents: userAgents,
+        settings: userSettings,
+        commands: userCommands,
+      },
+    });
   });
 
   api.put("/fs/claude-md", async (c) => {

@@ -1,8 +1,7 @@
 import type { ServerWebSocket } from "bun";
 import type {
   CLIMessage,
-  CLISystemInitMessage,
-  CLISystemStatusMessage,
+  CLISystemMessage,
   CLIAssistantMessage,
   CLIResultMessage,
   CLIStreamEventMessage,
@@ -552,7 +551,7 @@ export class WsBridge {
     }
   }
 
-  private handleSystemMessage(session: Session, msg: CLISystemInitMessage | CLISystemStatusMessage) {
+  private handleSystemMessage(session: Session, msg: CLISystemMessage) {
     if (msg.subtype === "init") {
       // Keep the launcher-assigned session_id as the canonical ID.
       // The CLI may report its own internal session_id which differs
@@ -595,7 +594,10 @@ export class WsBridge {
           this.sendToCLI(session, ndjson);
         }
       }
-    } else if (msg.subtype === "status") {
+      return;
+    }
+
+    if (msg.subtype === "status") {
       session.state.is_compacting = msg.status === "compacting";
 
       if (msg.permissionMode) {
@@ -606,8 +608,108 @@ export class WsBridge {
         type: "status_change",
         status: msg.status ?? null,
       });
+      return;
     }
-    // Other system subtypes (compact_boundary, task_notification, etc.) can be forwarded as needed
+
+    if (msg.subtype === "compact_boundary") {
+      this.forwardSystemEvent(session, {
+        subtype: "compact_boundary",
+        compact_metadata: msg.compact_metadata,
+        uuid: msg.uuid,
+        session_id: msg.session_id,
+      });
+      return;
+    }
+
+    if (msg.subtype === "task_notification") {
+      this.forwardSystemEvent(session, {
+        subtype: "task_notification",
+        task_id: msg.task_id,
+        status: msg.status,
+        output_file: msg.output_file,
+        summary: msg.summary,
+        uuid: msg.uuid,
+        session_id: msg.session_id,
+      });
+      return;
+    }
+
+    if (msg.subtype === "files_persisted") {
+      this.forwardSystemEvent(session, {
+        subtype: "files_persisted",
+        files: msg.files,
+        failed: msg.failed,
+        processed_at: msg.processed_at,
+        uuid: msg.uuid,
+        session_id: msg.session_id,
+      });
+      return;
+    }
+
+    if (msg.subtype === "hook_started") {
+      this.forwardSystemEvent(session, {
+        subtype: "hook_started",
+        hook_id: msg.hook_id,
+        hook_name: msg.hook_name,
+        hook_event: msg.hook_event,
+        uuid: msg.uuid,
+        session_id: msg.session_id,
+      });
+      return;
+    }
+
+    if (msg.subtype === "hook_progress") {
+      this.forwardSystemEvent(session, {
+        subtype: "hook_progress",
+        hook_id: msg.hook_id,
+        hook_name: msg.hook_name,
+        hook_event: msg.hook_event,
+        stdout: msg.stdout,
+        stderr: msg.stderr,
+        output: msg.output,
+        uuid: msg.uuid,
+        session_id: msg.session_id,
+      }, { persistInHistory: false });
+      return;
+    }
+
+    if (msg.subtype === "hook_response") {
+      this.forwardSystemEvent(session, {
+        subtype: "hook_response",
+        hook_id: msg.hook_id,
+        hook_name: msg.hook_name,
+        hook_event: msg.hook_event,
+        output: msg.output,
+        stdout: msg.stdout,
+        stderr: msg.stderr,
+        exit_code: msg.exit_code,
+        outcome: msg.outcome,
+        uuid: msg.uuid,
+        session_id: msg.session_id,
+      });
+      return;
+    }
+
+    // Unknown system subtypes are intentionally ignored until we map them.
+  }
+
+  private forwardSystemEvent(
+    session: Session,
+    event: Extract<BrowserIncomingMessage, { type: "system_event" }>["event"],
+    options: { persistInHistory?: boolean } = {},
+  ) {
+    const browserMsg: BrowserIncomingMessage = {
+      type: "system_event",
+      event,
+      timestamp: Date.now(),
+    };
+
+    if (options.persistInHistory !== false) {
+      session.messageHistory.push(browserMsg);
+      this.persistSession(session);
+    }
+
+    this.broadcastToBrowsers(session, browserMsg);
   }
 
   private handleAssistantMessage(session: Session, msg: CLIAssistantMessage) {

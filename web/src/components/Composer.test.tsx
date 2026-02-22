@@ -551,7 +551,8 @@ describe("Composer save prompt", () => {
     const textarea = container.querySelector("textarea")!;
 
     fireEvent.change(textarea, { target: { value: "Prompt body text" } });
-    fireEvent.click(screen.getByTitle("Save as prompt"));
+    // Mobile + desktop layouts render separate buttons; click the first visible one.
+    fireEvent.click(screen.getAllByTitle("Save as prompt")[0]);
     const titleInput = screen.getByPlaceholderText("Prompt title");
     fireEvent.change(titleInput, { target: { value: "My Prompt" } });
     fireEvent.click(screen.getByText("Save"));

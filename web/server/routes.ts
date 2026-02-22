@@ -29,6 +29,8 @@ import { registerSettingsRoutes } from "./routes/settings-routes.js";
 import { registerGitRoutes } from "./routes/git-routes.js";
 import { registerSystemRoutes } from "./routes/system-routes.js";
 import { registerLinearRoutes } from "./routes/linear-routes.js";
+import { discoverClaudeSessions } from "./claude-session-discovery.js";
+import { getClaudeSessionHistoryPage } from "./claude-session-history.js";
 
 const UPDATE_CHECK_STALE_MS = 5 * 60 * 1000;
 const ROUTES_DIR = dirname(fileURLToPath(import.meta.url));
@@ -57,6 +59,10 @@ export function createRoutes(
   api.post("/sessions/create", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     try {
+      const resumeSessionAt = typeof body.resumeSessionAt === "string" && body.resumeSessionAt.trim()
+        ? body.resumeSessionAt.trim()
+        : undefined;
+      const forkSession = body.forkSession === true;
       const backend = body.backend ?? "claude";
       if (backend !== "claude" && backend !== "codex") {
         return c.json({ error: `Invalid backend: ${String(backend)}` }, 400);
@@ -264,6 +270,8 @@ export function createRoutes(
         containerName,
         containerImage,
         containerCwd: containerInfo?.containerCwd,
+        resumeSessionAt,
+        forkSession,
       });
 
       // Re-track container with real session ID and mark session as containerized
@@ -312,6 +320,10 @@ export function createRoutes(
 
     return streamSSE(c, async (stream) => {
       try {
+        const resumeSessionAt = typeof body.resumeSessionAt === "string" && body.resumeSessionAt.trim()
+          ? body.resumeSessionAt.trim()
+          : undefined;
+        const forkSession = body.forkSession === true;
         const backend = body.backend ?? "claude";
         if (backend !== "claude" && backend !== "codex") {
           await stream.writeSSE({
@@ -583,6 +595,8 @@ export function createRoutes(
           containerName,
           containerImage,
           containerCwd: containerInfo?.containerCwd,
+          resumeSessionAt,
+          forkSession,
         });
 
         // Re-track container and mark session as containerized
@@ -612,6 +626,9 @@ export function createRoutes(
             sessionId: session.sessionId,
             state: session.state,
             cwd: session.cwd,
+            backendType: session.backendType,
+            resumeSessionAt: session.resumeSessionAt,
+            forkSession: session.forkSession,
           }),
         });
       } catch (e: unknown) {
@@ -653,6 +670,31 @@ export function createRoutes(
     const session = launcher.getSession(id);
     if (!session) return c.json({ error: "Session not found" }, 404);
     return c.json(session);
+  });
+
+  api.get("/claude/sessions/discover", (c) => {
+    const limitRaw = c.req.query("limit");
+    const limit = limitRaw ? Number(limitRaw) : undefined;
+    const sessions = discoverClaudeSessions({ limit });
+    return c.json({ sessions });
+  });
+
+  api.get("/claude/sessions/:id/history", (c) => {
+    const sessionId = c.req.param("id");
+    const limitRaw = c.req.query("limit");
+    const cursorRaw = c.req.query("cursor");
+    const limit = limitRaw !== undefined ? Number(limitRaw) : undefined;
+    const cursor = cursorRaw !== undefined ? Number(cursorRaw) : undefined;
+
+    const page = getClaudeSessionHistoryPage({
+      sessionId,
+      limit,
+      cursor,
+    });
+    if (!page) {
+      return c.json({ error: "Claude session history not found" }, 404);
+    }
+    return c.json(page);
   });
 
   api.post("/sessions/:id/editor/start", async (c) => {

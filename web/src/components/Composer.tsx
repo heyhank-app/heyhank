@@ -390,11 +390,11 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const canSend = text.trim().length > 0 && isConnected;
 
   return (
-    <div className="shrink-0 px-2 sm:px-4 pt-2.5 sm:pt-3 pb-3 sm:pb-4 bg-transparent">
-      <div className="max-w-4xl mx-auto">
+    <div className="shrink-0 px-0 sm:px-6 pt-0 sm:pt-3 pb-safe bg-cc-input-bg sm:bg-transparent">
+      <div className="max-w-3xl mx-auto">
         {/* Image thumbnails */}
         {images.length > 0 && (
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
+          <div className="flex items-center gap-2 mb-2 px-3 sm:px-0 flex-wrap">
             {images.map((img, i) => (
               <div key={i} className="relative group">
                 <img
@@ -427,11 +427,11 @@ export function Composer({ sessionId }: { sessionId: string }) {
           aria-label="Attach images"
         />
 
-        {/* Unified input card */}
-        <div className={`relative bg-cc-input-bg/95 border rounded-[14px] shadow-[0_10px_30px_rgba(0,0,0,0.10)] overflow-visible transition-colors backdrop-blur-sm ${
+        {/* Input container: flat separator on mobile, card on desktop */}
+        <div className={`relative overflow-visible transition-colors border-t border-cc-separator sm:border sm:border-cc-border sm:bg-cc-input-bg/95 sm:rounded-[14px] sm:shadow-[0_10px_30px_rgba(0,0,0,0.10)] sm:backdrop-blur-sm ${
           isPlan
-            ? "border-cc-primary/40"
-            : "border-cc-border focus-within:border-cc-primary/30"
+            ? "sm:border-cc-primary/40"
+            : "sm:focus-within:border-cc-primary/30"
         }`}>
           {/* Slash command menu */}
           {slashMenuOpen && filteredCommands.length > 0 && (
@@ -555,11 +555,81 @@ export function Composer({ sessionId }: { sessionId: string }) {
             </div>
           )}
 
-          <div className="flex items-end gap-2 px-2.5 py-2">
+          {/* Mobile toolbar: mode toggle + secondary actions (hidden on sm+) */}
+          <div className="flex items-center gap-1.5 px-3 pt-1.5 pb-0.5 sm:hidden">
             <button
               onClick={toggleMode}
               disabled={!isConnected}
-              className={`mb-0.5 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-semibold transition-all border select-none shrink-0 ${
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] font-semibold transition-all border select-none shrink-0 ${
+                !isConnected
+                  ? "opacity-30 cursor-not-allowed text-cc-muted border-transparent"
+                  : isPlan
+                    ? "text-cc-primary border-cc-primary/30 bg-cc-primary/8"
+                    : "text-cc-muted border-cc-border"
+              }`}
+              title="Toggle mode (Shift+Tab)"
+            >
+              {isPlan ? (
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                  <rect x="3" y="3" width="3.5" height="10" rx="0.75" />
+                  <rect x="9.5" y="3" width="3.5" height="10" rx="0.75" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                  <path d="M2.5 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                  <path d="M8.5 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                </svg>
+              )}
+              <span>{modeLabel}</span>
+            </button>
+
+            <div className="flex-1" />
+
+            <button
+              onClick={() => {
+                const defaultName = text.trim().slice(0, 32);
+                setSavePromptName(defaultName || "");
+                setSavePromptError(null);
+                setSavePromptOpen((v) => !v);
+              }}
+              disabled={!isConnected || !text.trim()}
+              className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
+                isConnected && text.trim()
+                  ? "text-cc-muted hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
+                  : "text-cc-muted opacity-30 cursor-not-allowed"
+              }`}
+              title="Save as prompt"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                <path d="M4 2.75h8A1.25 1.25 0 0113.25 4v9.25L8 10.5l-5.25 2.75V4A1.25 1.25 0 014 2.75z" />
+              </svg>
+            </button>
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!isConnected}
+              className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
+                isConnected
+                  ? "text-cc-muted hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
+                  : "text-cc-muted opacity-30 cursor-not-allowed"
+              }`}
+              title="Upload image"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                <rect x="2" y="2" width="12" height="12" rx="2" />
+                <circle cx="5.5" cy="5.5" r="1" fill="currentColor" stroke="none" />
+                <path d="M2 11l3-3 2 2 3-4 4 5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Main input row */}
+          <div className="flex items-end gap-2 px-3 sm:px-2.5 py-1 sm:py-2">
+            {/* Desktop mode toggle (hidden on mobile) */}
+            <button
+              onClick={toggleMode}
+              disabled={!isConnected}
+              className={`mb-0.5 hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-semibold transition-all border select-none shrink-0 ${
                 !isConnected
                   ? "opacity-30 cursor-not-allowed text-cc-muted border-transparent"
                   : isPlan
@@ -596,12 +666,13 @@ export function Composer({ sessionId }: { sessionId: string }) {
                 : "Waiting for CLI connection..."}
               disabled={!isConnected}
               rows={1}
-              className="flex-1 min-w-0 px-2 py-1.5 text-base sm:text-sm bg-transparent resize-none focus:outline-none text-cc-fg font-sans-ui placeholder:text-cc-muted disabled:opacity-50 overflow-y-auto"
-              style={{ minHeight: "36px", maxHeight: "200px" }}
+              className="flex-1 min-w-0 px-2 py-2 text-base sm:text-sm bg-transparent resize-none outline-none text-cc-fg font-sans-ui placeholder:text-cc-muted disabled:opacity-50 overflow-y-auto"
+              style={{ minHeight: "42px", maxHeight: "200px" }}
             />
 
-            {/* Right: image + send/stop */}
+            {/* Desktop secondary buttons + send/stop */}
             <div className="mb-0.5 flex items-center gap-1.5 shrink-0">
+              {/* Bookmark + image: desktop only */}
               <button
                 onClick={() => {
                   const defaultName = text.trim().slice(0, 32);
@@ -610,7 +681,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
                   setSavePromptOpen((v) => !v);
                 }}
                 disabled={!isConnected || !text.trim()}
-                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-colors ${
+                className={`hidden sm:flex items-center justify-center w-9 h-9 rounded-lg border transition-colors ${
                   isConnected && text.trim()
                     ? "text-cc-muted border-cc-border hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
                     : "text-cc-muted opacity-30 border-cc-border/60 cursor-not-allowed"
@@ -625,7 +696,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={!isConnected}
-                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-colors ${
+                className={`hidden sm:flex items-center justify-center w-9 h-9 rounded-lg border transition-colors ${
                   isConnected
                     ? "text-cc-muted border-cc-border hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
                     : "text-cc-muted opacity-30 border-cc-border/60 cursor-not-allowed"
@@ -639,10 +710,11 @@ export function Composer({ sessionId }: { sessionId: string }) {
                 </svg>
               </button>
 
+              {/* Send/stop: always visible */}
               {isRunning ? (
                 <button
                   onClick={handleInterrupt}
-                  className="flex items-center justify-center w-9 h-9 rounded-lg bg-cc-error/10 hover:bg-cc-error/20 text-cc-error transition-colors cursor-pointer"
+                  className="flex items-center justify-center w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-cc-error/10 hover:bg-cc-error/20 text-cc-error transition-colors cursor-pointer"
                   title="Stop generation"
                 >
                   <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
@@ -653,7 +725,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
                 <button
                   onClick={handleSend}
                   disabled={!canSend}
-                  className={`flex items-center justify-center w-9 h-9 rounded-full transition-colors ${
+                  className={`flex items-center justify-center w-10 h-10 sm:w-9 sm:h-9 rounded-full transition-colors ${
                     canSend
                       ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer shadow-[0_6px_20px_rgba(0,0,0,0.18)]"
                       : "bg-cc-hover text-cc-muted cursor-not-allowed"
