@@ -1,3 +1,5 @@
+import { installClipboardWriteFallback } from "./clipboard.js";
+
 export type Route =
   | { page: "home" }
   | { page: "session"; sessionId: string }
@@ -14,11 +16,20 @@ export type Route =
 
 const SESSION_PREFIX = "#/session/";
 const AGENT_PREFIX = "#/agents/";
+let clipboardFallbackInitialized = false;
+
+function ensureClipboardFallbackInstalled(): void {
+  if (clipboardFallbackInitialized) return;
+  installClipboardWriteFallback();
+  clipboardFallbackInitialized = true;
+}
 
 /**
  * Parse a window.location.hash string into a typed Route.
  */
 export function parseHash(hash: string): Route {
+  ensureClipboardFallbackInstalled();
+
   if (hash === "#/settings") return { page: "settings" };
   if (hash === "#/integrations") return { page: "integrations" };
   if (hash === "#/integrations/linear") return { page: "integration-linear" };
@@ -55,6 +66,8 @@ export function sessionHash(sessionId: string): string {
  * When replace=true, uses replaceState to avoid creating a history entry.
  */
 export function navigateToSession(sessionId: string, replace = false): void {
+  ensureClipboardFallbackInstalled();
+
   const newHash = sessionHash(sessionId);
   if (replace) {
     history.replaceState(null, "", newHash);
@@ -69,6 +82,8 @@ export function navigateToSession(sessionId: string, replace = false): void {
  * When replace=true, uses replaceState to avoid creating a history entry.
  */
 export function navigateHome(replace = false): void {
+  ensureClipboardFallbackInstalled();
+
   if (replace) {
     history.replaceState(null, "", window.location.pathname + window.location.search);
     window.dispatchEvent(new HashChangeEvent("hashchange"));
