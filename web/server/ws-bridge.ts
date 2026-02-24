@@ -14,6 +14,7 @@ import type {
   SessionState,
   PermissionRequest,
   BackendType,
+  McpServerConfig,
 } from "./session-types.js";
 import type { SessionStore } from "./session-store.js";
 import type { CodexAdapter } from "./codex-adapter.js";
@@ -482,7 +483,7 @@ export class WsBridge {
   }
 
   /** Send a user message into a session programmatically (no browser required).
-   *  Used by the cron scheduler to send prompts to autonomous sessions. */
+   *  Used by the cron scheduler and agent executor to send prompts to autonomous sessions. */
   injectUserMessage(sessionId: string, content: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -490,6 +491,17 @@ export class WsBridge {
       return;
     }
     this.routeBrowserMessage(session, { type: "user_message", content });
+  }
+
+  /** Configure MCP servers on a session programmatically (no browser required).
+   *  Used by the agent executor to set up MCP servers after CLI connects. */
+  injectMcpSetServers(sessionId: string, servers: Record<string, McpServerConfig>): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      console.error(`[ws-bridge] Cannot inject MCP servers: session ${sessionId} not found`);
+      return;
+    }
+    this.routeBrowserMessage(session, { type: "mcp_set_servers", servers });
   }
 
   handleBrowserClose(ws: ServerWebSocket<SocketData>) {

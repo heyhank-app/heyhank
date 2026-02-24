@@ -54,12 +54,12 @@ const NAV_ITEMS: NavItem[] = [
     iconPath: "M8 1a2 2 0 012 2v1h2a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h2V3a2 2 0 012-2zm0 1.5a.5.5 0 00-.5.5v1h1V3a.5.5 0 00-.5-.5zM4 5.5a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V6a.5.5 0 00-.5-.5H4z",
   },
   {
-    id: "scheduled",
-    label: "Scheduled",
-    shortLabel: "Sched.",
-    hash: "#/scheduled",
+    id: "agents",
+    label: "Agents",
+    shortLabel: "Agents",
+    hash: "#/agents",
     viewBox: "0 0 16 16",
-    iconPath: "M8 2a6 6 0 100 12A6 6 0 008 2zM0 8a8 8 0 1116 0A8 8 0 010 8zm9-3a1 1 0 10-2 0v3a1 1 0 00.293.707l2 2a1 1 0 001.414-1.414L9 7.586V5z",
+    iconPath: "M8 1.5a2.5 2.5 0 00-2.5 2.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5S9.38 1.5 8 1.5zM4 8a4 4 0 00-4 4v1.5a.5.5 0 00.5.5h15a.5.5 0 00.5-.5V12a4 4 0 00-4-4H4z",
   },
   {
     id: "settings",
@@ -284,15 +284,19 @@ export function Sidebar() {
       permCount: pendingPermissions.get(id)?.size ?? 0,
       cronJobId: bridgeState?.cronJobId || sdkInfo?.cronJobId,
       cronJobName: bridgeState?.cronJobName || sdkInfo?.cronJobName,
+      agentId: bridgeState?.agentId || sdkInfo?.agentId,
+      agentName: bridgeState?.agentName || sdkInfo?.agentName,
     };
   }).sort((a, b) => b.createdAt - a.createdAt);
 
-  const activeSessions = allSessionList.filter((s) => !s.archived && !s.cronJobId);
+  const activeSessions = allSessionList.filter((s) => !s.archived && !s.cronJobId && !s.agentId);
   const cronSessions = allSessionList.filter((s) => !s.archived && !!s.cronJobId);
+  const agentSessions = allSessionList.filter((s) => !s.archived && !!s.agentId);
   const archivedSessions = allSessionList.filter((s) => s.archived);
   const currentSession = currentSessionId ? allSessionList.find((s) => s.id === currentSessionId) : null;
   const logoSrc = currentSession?.backendType === "codex" ? "/logo-codex.svg" : "/logo.svg";
   const [showCronSessions, setShowCronSessions] = useState(true);
+  const [showAgentSessions, setShowAgentSessions] = useState(true);
 
   // Group active sessions by project
   const projectGroups = useMemo(
@@ -406,6 +410,38 @@ export function Sidebar() {
                 {showCronSessions && (
                   <div className="space-y-0.5 mt-1">
                     {cronSessions.map((s) => (
+                      <SessionItem
+                        key={s.id}
+                        session={s}
+                        isActive={currentSessionId === s.id}
+                        sessionName={sessionNames.get(s.id)}
+                        permCount={pendingPermissions.get(s.id)?.size ?? 0}
+                        isRecentlyRenamed={recentlyRenamed.has(s.id)}
+                        {...sessionItemProps}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {agentSessions.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-cc-border">
+                <button
+                  onClick={() => setShowAgentSessions(!showAgentSessions)}
+                  className="w-full px-3 py-1.5 text-[11px] font-medium text-emerald-400 uppercase tracking-wider flex items-center gap-1.5 hover:text-emerald-300 transition-colors cursor-pointer"
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className={`w-3 h-3 transition-transform ${showAgentSessions ? "rotate-90" : ""}`}>
+                    <path d="M6 4l4 4-4 4" />
+                  </svg>
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-60">
+                    <path d="M8 1.5a2.5 2.5 0 00-2.5 2.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5S9.38 1.5 8 1.5zM4 8a4 4 0 00-4 4v1.5a.5.5 0 00.5.5h15a.5.5 0 00.5-.5V12a4 4 0 00-4-4H4z" />
+                  </svg>
+                  Agent Runs ({agentSessions.length})
+                </button>
+                {showAgentSessions && (
+                  <div className="space-y-0.5 mt-1">
+                    {agentSessions.map((s) => (
                       <SessionItem
                         key={s.id}
                         session={s}

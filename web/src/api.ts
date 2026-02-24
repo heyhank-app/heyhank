@@ -473,6 +473,77 @@ export interface CronJobExecution {
   costUsd?: number;
 }
 
+export interface McpServerConfigAgent {
+  type: "stdio" | "sse" | "http";
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: Record<string, string>;
+}
+
+export interface AgentInfo {
+  id: string;
+  version: 1;
+  name: string;
+  description: string;
+  icon?: string;
+  backendType: "claude" | "codex";
+  model: string;
+  permissionMode: string;
+  cwd: string;
+  envSlug?: string;
+  env?: Record<string, string>;
+  allowedTools?: string[];
+  codexInternetAccess?: boolean;
+  prompt: string;
+  mcpServers?: Record<string, McpServerConfigAgent>;
+  skills?: string[];
+  container?: {
+    image?: string;
+    ports?: number[];
+    volumes?: string[];
+    initScript?: string;
+  };
+  branch?: string;
+  createBranch?: boolean;
+  useWorktree?: boolean;
+  triggers?: {
+    webhook?: {
+      enabled: boolean;
+      secret: string;
+    };
+    schedule?: {
+      enabled: boolean;
+      expression: string;
+      recurring: boolean;
+    };
+  };
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+  lastRunAt?: number;
+  lastSessionId?: string;
+  totalRuns: number;
+  consecutiveFailures: number;
+  nextRunAt?: number | null;
+}
+
+export interface AgentExecution {
+  sessionId: string;
+  agentId: string;
+  triggerType: "manual" | "webhook" | "schedule";
+  startedAt: number;
+  completedAt?: number;
+  success?: boolean;
+  error?: string;
+}
+
+/** Portable export format (no internal tracking fields) */
+export type AgentExport = Omit<
+  AgentInfo,
+  "id" | "createdAt" | "updatedAt" | "totalRuns" | "consecutiveFailures" | "lastRunAt" | "lastSessionId" | "enabled" | "nextRunAt"
+>;
+
 export interface SavedPrompt {
   id: string;
   name: string;
@@ -850,6 +921,27 @@ export const api = {
   runCronJob: (id: string) => post(`/cron/jobs/${encodeURIComponent(id)}/run`),
   getCronJobExecutions: (id: string) =>
     get<CronJobExecution[]>(`/cron/jobs/${encodeURIComponent(id)}/executions`),
+
+  // Agents
+  listAgents: () => get<AgentInfo[]>("/agents"),
+  getAgent: (id: string) => get<AgentInfo>(`/agents/${encodeURIComponent(id)}`),
+  createAgent: (data: Partial<AgentInfo>) => post<AgentInfo>("/agents", data),
+  updateAgent: (id: string, data: Partial<AgentInfo>) =>
+    put<AgentInfo>(`/agents/${encodeURIComponent(id)}`, data),
+  deleteAgent: (id: string) => del(`/agents/${encodeURIComponent(id)}`),
+  toggleAgent: (id: string) => post<AgentInfo>(`/agents/${encodeURIComponent(id)}/toggle`),
+  runAgent: (id: string, input?: string) =>
+    post<{ ok: boolean; message: string }>(`/agents/${encodeURIComponent(id)}/run`, { input }),
+  getAgentExecutions: (id: string) =>
+    get<AgentExecution[]>(`/agents/${encodeURIComponent(id)}/executions`),
+  importAgent: (data: AgentExport) => post<AgentInfo>("/agents/import", data),
+  exportAgent: (id: string) => get<AgentExport>(`/agents/${encodeURIComponent(id)}/export`),
+  regenerateAgentWebhookSecret: (id: string) =>
+    post<AgentInfo>(`/agents/${encodeURIComponent(id)}/regenerate-secret`),
+
+  // Skills
+  listSkills: () =>
+    get<{ slug: string; name: string; description: string; path: string }[]>("/skills"),
 
   // Cross-session messaging
   sendSessionMessage: (sessionId: string, content: string) =>

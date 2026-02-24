@@ -63,6 +63,19 @@ export const CODEX_MODES: ModeOption[] = [
   { value: "plan", label: "Plan" },
 ];
 
+// Agent-specific modes: "plan" is excluded because agents are autonomous
+// and cannot wait for human plan approval.
+export const CLAUDE_AGENT_MODES: ModeOption[] = [
+  { value: "bypassPermissions", label: "Full Auto" },
+  { value: "acceptEdits", label: "Auto-Edit" },
+  { value: "default", label: "Supervised" },
+];
+
+export const CODEX_AGENT_MODES: ModeOption[] = [
+  { value: "bypassPermissions", label: "Full Auto" },
+  { value: "default", label: "Supervised" },
+];
+
 // ─── Getters ─────────────────────────────────────────────────────────────────
 
 export function getModelsForBackend(backend: BackendType): ModelOption[] {
@@ -73,10 +86,18 @@ export function getModesForBackend(backend: BackendType): ModeOption[] {
   return backend === "codex" ? CODEX_MODES : CLAUDE_MODES;
 }
 
+export function getAgentModesForBackend(backend: BackendType): ModeOption[] {
+  return backend === "codex" ? CODEX_AGENT_MODES : CLAUDE_AGENT_MODES;
+}
+
 export function getDefaultModel(backend: BackendType): string {
   return backend === "codex" ? CODEX_MODELS[0].value : CLAUDE_MODELS[0].value;
 }
 
 export function getDefaultMode(backend: BackendType): string {
   return backend === "codex" ? CODEX_MODES[0].value : CLAUDE_MODES[0].value;
+}
+
+export function getDefaultAgentMode(backend: BackendType): string {
+  return backend === "codex" ? CODEX_AGENT_MODES[0].value : CLAUDE_AGENT_MODES[0].value;
 }

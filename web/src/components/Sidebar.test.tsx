@@ -735,7 +735,7 @@ describe("Sidebar", () => {
     // Short labels should be visible
     expect(screen.getByText("Envs")).toBeInTheDocument();
     expect(screen.getByText("Integr.")).toBeInTheDocument();
-    expect(screen.getByText("Sched.")).toBeInTheDocument();
+    expect(screen.getByText("Agents")).toBeInTheDocument();
   });
 
   it("session item has minimum touch target height", () => {

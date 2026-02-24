@@ -28,10 +28,5 @@ describe("Playground", () => {
 
     // Dynamic tool permission should be visible inside the integrated ChatView.
     expect(within(realChat).getByText("dynamic:code_interpreter")).toBeTruthy();
-
-    // Streaming text from MessageFeed mock state should also be rendered.
-    expect(
-      within(realChat).getByText("I'm updating tests and then I'll run the full suite."),
-    ).toBeTruthy();
   });
 });

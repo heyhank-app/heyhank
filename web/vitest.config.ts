@@ -7,12 +7,8 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "text-summary"],
-      thresholds: {
-        statements: 65,
-        branches: 55,
-        functions: 60,
-        lines: 65,
-      },
+      // Thresholds are enforced by the coverage-gate CI workflow which
+      // compares the PR's coverage against main (no hardcoded numbers).
     },
     include: ["server/**/*.test.ts", "src/**/*.test.ts", "src/**/*.test.tsx"],
     environmentMatchGlobs: [

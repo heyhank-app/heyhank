@@ -39,8 +39,8 @@ describe("parseHash", () => {
     expect(parseHash("#/environments")).toEqual({ page: "environments" });
   });
 
-  it("parses scheduled route", () => {
-    expect(parseHash("#/scheduled")).toEqual({ page: "scheduled" });
+  it("parses scheduled route (redirects to agents)", () => {
+    expect(parseHash("#/scheduled")).toEqual({ page: "agents" });
   });
 
   it("parses playground route", () => {

@@ -25,7 +25,7 @@ describe("Claude ws-bridge method drift vs upstream Agent SDK snapshot", () => {
     const handledFromCLI = extractCaseMethods(
       bridge,
       "private routeCLIMessage(session: Session, msg: CLIMessage) {",
-      "private handleSystemMessage(session: Session, msg: CLISystemInitMessage | CLISystemStatusMessage) {",
+      "private handleSystemMessage(session: Session, msg: CLISystemMessage) {",
     );
     expect(handledFromCLI.size).toBeGreaterThan(0);
 
@@ -55,6 +55,6 @@ describe("Claude ws-bridge method drift vs upstream Agent SDK snapshot", () => {
     expect(upstreamStatus).toBe(true);
 
     expect(bridge).toContain('if (msg.subtype === "init")');
-    expect(bridge).toContain('} else if (msg.subtype === "status")');
+    expect(bridge).toContain('if (msg.subtype === "status")');
   });
 });

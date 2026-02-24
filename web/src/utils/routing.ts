@@ -8,9 +8,12 @@ export type Route =
   | { page: "terminal" }
   | { page: "environments" }
   | { page: "scheduled" }
+  | { page: "agents" }
+  | { page: "agent-detail"; agentId: string }
   | { page: "playground" };
 
 const SESSION_PREFIX = "#/session/";
+const AGENT_PREFIX = "#/agents/";
 
 /**
  * Parse a window.location.hash string into a typed Route.
@@ -22,8 +25,15 @@ export function parseHash(hash: string): Route {
   if (hash === "#/prompts") return { page: "prompts" };
   if (hash === "#/terminal") return { page: "terminal" };
   if (hash === "#/environments") return { page: "environments" };
-  if (hash === "#/scheduled") return { page: "scheduled" };
+  // #/scheduled redirects to #/agents (cron absorbed into agents)
+  if (hash === "#/scheduled") return { page: "agents" };
+  if (hash === "#/agents") return { page: "agents" };
   if (hash === "#/playground") return { page: "playground" };
+
+  if (hash.startsWith(AGENT_PREFIX)) {
+    const agentId = hash.slice(AGENT_PREFIX.length);
+    if (agentId) return { page: "agent-detail", agentId };
+  }
 
   if (hash.startsWith(SESSION_PREFIX)) {
     const sessionId = hash.slice(SESSION_PREFIX.length);

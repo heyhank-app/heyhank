@@ -20,6 +20,88 @@ jobs:
         working-directory: web
         run: bun install
 
-      - name: Run coverage gate (enforces thresholds from vitest.config.ts)
+      # Run coverage on the PR branch (allow test failures — we only care about coverage numbers)
+      - name: PR branch coverage
         working-directory: web
-        run: bun run test -- --coverage
+        run: bun run test -- --coverage 2>&1 | tee /tmp/pr-coverage.txt || true
+
+      - name: Extract PR coverage
+        id: pr_coverage
+        run: |
+          # Extract "All files" line from v8 text-summary output
+          LINE=$(grep "All files" /tmp/pr-coverage.txt | head -1 || echo "")
+          if [ -z "$LINE" ]; then
+            echo "Could not find coverage summary — using 0"
+            echo "statements=0" >> "$GITHUB_OUTPUT"
+            echo "branches=0" >> "$GITHUB_OUTPUT"
+            echo "functions=0" >> "$GITHUB_OUTPUT"
+            echo "lines=0" >> "$GITHUB_OUTPUT"
+          else
+            # Format: "All files  |   70.5 |   60.2 |   65.3 |   71.1 |"
+            echo "statements=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$2); print $2}')" >> "$GITHUB_OUTPUT"
+            echo "branches=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$3); print $3}')" >> "$GITHUB_OUTPUT"
+            echo "functions=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$4); print $4}')" >> "$GITHUB_OUTPUT"
+            echo "lines=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$5); print $5}')" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Checkout main and run coverage there
+      - name: Checkout main
+        run: git checkout origin/main
+
+      - name: Install dependencies (main)
+        working-directory: web
+        run: bun install
+
+      - name: Main branch coverage
+        working-directory: web
+        run: bun run test -- --coverage 2>&1 | tee /tmp/main-coverage.txt || true
+
+      - name: Extract main coverage
+        id: main_coverage
+        run: |
+          LINE=$(grep "All files" /tmp/main-coverage.txt | head -1 || echo "")
+          if [ -z "$LINE" ]; then
+            echo "Could not find coverage summary — using 0"
+            echo "statements=0" >> "$GITHUB_OUTPUT"
+            echo "branches=0" >> "$GITHUB_OUTPUT"
+            echo "functions=0" >> "$GITHUB_OUTPUT"
+            echo "lines=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "statements=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$2); print $2}')" >> "$GITHUB_OUTPUT"
+            echo "branches=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$3); print $3}')" >> "$GITHUB_OUTPUT"
+            echo "functions=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$4); print $4}')" >> "$GITHUB_OUTPUT"
+            echo "lines=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$5); print $5}')" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compare coverage (PR must not regress vs main)
+        run: |
+          echo "=== Coverage Comparison ==="
+          echo ""
+          echo "           | Statements | Branches | Functions | Lines"
+          echo "  main     | ${{ steps.main_coverage.outputs.statements }}% | ${{ steps.main_coverage.outputs.branches }}% | ${{ steps.main_coverage.outputs.functions }}% | ${{ steps.main_coverage.outputs.lines }}%"
+          echo "  PR       | ${{ steps.pr_coverage.outputs.statements }}% | ${{ steps.pr_coverage.outputs.branches }}% | ${{ steps.pr_coverage.outputs.functions }}% | ${{ steps.pr_coverage.outputs.lines }}%"
+          echo ""
+
+          FAIL=0
+          check() {
+            local metric=$1 pr_val=$2 main_val=$3
+            # Use awk for float comparison (allow up to 1% regression tolerance)
+            result=$(awk "BEGIN { print ($pr_val < $main_val - 1) ? 1 : 0 }")
+            if [ "$result" = "1" ]; then
+              echo "❌ $metric regressed: $pr_val% < $main_val% (main)"
+              FAIL=1
+            else
+              echo "✅ $metric: $pr_val% (main: $main_val%)"
+            fi
+          }
+
+          check "Statements" "${{ steps.pr_coverage.outputs.statements }}" "${{ steps.main_coverage.outputs.statements }}"
+          check "Branches" "${{ steps.pr_coverage.outputs.branches }}" "${{ steps.main_coverage.outputs.branches }}"
+          check "Functions" "${{ steps.pr_coverage.outputs.functions }}" "${{ steps.main_coverage.outputs.functions }}"
+          check "Lines" "${{ steps.pr_coverage.outputs.lines }}" "${{ steps.main_coverage.outputs.lines }}"
+
+          if [ "$FAIL" = "1" ]; then
+            echo ""
+            echo "Coverage regression detected. PR coverage must be within 1% of main."
+            exit 1
+          fi

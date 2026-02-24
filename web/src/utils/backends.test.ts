@@ -3,12 +3,16 @@ import {
   toModelOptions,
   getModelsForBackend,
   getModesForBackend,
+  getAgentModesForBackend,
   getDefaultModel,
   getDefaultMode,
+  getDefaultAgentMode,
   CLAUDE_MODELS,
   CODEX_MODELS,
   CLAUDE_MODES,
   CODEX_MODES,
+  CLAUDE_AGENT_MODES,
+  CODEX_AGENT_MODES,
 } from "./backends.js";
 
 describe("toModelOptions", () => {
@@ -110,6 +114,26 @@ describe("getDefaultMode", () => {
   });
 });
 
+describe("getAgentModesForBackend", () => {
+  it("returns claude agent modes for claude backend", () => {
+    expect(getAgentModesForBackend("claude")).toBe(CLAUDE_AGENT_MODES);
+  });
+
+  it("returns codex agent modes for codex backend", () => {
+    expect(getAgentModesForBackend("codex")).toBe(CODEX_AGENT_MODES);
+  });
+});
+
+describe("getDefaultAgentMode", () => {
+  it("returns first claude agent mode for claude backend", () => {
+    expect(getDefaultAgentMode("claude")).toBe(CLAUDE_AGENT_MODES[0].value);
+  });
+
+  it("returns first codex agent mode for codex backend", () => {
+    expect(getDefaultAgentMode("codex")).toBe(CODEX_AGENT_MODES[0].value);
+  });
+});
+
 describe("static model/mode lists", () => {
   it("has codex models with GPT-5.x slugs", () => {
     for (const m of CODEX_MODELS) {
@@ -126,5 +150,25 @@ describe("static model/mode lists", () => {
   it("has at least 2 modes for each backend", () => {
     expect(CLAUDE_MODES.length).toBeGreaterThanOrEqual(2);
     expect(CODEX_MODES.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // Agent modes must never include "plan" — agents are autonomous and
+  // cannot wait for human plan approval.
+  it("agent modes do not include 'plan' for any backend", () => {
+    for (const m of CLAUDE_AGENT_MODES) {
+      expect(m.value).not.toBe("plan");
+    }
+    for (const m of CODEX_AGENT_MODES) {
+      expect(m.value).not.toBe("plan");
+    }
+  });
+
+  it("agent modes default to bypassPermissions", () => {
+    expect(CLAUDE_AGENT_MODES[0].value).toBe("bypassPermissions");
+    expect(CODEX_AGENT_MODES[0].value).toBe("bypassPermissions");
+  });
+
+  it("claude agent modes include acceptEdits for middle ground", () => {
+    expect(CLAUDE_AGENT_MODES.some((m) => m.value === "acceptEdits")).toBe(true);
   });
 });

@@ -350,6 +350,10 @@ export interface SessionState {
   cronJobId?: string;
   /** Human-readable name of the cron job that spawned this session */
   cronJobName?: string;
+  /** If this session was spawned by an agent */
+  agentId?: string;
+  /** Human-readable name of the agent that spawned this session */
+  agentName?: string;
 }
 
 // ─── MCP Types ───────────────────────────────────────────────────────────────

@@ -26,6 +26,8 @@ import { getSettings } from "./settings-manager.js";
 import { PRPoller } from "./pr-poller.js";
 import { RecorderManager } from "./recorder.js";
 import { CronScheduler } from "./cron-scheduler.js";
+import { AgentExecutor } from "./agent-executor.js";
+import { migrateCronJobsToAgents } from "./agent-cron-migrator.js";
 
 import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
 import { imagePullManager } from "./image-pull-manager.js";
@@ -50,6 +52,7 @@ const terminalManager = new TerminalManager();
 const prPoller = new PRPoller(wsBridge);
 const recorder = new RecorderManager();
 const cronScheduler = new CronScheduler(launcher, wsBridge);
+const agentExecutor = new AgentExecutor(launcher, wsBridge);
 
 // ── Restore persisted sessions from disk ────────────────────────────────────
 wsBridge.setStore(sessionStore);
@@ -120,7 +123,7 @@ if (recorder.isGloballyEnabled()) {
 const app = new Hono();
 
 app.use("/api/*", cors());
-app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler));
+app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor));
 
 // In production, serve built frontend using absolute path (works when installed as npm package)
 if (process.env.NODE_ENV === "production") {
@@ -216,6 +219,10 @@ if (process.env.NODE_ENV !== "production") {
 
 // ── Cron scheduler ──────────────────────────────────────────────────────────
 cronScheduler.startAll();
+
+// ── Agent system ────────────────────────────────────────────────────────────
+migrateCronJobsToAgents();
+agentExecutor.startAll();
 
 // ── Image pull manager — pre-pull missing Docker images for environments ────
 imagePullManager.initFromEnvironments();

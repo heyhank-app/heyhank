@@ -75,6 +75,10 @@ export interface SdkSessionInfo {
   resumeSessionAt?: string;
   /** Whether the resumed session used --fork-session. */
   forkSession?: boolean;
+  /** If this session was spawned by an agent */
+  agentId?: string;
+  /** Human-readable name of the agent that spawned this session */
+  agentName?: string;
 
   // Container fields
   /** Docker container ID when session runs inside a container */
