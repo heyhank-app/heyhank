@@ -57,7 +57,7 @@ function UsageLimitsSection({ sessionId }: { sessionId: string }) {
   if (!has5h && !has7d && !hasExtra) return null;
 
   return (
-    <div className="shrink-0 px-4 py-3 border-b border-cc-border space-y-2.5">
+    <div className="shrink-0 px-4 py-3 space-y-2.5">
       {/* 5-hour limit */}
       {limits.five_hour && (
         <div className="space-y-1">
@@ -158,7 +158,7 @@ function CodexRateLimitsSection({ sessionId }: { sessionId: string }) {
   if (!primary && !secondary) return null;
 
   return (
-    <div className="shrink-0 px-4 py-3 border-b border-cc-border space-y-2.5">
+    <div className="shrink-0 px-4 py-3 space-y-2.5">
       {primary && (
         <div className="space-y-1">
           <div className="flex items-center justify-between">
@@ -219,7 +219,7 @@ function CodexTokenDetailsSection({ sessionId }: { sessionId: string }) {
   if (!details) return null;
 
   return (
-    <div className="shrink-0 px-4 py-3 border-b border-cc-border space-y-2">
+    <div className="shrink-0 px-4 py-3 space-y-2">
       <span className="text-[11px] text-cc-muted uppercase tracking-wider">Tokens</span>
       <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
         <div className="flex items-center justify-between">
@@ -277,7 +277,7 @@ export function GitHubPRDisplay({ pr }: { pr: GitHubPRInfo }) {
   const { checksSummary: cs, reviewThreads: rt } = pr;
 
   return (
-    <div className="shrink-0 px-4 py-3 border-b border-cc-border space-y-2">
+    <div className="shrink-0 px-4 py-3 space-y-2">
       {/* Row 1: PR number + state pill */}
       <div className="flex items-center gap-1.5">
         <a
@@ -545,7 +545,7 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
   // No linked issue — show "Link" button or search
   if (!linkedIssue) {
     return (
-      <div className="shrink-0 px-4 py-3 border-b border-cc-border">
+      <div className="shrink-0 px-4 py-3">
         {!showSearch ? (
           <button
             onClick={() => setShowSearch(true)}
@@ -611,7 +611,7 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
   const pill = linearStatePill(linkedIssue.stateType, linkedIssue.stateName);
 
   return (
-    <div className="shrink-0 border-b border-cc-border">
+    <div className="shrink-0">
       {/* Header: identifier + state pill + unlink */}
       <div className="px-4 py-3 space-y-2">
         <div className="flex items-center gap-1.5">
@@ -711,7 +711,7 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
 
       {/* Recent comments */}
       {comments.length > 0 && (
-        <div className="px-4 py-2 border-t border-cc-border space-y-1.5 max-h-36 overflow-y-auto">
+        <div className="px-4 py-2 space-y-1.5 max-h-36 overflow-y-auto">
           <span className="text-[10px] text-cc-muted uppercase tracking-wider">Comments</span>
           {comments.slice(-3).map((comment) => (
             <div key={comment.id} className="text-[11px]">
@@ -726,7 +726,7 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
       )}
 
       {/* Add comment input */}
-      <div className="px-4 py-2 border-t border-cc-border flex items-center gap-1.5">
+      <div className="px-4 py-2 flex items-center gap-1.5">
         <input
           type="text"
           value={commentText}
@@ -785,7 +785,7 @@ function GitBranchSection({ sessionId }: { sessionId: string }) {
   if (!branch) return null;
 
   return (
-    <div className="shrink-0 px-4 py-3 border-b border-cc-border space-y-2">
+    <div className="shrink-0 px-4 py-3 space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-[11px] text-cc-muted uppercase tracking-wider">
           Branch
@@ -843,8 +843,8 @@ function TasksSection({ sessionId }: { sessionId: string }) {
   return (
     <>
       {/* Task section header */}
-      <div className="px-4 py-2.5 border-b border-cc-border flex items-center justify-between">
-        <span className="text-[12px] font-semibold text-cc-fg">Tasks</span>
+      <div className="px-4 py-2.5 flex items-center justify-between">
+        <span className="text-[13px] font-semibold text-cc-fg">Tasks</span>
         {tasks.length > 0 && (
           <span className="text-[11px] text-cc-muted tabular-nums">
             {completedCount}/{tasks.length}
@@ -964,7 +964,7 @@ function TaskPanelConfigView({ isCodex }: { isCodex: boolean }) {
                 data-testid={`toggle-${sectionId}`}
               >
                 <span
-                  className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform ${
+                  className={`absolute top-[2px] left-0 w-[14px] h-[14px] rounded-full bg-white shadow transition-transform ${
                     enabled ? "translate-x-[16px]" : "translate-x-[2px]"
                   }`}
                 />
@@ -975,7 +975,7 @@ function TaskPanelConfigView({ isCodex }: { isCodex: boolean }) {
       </div>
 
       {/* Footer buttons */}
-      <div className="shrink-0 border-t border-cc-border px-3 py-2.5 flex items-center justify-between">
+      <div className="shrink-0 px-3 py-2.5 flex items-center justify-between">
         <button
           onClick={() => resetTaskPanelConfig()}
           className="text-[11px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
@@ -1021,9 +1021,9 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
   });
 
   return (
-    <aside className="w-[320px] h-full flex flex-col overflow-hidden bg-cc-card border-l border-cc-border">
+    <aside className="w-full lg:w-[320px] h-full flex flex-col overflow-hidden bg-cc-card">
       {/* Header */}
-      <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-cc-border">
+      <div className="shrink-0 h-11 flex items-center justify-between px-4 bg-cc-card">
         <span className="text-sm font-semibold text-cc-fg tracking-tight">
           {configMode ? "Panel Settings" : "Context"}
         </span>
@@ -1036,7 +1036,7 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
             }
           }}
           aria-label="Close panel"
-          className="flex items-center justify-center w-6 h-6 rounded-lg text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+          className="flex items-center justify-center w-8 h-8 rounded-lg text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
         >
           <svg
             viewBox="0 0 16 16"
@@ -1071,7 +1071,7 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
           </div>
 
           {/* Settings button at bottom */}
-          <div className="shrink-0 border-t border-cc-border px-4 py-2">
+          <div className="shrink-0 px-4 py-2 pb-safe">
             <button
               onClick={() => useStore.getState().setTaskPanelConfigMode(true)}
               className="flex items-center gap-1.5 text-[11px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"

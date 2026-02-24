@@ -1,5 +1,13 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
 
+// Mock auth-manager so all test requests pass the auth middleware
+vi.mock("./auth-manager.js", () => ({
+  verifyToken: vi.fn(() => true),
+  getToken: vi.fn(() => "test-token-for-routes"),
+  getLanAddress: vi.fn(() => "192.168.1.100"),
+  _resetForTest: vi.fn(),
+}));
+
 // Mock env-manager and git-utils modules before any imports
 vi.mock("./env-manager.js", () => ({
   listEnvs: vi.fn(() => []),
@@ -415,7 +423,9 @@ describe("POST /api/sessions/create", () => {
     );
   });
 
-  it("returns 500 and does not launch when fetch fails before create", async () => {
+  it("proceeds with session creation when fetch fails (non-fatal)", async () => {
+    // git fetch failure should not block session creation — the user may be
+    // offline or have SSH key issues, but still wants to work locally.
     vi.mocked(gitUtils.getRepoInfo).mockReturnValue({
       repoRoot: "/repo",
       repoName: "my-repo",
@@ -434,13 +444,8 @@ describe("POST /api/sessions/create", () => {
       body: JSON.stringify({ cwd: "/repo", branch: "main" }),
     });
 
-    expect(res.status).toBe(500);
-    const json = await res.json();
-    expect(json).toEqual({
-      error: "git fetch failed before session create: network error",
-    });
-    expect(gitUtils.gitPull).not.toHaveBeenCalled();
-    expect(launcher.launch).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(launcher.launch).toHaveBeenCalled();
   });
 
   it("proceeds with session creation when pull fails (non-fatal)", async () => {
@@ -605,7 +610,7 @@ describe("POST /api/sessions/create", () => {
     } as any);
     vi.mocked(envManager.getEffectiveImage).mockReturnValue("the-companion:latest");
     vi.spyOn(containerManager, "imageExists").mockReturnValueOnce(true);
-    vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
+    const createSpy = vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-codex",
       name: "companion-codex",
       image: "the-companion:latest",
@@ -623,6 +628,8 @@ describe("POST /api/sessions/create", () => {
     });
 
     expect(res.status).toBe(200);
+    const config = createSpy.mock.calls[0][2];
+    expect(config.ports).toContain(4502);
     expect(launcher.launch).toHaveBeenCalledWith(
       expect.objectContaining({
         backendType: "codex",
@@ -1137,6 +1144,75 @@ describe("POST /api/sessions/:id/relaunch", () => {
     expect(res.status).toBe(404);
     const json = await res.json();
     expect(json.error).toContain("Session not found");
+  });
+});
+
+describe("GET /api/sessions/:id/processes/system", () => {
+  it("parses macOS lsof LISTEN lines and returns dev servers", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      cwd: "/repo",
+      state: "running",
+    });
+
+    vi.mocked(execSync)
+      .mockReturnValueOnce(
+        [
+          "COMMAND   PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME",
+          "node    12345 test   20u  IPv6 0x123456789      0t0  TCP *:3000 (LISTEN)",
+        ].join("\n"),
+      )
+      .mockReturnValueOnce("node /repo/node_modules/vite/bin/vite.js --port 3000\n");
+
+    const res = await app.request("/api/sessions/s1/processes/system", { method: "GET" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({
+      ok: true,
+      processes: [
+        {
+          pid: 12345,
+          command: "node",
+          fullCommand: "node /repo/node_modules/vite/bin/vite.js --port 3000",
+          ports: [3000],
+        },
+      ],
+    });
+  });
+
+  it("includes process cwd and best-effort start time when available", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      cwd: "/repo",
+      state: "running",
+    });
+
+    vi.mocked(execSync)
+      .mockReturnValueOnce(
+        [
+          "COMMAND   PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME",
+          "bun     43210 test   20u  IPv4 0x123456789      0t0  TCP *:3457 (LISTEN)",
+        ].join("\n"),
+      )
+      .mockReturnValueOnce("bun run dev\n")
+      .mockReturnValueOnce("p43210\nfcwd\nn/Users/test/project\n")
+      .mockReturnValueOnce("Mon Feb 23 10:00:00 2026\n");
+
+    const res = await app.request("/api/sessions/s1/processes/system", { method: "GET" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+    expect(json.processes).toHaveLength(1);
+    expect(json.processes[0]).toMatchObject({
+      pid: 43210,
+      command: "bun",
+      fullCommand: "bun run dev",
+      cwd: "/Users/test/project",
+      ports: [3457],
+    });
+    expect(typeof json.processes[0].startedAt).toBe("number");
   });
 });
 

@@ -41,7 +41,7 @@ export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
 
   return (
     <div className={`${embedded ? "h-full" : "h-[100dvh]"} bg-cc-bg text-cc-fg font-sans-ui antialiased overflow-y-auto`}>
-      <div className="max-w-5xl mx-auto px-4 sm:px-8 py-6 sm:py-10">
+      <div className="max-w-5xl mx-auto px-4 sm:px-8 py-6 sm:py-10 pb-safe">
         <div className="flex items-start justify-between gap-3 mb-6">
           <div>
             <h1 className="text-xl font-semibold text-cc-fg">Integrations</h1>
@@ -59,7 +59,7 @@ export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
                   navigateHome();
                 }
               }}
-              className="px-3 py-1.5 rounded-lg text-sm text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+              className="px-3 py-2.5 min-h-[44px] rounded-lg text-sm text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
             >
               Back
             </button>

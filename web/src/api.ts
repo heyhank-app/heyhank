@@ -3,6 +3,24 @@ import type { ContentBlock } from "./types.js";
 import { captureEvent, captureException } from "./analytics.js";
 
 const BASE = "/api";
+const AUTH_STORAGE_KEY = "companion_auth_token";
+
+function getAuthHeaders(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const token = localStorage.getItem(AUTH_STORAGE_KEY);
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
+
+function handle401(status: number): void {
+  if (status === 401 && typeof window !== "undefined") {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    // Dynamic import to avoid circular dependency
+    import("./store.js").then(({ useStore }) => {
+      useStore.getState().logout();
+    }).catch(() => {});
+  }
+}
 
 function nowMs(): number {
   if (typeof performance !== "undefined" && typeof performance.now === "function") {
@@ -43,10 +61,11 @@ async function post<T = unknown>(path: string, body?: object): Promise<T> {
   try {
     const res = await fetch(`${BASE}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
+      handle401(res.status);
       const err = await res.json().catch(() => ({ error: res.statusText }));
       const apiError = new Error(err.error || res.statusText);
       trackApiFailure("POST", path, nowMs() - startedAt, apiError, res.status);
@@ -67,8 +86,11 @@ async function get<T = unknown>(path: string): Promise<T> {
   const startedAt = nowMs();
   let failureTracked = false;
   try {
-    const res = await fetch(`${BASE}${path}`);
+    const res = await fetch(`${BASE}${path}`, {
+      headers: { ...getAuthHeaders() },
+    });
     if (!res.ok) {
+      handle401(res.status);
       const err = await res.json().catch(() => ({ error: res.statusText }));
       const apiError = new Error(err.error || res.statusText);
       trackApiFailure("GET", path, nowMs() - startedAt, apiError, res.status);
@@ -91,10 +113,11 @@ async function put<T = unknown>(path: string, body?: object): Promise<T> {
   try {
     const res = await fetch(`${BASE}${path}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
+      handle401(res.status);
       const err = await res.json().catch(() => ({ error: res.statusText }));
       const apiError = new Error(err.error || res.statusText);
       trackApiFailure("PUT", path, nowMs() - startedAt, apiError, res.status);
@@ -117,10 +140,11 @@ async function patch<T = unknown>(path: string, body?: object): Promise<T> {
   try {
     const res = await fetch(`${BASE}${path}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
+      handle401(res.status);
       const err = await res.json().catch(() => ({ error: res.statusText }));
       const apiError = new Error(err.error || res.statusText);
       trackApiFailure("PATCH", path, nowMs() - startedAt, apiError, res.status);
@@ -143,10 +167,11 @@ async function del<T = unknown>(path: string, body?: object): Promise<T> {
   try {
     const res = await fetch(`${BASE}${path}`, {
       method: "DELETE",
-      headers: body ? { "Content-Type": "application/json" } : undefined,
+      headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...getAuthHeaders() },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
+      handle401(res.status);
       const err = await res.json().catch(() => ({ error: res.statusText }));
       const apiError = new Error(err.error || res.statusText);
       trackApiFailure("DELETE", path, nowMs() - startedAt, apiError, res.status);
@@ -602,7 +627,7 @@ export async function createSessionStream(
 ): Promise<CreateSessionStreamResult> {
   const res = await fetch(`${BASE}/sessions/create-stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
     body: JSON.stringify(opts ?? {}),
   });
 
@@ -653,7 +678,54 @@ export async function createSessionStream(
   return result;
 }
 
+/**
+ * Verify an auth token with the server.
+ * This does NOT use the auth header helpers since it's called before auth is established.
+ */
+/**
+ * Attempt auto-authentication for localhost users.
+ * The server returns the token if the request comes from 127.0.0.1/::1.
+ * No auth header needed — this is a pre-auth endpoint.
+ */
+export async function autoAuth(): Promise<string | null> {
+  try {
+    const res = await fetch(`${BASE}/auth/auto`);
+    if (res.ok) {
+      const data = await res.json() as { ok: boolean; token?: string };
+      if (data.ok && data.token) return data.token;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function verifyAuthToken(token: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/auth/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return !!(data as { ok?: boolean }).ok;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export const api = {
+  // Auth
+  getAuthQr: () =>
+    get<{ qrCodes: { label: string; url: string; qrDataUrl: string }[] }>("/auth/qr"),
+  getAuthToken: () =>
+    get<{ token: string }>("/auth/token"),
+  regenerateAuthToken: () =>
+    post<{ token: string }>("/auth/regenerate"),
+
   createSession: (opts?: CreateSessionOpts) =>
     post<{ sessionId: string; state: string; cwd: string }>(
       "/sessions/create",
@@ -868,6 +940,18 @@ export const api = {
     get<{ path: string; content: string }>(
       `/fs/read?path=${encodeURIComponent(path)}`,
     ),
+  getFileBlob: async (path: string): Promise<string> => {
+    const res = await fetch(`${BASE}/fs/raw?path=${encodeURIComponent(path)}`, {
+      headers: { ...getAuthHeaders() },
+    });
+    if (!res.ok) {
+      handle401(res.status);
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error((err as { error?: string }).error || res.statusText);
+    }
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
   writeFile: (path: string, content: string) =>
     put<{ ok: boolean; path: string }>("/fs/write", { path, content }),
   getFileDiff: (path: string, base?: "last-commit" | "default-branch") =>
@@ -921,6 +1005,27 @@ export const api = {
   runCronJob: (id: string) => post(`/cron/jobs/${encodeURIComponent(id)}/run`),
   getCronJobExecutions: (id: string) =>
     get<CronJobExecution[]>(`/cron/jobs/${encodeURIComponent(id)}/executions`),
+
+  // Background process management
+  killProcess: (sessionId: string, taskId: string) =>
+    post<{ ok: boolean; taskId: string }>(
+      `/sessions/${encodeURIComponent(sessionId)}/processes/${encodeURIComponent(taskId)}/kill`,
+    ),
+  killAllProcesses: (sessionId: string, taskIds: string[]) =>
+    post<{ ok: boolean; results: { taskId: string; ok: boolean; error?: string }[] }>(
+      `/sessions/${encodeURIComponent(sessionId)}/processes/kill-all`,
+      { taskIds },
+    ),
+
+  // System dev process scanning
+  getSystemProcesses: (sessionId: string) =>
+    get<{ ok: boolean; processes: { pid: number; command: string; fullCommand: string; ports: number[]; cwd?: string; startedAt?: number }[] }>(
+      `/sessions/${encodeURIComponent(sessionId)}/processes/system`,
+    ),
+  killSystemProcess: (sessionId: string, pid: number) =>
+    post<{ ok: boolean; pid: number }>(
+      `/sessions/${encodeURIComponent(sessionId)}/processes/system/${pid}/kill`,
+    ),
 
   // Agents
   listAgents: () => get<AgentInfo[]>("/agents"),

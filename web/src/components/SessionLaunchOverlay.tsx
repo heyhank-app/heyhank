@@ -149,7 +149,7 @@ export function SessionLaunchOverlay({ steps, error, backend, onCancel }: Props)
       {(hasError || isAnyInProgress) && onCancel && (
         <button
           onClick={onCancel}
-          className="mt-6 px-4 py-1.5 text-xs font-medium rounded-lg bg-cc-hover text-cc-muted hover:text-cc-fg hover:bg-cc-border transition-colors cursor-pointer"
+          className="mt-6 px-4 py-2.5 min-h-[44px] text-xs font-medium rounded-lg bg-cc-hover text-cc-muted hover:text-cc-fg hover:bg-cc-border transition-colors cursor-pointer"
         >
           {hasError ? "Dismiss" : "Cancel"}
         </button>

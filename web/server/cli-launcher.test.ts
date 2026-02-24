@@ -17,11 +17,13 @@ vi.mock("./path-resolver.js", () => ({ resolveBinary: mockResolveBinary, getEnri
 const mockIsContainerAlive = vi.hoisted(() => vi.fn((): "running" | "stopped" | "missing" => "running"));
 const mockHasBinaryInContainer = vi.hoisted(() => vi.fn((): boolean => true));
 const mockStartContainer = vi.hoisted(() => vi.fn());
+const mockGetContainerById = vi.hoisted(() => vi.fn((_containerId: string) => undefined as any));
 vi.mock("./container-manager.js", () => ({
   containerManager: {
     isContainerAlive: mockIsContainerAlive,
     hasBinaryInContainer: mockHasBinaryInContainer,
     startContainer: mockStartContainer,
+    getContainerById: mockGetContainerById,
   },
 }));
 
@@ -105,8 +107,33 @@ function createMockCodexProc(pid = 12345) {
   };
 }
 
+function createPendingCodexWsProxyProc(pid = 12345) {
+  let resolve: (code: number) => void;
+  const exitedPromise = new Promise<number>((r) => {
+    resolve = r;
+  });
+
+  // Keep stdout open so CodexAdapter can wait for JSON-RPC responses without
+  // immediately failing initialization in tests that only care about launcher lifecycle.
+  const stdout = new ReadableStream<Uint8Array>({ start() {} });
+  const stderr = new ReadableStream<Uint8Array>({ start() {} });
+
+  return {
+    proc: {
+      pid,
+      kill: vi.fn(),
+      exited: exitedPromise,
+      stdin: new WritableStream<Uint8Array>(),
+      stdout,
+      stderr,
+    },
+    resolveExit: resolve!,
+  };
+}
+
 const mockSpawn = vi.fn();
-vi.stubGlobal("Bun", { spawn: mockSpawn });
+const mockListen = vi.hoisted(() => vi.fn(() => ({ stop: vi.fn() })));
+vi.stubGlobal("Bun", { spawn: mockSpawn, listen: mockListen });
 
 // ─── Test setup ──────────────────────────────────────────────────────────────
 
@@ -118,15 +145,20 @@ beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.COMPANION_CONTAINER_SDK_HOST;
   delete process.env.COMPANION_FORCE_BYPASS_IN_CONTAINER;
+  // Default to stdio for most tests; WS launcher behavior is covered explicitly below.
+  process.env.COMPANION_CODEX_TRANSPORT = "stdio";
   tempDir = mkdtempSync(join(tmpdir(), "launcher-test-"));
   store = new SessionStore(tempDir);
   launcher = new CliLauncher(3456);
   launcher.setStore(store);
   mockSpawn.mockReturnValue(createMockProc());
+  mockListen.mockImplementation(() => ({ stop: vi.fn() }));
   mockResolveBinary.mockReturnValue("/usr/bin/claude");
+  mockGetContainerById.mockReturnValue(undefined);
 });
 
 afterEach(() => {
+  delete process.env.COMPANION_CODEX_TRANSPORT;
   rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -815,6 +847,166 @@ describe("relaunch", () => {
     // Container validation methods should NOT have been called
     expect(mockIsContainerAlive).not.toHaveBeenCalled();
     expect(mockHasBinaryInContainer).not.toHaveBeenCalled();
+  });
+});
+
+// ─── codex websocket launcher ────────────────────────────────────────────────
+
+describe("codex websocket launcher", () => {
+  it("spawns codex app-server and a node ws proxy, then attaches a CodexAdapter", async () => {
+    // Verify the WS transport path launches two subprocesses:
+    // 1) codex app-server --listen ...
+    // 2) a Node sidecar proxy that bridges stdio <-> WebSocket
+    process.env.COMPANION_CODEX_TRANSPORT = "ws";
+    mockResolveBinary.mockReturnValue("/opt/fake/codex");
+
+    const codexProc = createMockProc(2001);
+    const { proc: proxyProc } = createPendingCodexWsProxyProc(2002);
+    mockSpawn.mockReturnValueOnce(codexProc).mockReturnValueOnce(proxyProc);
+
+    const onAdapter = vi.fn();
+    launcher.onCodexAdapterCreated(onAdapter);
+
+    launcher.launch({
+      backendType: "codex",
+      cwd: "/tmp/project",
+      codexSandbox: "workspace-write",
+    });
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mockListen).toHaveBeenCalled();
+    expect(mockSpawn).toHaveBeenCalledTimes(2);
+
+    const [codexCmd] = mockSpawn.mock.calls[0];
+    expect(codexCmd[0]).toBe("/opt/fake/codex");
+    expect(codexCmd).toContain("app-server");
+    expect(codexCmd).toContain("--listen");
+    expect(codexCmd).toContain("ws://127.0.0.1:4500");
+
+    const [proxyCmd, proxyOpts] = mockSpawn.mock.calls[1];
+    expect(proxyCmd[0]).toBe("node");
+    expect(proxyCmd[1]).toContain("codex-ws-proxy.cjs");
+    expect(proxyCmd[2]).toBe("ws://127.0.0.1:4500");
+    expect(proxyCmd[3]).toBe("10000");
+    expect(proxyOpts.stdin).toBe("pipe");
+    expect(proxyOpts.stdout).toBe("pipe");
+    expect(proxyOpts.stderr).toBe("pipe");
+
+    expect(onAdapter).toHaveBeenCalledTimes(1);
+    expect(onAdapter.mock.calls[0][0]).toBe("test-session-id");
+  });
+
+  it("relaunch kills the old codex process and ws proxy before spawning replacements", async () => {
+    // Verify the WS sidecar is treated as part of session lifecycle during relaunch.
+    process.env.COMPANION_CODEX_TRANSPORT = "ws";
+    mockResolveBinary.mockReturnValue("/opt/fake/codex");
+
+    let resolveCodex1!: (code: number) => void;
+    const codexProc1 = {
+      pid: 3001,
+      kill: vi.fn(() => resolveCodex1(0)),
+      exited: new Promise<number>((r) => { resolveCodex1 = r; }),
+      stdout: null,
+      stderr: null,
+    };
+    const proxy1 = createPendingCodexWsProxyProc(3002);
+    proxy1.proc.kill.mockImplementation(() => proxy1.resolveExit(0));
+
+    const codexProc2 = createMockProc(3003);
+    const proxy2 = createPendingCodexWsProxyProc(3004);
+
+    mockSpawn
+      .mockReturnValueOnce(codexProc1 as any)
+      .mockReturnValueOnce(proxy1.proc as any)
+      .mockReturnValueOnce(codexProc2 as any)
+      .mockReturnValueOnce(proxy2.proc as any);
+
+    launcher.launch({
+      backendType: "codex",
+      cwd: "/tmp/project",
+      codexSandbox: "workspace-write",
+    });
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const result = await launcher.relaunch("test-session-id");
+    expect(result).toEqual({ ok: true });
+    expect(codexProc1.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(proxy1.proc.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(mockSpawn).toHaveBeenCalledTimes(4);
+  });
+
+  it("kill() returns true and kills the proxy when only a ws proxy remains", async () => {
+    // Exercise the proxy-only branch introduced for WS cleanup robustness.
+    launcher.launch({ cwd: "/tmp/project" });
+    const proxyOnly = createPendingCodexWsProxyProc(4001);
+
+    (launcher as any).processes.delete("test-session-id");
+    (launcher as any).codexWsProxies.set("test-session-id", proxyOnly.proc);
+
+    const result = await launcher.kill("test-session-id");
+    expect(result).toBe(true);
+    expect(proxyOnly.proc.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
+  it("containerized codex ws mode ignores detached launcher exit and uses proxy exit for session liveness", async () => {
+    // In container WS mode, docker exec -d exits immediately after launching Codex.
+    // The session must remain alive until the proxy (actual transport) exits.
+    process.env.COMPANION_CODEX_TRANSPORT = "ws";
+    mockGetContainerById.mockReturnValue({
+      containerId: "abc123def456",
+      name: "companion-codex",
+      image: "the-companion:latest",
+      portMappings: [{ containerPort: 4502, hostPort: 55021 }],
+      hostCwd: "/tmp/project",
+      containerCwd: "/workspace",
+      state: "running",
+    });
+
+    let resolveLauncherProc!: (code: number) => void;
+    const detachedLauncherProc = {
+      pid: 5001,
+      kill: vi.fn(),
+      exited: new Promise<number>((r) => { resolveLauncherProc = r; }),
+      stdout: null,
+      stderr: null,
+    };
+    const proxy = createPendingCodexWsProxyProc(5002);
+
+    mockSpawn
+      .mockReturnValueOnce(detachedLauncherProc as any)
+      .mockReturnValueOnce(proxy.proc as any);
+
+    launcher.launch({
+      backendType: "codex",
+      cwd: "/tmp/project",
+      codexSandbox: "workspace-write",
+      containerId: "abc123def456",
+      containerName: "companion-codex",
+    });
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const [codexCmd] = mockSpawn.mock.calls[0];
+    const codexBashCmd = codexCmd[codexCmd.length - 1];
+    expect(codexBashCmd).toContain("--listen");
+    expect(codexBashCmd).toContain("ws://0.0.0.0:4502");
+
+    const [proxyCmd] = mockSpawn.mock.calls[1];
+    expect(proxyCmd[2]).toBe("ws://127.0.0.1:55021");
+
+    resolveLauncherProc(0);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(launcher.getSession("test-session-id")?.state).not.toBe("exited");
+
+    proxy.resolveExit(7);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const session = launcher.getSession("test-session-id");
+    expect(session?.state).toBe("exited");
+    expect(session?.exitCode).toBe(7);
   });
 });
 

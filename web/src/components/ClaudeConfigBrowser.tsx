@@ -349,7 +349,7 @@ export function ClaudeConfigBrowser({ sessionId }: { sessionId: string }) {
 
   if (loading) {
     return (
-      <div className="shrink-0 px-4 py-2.5 border-b border-cc-border">
+      <div className="shrink-0 px-4 py-2.5">
         <span className="text-[11px] text-cc-muted">Loading config...</span>
       </div>
     );
@@ -371,7 +371,7 @@ export function ClaudeConfigBrowser({ sessionId }: { sessionId: string }) {
     config.user.commands.length;
 
   return (
-    <div className="shrink-0 border-b border-cc-border" data-testid="claude-config-browser">
+    <div className="shrink-0" data-testid="claude-config-browser">
       {/* ── Project section ──────────────────────────────────────────── */}
       <SectionHeader
         icon="project"

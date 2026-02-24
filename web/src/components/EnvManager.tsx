@@ -107,6 +107,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
   }, [envs, dockerAvailable, refreshImageStatus]);
 
   // New env form
+  const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newVars, setNewVars] = useState<VarRow[]>([{ key: "", value: "" }]);
   const [newDockerfile, setNewDockerfile] = useState("");
@@ -208,6 +209,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
       setNewPorts([]);
       setNewInitScript("");
       setNewTab("variables");
+      setShowCreate(false);
       setError("");
       refresh();
     } catch (e: unknown) {
@@ -247,29 +249,321 @@ export function EnvManager({ onClose, embedded = false }: Props) {
     }
   }
 
-  const errorBanner = error && (
-    <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
-      {error}
+  const dockerBadge = dockerAvailable === null ? null : dockerAvailable ? (
+    <span className="text-[10px] px-2 py-1 rounded-md bg-green-500/10 text-green-500 font-medium">Docker</span>
+  ) : (
+    <span className="text-[10px] px-2 py-1 rounded-md bg-amber-500/10 text-amber-500 font-medium">No Docker</span>
+  );
+
+  /* ─── Embedded (full page) ───────────────────────────────────────── */
+
+  if (embedded) {
+    return (
+      <div className="h-full bg-cc-bg text-cc-fg font-sans-ui antialiased overflow-y-auto overflow-x-hidden">
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-10 pb-safe">
+          {/* Header */}
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold text-cc-fg">Environments</h1>
+              <p className="mt-0.5 text-[13px] text-cc-muted leading-relaxed">
+                Reusable environment profiles with optional Docker isolation.
+              </p>
+            </div>
+            {dockerBadge}
+          </div>
+
+          {/* Toolbar */}
+          <div className="flex items-center gap-2 mt-4 mb-5">
+            <div className="flex-1" />
+            <button
+              onClick={() => setShowCreate(!showCreate)}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 min-h-[44px] rounded-lg text-sm font-medium transition-colors cursor-pointer shrink-0 ${
+                showCreate
+                  ? "bg-cc-active text-cc-fg"
+                  : "bg-cc-primary hover:bg-cc-primary-hover text-white"
+              }`}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
+                {showCreate ? <path d="M18 6 6 18M6 6l12 12" /> : <path d="M12 5v14M5 12h14" />}
+              </svg>
+              <span className="hidden sm:inline">{showCreate ? "Cancel" : "New Environment"}</span>
+            </button>
+          </div>
+
+          {/* Inline create form */}
+          {showCreate && (
+            <div
+              className="mb-6 rounded-xl bg-cc-card p-4 sm:p-5 space-y-3"
+              style={{ animation: "fadeSlideIn 150ms ease-out" }}
+            >
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="Environment name (e.g. production)"
+                className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newName.trim()) handleCreate();
+                }}
+              />
+              {renderTabs(newTab, setNewTab)}
+              {newTab === "variables" && <VarEditor rows={newVars} onChange={setNewVars} />}
+              {newTab === "docker" && renderDockerTab(newDockerfile, setNewDockerfile, newBaseImage, setNewBaseImage)}
+              {newTab === "ports" && renderPortsTab(newPorts, setNewPorts)}
+              {newTab === "init" && renderInitScriptTab(newInitScript, setNewInitScript)}
+
+              {error && (
+                <div className="px-3 py-2 rounded-lg bg-cc-error/10 text-xs text-cc-error">{error}</div>
+              )}
+
+              <div className="flex items-center justify-between pt-1">
+                <p className="text-[11px] text-cc-muted">
+                  Stored in <code className="text-[10px]">~/.companion/envs/</code>
+                </p>
+                <button
+                  onClick={handleCreate}
+                  disabled={!newName.trim() || creating}
+                  className={`px-4 py-2.5 min-h-[44px] rounded-lg text-sm font-medium transition-colors ${
+                    newName.trim() && !creating
+                      ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+                      : "bg-cc-hover text-cc-muted cursor-not-allowed"
+                  }`}
+                >
+                  {creating ? "Creating..." : "Create"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Stats */}
+          <div className="flex items-center gap-2 mb-3 text-[12px] text-cc-muted">
+            <span>{envs.length} environment{envs.length !== 1 ? "s" : ""}</span>
+          </div>
+
+          {/* Env list */}
+          {loading ? (
+            <div className="py-12 text-center text-sm text-cc-muted">Loading environments...</div>
+          ) : envs.length === 0 ? (
+            <div className="py-12 text-center text-sm text-cc-muted">No environments yet.</div>
+          ) : (
+            <div className="space-y-1">
+              {envs.map((env) => {
+                const isEditing = editingSlug === env.slug;
+                const varCount = Object.keys(env.variables).length;
+
+                if (isEditing) {
+                  return (
+                    <div
+                      key={env.slug}
+                      className="rounded-xl bg-cc-card p-4 space-y-3"
+                      style={{ animation: "fadeSlideIn 150ms ease-out" }}
+                    >
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        placeholder="Environment name"
+                        className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
+                      />
+                      <div className="space-y-3">
+                        <div>
+                          <div className="text-[11px] font-medium text-cc-muted mb-1.5">Variables</div>
+                          <VarEditor rows={editVars} onChange={setEditVars} />
+                        </div>
+                        <div>
+                          <div className="text-[11px] font-medium text-cc-muted mb-1.5">Docker</div>
+                          {renderDockerTab(editDockerfile, setEditDockerfile, editBaseImage, setEditBaseImage, env.slug, env)}
+                        </div>
+                        <div>
+                          <div className="text-[11px] font-medium text-cc-muted mb-1.5">Ports</div>
+                          {renderPortsTab(editPorts, setEditPorts)}
+                        </div>
+                        <div>
+                          <div className="text-[11px] font-medium text-cc-muted mb-1.5">Init Script</div>
+                          {renderInitScriptTab(editInitScript, setEditInitScript)}
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={cancelEdit}
+                          className="px-3 py-2.5 min-h-[44px] text-sm rounded-lg text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => void saveEdit()}
+                          className="px-4 py-2.5 min-h-[44px] text-sm rounded-lg font-medium bg-cc-primary hover:bg-cc-primary-hover text-white transition-colors cursor-pointer"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <EnvRow
+                    key={env.slug}
+                    env={env}
+                    varCount={varCount}
+                    onStartEdit={() => startEdit(env)}
+                    onDelete={() => void handleDelete(env.slug)}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          {/* Error banner (when not inside create form) */}
+          {error && !showCreate && (
+            <div className="mt-4 px-3 py-2 rounded-lg bg-cc-error/10 text-xs text-cc-error">{error}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* ─── Modal mode ─────────────────────────────────────────────────── */
+
+  const createForm = (
+    <div className="rounded-xl bg-cc-card p-4 space-y-2.5">
+      <span className="text-sm font-medium text-cc-fg">New Environment</span>
+      <input
+        type="text"
+        value={newName}
+        onChange={(e) => setNewName(e.target.value)}
+        placeholder="Environment name (e.g. production)"
+        className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && newName.trim()) handleCreate();
+        }}
+      />
+      {renderTabs(newTab, setNewTab)}
+      {newTab === "variables" && <VarEditor rows={newVars} onChange={setNewVars} />}
+      {newTab === "docker" && renderDockerTab(newDockerfile, setNewDockerfile, newBaseImage, setNewBaseImage)}
+      {newTab === "ports" && renderPortsTab(newPorts, setNewPorts)}
+      {newTab === "init" && renderInitScriptTab(newInitScript, setNewInitScript)}
+      <button
+        onClick={handleCreate}
+        disabled={!newName.trim() || creating}
+        className={`px-4 py-2.5 min-h-[44px] text-sm font-medium rounded-lg transition-colors ${
+          newName.trim() && !creating
+            ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+            : "bg-cc-hover text-cc-muted cursor-not-allowed"
+        }`}
+      >
+        {creating ? "Creating..." : "Create"}
+      </button>
     </div>
   );
 
-  const dockerBadge = dockerAvailable === null ? null : dockerAvailable ? (
-    <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-500">Docker</span>
+  const environmentsList = loading ? (
+    <div className="text-sm text-cc-muted text-center py-6">Loading environments...</div>
+  ) : envs.length === 0 ? (
+    <div className="text-sm text-cc-muted text-center py-6">No environments yet.</div>
   ) : (
-    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500">No Docker</span>
+    <div className="space-y-3">
+      {envs.map((env) => (
+        <div key={env.slug} className="rounded-xl bg-cc-card overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2.5">
+            <span className="text-sm font-medium text-cc-fg flex-1">{env.name}</span>
+            {env.imageTag && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-mono-code">
+                {env.imageTag.split(":")[0]?.split("/").pop() || env.imageTag}
+              </span>
+            )}
+            <span className="text-xs text-cc-muted">
+              {Object.keys(env.variables).length} var{Object.keys(env.variables).length !== 1 ? "s" : ""}
+            </span>
+            {editingSlug === env.slug ? (
+              <button onClick={cancelEdit} className="text-xs px-2 py-1.5 min-h-[44px] text-cc-muted hover:text-cc-fg cursor-pointer">Cancel</button>
+            ) : (
+              <>
+                <button onClick={() => startEdit(env)} className="text-xs px-2 py-1.5 min-h-[44px] text-cc-muted hover:text-cc-fg cursor-pointer">Edit</button>
+                <button onClick={() => handleDelete(env.slug)} className="text-xs px-2 py-1.5 min-h-[44px] text-cc-muted hover:text-cc-error cursor-pointer">Delete</button>
+              </>
+            )}
+          </div>
+
+          {editingSlug === env.slug && (
+            <div className="px-3 py-3 space-y-2">
+              <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Environment name"
+                className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow" />
+              <div className="space-y-3">
+                <div><div className="text-[11px] font-medium text-cc-muted mb-1.5">Variables</div><VarEditor rows={editVars} onChange={setEditVars} /></div>
+                <div><div className="text-[11px] font-medium text-cc-muted mb-1.5">Docker</div>{renderDockerTab(editDockerfile, setEditDockerfile, editBaseImage, setEditBaseImage, env.slug, env)}</div>
+                <div><div className="text-[11px] font-medium text-cc-muted mb-1.5">Ports</div>{renderPortsTab(editPorts, setEditPorts)}</div>
+                <div><div className="text-[11px] font-medium text-cc-muted mb-1.5">Init Script</div>{renderInitScriptTab(editInitScript, setEditInitScript)}</div>
+              </div>
+              <button onClick={saveEdit} className="px-4 py-2.5 min-h-[44px] text-sm font-medium bg-cc-primary hover:bg-cc-primary-hover text-white rounded-lg transition-colors cursor-pointer">Save</button>
+            </div>
+          )}
+
+          {editingSlug !== env.slug && Object.keys(env.variables).length > 0 && (
+            <div className="px-3 py-2.5 space-y-1">
+              {Object.entries(env.variables).map(([k, v]) => (
+                <div key={k} className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-start gap-1.5 text-xs leading-5">
+                  <span className="font-mono-code text-cc-fg break-all">{k}</span>
+                  <span className="text-cc-muted">=</span>
+                  <span className="font-mono-code text-cc-muted break-all whitespace-pre-wrap">{v}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
   );
+
+  const panel = (
+    <div
+      className="w-full max-w-lg max-h-[90dvh] sm:max-h-[80dvh] mx-0 sm:mx-4 flex flex-col bg-cc-bg rounded-t-[14px] sm:rounded-[14px] shadow-2xl overflow-hidden"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-cc-fg">Manage Environments</h2>
+          {dockerBadge}
+        </div>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="w-8 h-8 flex items-center justify-center rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+              <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
+      </div>
+      <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-3 sm:py-4 pb-safe space-y-4">
+        {error && <div className="px-3 py-2 rounded-lg bg-cc-error/10 text-xs text-cc-error">{error}</div>}
+        {environmentsList}
+        {createForm}
+      </div>
+    </div>
+  );
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50" onClick={onClose}>
+      {panel}
+    </div>,
+    document.body,
+  );
+
+  /* ─── Shared tab/section renderers ───────────────────────────────── */
 
   function renderTabs(activeTab: Tab, setTab: (t: Tab) => void) {
     return (
-      <div className="flex gap-0.5 border-b border-cc-border mb-2.5">
+      <div className="flex gap-0.5 mb-2.5">
         {(["variables", "docker", "ports", "init"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-3 py-1.5 text-[11px] font-medium transition-colors cursor-pointer capitalize ${
+            className={`px-3 py-2.5 min-h-[44px] text-[11px] font-medium transition-colors cursor-pointer capitalize rounded-md ${
               activeTab === t
-                ? "text-cc-primary border-b-2 border-cc-primary -mb-[1px]"
-                : "text-cc-muted hover:text-cc-fg"
+                ? "text-cc-primary bg-cc-primary/8"
+                : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
             }`}
           >
             {t}
@@ -299,7 +593,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
             <label className="text-[11px] text-cc-muted">Base Image</label>
             {effectiveImg && (
               <div className="flex items-center gap-1.5">
-                {/* Image status badge */}
                 {imgState?.status === "ready" && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-500">Ready</span>
                 )}
@@ -315,11 +608,10 @@ export function EnvManager({ onClose, embedded = false }: Props) {
                 {imgState?.status === "error" && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-cc-error/10 text-cc-error">Pull failed</span>
                 )}
-                {/* Pull / Update button */}
                 <button
                   onClick={() => handlePullImage(effectiveImg)}
                   disabled={isPulling}
-                  className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
+                  className={`text-xs px-2.5 py-1.5 min-h-[44px] rounded transition-colors ${
                     isPulling
                       ? "bg-cc-hover text-cc-muted cursor-not-allowed"
                       : "bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 cursor-pointer"
@@ -334,10 +626,9 @@ export function EnvManager({ onClose, embedded = false }: Props) {
             value={baseImage}
             onChange={(e) => {
               setBaseImage(e.target.value);
-              // Immediately check status for the newly selected image
               if (e.target.value) refreshImageStatus(e.target.value);
             }}
-            className="w-full px-2 py-1.5 text-xs bg-cc-input-bg border border-cc-border rounded-md text-cc-fg focus:outline-none focus:border-cc-primary/50"
+            className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
           >
             <option value="">None (local execution)</option>
             <option value="the-companion:latest">the-companion:latest</option>
@@ -351,7 +642,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
 
         {/* Pull progress */}
         {isPulling && imgState?.progress && imgState.progress.length > 0 && (
-          <pre className="px-3 py-2 text-[10px] font-mono-code bg-black/20 border border-cc-border rounded-md text-cc-muted max-h-[120px] overflow-auto whitespace-pre-wrap">
+          <pre className="px-3 py-2 text-[10px] font-mono-code bg-cc-code-bg rounded-lg text-cc-muted max-h-[120px] overflow-auto whitespace-pre-wrap">
             {imgState.progress.slice(-20).join("\n")}
           </pre>
         )}
@@ -374,7 +665,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
             onChange={(e) => setDockerfile(e.target.value)}
             placeholder="# Custom Dockerfile content..."
             rows={10}
-            className="w-full px-3 py-2 text-[11px] font-mono-code bg-cc-input-bg border border-cc-border rounded-md text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50 resize-y"
+            className="w-full px-3 py-2.5 text-[11px] font-mono-code bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 resize-y transition-shadow"
             style={{ minHeight: "120px" }}
           />
         </div>
@@ -386,7 +677,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
               <button
                 onClick={() => handleBuild(slug)}
                 disabled={building}
-                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                className={`px-3 py-2.5 min-h-[44px] text-xs font-medium rounded-lg transition-colors ${
                   building
                     ? "bg-cc-hover text-cc-muted cursor-not-allowed"
                     : "bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 cursor-pointer"
@@ -407,7 +698,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
               )}
             </div>
 
-            {/* Build log */}
             {showBuildLog && buildLog && (
               <div className="relative">
                 <button
@@ -418,7 +708,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
                     <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
                   </svg>
                 </button>
-                <pre className="px-3 py-2 text-[10px] font-mono-code bg-black/20 border border-cc-border rounded-md text-cc-muted max-h-[200px] overflow-auto whitespace-pre-wrap">
+                <pre className="px-3 py-2 text-[10px] font-mono-code bg-cc-code-bg rounded-lg text-cc-muted max-h-[200px] overflow-auto whitespace-pre-wrap">
                   {buildLog}
                 </pre>
               </div>
@@ -445,13 +735,13 @@ export function EnvManager({ onClose, embedded = false }: Props) {
               }}
               min={1}
               max={65535}
-              className="w-24 px-2 py-1 text-[11px] font-mono-code bg-cc-input-bg border border-cc-border rounded-md text-cc-fg focus:outline-none focus:border-cc-primary/50"
+              className="w-28 px-3 py-2.5 min-h-[44px] text-xs font-mono-code bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
             />
             <button
               onClick={() => setPorts(ports.filter((_, idx) => idx !== i))}
-              className="w-5 h-5 flex items-center justify-center rounded text-cc-muted hover:text-cc-error transition-colors cursor-pointer shrink-0"
+              className="w-10 h-10 min-h-[44px] flex items-center justify-center rounded-lg text-cc-muted hover:text-cc-error hover:bg-cc-error/10 transition-colors cursor-pointer shrink-0"
             >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-2.5 h-2.5">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
                 <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
               </svg>
             </button>
@@ -459,7 +749,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
         ))}
         <button
           onClick={() => setPorts([...ports, 3000])}
-          className="text-[10px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+          className="text-xs py-2 min-h-[44px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
         >
           + Add port
         </button>
@@ -482,225 +772,89 @@ export function EnvManager({ onClose, embedded = false }: Props) {
             onChange={(e) => setInitScript(e.target.value)}
             placeholder={"# Runs inside the container before Claude starts\n# Example:\nbun install\npip install -r requirements.txt"}
             rows={10}
-            className="w-full px-3 py-2 text-[11px] font-mono-code bg-cc-input-bg border border-cc-border rounded-md text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50 resize-y"
+            className="w-full px-3 py-2.5 text-[11px] font-mono-code bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 resize-y transition-shadow"
             style={{ minHeight: "120px" }}
           />
         </div>
         <p className="text-[10px] text-cc-muted">
           This shell script runs as root inside the container via{" "}
           <code className="bg-cc-hover px-1 rounded">sh -lc</code> before the session starts.
-          Use it to install project-specific dependencies. Timeout: 120s.
+          Timeout: 120s.
         </p>
       </div>
     );
   }
+}
 
-  const environmentsList = loading ? (
-    <div className="text-sm text-cc-muted text-center py-6">Loading environments...</div>
-  ) : envs.length === 0 ? (
-    <div className="text-sm text-cc-muted text-center py-6">No environments yet.</div>
-  ) : (
-    <div className="space-y-3">
-      {envs.map((env) => (
-        <div key={env.slug} className="border border-cc-border rounded-[10px] overflow-hidden bg-cc-card">
-          {/* Env header row */}
-          <div className="flex items-center gap-2 px-3 py-2.5 bg-cc-card border-b border-cc-border">
-            <span className="text-sm font-medium text-cc-fg flex-1">{env.name}</span>
-            {env.imageTag && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-mono-code">
-                {env.imageTag.split(":")[0]?.split("/").pop() || env.imageTag}
-              </span>
-            )}
-            {!env.imageTag && env.baseImage && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-cc-hover text-cc-muted font-mono-code">
-                {env.baseImage}
-              </span>
-            )}
-            <span className="text-xs text-cc-muted">
-              {Object.keys(env.variables).length} var{Object.keys(env.variables).length !== 1 ? "s" : ""}
+/* ─── Env Row (for embedded page — display only) ─────────────────── */
+
+interface EnvRowProps {
+  env: CompanionEnv;
+  varCount: number;
+  onStartEdit: () => void;
+  onDelete: () => void;
+}
+
+function EnvRow({ env, varCount, onStartEdit, onDelete }: EnvRowProps) {
+  return (
+    <div className="group flex items-start gap-3 px-3 py-3 min-h-[44px] rounded-lg hover:bg-cc-hover/60 transition-colors">
+      {/* Icon */}
+      <div className="shrink-0 mt-0.5 w-7 h-7 rounded-md bg-cc-primary/10 flex items-center justify-center">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5 text-cc-primary">
+          <path d="M12 3v18M3 12h18M4.5 6.5l15 0M4.5 17.5h15M6.5 4.5v15M17.5 4.5v15" />
+        </svg>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-cc-fg truncate">{env.name}</span>
+          {env.imageTag && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-mono-code">
+              {env.imageTag.split(":")[0]?.split("/").pop() || env.imageTag}
             </span>
-            {editingSlug === env.slug ? (
-              <button
-                onClick={cancelEdit}
-                className="text-xs text-cc-muted hover:text-cc-fg cursor-pointer"
-              >
-                Cancel
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={() => startEdit(env)}
-                  className="text-xs text-cc-muted hover:text-cc-fg cursor-pointer"
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() => handleDelete(env.slug)}
-                  className="text-xs text-cc-muted hover:text-cc-error cursor-pointer"
-                >
-                  Delete
-                </button>
-              </>
-            )}
-          </div>
-
-          {/* Edit form */}
-          {editingSlug === env.slug && (
-            <div className="px-3 py-3 space-y-2">
-              <input
-                type="text"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                placeholder="Environment name"
-                className="w-full px-3 py-2 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50"
-              />
-              <div className="space-y-3">
-                <div>
-                  <div className="text-[11px] font-medium text-cc-muted mb-1.5">Variables</div>
-                  <VarEditor rows={editVars} onChange={setEditVars} />
-                </div>
-                <div>
-                  <div className="text-[11px] font-medium text-cc-muted mb-1.5">Docker</div>
-                  {renderDockerTab(editDockerfile, setEditDockerfile, editBaseImage, setEditBaseImage, env.slug, env)}
-                </div>
-                <div>
-                  <div className="text-[11px] font-medium text-cc-muted mb-1.5">Ports</div>
-                  {renderPortsTab(editPorts, setEditPorts)}
-                </div>
-                <div>
-                  <div className="text-[11px] font-medium text-cc-muted mb-1.5">Init Script</div>
-                  {renderInitScriptTab(editInitScript, setEditInitScript)}
-                </div>
-              </div>
-              <button
-                onClick={saveEdit}
-                className="px-3 py-2 text-xs font-medium bg-cc-primary hover:bg-cc-primary-hover text-white rounded-lg transition-colors cursor-pointer"
-              >
-                Save
-              </button>
-            </div>
           )}
-
-          {/* Variable preview (collapsed) */}
-          {editingSlug !== env.slug && Object.keys(env.variables).length > 0 && (
-            <div className="px-3 py-2.5 space-y-1">
-              {Object.entries(env.variables).map(([k, v]) => (
-                <div key={k} className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-start gap-1.5 text-xs leading-5">
-                  <span className="font-mono-code text-cc-fg break-all">{k}</span>
-                  <span className="text-cc-muted">=</span>
-                  <span className="font-mono-code text-cc-muted break-all whitespace-pre-wrap">{v}</span>
-                </div>
-              ))}
-            </div>
+          {!env.imageTag && env.baseImage && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-cc-hover text-cc-muted font-mono-code">
+              {env.baseImage}
+            </span>
           )}
         </div>
-      ))}
-    </div>
-  );
-
-  const createForm = (
-    <div className="border border-cc-border rounded-[10px] overflow-hidden bg-cc-card">
-      <div className="px-3 py-2.5 bg-cc-card border-b border-cc-border">
-        <span className="text-sm font-medium text-cc-fg">New Environment</span>
+        <p className="mt-0.5 text-xs text-cc-muted">
+          {varCount} variable{varCount !== 1 ? "s" : ""}
+          {env.ports && env.ports.length > 0 && ` · ${env.ports.length} port${env.ports.length !== 1 ? "s" : ""}`}
+          {env.initScript && " · init script"}
+        </p>
       </div>
-      <div className="px-3 py-3 space-y-2.5">
-        <input
-          type="text"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          placeholder="Environment name (e.g. production)"
-          className="w-full px-3 py-2 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && newName.trim()) handleCreate();
-          }}
-        />
-        {renderTabs(newTab, setNewTab)}
-        {newTab === "variables" && <VarEditor rows={newVars} onChange={setNewVars} />}
-        {newTab === "docker" && renderDockerTab(newDockerfile, setNewDockerfile, newBaseImage, setNewBaseImage)}
-        {newTab === "ports" && renderPortsTab(newPorts, setNewPorts)}
-        {newTab === "init" && renderInitScriptTab(newInitScript, setNewInitScript)}
+
+      {/* Actions */}
+      <div className="shrink-0 flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
         <button
-          onClick={handleCreate}
-          disabled={!newName.trim() || creating}
-          className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
-            newName.trim() && !creating
-              ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
-              : "bg-cc-hover text-cc-muted cursor-not-allowed"
-          }`}
+          onClick={onStartEdit}
+          className="p-2 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-1.5 rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
+          aria-label="Edit"
         >
-          {creating ? "Creating..." : "Create"}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5Z" />
+          </svg>
+        </button>
+        <button
+          onClick={onDelete}
+          className="p-2 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-1.5 rounded-md text-cc-muted hover:text-cc-error hover:bg-cc-error/10 transition-colors cursor-pointer"
+          aria-label="Delete"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
+            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14Z" />
+          </svg>
         </button>
       </div>
     </div>
   );
-
-  if (embedded) {
-    return (
-      <div className="h-full bg-cc-bg overflow-y-auto">
-        <div className="max-w-5xl mx-auto px-4 sm:px-8 py-6 sm:py-10">
-          <div className="mb-6 flex items-center gap-3">
-            <div className="flex-1">
-              <h1 className="text-xl font-semibold text-cc-fg">Environments</h1>
-              <p className="mt-1 text-sm text-cc-muted">
-                Create and manage reusable environment profiles with optional Docker isolation.
-              </p>
-            </div>
-            {dockerBadge}
-          </div>
-          {errorBanner}
-          <div className={`mt-4 grid gap-4 ${envs.length > 0 ? "xl:grid-cols-[1.45fr_1fr]" : ""}`}>
-            <section className="bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-3">
-              <h2 className="text-sm font-semibold text-cc-fg">Profiles</h2>
-              {environmentsList}
-            </section>
-            <section className="bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-3 h-fit xl:sticky xl:top-4">
-              <h2 className="text-sm font-semibold text-cc-fg">Create</h2>
-              {createForm}
-            </section>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const panel = (
-    <div
-      className="w-full max-w-lg max-h-[90dvh] sm:max-h-[80dvh] mx-0 sm:mx-4 flex flex-col bg-cc-bg border border-cc-border rounded-t-[14px] sm:rounded-[14px] shadow-2xl overflow-hidden"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 border-b border-cc-border">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-cc-fg">Manage Environments</h2>
-          {dockerBadge}
-        </div>
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="w-6 h-6 flex items-center justify-center rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
-          >
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
-              <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
-            </svg>
-          </button>
-        )}
-      </div>
-      <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-3 sm:py-4 space-y-4">
-        {errorBanner}
-        {environmentsList}
-        {createForm}
-      </div>
-    </div>
-  );
-
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50" onClick={onClose}>
-      {panel}
-    </div>,
-    document.body,
-  );
 }
 
-// ─── Key-Value Editor ───────────────────────────────────────────────────
+
+/* ─── Key-Value Editor ────────────────────────────────────────────── */
 
 function VarEditor({ rows, onChange }: { rows: VarRow[]; onChange: (rows: VarRow[]) => void }) {
   function updateRow(i: number, field: "key" | "value", val: string) {
@@ -728,7 +882,7 @@ function VarEditor({ rows, onChange }: { rows: VarRow[]; onChange: (rows: VarRow
             value={row.key}
             onChange={(e) => updateRow(i, "key", e.target.value)}
             placeholder="KEY"
-            className="flex-1 min-w-0 px-2 py-1 text-[11px] font-mono-code bg-cc-input-bg border border-cc-border rounded-md text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50"
+            className="flex-1 min-w-0 px-3 py-2.5 min-h-[44px] text-xs font-mono-code bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
           />
           <span className="text-[10px] text-cc-muted">=</span>
           <input
@@ -736,13 +890,13 @@ function VarEditor({ rows, onChange }: { rows: VarRow[]; onChange: (rows: VarRow
             value={row.value}
             onChange={(e) => updateRow(i, "value", e.target.value)}
             placeholder="value"
-            className="flex-1 min-w-0 px-2 py-1 text-[11px] font-mono-code bg-cc-input-bg border border-cc-border rounded-md text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50"
+            className="flex-1 min-w-0 px-3 py-2.5 min-h-[44px] text-xs font-mono-code bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
           />
           <button
             onClick={() => removeRow(i)}
-            className="w-5 h-5 flex items-center justify-center rounded text-cc-muted hover:text-cc-error transition-colors cursor-pointer shrink-0"
+            className="w-10 h-10 min-h-[44px] flex items-center justify-center rounded-lg text-cc-muted hover:text-cc-error hover:bg-cc-error/10 transition-colors cursor-pointer shrink-0"
           >
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-2.5 h-2.5">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
               <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
             </svg>
           </button>
@@ -750,7 +904,7 @@ function VarEditor({ rows, onChange }: { rows: VarRow[]; onChange: (rows: VarRow
       ))}
       <button
         onClick={addRow}
-        className="text-[10px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+        className="text-xs py-2 min-h-[44px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
       >
         + Add variable
       </button>

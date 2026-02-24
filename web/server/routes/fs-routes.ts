@@ -4,6 +4,16 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Hono } from "hono";
 
+/** Ensure a resolved path is within one of the allowed base directories.
+ *  Returns the resolved absolute path, or null if it escapes all bases. */
+function guardPath(raw: string, allowedBases: string[]): string | null {
+  const abs = resolve(raw);
+  for (const base of allowedBases) {
+    if (abs === base || abs.startsWith(base + "/")) return abs;
+  }
+  return null;
+}
+
 function shellEscapeArg(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
@@ -48,10 +58,15 @@ function resolveBranchDiffBases(repoRoot: string): string[] {
   return ["main"];
 }
 
-export function registerFsRoutes(api: Hono): void {
+export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }): void {
+  // Allowed base directories for filesystem access.
+  // Requests must target paths under the user's home directory or process cwd.
+  const allowedBases = () => opts?.allowedBases ?? [homedir(), process.cwd()];
+
   api.get("/fs/list", async (c) => {
     const rawPath = c.req.query("path") || homedir();
-    const basePath = resolve(rawPath);
+    const basePath = guardPath(rawPath, allowedBases());
+    if (!basePath) return c.json({ error: "Path outside allowed directories" }, 403);
     try {
       const entries = await readdir(basePath, { withFileTypes: true });
       const dirs: { name: string; path: string }[] = [];
@@ -90,7 +105,8 @@ export function registerFsRoutes(api: Hono): void {
   api.get("/fs/tree", async (c) => {
     const rawPath = c.req.query("path");
     if (!rawPath) return c.json({ error: "path required" }, 400);
-    const basePath = resolve(rawPath);
+    const basePath = guardPath(rawPath, allowedBases());
+    if (!basePath) return c.json({ error: "Path outside allowed directories" }, 403);
 
     interface TreeNode {
       name: string;
@@ -136,7 +152,8 @@ export function registerFsRoutes(api: Hono): void {
   api.get("/fs/read", async (c) => {
     const filePath = c.req.query("path");
     if (!filePath) return c.json({ error: "path required" }, 400);
-    const absPath = resolve(filePath);
+    const absPath = guardPath(filePath, allowedBases());
+    if (!absPath) return c.json({ error: "Path outside allowed directories" }, 403);
     try {
       const info = await stat(absPath);
       if (info.size > 2 * 1024 * 1024) {
@@ -152,13 +169,48 @@ export function registerFsRoutes(api: Hono): void {
     }
   });
 
+  api.get("/fs/raw", async (c) => {
+    const filePath = c.req.query("path");
+    if (!filePath) return c.json({ error: "path required" }, 400);
+    const absPath = guardPath(filePath, allowedBases());
+    if (!absPath) return c.json({ error: "Path outside allowed directories" }, 403);
+    try {
+      const info = await stat(absPath);
+      if (info.size > 10 * 1024 * 1024) {
+        return c.json({ error: "File too large (>10MB)" }, 413);
+      }
+    } catch (e: unknown) {
+      return c.json({ error: e instanceof Error ? e.message : "File not found" }, 404);
+    }
+    try {
+      const buffer = await readFile(absPath);
+      const ext = absPath.split(".").pop()?.toLowerCase() ?? "";
+      const mimeMap: Record<string, string> = {
+        png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+        gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
+        avif: "image/avif", ico: "image/x-icon", bmp: "image/bmp",
+        tiff: "image/tiff", tif: "image/tiff",
+      };
+      const contentType = mimeMap[ext] || "application/octet-stream";
+      return new Response(buffer, {
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": "private, max-age=60",
+        },
+      });
+    } catch (e: unknown) {
+      return c.json({ error: e instanceof Error ? e.message : "Cannot read file" }, 404);
+    }
+  });
+
   api.put("/fs/write", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const { path: filePath, content } = body;
     if (!filePath || typeof content !== "string") {
       return c.json({ error: "path and content required" }, 400);
     }
-    const absPath = resolve(filePath);
+    const absPath = guardPath(filePath, allowedBases());
+    if (!absPath) return c.json({ error: "Path outside allowed directories" }, 403);
     try {
       await writeFile(absPath, content, "utf-8");
       return c.json({ ok: true, path: absPath });

@@ -75,6 +75,8 @@ describe("PromptsPage", () => {
   it("creates a global prompt", async () => {
     // Validates create payload is forced to global scope.
     render(<PromptsPage embedded />);
+    // Open the collapsible create form first
+    fireEvent.click(screen.getByRole("button", { name: /new prompt/i }));
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "review-pr" } });
     fireEvent.change(screen.getByLabelText("Content"), { target: { value: "Review this PR" } });
     fireEvent.click(screen.getByRole("button", { name: "Create Prompt" }));
@@ -96,6 +98,8 @@ describe("PromptsPage", () => {
       sdkSessions: [],
     };
     render(<PromptsPage embedded />);
+    // Open the collapsible create form first
+    fireEvent.click(screen.getByRole("button", { name: /new prompt/i }));
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "global" } });
     fireEvent.change(screen.getByLabelText("Content"), { target: { value: "Always do X" } });
     fireEvent.click(screen.getByRole("button", { name: "Create Prompt" }));

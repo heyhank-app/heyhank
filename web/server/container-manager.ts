@@ -607,6 +607,14 @@ export class ContainerManager {
     return this.containers.get(sessionId);
   }
 
+  /** Get container info by Docker container ID. */
+  getContainerById(containerId: string): ContainerInfo | undefined {
+    for (const info of this.containers.values()) {
+      if (info.containerId === containerId) return info;
+    }
+    return undefined;
+  }
+
   /** List all tracked containers. */
   listContainers(): ContainerInfo[] {
     return Array.from(this.containers.values());

@@ -89,7 +89,7 @@ function McpServerRow({
 
       {/* Expanded details */}
       {expanded && (
-        <div className="px-2.5 pb-2.5 space-y-1.5 border-t border-cc-border pt-2">
+        <div className="px-2.5 pb-2.5 space-y-1.5 pt-2">
           {/* Config info */}
           <div className="text-[11px] text-cc-muted space-y-0.5">
             <div className="flex items-center gap-1">
@@ -337,8 +337,8 @@ export function McpSection({ sessionId }: { sessionId: string }) {
   return (
     <>
       {/* MCP section header */}
-      <div className="shrink-0 px-4 py-2.5 border-b border-cc-border flex items-center justify-between">
-        <span className="text-[12px] font-semibold text-cc-fg flex items-center gap-1.5">
+      <div className="shrink-0 px-4 py-2.5 flex items-center justify-between">
+        <span className="text-[13px] font-semibold text-cc-fg flex items-center gap-1.5">
           <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 text-cc-muted">
             <path d="M1.5 3A1.5 1.5 0 013 1.5h10A1.5 1.5 0 0114.5 3v1A1.5 1.5 0 0113 5.5H3A1.5 1.5 0 011.5 4V3zm0 5A1.5 1.5 0 013 6.5h10A1.5 1.5 0 0114.5 8v1A1.5 1.5 0 0113 10.5H3A1.5 1.5 0 011.5 9V8zm0 5A1.5 1.5 0 013 11.5h10a1.5 1.5 0 011.5 1.5v1a1.5 1.5 0 01-1.5 1.5H3A1.5 1.5 0 011.5 14v-1z" />
           </svg>
@@ -381,7 +381,7 @@ export function McpSection({ sessionId }: { sessionId: string }) {
 
       {/* Add server form */}
       {showAddForm && (
-        <div className="px-3 py-2 border-b border-cc-border">
+        <div className="px-3 py-2">
           <AddServerForm
             sessionId={sessionId}
             onDone={() => setShowAddForm(false)}
@@ -391,7 +391,7 @@ export function McpSection({ sessionId }: { sessionId: string }) {
 
       {/* Server list */}
       {displayServers.length > 0 && (
-        <div className="px-3 py-2 space-y-1.5 border-b border-cc-border">
+        <div className="px-3 py-2 space-y-1.5">
           {displayServers.map((server) => (
             <McpServerRow
               key={server.name}
@@ -404,7 +404,7 @@ export function McpSection({ sessionId }: { sessionId: string }) {
 
       {/* Empty state */}
       {!showAddForm && displayServers.length === 0 && (
-        <div className="px-3 py-3 border-b border-cc-border">
+        <div className="px-3 py-3">
           <p className="text-[11px] text-cc-muted text-center">
             No MCP servers configured.{" "}
             {cliConnected && (

@@ -177,7 +177,7 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="w-5 h-5 flex items-center justify-center rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer sm:hidden"
+            className="w-8 h-8 flex items-center justify-center rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer sm:hidden"
           >
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
               <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
@@ -190,7 +190,7 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
             <button
               key={abs}
               onClick={() => handleFileSelect(abs)}
-              className={`flex items-center gap-2 w-full mx-1 px-2 py-1.5 text-[13px] rounded-[10px] hover:bg-cc-hover transition-colors cursor-pointer whitespace-nowrap ${
+              className={`flex items-center gap-2 w-full mx-1 px-2 py-2.5 text-[13px] rounded-[10px] hover:bg-cc-hover transition-colors cursor-pointer whitespace-nowrap ${
                 abs === selectedFile ? "bg-cc-active text-cc-fg" : "text-cc-fg/70"
               }`}
               style={{ width: "calc(100% - 8px)" }}
@@ -210,7 +210,7 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
             {!sidebarOpen && (
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="flex items-center justify-center w-6 h-6 rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer shrink-0"
+                className="flex items-center justify-center w-8 h-8 rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer shrink-0"
                 title="Show file list"
               >
                 <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">

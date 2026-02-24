@@ -4,6 +4,7 @@ import { connectSession } from "./ws.js";
 import { api } from "./api.js";
 import { capturePageView } from "./analytics.js";
 import { parseHash, navigateToSession } from "./utils/routing.js";
+import { LoginPage } from "./components/LoginPage.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { ChatView } from "./components/ChatView.js";
 import { TopBar } from "./components/TopBar.js";
@@ -26,6 +27,8 @@ const EnvManager = lazy(() => import("./components/EnvManager.js").then((m) => (
 const CronManager = lazy(() => import("./components/CronManager.js").then((m) => ({ default: m.CronManager })));
 const AgentsPage = lazy(() => import("./components/AgentsPage.js").then((m) => ({ default: m.AgentsPage })));
 const TerminalPage = lazy(() => import("./components/TerminalPage.js").then((m) => ({ default: m.TerminalPage })));
+const ProcessPanel = lazy(() => import("./components/ProcessPanel.js").then((m) => ({ default: m.ProcessPanel })));
+
 
 function LazyFallback() {
   return (
@@ -43,14 +46,13 @@ function useHash() {
 }
 
 export default function App() {
+  const isAuthenticated = useStore((s) => s.isAuthenticated);
   const darkMode = useStore((s) => s.darkMode);
   const currentSessionId = useStore((s) => s.currentSessionId);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const taskPanelOpen = useStore((s) => s.taskPanelOpen);
   const homeResetKey = useStore((s) => s.homeResetKey);
   const activeTab = useStore((s) => s.activeTab);
-  const editorTabEnabled = useStore((s) => s.editorTabEnabled);
-  const setEditorTabEnabled = useStore((s) => s.setEditorTabEnabled);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const sessionCreating = useStore((s) => s.sessionCreating);
   const sessionCreatingBackend = useStore((s) => s.sessionCreatingBackend);
@@ -77,17 +79,12 @@ export default function App() {
     document.documentElement.classList.toggle("dark", darkMode);
   }, [darkMode]);
 
+  // Migrate legacy "files" tab to "editor"
   useEffect(() => {
-    api.getSettings().then((settings) => {
-      setEditorTabEnabled(settings.editorTabEnabled);
-    }).catch(() => {});
-  }, [setEditorTabEnabled]);
-
-  useEffect(() => {
-    if (!editorTabEnabled && activeTab === "editor") {
-      setActiveTab("chat");
+    if ((activeTab as string) === "files") {
+      setActiveTab("editor");
     }
-  }, [editorTabEnabled, activeTab, setActiveTab]);
+  }, [activeTab, setActiveTab]);
 
   // Capture the localStorage-restored session ID during render (before any effects run)
   // so the mount logic can use it even if the hash-sync branch would clear it.
@@ -153,12 +150,17 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Auth gate: show login page when not authenticated
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
+
   if (route.page === "playground") {
     return <Suspense fallback={<LazyFallback />}><Playground /></Suspense>;
   }
 
   return (
-    <div className="h-[100dvh] flex font-sans-ui bg-cc-bg text-cc-fg antialiased pt-safe">
+    <div className="fixed inset-0 flex font-sans-ui bg-cc-bg text-cc-fg antialiased pt-safe overflow-hidden overscroll-none">
       {/* Mobile overlay backdrop */}
       {sidebarOpen && (
         <div
@@ -170,9 +172,9 @@ export default function App() {
       {/* Sidebar — overlay on mobile, inline on desktop */}
       <div
         className={`
-          fixed md:relative z-40 md:z-auto
-          h-full shrink-0 transition-all duration-200
-          ${sidebarOpen ? "w-[260px] translate-x-0" : "w-0 -translate-x-full md:w-0 md:-translate-x-full"}
+          fixed inset-y-0 left-0 md:relative md:inset-auto z-40 md:z-auto
+          h-full shrink-0 transition-all duration-200 pt-safe md:pt-0
+          ${sidebarOpen ? "w-full md:w-[260px] translate-x-0" : "w-0 -translate-x-full md:w-0 md:-translate-x-full"}
           overflow-hidden
         `}
       >
@@ -244,9 +246,11 @@ export default function App() {
                         onClosePanel={() => useStore.getState().setActiveTab("chat")}
                       />
                     )
-                    : activeTab === "editor" && editorTabEnabled
-                      ? <SessionEditorPane sessionId={currentSessionId} />
-                      : (
+                    : activeTab === "processes"
+                      ? <Suspense fallback={<LazyFallback />}><ProcessPanel sessionId={currentSessionId} /></Suspense>
+                      : activeTab === "editor"
+                        ? <SessionEditorPane sessionId={currentSessionId} />
+                        : (
                         <SessionTerminalDock sessionId={currentSessionId} suppressPanel>
                           {activeTab === "diff"
                             ? <DiffPanel sessionId={currentSessionId} />
@@ -299,9 +303,9 @@ export default function App() {
 
           <div
             className={`
-              fixed lg:relative z-40 lg:z-auto right-0 top-0
-              h-full shrink-0 transition-all duration-200
-              ${taskPanelOpen ? "w-[320px] translate-x-0" : "w-0 translate-x-full lg:w-0 lg:translate-x-full"}
+              fixed inset-y-0 right-0 lg:relative lg:inset-auto z-40 lg:z-auto
+              h-full shrink-0 transition-all duration-200 pt-safe lg:pt-0
+              ${taskPanelOpen ? "w-full lg:w-[320px] translate-x-0" : "w-0 translate-x-full lg:w-0 lg:translate-x-full"}
               overflow-hidden
             `}
           >

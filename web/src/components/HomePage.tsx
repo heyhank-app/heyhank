@@ -290,6 +290,8 @@ export function HomePage() {
       setIsNewBranch(false);
     }).catch(() => {
       setGitRepoInfo(null);
+      setSelectedBranch("");
+      setIsNewBranch(false);
     });
   }, [cwd]);
 
@@ -732,7 +734,7 @@ export function HomePage() {
   const canSend = text.trim().length > 0 && !sending;
 
   return (
-    <div className="flex-1 h-full flex items-start justify-center px-3 sm:px-4 pt-6 sm:pt-8 pb-6 overflow-y-auto">
+    <div className="flex-1 h-full flex items-start justify-center px-3 sm:px-4 pt-6 sm:pt-8 pb-6 pb-safe overflow-y-auto overscroll-y-contain">
       <div className="w-full max-w-2xl">
         {/* Logo + Title */}
         <div className="flex flex-col items-center justify-center mb-3 sm:mb-4">
@@ -754,7 +756,7 @@ export function HomePage() {
                 />
                 <button
                   onClick={() => removeImage(i)}
-                  className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-cc-error text-white flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                  className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-cc-error text-white flex items-center justify-center text-[10px] opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity cursor-pointer"
                 >
                   <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5">
                     <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
@@ -863,7 +865,7 @@ export function HomePage() {
                   <button
                     onClick={handleSend}
                     disabled={!canSend}
-                    className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors ${
+                    className={`flex items-center justify-center w-10 h-10 rounded-full transition-colors ${
                       canSend
                         ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
                         : "bg-cc-hover text-cc-muted cursor-not-allowed"
@@ -889,7 +891,7 @@ export function HomePage() {
                   onClick={() => b.available && switchBackend(b.id as BackendType)}
                   disabled={!b.available}
                   title={b.available ? b.name : `${b.name} CLI not found in PATH`}
-                  className={`flex items-center gap-1 px-2 py-1 text-xs rounded-md transition-colors ${
+                  className={`flex items-center gap-1 px-2.5 py-2 text-xs rounded-md transition-colors ${
                     !b.available
                       ? "text-cc-muted/40 cursor-not-allowed"
                       : backend === b.id
@@ -913,7 +915,7 @@ export function HomePage() {
           <div>
             <button
               onClick={() => setShowFolderPicker(true)}
-              className="flex items-center gap-1.5 px-2 py-1 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
             >
               <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
                 <path d="M1 3.5A1.5 1.5 0 012.5 2h3.379a1.5 1.5 0 011.06.44l.622.621a.5.5 0 00.353.146H13.5A1.5 1.5 0 0115 4.707V12.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" />
@@ -954,7 +956,7 @@ export function HomePage() {
                 setShowEnvDropdown(!showEnvDropdown);
               }}
               aria-expanded={showEnvDropdown}
-              className="flex items-center gap-1.5 px-2 py-1 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
             >
               <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
                 <path d="M8 1a2 2 0 012 2v1h2a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h2V3a2 2 0 012-2zm0 1.5a.5.5 0 00-.5.5v1h1V3a.5.5 0 00-.5-.5zM4 5.5a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V6a.5.5 0 00-.5-.5H4z" />
@@ -1037,7 +1039,7 @@ export function HomePage() {
             <button
               onClick={() => setShowModelDropdown(!showModelDropdown)}
               aria-expanded={showModelDropdown}
-              className="flex items-center gap-1.5 px-2 py-1 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
             >
               <span>{selectedModel.icon}</span>
               <span>{selectedModel.label}</span>
@@ -1068,7 +1070,7 @@ export function HomePage() {
             <button
               type="button"
               onClick={() => setShowBranchingControls((v) => !v)}
-              className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded-md transition-colors cursor-pointer ${
+              className={`flex items-center gap-1.5 px-2.5 py-2 text-xs rounded-md transition-colors cursor-pointer ${
                 showBranchingControls
                   ? "text-cc-primary bg-cc-primary/10 hover:bg-cc-primary/15"
                   : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"

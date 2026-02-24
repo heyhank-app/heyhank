@@ -2,10 +2,21 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
+// IntersectionObserver is not available in jsdom — provide a no-op mock
+// so the scroll-tracking logic in SettingsPage doesn't crash during tests.
+class MockIntersectionObserver {
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+  constructor(_cb: IntersectionObserverCallback, _opts?: IntersectionObserverInit) {}
+}
+(globalThis as Record<string, unknown>).IntersectionObserver = MockIntersectionObserver;
+
 interface MockStoreState {
   darkMode: boolean;
   notificationSound: boolean;
   notificationDesktop: boolean;
+  diffBase: string;
   updateInfo: {
     currentVersion: string;
     latestVersion: string | null;
@@ -17,6 +28,7 @@ interface MockStoreState {
   toggleDarkMode: ReturnType<typeof vi.fn>;
   toggleNotificationSound: ReturnType<typeof vi.fn>;
   setNotificationDesktop: ReturnType<typeof vi.fn>;
+  setDiffBase: ReturnType<typeof vi.fn>;
   setUpdateInfo: ReturnType<typeof vi.fn>;
   setUpdateOverlayActive: ReturnType<typeof vi.fn>;
   setEditorTabEnabled: ReturnType<typeof vi.fn>;
@@ -29,10 +41,12 @@ function createMockState(overrides: Partial<MockStoreState> = {}): MockStoreStat
     darkMode: false,
     notificationSound: true,
     notificationDesktop: false,
+    diffBase: "last-commit",
     updateInfo: null,
     toggleDarkMode: vi.fn(),
     toggleNotificationSound: vi.fn(),
     setNotificationDesktop: vi.fn(),
+    setDiffBase: vi.fn(),
     setUpdateInfo: vi.fn(),
     setUpdateOverlayActive: vi.fn(),
     setEditorTabEnabled: vi.fn(),
@@ -45,6 +59,9 @@ const mockApi = {
   updateSettings: vi.fn(),
   forceCheckForUpdate: vi.fn(),
   triggerUpdate: vi.fn(),
+  getAuthToken: vi.fn(),
+  regenerateAuthToken: vi.fn(),
+  getAuthQr: vi.fn(),
 };
 
 const mockTelemetry = {
@@ -58,6 +75,9 @@ vi.mock("../api.js", () => ({
     updateSettings: (...args: unknown[]) => mockApi.updateSettings(...args),
     forceCheckForUpdate: (...args: unknown[]) => mockApi.forceCheckForUpdate(...args),
     triggerUpdate: (...args: unknown[]) => mockApi.triggerUpdate(...args),
+    getAuthToken: (...args: unknown[]) => mockApi.getAuthToken(...args),
+    regenerateAuthToken: (...args: unknown[]) => mockApi.regenerateAuthToken(...args),
+    getAuthQr: (...args: unknown[]) => mockApi.getAuthQr(...args),
   },
 }));
 
@@ -106,6 +126,14 @@ beforeEach(() => {
     ok: true,
     message: "Update started. Server will restart shortly.",
   });
+  mockApi.getAuthToken.mockResolvedValue({ token: "abc123testtoken" });
+  mockApi.regenerateAuthToken.mockResolvedValue({ token: "newtoken456" });
+  mockApi.getAuthQr.mockResolvedValue({
+    qrCodes: [
+      { label: "LAN", url: "http://192.168.1.10:3456", qrDataUrl: "data:image/png;base64,LAN_QR" },
+      { label: "Tailscale", url: "http://100.118.112.23:3456", qrDataUrl: "data:image/png;base64,TS_QR" },
+    ],
+  });
   mockTelemetry.getTelemetryPreferenceEnabled.mockReturnValue(true);
 });
 
@@ -116,6 +144,21 @@ describe("SettingsPage", () => {
     expect(mockApi.getSettings).toHaveBeenCalledTimes(1);
     await screen.findByText("OpenRouter key configured");
     expect(screen.getByDisplayValue("openrouter/free")).toBeInTheDocument();
+  });
+
+  // When a key is already configured, the input shows masked dots (••••) to
+  // visually indicate a key is present. The dots clear on focus so the user
+  // can type a replacement key.
+  it("shows masked dots in API key field when key is configured", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    const input = screen.getByLabelText("OpenRouter API Key") as HTMLInputElement;
+    expect(input.value).toBe("••••••••••••••••");
+
+    // On focus the dots clear to allow entering a new key
+    fireEvent.focus(input);
+    expect(input.value).toBe("");
   });
 
   it("shows not configured status", async () => {
@@ -197,6 +240,8 @@ describe("SettingsPage", () => {
     });
   });
 
+  // Editor tab toggle is in the General section; toggling it updates local state,
+  // which is then included in the OpenRouter form's save payload.
   it("saves editor tab toggle in settings payload", async () => {
     render(<SettingsPage />);
     await screen.findByText("OpenRouter key configured");
@@ -381,5 +426,131 @@ describe("SettingsPage", () => {
     });
     expect(mockState.setUpdateOverlayActive).toHaveBeenCalledWith(true);
     expect(await screen.findByText("Update started. Server will restart shortly.")).toBeInTheDocument();
+  });
+
+  // Verify left sidebar nav renders category labels for quick navigation
+  it("renders category navigation with all section labels", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    // Each category appears in both desktop sidebar and mobile nav (jsdom renders both)
+    const generalButtons = screen.getAllByRole("button", { name: "General" });
+    expect(generalButtons.length).toBeGreaterThanOrEqual(1);
+
+    const notifButtons = screen.getAllByRole("button", { name: "Notifications" });
+    expect(notifButtons.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // Verify section headings have correct IDs for anchor-based scrolling
+  it("renders section headings with anchor IDs", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    expect(document.getElementById("general")).toBeInTheDocument();
+    expect(document.getElementById("authentication")).toBeInTheDocument();
+    expect(document.getElementById("notifications")).toBeInTheDocument();
+    expect(document.getElementById("openrouter")).toBeInTheDocument();
+    expect(document.getElementById("updates")).toBeInTheDocument();
+    expect(document.getElementById("telemetry")).toBeInTheDocument();
+    expect(document.getElementById("environments")).toBeInTheDocument();
+  });
+
+  // ─── Authentication section tests ──────────────────────────────────
+
+  // The auth section fetches the token on mount and displays it masked.
+  it("fetches and displays the auth token masked by default", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    // Token should be fetched
+    expect(mockApi.getAuthToken).toHaveBeenCalledTimes(1);
+
+    // Token is masked by default — shows dots, not the actual value
+    await waitFor(() => {
+      expect(screen.getByText("\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("abc123testtoken")).not.toBeInTheDocument();
+  });
+
+  // Clicking "Show" reveals the actual token value.
+  it("reveals the token when Show is clicked", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    await waitFor(() => {
+      expect(screen.getByText("\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle("Show token"));
+    expect(screen.getByText("abc123testtoken")).toBeInTheDocument();
+  });
+
+  // Clicking "Show QR Code" loads and displays QR with address tabs.
+  it("shows QR code with address tabs when button is clicked", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show QR Code" }));
+
+    await waitFor(() => {
+      expect(mockApi.getAuthQr).toHaveBeenCalledTimes(1);
+    });
+
+    // First address (LAN) QR should be shown by default
+    const img = await screen.findByAltText("QR code for LAN login");
+    expect(img).toBeInTheDocument();
+    expect(img).toHaveAttribute("src", "data:image/png;base64,LAN_QR");
+
+    // Address tabs should be visible (LAN and Tailscale)
+    expect(screen.getByRole("button", { name: "LAN" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tailscale" })).toBeInTheDocument();
+
+    // Clicking Tailscale tab switches the QR code
+    fireEvent.click(screen.getByRole("button", { name: "Tailscale" }));
+    const tsImg = screen.getByAltText("QR code for Tailscale login");
+    expect(tsImg).toHaveAttribute("src", "data:image/png;base64,TS_QR");
+    expect(screen.getByText("http://100.118.112.23:3456")).toBeInTheDocument();
+  });
+
+  // Regenerating the token calls the API and reveals the new token.
+  it("regenerates the token after user confirms", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate Token" }));
+
+    await waitFor(() => {
+      expect(mockApi.regenerateAuthToken).toHaveBeenCalledTimes(1);
+    });
+
+    // New token is revealed automatically after regeneration
+    expect(await screen.findByText("newtoken456")).toBeInTheDocument();
+
+    (window.confirm as ReturnType<typeof vi.spyOn>).mockRestore();
+  });
+
+  // Cancelling the confirmation dialog skips regeneration entirely.
+  it("does not regenerate when user cancels confirmation", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate Token" }));
+
+    expect(mockApi.regenerateAuthToken).not.toHaveBeenCalled();
+
+    (window.confirm as ReturnType<typeof vi.spyOn>).mockRestore();
+  });
+
+  // The Authentication navigation item appears in the sidebar.
+  it("includes Authentication in category navigation", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    const authButtons = screen.getAllByRole("button", { name: "Authentication" });
+    expect(authButtons.length).toBeGreaterThanOrEqual(1);
   });
 });

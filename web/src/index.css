@@ -18,25 +18,25 @@
 
 @theme {
   /* Light Mode (default) */
-  --color-cc-bg: #ffffff;
+  --color-cc-bg: #faf9f6;
   --color-cc-fg: #141413;
-  --color-cc-card: #FFFFFF;
+  --color-cc-card: #ffffff;
   --color-cc-primary: #d97757;
   --color-cc-primary-hover: #e08b6b;
   --color-cc-user-bubble: #f0efe8;
-  --color-cc-border: rgba(31,30,29,0.10);
+  --color-cc-border: rgba(31,30,29,0.12);
   --color-cc-muted: #6f6e69;
   --color-cc-sidebar: #f5f4ef;
-  --color-cc-input-bg: #FFFFFF;
-  --color-cc-code-bg: #1e1e1e;
-  --color-cc-code-fg: #d4d4d4;
+  --color-cc-input-bg: #ffffff;
+  --color-cc-code-bg: #f5f4ef;
+  --color-cc-code-fg: #2d2d2d;
   --color-cc-hover: rgba(31,30,29,0.05);
   --color-cc-active: rgba(31,30,29,0.09);
   --color-cc-success: #2d7d46;
   --color-cc-error: #c53030;
   --color-cc-warning: #b7791f;
   --color-cc-sidebar-footer: #edece5;
-  --color-cc-separator: rgba(31,30,29,0.06);
+  --color-cc-separator: rgba(31,30,29,0.10);
 }
 
 @keyframes fadeSlideIn {
@@ -129,7 +129,7 @@
   --color-cc-user-bubble: #30302e;
   --color-cc-border: rgba(222,220,209,0.15);
   --color-cc-muted: #c2c0b6;
-  --color-cc-sidebar: #262624;
+  --color-cc-sidebar: #1e1e1c;
   --color-cc-input-bg: #141413;
   --color-cc-code-bg: #141413;
   --color-cc-code-fg: #d4d4d4;
@@ -195,6 +195,23 @@
   }
 }
 
+/* Lock html/body so iOS PWA doesn't rubber-band the whole page.
+   min-height on html compensates for the upward shift caused by
+   apple-mobile-web-app-status-bar-style: black-translucent — iOS moves
+   the document up behind the status bar, creating an equal gap at the
+   bottom where the html background shows through. Adding the status bar
+   height back fills that gap. */
+html {
+  min-height: calc(100% + env(safe-area-inset-top));
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 /* Eliminate 300ms tap delay on interactive elements */
 button,
 [role="button"],
@@ -211,6 +228,12 @@ select {
 }
 .pb-safe {
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+}
+/* Like pb-safe but only adds the raw safe-area inset (no minimum).
+   Use on elements that sit directly above the keyboard (e.g. Composer)
+   so there's no gap when the iOS keyboard is open. */
+.pb-safe-only {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 @media (min-width: 640px) {
   .pb-safe {

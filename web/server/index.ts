@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
+import { cacheControlMiddleware } from "./cache-headers.js";
 import { createRoutes } from "./routes.js";
 import { CliLauncher } from "./cli-launcher.js";
 import { WsBridge } from "./ws-bridge.js";
@@ -32,6 +33,8 @@ import { migrateCronJobsToAgents } from "./agent-cron-migrator.js";
 import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
 import { imagePullManager } from "./image-pull-manager.js";
 import { isRunningAsService } from "./service.js";
+import { getToken, verifyToken } from "./auth-manager.js";
+import { getCookie } from "hono/cookie";
 import type { SocketData } from "./ws-bridge.js";
 import type { ServerWebSocket } from "bun";
 
@@ -125,9 +128,48 @@ const app = new Hono();
 app.use("/api/*", cors());
 app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor));
 
+// Dynamic manifest — embeds auth token in start_url so PWA auto-authenticates
+// on first launch. iOS gives standalone PWAs isolated storage from Safari,
+// so this is the only way to bridge auth across the install boundary.
+app.get("/manifest.json", (c) => {
+  const manifest = {
+    name: "The Companion",
+    short_name: "Companion",
+    description: "Web UI for Claude Code and Codex",
+    start_url: "/",
+    scope: "/",
+    display: "standalone" as const,
+    background_color: "#262624",
+    theme_color: "#d97757",
+    icons: [
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+    ],
+  };
+
+  // If the user has an auth cookie (set during login), embed token in start_url.
+  // Safari sends this cookie when fetching the manifest at "Add to Home Screen" time.
+  const authCookie = getCookie(c, "companion_auth");
+  if (authCookie && verifyToken(authCookie)) {
+    manifest.start_url = `/?token=${authCookie}`;
+  } else {
+    // Localhost bypass — always embed the token for same-machine installs
+    const bunServer = c.env as { requestIP?: (req: Request) => { address: string } | null };
+    const ip = bunServer?.requestIP?.(c.req.raw);
+    const addr = ip?.address ?? "";
+    if (addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1") {
+      manifest.start_url = `/?token=${getToken()}`;
+    }
+  }
+
+  c.header("Content-Type", "application/manifest+json");
+  return c.json(manifest);
+});
+
 // In production, serve built frontend using absolute path (works when installed as npm package)
 if (process.env.NODE_ENV === "production") {
   const distDir = resolve(packageRoot, "dist");
+  app.use("/*", cacheControlMiddleware());
   app.use("/*", serveStatic({ root: distDir }));
   app.get("/*", serveStatic({ path: resolve(distDir, "index.html") }));
 }
@@ -149,9 +191,18 @@ const server = Bun.serve<SocketData>({
       return new Response("WebSocket upgrade failed", { status: 400 });
     }
 
+    // Helper: check if request is from localhost (same machine)
+    const reqIp = server.requestIP(req);
+    const reqAddr = reqIp?.address ?? "";
+    const isLocalhost = reqAddr === "127.0.0.1" || reqAddr === "::1" || reqAddr === "::ffff:127.0.0.1";
+
     // ── Browser WebSocket — connects to a specific session ─────────────
     const browserMatch = url.pathname.match(/^\/ws\/browser\/([a-f0-9-]+)$/);
     if (browserMatch) {
+      const wsToken = url.searchParams.get("token");
+      if (!isLocalhost && !verifyToken(wsToken)) {
+        return new Response("Unauthorized", { status: 401 });
+      }
       const sessionId = browserMatch[1];
       const upgraded = server.upgrade(req, {
         data: { kind: "browser" as const, sessionId },
@@ -163,6 +214,10 @@ const server = Bun.serve<SocketData>({
     // ── Terminal WebSocket — embedded terminal PTY connection ─────────
     const termMatch = url.pathname.match(/^\/ws\/terminal\/([a-f0-9-]+)$/);
     if (termMatch) {
+      const wsToken = url.searchParams.get("token");
+      if (!isLocalhost && !verifyToken(wsToken)) {
+        return new Response("Unauthorized", { status: 401 });
+      }
       const terminalId = termMatch[1];
       const upgraded = server.upgrade(req, {
         data: { kind: "terminal" as const, terminalId },
@@ -209,7 +264,14 @@ const server = Bun.serve<SocketData>({
   },
 });
 
+const authToken = getToken();
 console.log(`Server running on http://localhost:${server.port}`);
+console.log();
+console.log(`  Auth token: ${authToken}`);
+if (process.env.COMPANION_AUTH_TOKEN) {
+  console.log("  (using COMPANION_AUTH_TOKEN env var)");
+}
+console.log();
 console.log(`  CLI WebSocket:     ws://localhost:${server.port}/ws/cli/:sessionId`);
 console.log(`  Browser WebSocket: ws://localhost:${server.port}/ws/browser/:sessionId`);
 

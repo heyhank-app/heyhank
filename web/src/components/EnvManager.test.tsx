@@ -45,7 +45,8 @@ describe("EnvManager existing env edit", () => {
     render(<EnvManager embedded />);
 
     await screen.findByText("Companion");
-    fireEvent.click(screen.getByText("Edit"));
+    // In embedded mode, Edit is an icon button with aria-label
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     // Docker controls are visible in existing env edit mode.
     const baseImageSelect = screen.getAllByRole("combobox")[0] as HTMLSelectElement;

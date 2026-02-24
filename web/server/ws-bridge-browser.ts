@@ -5,6 +5,24 @@ import type {
   ReplayableBrowserIncomingMessage,
 } from "./session-types.js";
 
+/**
+ * Infer the CLI's current status from server-side session state.
+ * Used as a ground-truth correction after event replay to prevent
+ * stale "running"/"generating" state when `result` was pruned from
+ * the event buffer.
+ */
+function inferCliStatus(session: Session): "idle" | "running" | "compacting" | null {
+  if (session.state.is_compacting) return "compacting";
+  const last = session.messageHistory[session.messageHistory.length - 1];
+  if (!last) return "idle";
+  // `result` means the last turn completed → idle
+  if (last.type === "result") return "idle";
+  // `assistant` means CLI sent a response and is executing tools or streaming → running
+  if (last.type === "assistant") return "running";
+  // For other types (user_message, system_event), default to idle
+  return "idle";
+}
+
 export function handleSessionSubscribe(
   session: Session,
   ws: ServerWebSocket<SocketData> | undefined,
@@ -36,6 +54,8 @@ export function handleSessionSubscribe(
         events: transientMissed,
       });
     }
+    // Send ground-truth status after replay to correct stale streaming state
+    sendToBrowser(ws, { type: "status_change", status: inferCliStatus(session) });
     return;
   }
 
@@ -45,6 +65,8 @@ export function handleSessionSubscribe(
     type: "event_replay",
     events: missed,
   });
+  // Send ground-truth status after replay to correct stale streaming state
+  sendToBrowser(ws, { type: "status_change", status: inferCliStatus(session) });
 }
 
 export function handleSessionAck(

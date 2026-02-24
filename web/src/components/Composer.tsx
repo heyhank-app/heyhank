@@ -4,6 +4,7 @@ import { sendToSession } from "../ws.js";
 import { CLAUDE_MODES, CODEX_MODES } from "../utils/backends.js";
 import { api, type SavedPrompt } from "../api.js";
 import type { ModeOption } from "../utils/backends.js";
+import { ModelSwitcher } from "./ModelSwitcher.js";
 
 import { readFileAsBase64, type ImageAttachment } from "../utils/image.js";
 
@@ -390,7 +391,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const canSend = text.trim().length > 0 && isConnected;
 
   return (
-    <div className="shrink-0 px-0 sm:px-6 pt-0 sm:pt-3 pb-safe bg-cc-input-bg sm:bg-transparent">
+    <div className="shrink-0 px-0 sm:px-6 pt-0 sm:pt-3 pb-5 sm:pb-4 bg-cc-input-bg sm:bg-transparent">
       <div className="max-w-3xl mx-auto">
         {/* Image thumbnails */}
         {images.length > 0 && (
@@ -405,7 +406,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
                 <button
                   onClick={() => removeImage(i)}
                   aria-label="Remove image"
-                  className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-cc-error text-white flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                  className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-cc-error text-white flex items-center justify-center text-[10px] opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity cursor-pointer"
                 >
                   <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5">
                     <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
@@ -555,7 +556,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
             </div>
           )}
 
-          {/* Mobile toolbar: mode toggle + secondary actions (hidden on sm+) */}
+          {/* Mobile toolbar: mode toggle + model switcher + secondary actions (hidden on sm+) */}
           <div className="flex items-center gap-1.5 px-3 pt-1.5 pb-0.5 sm:hidden">
             <button
               onClick={toggleMode}
@@ -582,6 +583,8 @@ export function Composer({ sessionId }: { sessionId: string }) {
               )}
               <span>{modeLabel}</span>
             </button>
+
+            <ModelSwitcher sessionId={sessionId} />
 
             <div className="flex-1" />
 
@@ -623,13 +626,102 @@ export function Composer({ sessionId }: { sessionId: string }) {
             </button>
           </div>
 
-          {/* Main input row */}
-          <div className="flex items-end gap-2 px-3 sm:px-2.5 py-1 sm:py-2">
-            {/* Desktop mode toggle (hidden on mobile) */}
+          {/* Textarea row */}
+          <div className="px-3 sm:px-3 pt-1 sm:pt-2.5">
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={handleInput}
+              onKeyDown={handleKeyDown}
+              onClick={syncCaret}
+              onKeyUp={syncCaret}
+              onPaste={handlePaste}
+              aria-label="Message input"
+              placeholder={isConnected
+                ? "Type a message... (/ + @)"
+                : "Waiting for CLI connection..."}
+              disabled={!isConnected}
+              rows={1}
+              className="w-full px-1 py-1.5 text-base sm:text-sm bg-transparent resize-none outline-none text-cc-fg font-sans-ui placeholder:text-cc-muted disabled:opacity-50 overflow-y-auto"
+              style={{ minHeight: "36px", maxHeight: "200px" }}
+            />
+          </div>
+
+          {/* Mobile action row (hidden on sm+) */}
+          <div className="flex items-center justify-end gap-1 px-3 pb-1 sm:hidden">
+            {/* Send/stop */}
+            {isRunning ? (
+              <button
+                onClick={handleInterrupt}
+                className="flex items-center justify-center w-10 h-10 rounded-lg bg-cc-error/10 hover:bg-cc-error/20 text-cc-error transition-colors cursor-pointer"
+                title="Stop generation"
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                  <rect x="3" y="3" width="10" height="10" rx="1" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={!canSend}
+                className={`flex items-center justify-center w-10 h-10 rounded-full transition-colors ${
+                  canSend
+                    ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer shadow-[0_6px_20px_rgba(0,0,0,0.18)]"
+                    : "bg-cc-hover text-cc-muted cursor-not-allowed"
+                }`}
+                title="Send message"
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                  <path d="M3 2l11 6-11 6V9.5l7-1.5-7-1.5V2z" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {/* Desktop action bar: + bookmark mode spacer model send (hidden on mobile) */}
+          <div className="hidden sm:flex items-center gap-1.5 px-2.5 pb-2">
+            {/* + button (image upload) */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!isConnected}
+              className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
+                isConnected
+                  ? "text-cc-muted hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
+                  : "text-cc-muted opacity-30 cursor-not-allowed"
+              }`}
+              title="Attach image"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                <path d="M8 3v10M3 8h10" strokeLinecap="round" />
+              </svg>
+            </button>
+
+            {/* Save prompt (bookmark) */}
+            <button
+              onClick={() => {
+                const defaultName = text.trim().slice(0, 32);
+                setSavePromptName(defaultName || "");
+                setSavePromptError(null);
+                setSavePromptOpen((v) => !v);
+              }}
+              disabled={!isConnected || !text.trim()}
+              className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
+                isConnected && text.trim()
+                  ? "text-cc-muted hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
+                  : "text-cc-muted opacity-30 cursor-not-allowed"
+              }`}
+              title="Save as prompt"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                <path d="M4 2.75h8A1.25 1.25 0 0113.25 4v9.25L8 10.5l-5.25 2.75V4A1.25 1.25 0 014 2.75z" />
+              </svg>
+            </button>
+
+            {/* Mode toggle */}
             <button
               onClick={toggleMode}
               disabled={!isConnected}
-              className={`mb-0.5 hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-semibold transition-all border select-none shrink-0 ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-semibold transition-all border select-none shrink-0 ${
                 !isConnected
                   ? "opacity-30 cursor-not-allowed text-cc-muted border-transparent"
                   : isPlan
@@ -652,92 +744,39 @@ export function Composer({ sessionId }: { sessionId: string }) {
               <span>{modeLabel}</span>
             </button>
 
-            <textarea
-              ref={textareaRef}
-              value={text}
-              onChange={handleInput}
-              onKeyDown={handleKeyDown}
-              onClick={syncCaret}
-              onKeyUp={syncCaret}
-              onPaste={handlePaste}
-              aria-label="Message input"
-              placeholder={isConnected
-                ? "Type a message... (/ + @)"
-                : "Waiting for CLI connection..."}
-              disabled={!isConnected}
-              rows={1}
-              className="flex-1 min-w-0 px-2 py-2 text-base sm:text-sm bg-transparent resize-none outline-none text-cc-fg font-sans-ui placeholder:text-cc-muted disabled:opacity-50 overflow-y-auto"
-              style={{ minHeight: "42px", maxHeight: "200px" }}
-            />
+            {/* Spacer */}
+            <div className="flex-1" />
 
-            {/* Desktop secondary buttons + send/stop */}
-            <div className="mb-0.5 flex items-center gap-1.5 shrink-0">
-              {/* Bookmark + image: desktop only */}
+            {/* Model switcher */}
+            <ModelSwitcher sessionId={sessionId} />
+
+            {/* Send/stop */}
+            {isRunning ? (
               <button
-                onClick={() => {
-                  const defaultName = text.trim().slice(0, 32);
-                  setSavePromptName(defaultName || "");
-                  setSavePromptError(null);
-                  setSavePromptOpen((v) => !v);
-                }}
-                disabled={!isConnected || !text.trim()}
-                className={`hidden sm:flex items-center justify-center w-9 h-9 rounded-lg border transition-colors ${
-                  isConnected && text.trim()
-                    ? "text-cc-muted border-cc-border hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
-                    : "text-cc-muted opacity-30 border-cc-border/60 cursor-not-allowed"
-                }`}
-                title="Save as prompt"
+                onClick={handleInterrupt}
+                className="flex items-center justify-center w-9 h-9 rounded-lg bg-cc-error/10 hover:bg-cc-error/20 text-cc-error transition-colors cursor-pointer"
+                title="Stop generation"
               >
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
-                  <path d="M4 2.75h8A1.25 1.25 0 0113.25 4v9.25L8 10.5l-5.25 2.75V4A1.25 1.25 0 014 2.75z" />
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                  <rect x="3" y="3" width="10" height="10" rx="1" />
                 </svg>
               </button>
-
+            ) : (
               <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={!isConnected}
-                className={`hidden sm:flex items-center justify-center w-9 h-9 rounded-lg border transition-colors ${
-                  isConnected
-                    ? "text-cc-muted border-cc-border hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
-                    : "text-cc-muted opacity-30 border-cc-border/60 cursor-not-allowed"
+                onClick={handleSend}
+                disabled={!canSend}
+                className={`flex items-center justify-center w-9 h-9 rounded-full transition-colors ${
+                  canSend
+                    ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer shadow-[0_6px_20px_rgba(0,0,0,0.18)]"
+                    : "bg-cc-hover text-cc-muted cursor-not-allowed"
                 }`}
-                title="Upload image"
+                title="Send message"
               >
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
-                  <rect x="2" y="2" width="12" height="12" rx="2" />
-                  <circle cx="5.5" cy="5.5" r="1" fill="currentColor" stroke="none" />
-                  <path d="M2 11l3-3 2 2 3-4 4 5" strokeLinecap="round" strokeLinejoin="round" />
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                  <path d="M3 2l11 6-11 6V9.5l7-1.5-7-1.5V2z" />
                 </svg>
               </button>
-
-              {/* Send/stop: always visible */}
-              {isRunning ? (
-                <button
-                  onClick={handleInterrupt}
-                  className="flex items-center justify-center w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-cc-error/10 hover:bg-cc-error/20 text-cc-error transition-colors cursor-pointer"
-                  title="Stop generation"
-                >
-                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
-                    <rect x="3" y="3" width="10" height="10" rx="1" />
-                  </svg>
-                </button>
-              ) : (
-                <button
-                  onClick={handleSend}
-                  disabled={!canSend}
-                  className={`flex items-center justify-center w-10 h-10 sm:w-9 sm:h-9 rounded-full transition-colors ${
-                    canSend
-                      ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer shadow-[0_6px_20px_rgba(0,0,0,0.18)]"
-                      : "bg-cc-hover text-cc-muted cursor-not-allowed"
-                  }`}
-                  title="Send message"
-                >
-                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
-                    <path d="M3 2l11 6-11 6V9.5l7-1.5-7-1.5V2z" />
-                  </svg>
-                </button>
-              )}
-            </div>
+            )}
           </div>
 
         </div>

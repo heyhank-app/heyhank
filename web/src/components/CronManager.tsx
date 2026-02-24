@@ -110,9 +110,9 @@ export function CronManager({ onClose, embedded = false }: Props) {
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<JobFormData>(EMPTY_FORM);
-  const [createForm, setCreateForm] = useState<JobFormData>(EMPTY_FORM);
+  const [formData, setFormData] = useState<JobFormData>(EMPTY_FORM);
   const [creating, setCreating] = useState(false);
-  const [createCollapsed, setCreateCollapsed] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set());
 
   const refresh = useCallback(() => {
@@ -128,16 +128,16 @@ export function CronManager({ onClose, embedded = false }: Props) {
   // ─── Create ──────────────────────────────────────────────────────────
 
   async function handleCreate() {
-    const name = createForm.name.trim();
-    const prompt = createForm.prompt.trim();
+    const name = formData.name.trim();
+    const prompt = formData.prompt.trim();
     if (!name || !prompt) return;
 
     setCreating(true);
     setError("");
 
-    let schedule = createForm.schedule;
-    if (!createForm.recurring && createForm.oneTimeDate) {
-      schedule = new Date(createForm.oneTimeDate).toISOString();
+    let schedule = formData.schedule;
+    if (!formData.recurring && formData.oneTimeDate) {
+      schedule = new Date(formData.oneTimeDate).toISOString();
     }
 
     try {
@@ -145,13 +145,13 @@ export function CronManager({ onClose, embedded = false }: Props) {
         name,
         prompt,
         schedule,
-        recurring: createForm.recurring,
-        backendType: createForm.backendType,
-        model: createForm.model.trim() || undefined,
-        cwd: createForm.cwd.trim() || undefined,
+        recurring: formData.recurring,
+        backendType: formData.backendType,
+        model: formData.model.trim() || undefined,
+        cwd: formData.cwd.trim() || undefined,
       } as Partial<CronJobInfo>);
-      setCreateForm(EMPTY_FORM);
-      setCreateCollapsed(true);
+      setFormData(EMPTY_FORM);
+      setShowCreate(false);
       refresh();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -248,29 +248,158 @@ export function CronManager({ onClose, embedded = false }: Props) {
     }
   }
 
-  // ─── Renderers ───────────────────────────────────────────────────────
+  // ─── Embedded layout ───────────────────────────────────────────────
+
+  if (embedded) {
+    return (
+      <div className="h-full bg-cc-bg text-cc-fg font-sans-ui antialiased overflow-y-auto">
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-10 pb-safe">
+          {/* Header */}
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold text-cc-fg">Scheduled Tasks</h1>
+              <p className="mt-0.5 text-[13px] text-cc-muted leading-relaxed">
+                Run autonomous Claude Code or Codex sessions on a schedule.
+              </p>
+            </div>
+          </div>
+
+          {/* Toolbar */}
+          <div className="flex items-center gap-2 mt-4 mb-5">
+            <div className="flex-1" />
+            <button
+              onClick={() => setShowCreate(!showCreate)}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 min-h-[44px] rounded-lg text-sm font-medium transition-colors cursor-pointer shrink-0 ${
+                showCreate
+                  ? "bg-cc-active text-cc-fg"
+                  : "bg-cc-primary hover:bg-cc-primary-hover text-white"
+              }`}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
+                {showCreate ? <path d="M18 6 6 18M6 6l12 12" /> : <path d="M12 5v14M5 12h14" />}
+              </svg>
+              <span className="hidden sm:inline">{showCreate ? "Cancel" : "New Task"}</span>
+            </button>
+          </div>
+
+          {/* Inline create form */}
+          {showCreate && (
+            <div
+              className="mb-6 rounded-xl bg-cc-card p-4 sm:p-5 space-y-3"
+              style={{ animation: "fadeSlideIn 150ms ease-out" }}
+            >
+              <JobForm form={formData} onChange={setFormData} />
+              <p className="text-[10px] text-cc-muted">
+                Scheduled tasks run with full autonomy (bypassPermissions)
+              </p>
+
+              {error && showCreate && (
+                <div className="px-3 py-2 rounded-lg bg-cc-error/10 text-xs text-cc-error">{error}</div>
+              )}
+
+              <div className="flex items-center justify-end pt-1">
+                <button
+                  onClick={handleCreate}
+                  disabled={!formData.name.trim() || !formData.prompt.trim() || creating}
+                  className={`px-4 py-2.5 min-h-[44px] rounded-lg text-sm font-medium transition-colors ${
+                    formData.name.trim() && formData.prompt.trim() && !creating
+                      ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+                      : "bg-cc-hover text-cc-muted cursor-not-allowed"
+                  }`}
+                >
+                  {creating ? "Creating..." : "Create"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Stats */}
+          <div className="flex items-center gap-2 mb-3 text-[12px] text-cc-muted">
+            <span>{jobs.length} task{jobs.length !== 1 ? "s" : ""}</span>
+            {jobs.filter((j) => j.enabled).length > 0 && (
+              <>
+                <span className="text-cc-border">·</span>
+                <span>{jobs.filter((j) => j.enabled).length} active</span>
+              </>
+            )}
+          </div>
+
+          {/* Job list */}
+          {loading ? (
+            <div className="py-12 text-center text-sm text-cc-muted">Loading scheduled tasks...</div>
+          ) : jobs.length === 0 ? (
+            <div className="py-12 text-center text-sm text-cc-muted">No scheduled tasks yet.</div>
+          ) : (
+            <div className="space-y-1">
+              {jobs.map((job) => {
+                if (editingId === job.id) {
+                  return (
+                    <div
+                      key={job.id}
+                      className="rounded-xl bg-cc-card p-4 space-y-3"
+                      style={{ animation: "fadeSlideIn 150ms ease-out" }}
+                    >
+                      <JobForm form={editForm} onChange={setEditForm} />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={cancelEdit}
+                          className="px-3 py-2.5 min-h-[44px] text-sm rounded-lg text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => void saveEdit()}
+                          className="px-4 py-2.5 min-h-[44px] text-sm rounded-lg font-medium bg-cc-primary hover:bg-cc-primary-hover text-white transition-colors cursor-pointer"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <CronJobRow
+                    key={job.id}
+                    job={job}
+                    isRunning={runningIds.has(job.id)}
+                    onStartEdit={() => startEdit(job)}
+                    onDelete={() => void handleDelete(job.id)}
+                    onToggle={() => void handleToggle(job.id)}
+                    onRunNow={() => void handleRunNow(job.id)}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          {/* Error banner (when not inside create form) */}
+          {error && !showCreate && (
+            <div className="mt-4 px-3 py-2 rounded-lg bg-cc-error/10 text-xs text-cc-error">{error}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Modal layout ──────────────────────────────────────────────────
 
   const errorBanner = error && (
-    <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
-      {error}
-    </div>
+    <div className="px-3 py-2 rounded-lg bg-cc-error/10 text-xs text-cc-error">{error}</div>
   );
 
   const jobsList = loading ? (
     <div className="text-sm text-cc-muted text-center py-6">Loading scheduled tasks...</div>
   ) : jobs.length === 0 ? (
     <div className="text-sm text-cc-muted text-center py-6">
-      No scheduled tasks yet. Create one below.
+      No scheduled tasks yet.
     </div>
   ) : (
     <div className="space-y-3">
       {jobs.map((job) => (
-        <div key={job.id} className="border border-cc-border rounded-[10px] overflow-hidden bg-cc-card">
-          {/* Job header */}
-          <div className="flex items-center gap-2 px-3 py-2.5 bg-cc-card border-b border-cc-border">
+        <div key={job.id} className="rounded-xl bg-cc-card overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2.5">
             <span className="text-sm font-medium text-cc-fg flex-1 truncate">{job.name}</span>
-
-            {/* Backend pill */}
             <span
               className={`text-[9px] font-medium px-1.5 rounded-full leading-[16px] shrink-0 ${
                 job.backendType === "codex"
@@ -280,134 +409,61 @@ export function CronManager({ onClose, embedded = false }: Props) {
             >
               {job.backendType === "codex" ? "Codex" : "Claude"}
             </span>
-
-            {/* Consecutive failures warning */}
             {job.consecutiveFailures > 0 && (
               <span className="text-[9px] font-medium px-1.5 rounded-full leading-[16px] shrink-0 text-cc-error bg-cc-error/10">
                 {job.consecutiveFailures} fail{job.consecutiveFailures !== 1 ? "s" : ""}
               </span>
             )}
-
-            {/* Toggle */}
             <button
               onClick={() => handleToggle(job.id)}
-              className={`relative w-8 h-[18px] rounded-full transition-colors cursor-pointer shrink-0 ${
+              className={`relative w-10 h-6 rounded-full transition-colors cursor-pointer shrink-0 ${
                 job.enabled ? "bg-cc-primary" : "bg-cc-border"
               }`}
               title={job.enabled ? "Disable" : "Enable"}
             >
-              <span
-                className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white transition-transform ${
-                  job.enabled ? "left-[16px]" : "left-[2px]"
-                }`}
-              />
+              <span className={`absolute top-[3px] w-[18px] h-[18px] rounded-full bg-white transition-transform ${job.enabled ? "left-[19px]" : "left-[3px]"}`} />
             </button>
-
-            {/* Action buttons */}
             {editingId === job.id ? (
-              <button
-                onClick={cancelEdit}
-                className="text-xs text-cc-muted hover:text-cc-fg cursor-pointer"
-              >
-                Cancel
-              </button>
+              <button onClick={cancelEdit} className="text-xs px-2 py-1.5 min-h-[44px] text-cc-muted hover:text-cc-fg cursor-pointer">Cancel</button>
             ) : (
               <>
-                <button
-                  onClick={() => handleRunNow(job.id)}
-                  disabled={runningIds.has(job.id)}
-                  className={`text-xs cursor-pointer ${
-                    runningIds.has(job.id)
-                      ? "text-cc-muted cursor-not-allowed"
-                      : "text-cc-primary hover:text-cc-primary-hover"
-                  }`}
-                >
+                <button onClick={() => handleRunNow(job.id)} disabled={runningIds.has(job.id)} className={`text-xs px-2 py-1.5 min-h-[44px] cursor-pointer ${runningIds.has(job.id) ? "text-cc-muted cursor-not-allowed" : "text-cc-primary hover:text-cc-primary-hover"}`}>
                   {runningIds.has(job.id) ? "Running..." : "Run Now"}
                 </button>
-                <button
-                  onClick={() => startEdit(job)}
-                  className="text-xs text-cc-muted hover:text-cc-fg cursor-pointer"
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() => handleDelete(job.id)}
-                  className="text-xs text-cc-muted hover:text-cc-error cursor-pointer"
-                >
-                  Delete
-                </button>
+                <button onClick={() => startEdit(job)} className="text-xs px-2 py-1.5 min-h-[44px] text-cc-muted hover:text-cc-fg cursor-pointer">Edit</button>
+                <button onClick={() => handleDelete(job.id)} className="text-xs px-2 py-1.5 min-h-[44px] text-cc-muted hover:text-cc-error cursor-pointer">Delete</button>
               </>
             )}
           </div>
 
-          {/* Edit form (inline) */}
           {editingId === job.id && (
             <div className="px-3 py-3 space-y-2.5">
               <JobForm form={editForm} onChange={setEditForm} />
               <div className="flex items-center gap-2">
-                <button
-                  onClick={saveEdit}
-                  className="px-3 py-2 text-xs font-medium bg-cc-primary hover:bg-cc-primary-hover text-white rounded-lg transition-colors cursor-pointer"
-                >
-                  Save
-                </button>
-                <button
-                  onClick={cancelEdit}
-                  className="px-3 py-2 text-xs font-medium text-cc-muted hover:text-cc-fg rounded-lg transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
+                <button onClick={saveEdit} className="px-4 py-2.5 min-h-[44px] text-sm font-medium bg-cc-primary hover:bg-cc-primary-hover text-white rounded-lg transition-colors cursor-pointer">Save</button>
+                <button onClick={cancelEdit} className="px-3 py-2.5 min-h-[44px] text-sm font-medium text-cc-muted hover:text-cc-fg rounded-lg transition-colors cursor-pointer">Cancel</button>
               </div>
             </div>
           )}
 
-          {/* Job details (collapsed) */}
           {editingId !== job.id && (
             <div className="px-3 py-2.5 space-y-1.5">
-              {/* Prompt preview */}
-              <div className="text-xs text-cc-muted truncate" title={job.prompt}>
-                {job.prompt}
-              </div>
-
-              {/* Info row */}
+              <div className="text-xs text-cc-muted truncate" title={job.prompt}>{job.prompt}</div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-cc-muted">
-                {/* Schedule */}
                 <span>{humanizeSchedule(job.schedule, job.recurring)}</span>
-
-                {/* Next run */}
-                {job.nextRunAt != null && job.enabled && (
-                  <span>
-                    Next: {timeUntil(job.nextRunAt)}
-                  </span>
-                )}
-
-                {/* Last run */}
+                {job.nextRunAt != null && job.enabled && <span>Next: {timeUntil(job.nextRunAt)}</span>}
                 {job.lastRunAt != null && (
                   <span className="flex items-center gap-1">
                     Last: {timeAgo(job.lastRunAt)}
                     {job.consecutiveFailures === 0 ? (
-                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-success">
-                        <path d="M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2.5-2.5a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z" />
-                      </svg>
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-success"><path d="M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2.5-2.5a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z" /></svg>
                     ) : (
-                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-error">
-                        <path d="M4.646 4.646a.5.5 0 01.708 0L8 7.293l2.646-2.647a.5.5 0 01.708.708L8.707 8l2.647 2.646a.5.5 0 01-.708.708L8 8.707l-2.646 2.647a.5.5 0 01-.708-.708L7.293 8 4.646 5.354a.5.5 0 010-.708z" />
-                      </svg>
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-error"><path d="M4.646 4.646a.5.5 0 01.708 0L8 7.293l2.646-2.647a.5.5 0 01.708.708L8.707 8l2.647 2.646a.5.5 0 01-.708.708L8 8.707l-2.646 2.647a.5.5 0 01-.708-.708L7.293 8 4.646 5.354a.5.5 0 010-.708z" /></svg>
                     )}
                   </span>
                 )}
-
-                {/* Total runs */}
-                {job.totalRuns > 0 && (
-                  <span>{job.totalRuns} run{job.totalRuns !== 1 ? "s" : ""}</span>
-                )}
-
-                {/* Working directory */}
-                {job.cwd && (
-                  <span className="font-mono-code truncate max-w-[200px]" title={job.cwd}>
-                    {job.cwd}
-                  </span>
-                )}
+                {job.totalRuns > 0 && <span>{job.totalRuns} run{job.totalRuns !== 1 ? "s" : ""}</span>}
+                {job.cwd && <span className="font-mono-code truncate max-w-[200px]" title={job.cwd}>{job.cwd}</span>}
               </div>
             </div>
           )}
@@ -417,33 +473,30 @@ export function CronManager({ onClose, embedded = false }: Props) {
   );
 
   const createSection = (
-    <div className="border border-cc-border rounded-[10px] overflow-hidden bg-cc-card">
+    <div className="rounded-xl bg-cc-card overflow-hidden">
       <button
-        onClick={() => setCreateCollapsed(!createCollapsed)}
-        className="w-full flex items-center gap-2 px-3 py-2.5 bg-cc-card border-b border-cc-border cursor-pointer hover:bg-cc-hover transition-colors"
+        onClick={() => setShowCreate(!showCreate)}
+        className="w-full flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-cc-hover transition-colors"
       >
         <svg
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          className={`w-3 h-3 text-cc-muted transition-transform ${createCollapsed ? "" : "rotate-90"}`}
+          viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"
+          className={`w-3 h-3 text-cc-muted transition-transform ${showCreate ? "rotate-90" : ""}`}
         >
           <path d="M6 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
         <span className="text-sm font-medium text-cc-fg">New Scheduled Task</span>
       </button>
-      {!createCollapsed && (
+      {showCreate && (
         <div className="px-3 py-3 space-y-2.5">
-          <JobForm form={createForm} onChange={setCreateForm} />
+          <JobForm form={formData} onChange={setFormData} />
           <div className="text-[10px] text-cc-muted">
             Scheduled tasks run with full autonomy (bypassPermissions)
           </div>
           <button
             onClick={handleCreate}
-            disabled={!createForm.name.trim() || !createForm.prompt.trim() || creating}
-            className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
-              createForm.name.trim() && createForm.prompt.trim() && !creating
+            disabled={!formData.name.trim() || !formData.prompt.trim() || creating}
+            className={`px-4 py-2.5 min-h-[44px] text-sm font-medium rounded-lg transition-colors ${
+              formData.name.trim() && formData.prompt.trim() && !creating
                 ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
                 : "bg-cc-hover text-cc-muted cursor-not-allowed"
             }`}
@@ -455,39 +508,12 @@ export function CronManager({ onClose, embedded = false }: Props) {
     </div>
   );
 
-  // ─── Layout (embedded vs modal) ──────────────────────────────────────
-
-  if (embedded) {
-    return (
-      <div className="h-full bg-cc-bg overflow-y-auto">
-        <div className="max-w-5xl mx-auto px-4 sm:px-8 py-6 sm:py-10">
-          <div className="mb-6">
-            <h1 className="text-xl font-semibold text-cc-fg">Scheduled Tasks</h1>
-            <p className="mt-1 text-sm text-cc-muted">
-              Run autonomous Claude Code or Codex sessions on a schedule.
-            </p>
-          </div>
-          {errorBanner}
-          <div className="mt-4 space-y-4">
-            <section className="bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-3">
-              <h2 className="text-sm font-semibold text-cc-fg">Tasks</h2>
-              {jobsList}
-            </section>
-            <section className="bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-3">
-              {createSection}
-            </section>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const panel = (
     <div
-      className="w-full max-w-2xl max-h-[90dvh] sm:max-h-[80dvh] mx-0 sm:mx-4 flex flex-col bg-cc-bg border border-cc-border rounded-t-[14px] sm:rounded-[14px] shadow-2xl overflow-hidden"
+      className="w-full max-w-2xl max-h-[90dvh] sm:max-h-[80dvh] mx-0 sm:mx-4 flex flex-col bg-cc-bg rounded-t-[14px] sm:rounded-[14px] shadow-2xl overflow-hidden"
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 border-b border-cc-border">
+      <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4">
         <div>
           <h2 className="text-sm font-semibold text-cc-fg">Scheduled Tasks</h2>
           <p className="text-xs text-cc-muted mt-0.5">
@@ -497,7 +523,7 @@ export function CronManager({ onClose, embedded = false }: Props) {
         {onClose && (
           <button
             onClick={onClose}
-            className="w-6 h-6 flex items-center justify-center rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+            className="w-8 h-8 flex items-center justify-center rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
           >
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
               <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
@@ -505,7 +531,7 @@ export function CronManager({ onClose, embedded = false }: Props) {
           </button>
         )}
       </div>
-      <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-3 sm:py-4 space-y-4">
+      <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-3 sm:py-4 pb-safe space-y-4">
         {errorBanner}
         {jobsList}
         {createSection}
@@ -518,6 +544,139 @@ export function CronManager({ onClose, embedded = false }: Props) {
       {panel}
     </div>,
     document.body,
+  );
+}
+
+// ─── Job Row (embedded display only) ──────────────────────────────────────────
+
+interface CronJobRowProps {
+  job: CronJobInfo;
+  isRunning: boolean;
+  onStartEdit: () => void;
+  onDelete: () => void;
+  onToggle: () => void;
+  onRunNow: () => void;
+}
+
+function CronJobRow({ job, isRunning, onStartEdit, onDelete, onToggle, onRunNow }: CronJobRowProps) {
+  return (
+    <div className="group flex items-start gap-3 px-3 py-3 min-h-[44px] rounded-lg hover:bg-cc-hover/60 transition-colors">
+      {/* Icon */}
+      <div className="shrink-0 mt-0.5 w-7 h-7 rounded-md bg-cc-primary/10 flex items-center justify-center">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5 text-cc-primary">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 6v6l4 2" />
+        </svg>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-cc-fg truncate">{job.name}</span>
+          <span
+            className={`text-[9px] font-medium px-1.5 rounded-full leading-[16px] shrink-0 ${
+              job.backendType === "codex"
+                ? "text-blue-500 bg-blue-500/10"
+                : "text-[#5BA8A0] bg-[#5BA8A0]/10"
+            }`}
+          >
+            {job.backendType === "codex" ? "Codex" : "Claude"}
+          </span>
+          {job.consecutiveFailures > 0 && (
+            <span className="text-[9px] font-medium px-1.5 rounded-full leading-[16px] shrink-0 text-cc-error bg-cc-error/10">
+              {job.consecutiveFailures} fail{job.consecutiveFailures !== 1 ? "s" : ""}
+            </span>
+          )}
+          {!job.enabled && (
+            <span className="text-[9px] font-medium px-1.5 rounded-full leading-[16px] shrink-0 text-cc-muted bg-cc-hover">
+              Paused
+            </span>
+          )}
+        </div>
+        <p className="mt-0.5 text-xs text-cc-muted line-clamp-1 leading-relaxed">{job.prompt}</p>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[11px] text-cc-muted">
+          <span>{humanizeSchedule(job.schedule, job.recurring)}</span>
+          {job.nextRunAt != null && job.enabled && (
+            <>
+              <span className="text-cc-border">·</span>
+              <span>Next {timeUntil(job.nextRunAt)}</span>
+            </>
+          )}
+          {job.lastRunAt != null && (
+            <>
+              <span className="text-cc-border">·</span>
+              <span className="flex items-center gap-0.5">
+                Last {timeAgo(job.lastRunAt)}
+                {job.consecutiveFailures === 0 ? (
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 text-cc-success">
+                    <path d="M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2.5-2.5a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 text-cc-error">
+                    <path d="M4.646 4.646a.5.5 0 01.708 0L8 7.293l2.646-2.647a.5.5 0 01.708.708L8.707 8l2.647 2.646a.5.5 0 01-.708.708L8 8.707l-2.646 2.647a.5.5 0 01-.708-.708L7.293 8 4.646 5.354a.5.5 0 010-.708z" />
+                  </svg>
+                )}
+              </span>
+            </>
+          )}
+          {job.totalRuns > 0 && (
+            <>
+              <span className="text-cc-border">·</span>
+              <span>{job.totalRuns} run{job.totalRuns !== 1 ? "s" : ""}</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="shrink-0 flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+        {/* Toggle */}
+        <button
+          onClick={onToggle}
+          className={`relative w-9 h-5 rounded-full transition-colors cursor-pointer shrink-0 ${
+            job.enabled ? "bg-cc-primary" : "bg-cc-border"
+          }`}
+          title={job.enabled ? "Disable" : "Enable"}
+        >
+          <span className={`absolute top-[2px] w-4 h-4 rounded-full bg-white transition-transform ${job.enabled ? "left-[17px]" : "left-[2px]"}`} />
+        </button>
+        {/* Run now */}
+        <button
+          onClick={onRunNow}
+          disabled={isRunning}
+          className={`p-2 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-1.5 rounded-md transition-colors cursor-pointer ${
+            isRunning ? "text-cc-muted cursor-not-allowed" : "text-cc-primary hover:bg-cc-primary/10"
+          }`}
+          aria-label="Run now"
+          title={isRunning ? "Running..." : "Run now"}
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+        </button>
+        {/* Edit */}
+        <button
+          onClick={onStartEdit}
+          className="p-2 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-1.5 rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
+          aria-label="Edit"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5Z" />
+          </svg>
+        </button>
+        {/* Delete */}
+        <button
+          onClick={onDelete}
+          className="p-2 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-1.5 rounded-md text-cc-muted hover:text-cc-error hover:bg-cc-error/10 transition-colors cursor-pointer"
+          aria-label="Delete"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
+            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14Z" />
+          </svg>
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -538,6 +697,8 @@ function JobForm({
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
+  const [showBackendDropdown, setShowBackendDropdown] = useState(false);
+  const backendDropdownRef = useRef<HTMLDivElement>(null);
 
   const models = dynamicModels || getModelsForBackend(form.backendType);
   const selectedModel = models.find((m) => m.value === form.model) || models[0];
@@ -566,10 +727,14 @@ function JobForm({
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Close model dropdown on outside click
+  // Close dropdowns on outside click
   const modelDropdownRefs = useMemo(() => [modelDropdownRef], []);
   const closeModelDropdown = useCallback(() => setShowModelDropdown(false), []);
   useClickOutside(modelDropdownRefs, closeModelDropdown, showModelDropdown);
+
+  const backendDropdownRefs = useMemo(() => [backendDropdownRef], []);
+  const closeBackendDropdown = useCallback(() => setShowBackendDropdown(false), []);
+  useClickOutside(backendDropdownRefs, closeBackendDropdown, showBackendDropdown);
 
   // Folder display label
   const dirLabel = form.cwd
@@ -584,7 +749,7 @@ function JobForm({
         value={form.name}
         onChange={(e) => update({ name: e.target.value })}
         placeholder="Task name (e.g. Daily test suite)"
-        className="w-full px-3 py-2 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50"
+        className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
       />
 
       {/* Prompt */}
@@ -593,7 +758,7 @@ function JobForm({
         onChange={(e) => update({ prompt: e.target.value })}
         placeholder="Prompt for the session (e.g. Run the test suite and fix any failures)"
         rows={4}
-        className="w-full px-3 py-2 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50 resize-y"
+        className="w-full px-3 py-2.5 text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 resize-y transition-shadow"
         style={{ minHeight: "100px" }}
       />
 
@@ -602,7 +767,7 @@ function JobForm({
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => update({ recurring: true })}
-            className={`px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
+            className={`px-2.5 py-2 min-h-[44px] text-xs font-medium rounded-lg transition-colors cursor-pointer ${
               form.recurring
                 ? "bg-cc-primary text-white"
                 : "bg-cc-hover text-cc-muted hover:text-cc-fg"
@@ -612,7 +777,7 @@ function JobForm({
           </button>
           <button
             onClick={() => update({ recurring: false })}
-            className={`px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
+            className={`px-2.5 py-2 min-h-[44px] text-xs font-medium rounded-lg transition-colors cursor-pointer ${
               !form.recurring
                 ? "bg-cc-primary text-white"
                 : "bg-cc-hover text-cc-muted hover:text-cc-fg"
@@ -630,10 +795,10 @@ function JobForm({
                 <button
                   key={preset.value}
                   onClick={() => update({ schedule: preset.value })}
-                  className={`px-2 py-1 text-[10px] font-medium rounded-md transition-colors cursor-pointer ${
+                  className={`px-2.5 py-2 min-h-[44px] text-xs font-medium rounded-md transition-colors cursor-pointer ${
                     form.schedule === preset.value
-                      ? "bg-cc-primary/20 text-cc-primary border border-cc-primary/30"
-                      : "bg-cc-hover text-cc-muted hover:text-cc-fg border border-transparent"
+                      ? "bg-cc-primary/20 text-cc-primary"
+                      : "bg-cc-hover text-cc-muted hover:text-cc-fg"
                   }`}
                 >
                   {preset.label}
@@ -646,7 +811,7 @@ function JobForm({
               value={form.schedule}
               onChange={(e) => update({ schedule: e.target.value })}
               placeholder="Cron expression (e.g. 0 8 * * *)"
-              className="w-full px-3 py-2 text-sm font-mono-code bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50"
+              className="w-full px-3 py-2.5 min-h-[44px] text-sm font-mono-code bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
             />
             <div className="text-[10px] text-cc-muted">
               {humanizeSchedule(form.schedule, true)}
@@ -657,33 +822,54 @@ function JobForm({
             type="datetime-local"
             value={form.oneTimeDate}
             onChange={(e) => update({ oneTimeDate: e.target.value })}
-            className="w-full px-3 py-2 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50"
+            className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
           />
         )}
       </div>
 
       {/* Backend + Model + Folder row */}
       <div className="flex flex-wrap items-center gap-1.5">
-        {/* Backend toggle */}
-        <button
-          onClick={() => {
-            const next = form.backendType === "claude" ? "codex" : "claude";
-            update({ backendType: next as "claude" | "codex", model: getDefaultModel(next as "claude" | "codex") });
-          }}
-          className={`px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
-            form.backendType === "codex"
-              ? "bg-blue-500/15 text-blue-500 border border-blue-500/30"
-              : "bg-[#5BA8A0]/15 text-[#5BA8A0] border border-[#5BA8A0]/30"
-          }`}
-        >
-          {form.backendType === "codex" ? "Codex" : "Claude Code"}
-        </button>
+        {/* Backend selector */}
+        <div className="relative" ref={backendDropdownRef}>
+          <button
+            onClick={() => setShowBackendDropdown(!showBackendDropdown)}
+            className="flex items-center gap-1.5 px-2.5 py-2 min-h-[44px] text-xs font-medium text-cc-fg rounded-lg hover:bg-cc-hover transition-colors cursor-pointer"
+          >
+            <span>{form.backendType === "codex" ? "Codex" : "Claude Code"}</span>
+            <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
+              <path d="M4 6l4 4 4-4" />
+            </svg>
+          </button>
+          {showBackendDropdown && (
+            <div className="absolute left-0 bottom-full mb-1 w-40 bg-cc-card rounded-xl shadow-lg z-10 py-1">
+              {(
+                [
+                  { value: "claude", label: "Claude Code" },
+                  { value: "codex", label: "Codex" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => {
+                    update({ backendType: opt.value, model: getDefaultModel(opt.value) });
+                    setShowBackendDropdown(false);
+                  }}
+                  className={`w-full px-3 py-2.5 min-h-[44px] text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
+                    opt.value === form.backendType ? "text-cc-primary font-medium" : "text-cc-fg"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Model dropdown */}
         <div className="relative" ref={modelDropdownRef}>
           <button
             onClick={() => setShowModelDropdown(!showModelDropdown)}
-            className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-cc-muted hover:text-cc-fg rounded-lg hover:bg-cc-hover transition-colors cursor-pointer border border-cc-border"
+            className="flex items-center gap-1.5 px-2.5 py-2 min-h-[44px] text-xs text-cc-muted hover:text-cc-fg rounded-lg hover:bg-cc-hover transition-colors cursor-pointer"
           >
             <span>{selectedModel?.icon}</span>
             <span>{selectedModel?.label}</span>
@@ -692,7 +878,7 @@ function JobForm({
             </svg>
           </button>
           {showModelDropdown && (
-            <div className="absolute left-0 bottom-full mb-1 w-52 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1">
+            <div className="absolute left-0 bottom-full mb-1 w-52 bg-cc-card rounded-xl shadow-lg z-10 py-1">
               {models.map((m) => (
                 <button
                   key={m.value}
@@ -700,7 +886,7 @@ function JobForm({
                     update({ model: m.value });
                     setShowModelDropdown(false);
                   }}
-                  className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-2 ${
+                  className={`w-full px-3 py-2.5 min-h-[44px] text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-2 ${
                     m.value === form.model ? "text-cc-primary font-medium" : "text-cc-fg"
                   }`}
                 >
@@ -715,7 +901,7 @@ function JobForm({
         {/* Folder picker */}
         <button
           onClick={() => setShowFolderPicker(true)}
-          className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-cc-muted hover:text-cc-fg rounded-lg hover:bg-cc-hover transition-colors cursor-pointer border border-cc-border"
+          className="flex items-center gap-1.5 px-2.5 py-2 min-h-[44px] text-xs text-cc-muted hover:text-cc-fg rounded-lg hover:bg-cc-hover transition-colors cursor-pointer"
         >
           <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
             <path d="M1 3.5A1.5 1.5 0 012.5 2h3.379a1.5 1.5 0 011.06.44l.622.621a.5.5 0 00.353.146H13.5A1.5 1.5 0 0115 4.707V12.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" />

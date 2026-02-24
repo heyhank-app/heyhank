@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { setCookie } from "hono/cookie";
 import { streamSSE, type SSEStreamingApi } from "hono/streaming";
 import { execSync } from "node:child_process";
 import { resolveBinary } from "./path-resolver.js";
@@ -32,11 +33,14 @@ import { registerSystemRoutes } from "./routes/system-routes.js";
 import { registerLinearRoutes } from "./routes/linear-routes.js";
 import { discoverClaudeSessions } from "./claude-session-discovery.js";
 import { getClaudeSessionHistoryPage } from "./claude-session-history.js";
+import { verifyToken, getToken, getLanAddress, regenerateToken, getAllAddresses } from "./auth-manager.js";
+import QRCode from "qrcode";
 
 const UPDATE_CHECK_STALE_MS = 5 * 60 * 1000;
 const ROUTES_DIR = dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = dirname(ROUTES_DIR);
 const VSCODE_EDITOR_CONTAINER_PORT = 13337;
+const CODEX_APP_SERVER_CONTAINER_PORT = Number(process.env.COMPANION_CODEX_CONTAINER_WS_PORT || "4502");
 const VSCODE_EDITOR_HOST_PORT = Number(process.env.COMPANION_EDITOR_PORT || "13338");
 
 function shellEscapeArg(value: string): string {
@@ -55,6 +59,110 @@ export function createRoutes(
   agentExecutor?: import("./agent-executor.js").AgentExecutor,
 ) {
   const api = new Hono();
+
+  // ─── Auth endpoints (exempt from auth middleware) ──────────────────
+
+  api.post("/auth/verify", async (c) => {
+    const body = await c.req.json().catch(() => ({} as { token?: string }));
+    if (verifyToken(body.token)) {
+      // Set cookie so the dynamic manifest can embed the token in start_url.
+      // This bridges auth from Safari to standalone PWA on iOS (isolated storage).
+      setCookie(c, "companion_auth", body.token!, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "Strict",
+        maxAge: 365 * 24 * 60 * 60,
+      });
+      return c.json({ ok: true });
+    }
+    return c.json({ error: "Invalid token" }, 401);
+  });
+
+  api.get("/auth/qr", async (c) => {
+    // QR endpoint requires auth — only authenticated users can generate QR for mobile
+    const authHeader = c.req.header("Authorization");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!isLocalhostRequest(c) && !verifyToken(token)) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    const port = Number(process.env.PORT) || (process.env.NODE_ENV === "production" ? 3456 : 3457);
+    const authToken = getToken();
+
+    // Build QR codes for each remote address (skip localhost — it auto-auths).
+    // Each QR encodes the full login URL so the native iPhone Camera app can
+    // open it directly: scan → tap popup → Safari opens → auto-authenticated.
+    const addresses = getAllAddresses().filter((a) => a.ip !== "localhost");
+    const qrCodes = await Promise.all(
+      addresses.map(async (a) => {
+        const loginUrl = `http://${a.ip}:${port}/?token=${authToken}`;
+        const qrDataUrl = await QRCode.toDataURL(loginUrl, { width: 256, margin: 2 });
+        return { label: a.label, url: `http://${a.ip}:${port}`, qrDataUrl };
+      }),
+    );
+
+    return c.json({ qrCodes });
+  });
+
+  // ─── Localhost auto-auth (exempt from auth middleware) ────────────
+  // Localhost users are on the same machine as the server, so they can
+  // auto-authenticate without a token. This makes first-launch seamless.
+
+  // Check if the request comes from localhost (same machine as the server).
+  // Uses Bun's requestIP which returns the actual TCP source address.
+  // Returns false in test environments where c.env is not a Bun server.
+  function isLocalhostRequest(c: { env: unknown; req: { raw: Request } }): boolean {
+    const bunServer = c.env as { requestIP?: (req: Request) => { address: string } | null };
+    const ip = bunServer?.requestIP?.(c.req.raw);
+    const addr = ip?.address ?? "";
+    return addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1";
+  }
+
+  api.get("/auth/auto", (c) => {
+    if (isLocalhostRequest(c)) {
+      const token = getToken();
+      setCookie(c, "companion_auth", token, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "Strict",
+        maxAge: 365 * 24 * 60 * 60,
+      });
+      return c.json({ ok: true, token });
+    }
+    return c.json({ ok: false });
+  });
+
+  // ─── Auth middleware (protects all routes below) ───────────────────
+
+  api.use("/*", async (c, next) => {
+    // Skip auth for the verify endpoint (handled above)
+    if (c.req.path === "/auth/verify") {
+      return next();
+    }
+
+    // Localhost bypass — same machine as the server, always trusted
+    if (isLocalhostRequest(c)) {
+      return next();
+    }
+
+    const authHeader = c.req.header("Authorization");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!verifyToken(token)) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+    return next();
+  });
+
+  // ─── Auth management (protected) ──────────────────────────────────
+
+  api.get("/auth/token", (c) => {
+    return c.json({ token: getToken() });
+  });
+
+  api.post("/auth/regenerate", (c) => {
+    const token = regenerateToken();
+    return c.json({ token });
+  });
 
   // ─── SDK Sessions (--sdk-url) ─────────────────────────────────────
 
@@ -119,7 +227,7 @@ export function createRoutes(
         if (repoInfo) {
           const fetchResult = gitUtils.gitFetch(repoInfo.repoRoot);
           if (!fetchResult.success) {
-            throw new Error(`git fetch failed before session create: ${fetchResult.output}`);
+            console.warn(`[routes] git fetch failed (non-fatal): ${fetchResult.output}`);
           }
 
           if (repoInfo.currentBranch !== body.branch) {
@@ -190,7 +298,11 @@ export function createRoutes(
             ? body.container.ports.map(Number).filter((n: number) => n > 0)
             : []);
         const containerPorts = Array.from(
-          new Set([...requestedPorts, VSCODE_EDITOR_CONTAINER_PORT]),
+          new Set([
+            ...requestedPorts,
+            VSCODE_EDITOR_CONTAINER_PORT,
+            ...(backend === "codex" ? [CODEX_APP_SERVER_CONTAINER_PORT] : []),
+          ]),
         );
         const cConfig: ContainerConfig = {
           image: effectiveImage,
@@ -384,13 +496,9 @@ export function createRoutes(
             await emitProgress(stream, "fetching_git", "Fetching from remote...", "in_progress");
             const fetchResult = gitUtils.gitFetch(repoInfo.repoRoot);
             if (!fetchResult.success) {
-              await stream.writeSSE({
-                event: "error",
-                data: JSON.stringify({ error: `git fetch failed: ${fetchResult.output}`, step: "fetching_git" }),
-              });
-              return;
+              console.warn(`[routes] git fetch failed (non-fatal): ${fetchResult.output}`);
             }
-            await emitProgress(stream, "fetching_git", "Fetch complete", "done");
+            await emitProgress(stream, "fetching_git", fetchResult.success ? "Fetch complete" : "Fetch skipped (offline?)", "done");
 
             if (repoInfo.currentBranch !== body.branch) {
               await emitProgress(stream, "checkout_branch", `Checking out ${body.branch}...`, "in_progress");
@@ -486,7 +594,11 @@ export function createRoutes(
               ? body.container.ports.map(Number).filter((n: number) => n > 0)
               : []);
           const containerPorts = Array.from(
-            new Set([...requestedPorts, VSCODE_EDITOR_CONTAINER_PORT]),
+            new Set([
+              ...requestedPorts,
+              VSCODE_EDITOR_CONTAINER_PORT,
+              ...(backend === "codex" ? [CODEX_APP_SERVER_CONTAINER_PORT] : []),
+            ]),
           );
           const cConfig: ContainerConfig = {
             image: effectiveImage,
@@ -867,6 +979,310 @@ export function createRoutes(
       return c.json({ error: result.error || "Relaunch failed" }, status);
     }
     return c.json({ ok: true });
+  });
+
+  // Kill a background process spawned by a session
+  api.post("/sessions/:id/processes/:taskId/kill", async (c) => {
+    const sessionId = c.req.param("id");
+    const taskId = c.req.param("taskId");
+
+    // Validate taskId to prevent command injection (hex string from Claude Code)
+    if (!/^[a-f0-9]+$/i.test(taskId)) {
+      return c.json({ error: "Invalid task ID format" }, 400);
+    }
+
+    const session = launcher.getSession(sessionId);
+    if (!session) return c.json({ error: "Session not found" }, 404);
+    if (!session.pid) return c.json({ error: "Session PID unknown" }, 503);
+
+    try {
+      const { execFileSync } = await import("node:child_process");
+      // The taskId appears in the output file path of the background process,
+      // so pkill -f matches it reliably.
+      // Use execFileSync (array form) to avoid shell injection — taskId is passed
+      // as an argument, never interpolated into a shell string.
+      if (session.containerId) {
+        containerManager.execInContainer(
+          session.containerId,
+          ["pkill", "-f", taskId],
+          5_000,
+        );
+      } else {
+        try {
+          execFileSync("pkill", ["-f", taskId], {
+            timeout: 5_000,
+            encoding: "utf-8",
+          });
+        } catch {
+          // pkill returns non-zero when no processes matched — that's fine
+        }
+      }
+      return c.json({ ok: true, taskId });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return c.json({ error: `Kill failed: ${msg}` }, 500);
+    }
+  });
+
+  // Kill all background processes for a session
+  api.post("/sessions/:id/processes/kill-all", async (c) => {
+    const sessionId = c.req.param("id");
+    const body = await c.req.json().catch(() => ({} as { taskIds?: string[] }));
+    const taskIds = Array.isArray(body.taskIds) ? body.taskIds : [];
+
+    const session = launcher.getSession(sessionId);
+    if (!session) return c.json({ error: "Session not found" }, 404);
+    if (!session.pid) return c.json({ error: "Session PID unknown" }, 503);
+
+    const results: { taskId: string; ok: boolean; error?: string }[] = [];
+    const { execSync } = await import("node:child_process");
+
+    for (const taskId of taskIds) {
+      if (!/^[a-f0-9]+$/i.test(taskId)) {
+        results.push({ taskId, ok: false, error: "Invalid task ID" });
+        continue;
+      }
+      try {
+        if (session.containerId) {
+          containerManager.execInContainer(
+            session.containerId,
+            ["sh", "-c", `pkill -f ${shellEscapeArg(taskId)} 2>/dev/null; true`],
+            5_000,
+          );
+        } else {
+          execSync(`pkill -f ${shellEscapeArg(taskId)} 2>/dev/null; true`, {
+            timeout: 5_000,
+            encoding: "utf-8",
+          });
+        }
+        results.push({ taskId, ok: true });
+      } catch (e) {
+        results.push({ taskId, ok: false, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    return c.json({ ok: true, results });
+  });
+
+  // Scan for dev-related processes listening on TCP ports
+  const DEV_COMMANDS = new Set([
+    "node", "bun", "deno", "ts-node", "tsx",
+    "python", "python3", "uvicorn", "gunicorn", "flask",
+    "ruby", "rails", "puma",
+    "go", "air",
+    "java", "gradle", "mvn",
+    "cargo",
+    "php", "php-fpm",
+    "dotnet",
+    "vite", "next", "nuxt", "remix", "astro",
+    "webpack", "esbuild", "rollup", "parcel",
+    "tsc",
+  ]);
+  // System/IDE processes to exclude even if they listen on a port
+  const EXCLUDE_COMMANDS = new Set([
+    "launchd", "mDNSResponder", "rapportd", "systemd",
+    "sshd", "cupsd", "httpd", "nginx", "postgres", "mysqld",
+    "Cursor", "Code", "Electron", "WindowServer", "BetterDisplay",
+    "com.docker", "Docker", "docker-proxy", "vpnkit",
+    "Dropbox", "Creative Cloud", "zoom.us",
+    "ControlCenter", "Finder", "loginwindow", "SystemUIServer",
+  ]);
+
+  function parseLsofCwd(raw: string): string | undefined {
+    // `lsof -Fn` emits records like:
+    // p1234\nfcwd\nn/Users/me/project\n
+    const match = raw.match(/^n(.+)$/m);
+    const cwd = match?.[1]?.trim();
+    return cwd || undefined;
+  }
+
+  function parsePsStartTime(raw: string): number | undefined {
+    const text = raw.trim();
+    if (!text) return undefined;
+    const ts = Date.parse(text);
+    if (!Number.isFinite(ts)) return undefined;
+    return ts;
+  }
+
+  api.get("/sessions/:id/processes/system", async (c) => {
+    const sessionId = c.req.param("id");
+    const session = launcher.getSession(sessionId);
+    if (!session) return c.json({ error: "Session not found" }, 404);
+
+    try {
+      let raw: string;
+      if (session.containerId) {
+        raw = containerManager.execInContainer(
+          session.containerId,
+          ["sh", "-c", "lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null || ss -tlnp 2>/dev/null || true"],
+          5_000,
+        );
+      } else {
+        raw = execSync("lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null || true", {
+          timeout: 5_000,
+          encoding: "utf-8",
+        });
+      }
+
+      // Parse lsof output: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+      const lines = raw.trim().split("\n").slice(1); // skip header
+      const pidMap = new Map<number, { command: string; ports: Set<number> }>();
+
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length < 9) continue;
+        const command = parts[0];
+        const pid = parseInt(parts[1], 10);
+        if (isNaN(pid)) continue;
+        if (EXCLUDE_COMMANDS.has(command)) continue;
+
+        // macOS lsof NAME ends like `TCP *:3000 (LISTEN)`, so the final token is
+        // often `(LISTEN)` rather than the address. Parse from the full line.
+        const portMatch = line.match(/:(\d+)\s+\(LISTEN\)\s*$/) ?? line.match(/:(\d+)\s*$/);
+        if (!portMatch) continue;
+        const port = parseInt(portMatch[1], 10);
+
+        const existing = pidMap.get(pid);
+        if (existing) {
+          existing.ports.add(port);
+        } else {
+          pidMap.set(pid, { command, ports: new Set([port]) });
+        }
+      }
+
+      // Get full command line for each PID
+      const processes: {
+        pid: number;
+        command: string;
+        fullCommand: string;
+        ports: number[];
+        cwd?: string;
+        startedAt?: number;
+      }[] = [];
+
+      for (const [pid, info] of pidMap) {
+        // Skip if command isn't dev-related (check both exact name and prefix)
+        const lowerCmd = info.command.toLowerCase();
+        const isDev = DEV_COMMANDS.has(lowerCmd)
+          || DEV_COMMANDS.has(info.command)
+          || [...DEV_COMMANDS].some((d) => lowerCmd.startsWith(d));
+
+        if (!isDev) continue;
+
+        let fullCommand = info.command;
+        let cwd: string | undefined;
+        let startedAt: number | undefined;
+        try {
+          if (session.containerId) {
+            fullCommand = containerManager.execInContainer(
+              session.containerId,
+              ["ps", "-p", String(pid), "-o", "args="],
+              2_000,
+            ).trim();
+          } else {
+            fullCommand = execSync(`ps -p ${pid} -o args= 2>/dev/null || true`, {
+              timeout: 2_000,
+              encoding: "utf-8",
+            }).trim();
+          }
+        } catch {
+          // Fall back to short command name
+        }
+
+        try {
+          if (session.containerId) {
+            const cwdRaw = containerManager.execInContainer(
+              session.containerId,
+              ["sh", "-c", `readlink /proc/${pid}/cwd 2>/dev/null || true`],
+              2_000,
+            ).trim();
+            cwd = cwdRaw || undefined;
+          } else {
+            const cwdRaw = execSync(`lsof -a -p ${pid} -d cwd -Fn 2>/dev/null || true`, {
+              timeout: 2_000,
+              encoding: "utf-8",
+            });
+            cwd = parseLsofCwd(cwdRaw);
+          }
+        } catch {
+          // Best-effort only
+        }
+
+        try {
+          if (session.containerId) {
+            const startRaw = containerManager.execInContainer(
+              session.containerId,
+              ["sh", "-c", `ps -p ${pid} -o lstart= 2>/dev/null || true`],
+              2_000,
+            );
+            startedAt = parsePsStartTime(startRaw);
+          } else {
+            const startRaw = execSync(`ps -p ${pid} -o lstart= 2>/dev/null || true`, {
+              timeout: 2_000,
+              encoding: "utf-8",
+            });
+            startedAt = parsePsStartTime(startRaw);
+          }
+        } catch {
+          // Best-effort only
+        }
+
+        processes.push({
+          pid,
+          command: info.command,
+          fullCommand: fullCommand || info.command,
+          ports: [...info.ports].sort((a, b) => a - b),
+          cwd,
+          startedAt,
+        });
+      }
+
+      // Sort by port (lowest first)
+      processes.sort((a, b) => (a.ports[0] || 0) - (b.ports[0] || 0));
+
+      return c.json({ ok: true, processes });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return c.json({ error: `Scan failed: ${msg}` }, 500);
+    }
+  });
+
+  // Kill a system process by PID
+  api.post("/sessions/:id/processes/system/:pid/kill", async (c) => {
+    const sessionId = c.req.param("id");
+    const pidStr = c.req.param("pid");
+    const pid = parseInt(pidStr, 10);
+
+    if (isNaN(pid) || pid <= 0) {
+      return c.json({ error: "Invalid PID" }, 400);
+    }
+
+    const session = launcher.getSession(sessionId);
+    if (!session) return c.json({ error: "Session not found" }, 404);
+
+    // Safety: don't allow killing the Companion server or Claude CLI process itself
+    if (pid === process.pid) {
+      return c.json({ error: "Cannot kill the Companion server" }, 403);
+    }
+    if (session.pid === pid) {
+      return c.json({ error: "Use the session kill endpoint to terminate Claude" }, 403);
+    }
+
+    try {
+      if (session.containerId) {
+        containerManager.execInContainer(
+          session.containerId,
+          ["kill", "-TERM", String(pid)],
+          5_000,
+        );
+      } else {
+        process.kill(pid, "SIGTERM");
+      }
+      return c.json({ ok: true, pid });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return c.json({ error: `Kill failed: ${msg}` }, 500);
+    }
   });
 
   api.delete("/sessions/:id", async (c) => {

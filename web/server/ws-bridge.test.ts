@@ -863,6 +863,145 @@ describe("Browser handlers", () => {
     expect(replayMsg.events.some((e: any) => e.message.type === "stream_event")).toBe(true);
   });
 
+  it("session_subscribe: sends ground-truth status_change=idle after event_replay when last history is result", () => {
+    // When the CLI finished (result in messageHistory), the server should send
+    // a status_change after event_replay so the browser clears stale "running" state.
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+
+    // Simulate a completed turn: assistant → result in history
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "a1",
+        type: "message",
+        role: "assistant",
+        model: "claude-sonnet-4-6",
+        content: [{ type: "text", text: "hello" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      },
+      parent_tool_use_id: null,
+      uuid: "u1",
+      session_id: "s1",
+    }));
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result",
+      is_error: false,
+      total_cost_usd: 0.01,
+      num_turns: 1,
+      session_id: "s1",
+    }));
+
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "session_subscribe",
+      last_seq: 0,
+    }));
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    // Last message should be a status_change with idle
+    const statusMsg = calls.filter((c: any) => c.type === "status_change");
+    expect(statusMsg.length).toBeGreaterThanOrEqual(1);
+    const lastStatus = statusMsg[statusMsg.length - 1];
+    expect(lastStatus.status).toBe("idle");
+  });
+
+  it("session_subscribe: sends ground-truth status_change=running after event_replay when last history is assistant", () => {
+    // When the CLI is mid-turn (assistant in messageHistory but no result yet),
+    // the ground-truth status should be "running".
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "a1",
+        type: "message",
+        role: "assistant",
+        model: "claude-sonnet-4-6",
+        content: [{ type: "text", text: "working on it" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      },
+      parent_tool_use_id: null,
+      uuid: "u1",
+      session_id: "s1",
+    }));
+
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "session_subscribe",
+      last_seq: 0,
+    }));
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const statusMsg = calls.filter((c: any) => c.type === "status_change");
+    expect(statusMsg.length).toBeGreaterThanOrEqual(1);
+    const lastStatus = statusMsg[statusMsg.length - 1];
+    expect(lastStatus.status).toBe("running");
+  });
+
+  it("session_subscribe: sends status_change=idle in gap path when session completed", () => {
+    // Even when falling back to message_history + transient replay,
+    // a trailing status_change should correct stale state.
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "a1",
+        type: "message",
+        role: "assistant",
+        model: "claude-sonnet-4-6",
+        content: [{ type: "text", text: "done" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      },
+      parent_tool_use_id: null,
+      uuid: "u1",
+      session_id: "s1",
+    }));
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result",
+      is_error: false,
+      total_cost_usd: 0.01,
+      num_turns: 1,
+      session_id: "s1",
+    }));
+    // Add a stream event and then force a gap by trimming the buffer
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "x" } },
+      parent_tool_use_id: null,
+      uuid: "se1",
+      session_id: "s1",
+    }));
+    const session = bridge.getSession("s1")!;
+    session.eventBuffer.shift(); // force a gap
+
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "session_subscribe",
+      last_seq: 1,
+    }));
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const statusMsg = calls.filter((c: any) => c.type === "status_change");
+    expect(statusMsg.length).toBeGreaterThanOrEqual(1);
+    expect(statusMsg[statusMsg.length - 1].status).toBe("idle");
+  });
+
   it("session_ack: updates lastAckSeq for the session", () => {
     const browser = makeBrowserSocket("s1");
     bridge.handleBrowserOpen(browser, "s1");

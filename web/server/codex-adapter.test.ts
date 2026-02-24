@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { CodexAdapter } from "./codex-adapter.js";
+import type { ICodexTransport } from "./codex-adapter.js";
 import type { BrowserIncomingMessage, BrowserOutgoingMessage } from "./session-types.js";
 
 // ─── Mock Subprocess ──────────────────────────────────────────────────────────
@@ -2352,5 +2353,140 @@ describe("CodexAdapter", () => {
     expect(lastUpdate.session.codex_token_details?.inputTokens).toBe(1_150_000);
     expect(lastUpdate.session.codex_token_details?.outputTokens).toBe(50_000);
     expect(lastUpdate.session.codex_token_details?.cachedInputTokens).toBe(930_000);
+  });
+});
+
+// ─── ICodexTransport-based tests ──────────────────────────────────────────────
+
+/**
+ * Verify that CodexAdapter accepts a pre-built ICodexTransport directly
+ * (instead of a Subprocess). This is the path used by WebSocket transport.
+ */
+describe("CodexAdapter with ICodexTransport", () => {
+  /** Create a mock ICodexTransport with controllable behavior. */
+  function createMockTransport() {
+    let notificationHandler: ((method: string, params: Record<string, unknown>) => void) | null = null;
+    let requestHandler: ((method: string, id: number, params: Record<string, unknown>) => void) | null = null;
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const notifications: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const responses: Array<{ id: number; result: unknown }> = [];
+
+    // Track pending call resolvers for simulating responses
+    let nextCallId = 0;
+    const pendingCalls = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+
+    const transport: ICodexTransport = {
+      call: vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
+        const id = ++nextCallId;
+        calls.push({ method, params });
+        return new Promise((resolve, reject) => {
+          pendingCalls.set(id, { resolve, reject });
+        });
+      }),
+      notify: vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
+        notifications.push({ method, params });
+      }),
+      respond: vi.fn(async (id: number, result: unknown) => {
+        responses.push({ id, result });
+      }),
+      onNotification: vi.fn((handler) => { notificationHandler = handler; }),
+      onRequest: vi.fn((handler) => { requestHandler = handler; }),
+      onRawIncoming: vi.fn(),
+      onRawOutgoing: vi.fn(),
+      isConnected: vi.fn(() => true),
+    };
+
+    return {
+      transport,
+      calls,
+      notifications,
+      responses,
+      /** Resolve the Nth call()'s promise (1-indexed). */
+      resolveCall(n: number, result: unknown) {
+        const pending = pendingCalls.get(n);
+        if (pending) {
+          pendingCalls.delete(n);
+          pending.resolve(result);
+        }
+      },
+      /** Simulate a notification FROM the Codex server. */
+      pushNotification(method: string, params: Record<string, unknown>) {
+        notificationHandler?.(method, params);
+      },
+      /** Simulate a request FROM the Codex server (needs a response). */
+      pushRequest(method: string, id: number, params: Record<string, unknown>) {
+        requestHandler?.(method, id, params);
+      },
+    };
+  }
+
+  it("accepts ICodexTransport directly and wires handlers", async () => {
+    // Verify that passing an ICodexTransport does not throw and wires the handlers.
+    const mock = createMockTransport();
+    const adapter = new CodexAdapter(mock.transport, "test-session-transport", { model: "o4-mini" });
+
+    // The adapter should register notification and request handlers
+    expect(mock.transport.onNotification).toHaveBeenCalled();
+    expect(mock.transport.onRequest).toHaveBeenCalled();
+
+    // The adapter should send an initialize call
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(mock.calls[0].method).toBe("initialize");
+  });
+
+  it("disconnect calls killProcess callback when using transport", async () => {
+    const killProcess = vi.fn(async () => {});
+    const mock = createMockTransport();
+    const adapter = new CodexAdapter(mock.transport, "test-session-transport", {
+      model: "o4-mini",
+      killProcess,
+    });
+
+    await adapter.disconnect();
+
+    expect(killProcess).toHaveBeenCalledTimes(1);
+  });
+
+  it("handleTransportClose fires disconnectCb and cleans up", async () => {
+    const mock = createMockTransport();
+    const adapter = new CodexAdapter(mock.transport, "test-session-transport", { model: "o4-mini" });
+    const disconnectCb = vi.fn();
+    adapter.onDisconnect(disconnectCb);
+
+    adapter.handleTransportClose();
+
+    expect(disconnectCb).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits session_init after successful initialization via transport", async () => {
+    const mock = createMockTransport();
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(mock.transport, "test-session-transport", {
+      model: "o4-mini",
+      cwd: "/tmp",
+    });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+
+    // Wait for initialize call to be made
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Resolve initialize response
+    mock.resolveCall(1, { userAgent: "codex" });
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Resolve thread/start response
+    mock.resolveCall(2, { thread: { id: "thr_ws_1" } });
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Resolve rateLimits call (best-effort, won't fail)
+    mock.resolveCall(3, {});
+    await new Promise((r) => setTimeout(r, 20));
+
+    const sessionInits = messages.filter((m) => m.type === "session_init");
+    expect(sessionInits.length).toBe(1);
+    const init = sessionInits[0] as { session: { session_id: string; backend_type: string } };
+    expect(init.session.session_id).toBe("test-session-transport");
+    expect(init.session.backend_type).toBe("codex");
   });
 });

@@ -28,7 +28,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
           </span>
           <button
             onClick={() => api.relaunchSession(sessionId).catch(captureException)}
-            className="text-xs font-medium px-3 py-1 rounded-md bg-cc-warning/20 hover:bg-cc-warning/30 text-cc-warning transition-colors cursor-pointer"
+            className="text-xs font-medium px-3 py-2 rounded-md bg-cc-warning/20 hover:bg-cc-warning/30 text-cc-warning transition-colors cursor-pointer"
           >
             Reconnect
           </button>

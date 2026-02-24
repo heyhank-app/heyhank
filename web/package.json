@@ -36,15 +36,31 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:a11y": "vitest run --testNamePattern='axe accessibility|accessible names|aria-expanded'",
-    "test:codex-contract": "vitest run server/codex-protocol-*.test.ts"
+    "test:codex-contract": "vitest run server/codex-protocol-*.test.ts",
+    "generate-token": "bun bin/generate-token.ts"
   },
   "dependencies": {
+    "@codemirror/lang-cpp": "^6.0.3",
+    "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-html": "^6.4.11",
+    "@codemirror/lang-java": "^6.0.2",
+    "@codemirror/lang-javascript": "^6.2.4",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/lang-python": "^6.2.1",
+    "@codemirror/lang-rust": "^6.0.2",
+    "@codemirror/lang-sql": "^6.10.0",
+    "@codemirror/lang-xml": "^6.1.0",
+    "@codemirror/lang-yaml": "^6.1.2",
     "@codemirror/view": "^6.39.15",
     "@uiw/react-codemirror": "^4.25.4",
     "croner": "^10.0.1",
     "diff": "^8.0.3",
+    "fzf": "^0.5.2",
     "hono": "^4.7.0",
-    "posthog-js": "^1.347.2"
+    "posthog-js": "^1.347.2",
+    "qrcode": "^1.5.4",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
@@ -53,8 +69,10 @@
     "@testing-library/user-event": "^14.6.1",
     "@types/bun": "^1.2.5",
     "@types/diff": "^8.0.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.4.0",
     "@vitest/coverage-v8": "^4.0.18",
     "@xterm/addon-fit": "^0.11.0",
@@ -71,6 +89,7 @@
     "tailwindcss": "^4.0.0",
     "typescript": "^5.9.3",
     "vite": "^6.3.0",
+    "vite-plugin-pwa": "^1.2.0",
     "vitest": "^4.0.18",
     "vitest-axe": "^0.1.0",
     "zustand": "^5.0.0"
