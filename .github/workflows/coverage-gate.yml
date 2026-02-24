@@ -20,88 +20,71 @@ jobs:
         working-directory: web
         run: bun install
 
-      # Run coverage on the PR branch (allow test failures — we only care about coverage numbers)
-      - name: PR branch coverage
+      - name: Run tests with coverage
         working-directory: web
-        run: bun run test -- --coverage 2>&1 | tee /tmp/pr-coverage.txt || true
+        run: bun run test -- --coverage || true
 
-      - name: Extract PR coverage
-        id: pr_coverage
+      - name: Enforce 80% coverage on new / changed files
         run: |
-          # Extract "All files" line from v8 text-summary output
-          LINE=$(grep "All files" /tmp/pr-coverage.txt | head -1 || echo "")
-          if [ -z "$LINE" ]; then
-            echo "Could not find coverage summary — using 0"
-            echo "statements=0" >> "$GITHUB_OUTPUT"
-            echo "branches=0" >> "$GITHUB_OUTPUT"
-            echo "functions=0" >> "$GITHUB_OUTPUT"
-            echo "lines=0" >> "$GITHUB_OUTPUT"
-          else
-            # Format: "All files  |   70.5 |   60.2 |   65.3 |   71.1 |"
-            echo "statements=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$2); print $2}')" >> "$GITHUB_OUTPUT"
-            echo "branches=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$3); print $3}')" >> "$GITHUB_OUTPUT"
-            echo "functions=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$4); print $4}')" >> "$GITHUB_OUTPUT"
-            echo "lines=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$5); print $5}')" >> "$GITHUB_OUTPUT"
+          SUMMARY="web/coverage/coverage-summary.json"
+          if [ ! -f "$SUMMARY" ]; then
+            echo "::error::coverage-summary.json not found — tests may have crashed."
+            exit 1
           fi
 
-      # Checkout main and run coverage there
-      - name: Checkout main
-        run: git checkout origin/main
+          # Absolute path prefix used by Istanbul in the JSON keys
+          ABS_PREFIX="$(pwd)/web/"
 
-      - name: Install dependencies (main)
-        working-directory: web
-        run: bun install
+          # Source files added or modified in this PR (relative to repo root, under web/)
+          CHANGED=$(git diff --name-only --diff-filter=ACM origin/main...HEAD -- web/server/ web/src/ \
+            | grep -E '\.(ts|tsx)$' \
+            | grep -v '\.test\.\|\.spec\.\|__mocks__\|test-setup' || true)
 
-      - name: Main branch coverage
-        working-directory: web
-        run: bun run test -- --coverage 2>&1 | tee /tmp/main-coverage.txt || true
-
-      - name: Extract main coverage
-        id: main_coverage
-        run: |
-          LINE=$(grep "All files" /tmp/main-coverage.txt | head -1 || echo "")
-          if [ -z "$LINE" ]; then
-            echo "Could not find coverage summary — using 0"
-            echo "statements=0" >> "$GITHUB_OUTPUT"
-            echo "branches=0" >> "$GITHUB_OUTPUT"
-            echo "functions=0" >> "$GITHUB_OUTPUT"
-            echo "lines=0" >> "$GITHUB_OUTPUT"
-          else
-            echo "statements=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$2); print $2}')" >> "$GITHUB_OUTPUT"
-            echo "branches=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$3); print $3}')" >> "$GITHUB_OUTPUT"
-            echo "functions=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$4); print $4}')" >> "$GITHUB_OUTPUT"
-            echo "lines=$(echo "$LINE" | awk -F'|' '{gsub(/ /,"",$5); print $5}')" >> "$GITHUB_OUTPUT"
+          if [ -z "$CHANGED" ]; then
+            echo "No new/changed source files in this PR — nothing to gate."
+            exit 0
           fi
 
-      - name: Compare coverage (PR must not regress vs main)
-        run: |
-          echo "=== Coverage Comparison ==="
-          echo ""
-          echo "           | Statements | Branches | Functions | Lines"
-          echo "  main     | ${{ steps.main_coverage.outputs.statements }}% | ${{ steps.main_coverage.outputs.branches }}% | ${{ steps.main_coverage.outputs.functions }}% | ${{ steps.main_coverage.outputs.lines }}%"
-          echo "  PR       | ${{ steps.pr_coverage.outputs.statements }}% | ${{ steps.pr_coverage.outputs.branches }}% | ${{ steps.pr_coverage.outputs.functions }}% | ${{ steps.pr_coverage.outputs.lines }}%"
+          echo "=== Changed source files ==="
+          echo "$CHANGED"
           echo ""
 
           FAIL=0
-          check() {
-            local metric=$1 pr_val=$2 main_val=$3
-            # Use awk for float comparison (allow up to 1% regression tolerance)
-            result=$(awk "BEGIN { print ($pr_val < $main_val - 1) ? 1 : 0 }")
-            if [ "$result" = "1" ]; then
-              echo "❌ $metric regressed: $pr_val% < $main_val% (main)"
+          THRESHOLD=80
+
+          for file in $CHANGED; do
+            # Build the absolute path key that Istanbul uses in json-summary
+            # $file is like "web/server/foo.ts", key is "/abs/path/web/server/foo.ts"
+            ABS_KEY="$(pwd)/${file}"
+
+            # jq: look up by absolute path
+            LINES_PCT=$(jq -r --arg f "$ABS_KEY" '.[$f].lines.pct // empty' "$SUMMARY")
+
+            # Strip "web/" prefix for display
+            DISPLAY="${file#web/}"
+
+            if [ -z "$LINES_PCT" ]; then
+              echo "⚠️  $DISPLAY — no coverage data (not imported by any test)"
+              echo "❌ $DISPLAY — treated as 0% (below ${THRESHOLD}%)"
+              FAIL=1
+              continue
+            fi
+
+            # Compare as float
+            BELOW=$(awk "BEGIN { print ($LINES_PCT < $THRESHOLD) ? 1 : 0 }")
+            if [ "$BELOW" = "1" ]; then
+              echo "❌ $DISPLAY — ${LINES_PCT}% lines covered (threshold: ${THRESHOLD}%)"
               FAIL=1
             else
-              echo "✅ $metric: $pr_val% (main: $main_val%)"
+              echo "✅ $DISPLAY — ${LINES_PCT}% lines covered"
             fi
-          }
+          done
 
-          check "Statements" "${{ steps.pr_coverage.outputs.statements }}" "${{ steps.main_coverage.outputs.statements }}"
-          check "Branches" "${{ steps.pr_coverage.outputs.branches }}" "${{ steps.main_coverage.outputs.branches }}"
-          check "Functions" "${{ steps.pr_coverage.outputs.functions }}" "${{ steps.main_coverage.outputs.functions }}"
-          check "Lines" "${{ steps.pr_coverage.outputs.lines }}" "${{ steps.main_coverage.outputs.lines }}"
-
+          echo ""
           if [ "$FAIL" = "1" ]; then
-            echo ""
-            echo "Coverage regression detected. PR coverage must be within 1% of main."
+            echo "::error::Coverage gate failed — one or more changed files are below ${THRESHOLD}% line coverage."
+            echo "Add tests for the files listed above to bring them above the threshold."
             exit 1
+          else
+            echo "All changed files meet the ${THRESHOLD}% line coverage threshold."
           fi

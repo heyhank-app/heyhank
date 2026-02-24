@@ -6,9 +6,9 @@ export default defineConfig({
     environment: "node",
     coverage: {
       provider: "v8",
-      reporter: ["text", "text-summary"],
-      // Thresholds are enforced by the coverage-gate CI workflow which
-      // compares the PR's coverage against main (no hardcoded numbers).
+      reporter: ["text", "json-summary"],
+      // The coverage-gate CI workflow reads json-summary to enforce
+      // that new / changed files have ≥ 80 % line coverage.
     },
     include: ["server/**/*.test.ts", "src/**/*.test.ts", "src/**/*.test.tsx"],
     environmentMatchGlobs: [
