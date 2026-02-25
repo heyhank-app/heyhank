@@ -1,0 +1,795 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { attachCodexAdapterHandlers } from "./ws-bridge-codex.js";
+import type { BrowserIncomingMessage, SessionState } from "./session-types.js";
+import type { Session } from "./ws-bridge-types.js";
+import type { CodexAdapter } from "./codex-adapter.js";
+import type { CodexAttachDeps } from "./ws-bridge-codex.js";
+
+// ── Mock Factories ──────────────────────────────────────────────────────────
+
+function createMockSession(overrides = {}): Session {
+  return {
+    id: "test-session",
+    backendType: "codex",
+    cliSocket: null,
+    codexAdapter: null,
+    browserSockets: new Set(),
+    state: {
+      session_id: "test-session",
+      backend_type: "codex",
+      model: "",
+      cwd: "",
+      tools: [],
+      permissionMode: "default",
+      claude_code_version: "",
+      mcp_servers: [],
+      agents: [],
+      slash_commands: [],
+      skills: [],
+      total_cost_usd: 0,
+      num_turns: 0,
+      context_used_percent: 0,
+      is_compacting: false,
+      git_branch: "",
+      is_worktree: false,
+      is_containerized: false,
+      repo_root: "",
+      git_ahead: 0,
+      git_behind: 0,
+      total_lines_added: 0,
+      total_lines_removed: 0,
+    } as SessionState,
+    pendingPermissions: new Map(),
+    pendingControlRequests: new Map(),
+    messageHistory: [] as BrowserIncomingMessage[],
+    pendingMessages: [] as string[],
+    nextEventSeq: 0,
+    eventBuffer: [],
+    lastAckSeq: 0,
+    processedClientMessageIds: [],
+    processedClientMessageIdSet: new Set(),
+    ...overrides,
+  } as Session;
+}
+
+function createMockAdapter() {
+  const handlers: Record<string, Function> = {};
+  return {
+    onBrowserMessage: vi.fn((fn: Function) => {
+      handlers.onBrowserMessage = fn;
+    }),
+    onSessionMeta: vi.fn((fn: Function) => {
+      handlers.onSessionMeta = fn;
+    }),
+    onDisconnect: vi.fn((fn: Function) => {
+      handlers.onDisconnect = fn;
+    }),
+    sendBrowserMessage: vi.fn(),
+    /** Helper to trigger a registered handler in tests */
+    _trigger: (event: string, data: any) => handlers[event]?.(data),
+  };
+}
+
+function createMockDeps(overrides = {}): CodexAttachDeps {
+  return {
+    persistSession: vi.fn(),
+    refreshGitInfo: vi.fn(),
+    broadcastToBrowsers: vi.fn(),
+    onCLISessionId: vi.fn(),
+    onFirstTurnCompleted: vi.fn(),
+    autoNamingAttempted: new Set<string>(),
+    ...overrides,
+  };
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+describe("attachCodexAdapterHandlers", () => {
+  let session: Session;
+  let adapter: ReturnType<typeof createMockAdapter>;
+  let deps: CodexAttachDeps;
+
+  beforeEach(() => {
+    session = createMockSession();
+    adapter = createMockAdapter();
+    deps = createMockDeps();
+  });
+
+  // ── Handler registration ────────────────────────────────────────────────
+
+  it("registers onBrowserMessage, onSessionMeta, and onDisconnect handlers", () => {
+    // Verifies that attachCodexAdapterHandlers wires all three adapter callbacks.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    expect(adapter.onBrowserMessage).toHaveBeenCalledOnce();
+    expect(adapter.onSessionMeta).toHaveBeenCalledOnce();
+    expect(adapter.onDisconnect).toHaveBeenCalledOnce();
+  });
+
+  // ── session_init ────────────────────────────────────────────────────────
+
+  it("session_init updates session state with backend_type and persists", () => {
+    // session_init should merge the incoming session state into session.state,
+    // set backend_type to "codex", call refreshGitInfo, and persist.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    const sessionInitPayload: BrowserIncomingMessage = {
+      type: "session_init",
+      session: {
+        session_id: "test-session",
+        backend_type: "codex",
+        model: "o3-pro",
+        cwd: "/home/user/project",
+        tools: [],
+        permissionMode: "default",
+        claude_code_version: "",
+        mcp_servers: [],
+        agents: [],
+        slash_commands: [],
+        skills: [],
+        total_cost_usd: 0,
+        num_turns: 0,
+        context_used_percent: 0,
+        is_compacting: false,
+        git_branch: "",
+        is_worktree: false,
+        is_containerized: false,
+        repo_root: "",
+        git_ahead: 0,
+        git_behind: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+      },
+    };
+
+    adapter._trigger("onBrowserMessage", sessionInitPayload);
+
+    expect(session.state.model).toBe("o3-pro");
+    expect(session.state.cwd).toBe("/home/user/project");
+    expect(session.state.backend_type).toBe("codex");
+    expect(deps.refreshGitInfo).toHaveBeenCalledWith(session, { notifyPoller: true });
+    expect(deps.persistSession).toHaveBeenCalledWith(session);
+  });
+
+  // ── session_update ──────────────────────────────────────────────────────
+
+  it("session_update merges partial state and sets backend_type to codex", () => {
+    // session_update should spread the partial session fields into state,
+    // force backend_type to "codex", refresh git info, and persist.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onBrowserMessage", {
+      type: "session_update",
+      session: { model: "gpt-4.1", permissionMode: "bypassPermissions" },
+    });
+
+    expect(session.state.model).toBe("gpt-4.1");
+    expect(session.state.permissionMode).toBe("bypassPermissions");
+    expect(session.state.backend_type).toBe("codex");
+    expect(deps.refreshGitInfo).toHaveBeenCalledWith(session, { notifyPoller: true });
+    expect(deps.persistSession).toHaveBeenCalled();
+  });
+
+  // ── status_change ───────────────────────────────────────────────────────
+
+  it("status_change sets is_compacting to true when status is 'compacting'", () => {
+    // When the adapter emits a status_change with status "compacting",
+    // the handler should set session.state.is_compacting = true.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onBrowserMessage", {
+      type: "status_change",
+      status: "compacting",
+    });
+
+    expect(session.state.is_compacting).toBe(true);
+    expect(deps.persistSession).toHaveBeenCalled();
+  });
+
+  it("status_change sets is_compacting to false when status is not 'compacting'", () => {
+    // When status is something other than "compacting" (e.g. null),
+    // is_compacting should be false.
+    session.state.is_compacting = true;
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onBrowserMessage", {
+      type: "status_change",
+      status: null,
+    });
+
+    expect(session.state.is_compacting).toBe(false);
+    expect(deps.persistSession).toHaveBeenCalled();
+  });
+
+  // ── assistant message ───────────────────────────────────────────────────
+
+  it("assistant message is pushed to messageHistory with timestamp", () => {
+    // Assistant messages should be appended to the session's messageHistory
+    // array with a timestamp, and persisted.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    const assistantMsg: BrowserIncomingMessage = {
+      type: "assistant",
+      message: {
+        id: "msg-1",
+        type: "message",
+        role: "assistant",
+        model: "o3-pro",
+        content: [{ type: "text", text: "Hello world" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      },
+      parent_tool_use_id: null,
+      timestamp: 1700000000000,
+    };
+
+    adapter._trigger("onBrowserMessage", assistantMsg);
+
+    expect(session.messageHistory).toHaveLength(1);
+    expect(session.messageHistory[0].type).toBe("assistant");
+    expect((session.messageHistory[0] as any).timestamp).toBe(1700000000000);
+    expect(deps.persistSession).toHaveBeenCalled();
+  });
+
+  it("assistant message gets a default timestamp when none is provided", () => {
+    // If the assistant message doesn't have a timestamp, it should use Date.now().
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    const beforeTime = Date.now();
+    adapter._trigger("onBrowserMessage", {
+      type: "assistant",
+      message: {
+        id: "msg-2",
+        type: "message",
+        role: "assistant",
+        model: "o3-pro",
+        content: [{ type: "text", text: "No timestamp" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      },
+      parent_tool_use_id: null,
+    });
+    const afterTime = Date.now();
+
+    const stored = session.messageHistory[0] as any;
+    expect(stored.timestamp).toBeGreaterThanOrEqual(beforeTime);
+    expect(stored.timestamp).toBeLessThanOrEqual(afterTime);
+  });
+
+  // ── result message ──────────────────────────────────────────────────────
+
+  it("result message is pushed to messageHistory", () => {
+    // Result messages should also be appended to messageHistory and persisted.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    const resultMsg: BrowserIncomingMessage = {
+      type: "result",
+      data: {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: undefined,
+        duration_ms: 100,
+        duration_api_ms: 80,
+        num_turns: 1,
+        total_cost_usd: 0.01,
+        stop_reason: "end_turn",
+        usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        uuid: "result-uuid-1",
+        session_id: "test-session",
+      },
+    };
+
+    adapter._trigger("onBrowserMessage", resultMsg);
+
+    expect(session.messageHistory).toHaveLength(1);
+    expect(session.messageHistory[0].type).toBe("result");
+    expect(deps.persistSession).toHaveBeenCalled();
+  });
+
+  // ── permission_request ──────────────────────────────────────────────────
+
+  it("permission_request is added to pendingPermissions", () => {
+    // When a permission_request comes in, it should be stored in the session's
+    // pendingPermissions map keyed by request_id, and persisted.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    const permMsg: BrowserIncomingMessage = {
+      type: "permission_request",
+      request: {
+        request_id: "perm-1",
+        tool_name: "Bash",
+        input: { command: "ls -la" },
+        description: "Execute: ls -la",
+        tool_use_id: "tool-1",
+        timestamp: Date.now(),
+      },
+    };
+
+    adapter._trigger("onBrowserMessage", permMsg);
+
+    expect(session.pendingPermissions.has("perm-1")).toBe(true);
+    expect(session.pendingPermissions.get("perm-1")).toEqual(
+      expect.objectContaining({ request_id: "perm-1", tool_name: "Bash" }),
+    );
+    expect(deps.persistSession).toHaveBeenCalled();
+  });
+
+  // ── broadcast to browsers ───────────────────────────────────────────────
+
+  it("all messages are broadcast to browsers", () => {
+    // Every message that goes through onBrowserMessage should be broadcast
+    // to connected browser sockets.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    const testMessages: BrowserIncomingMessage[] = [
+      {
+        type: "session_init",
+        session: session.state,
+      },
+      {
+        type: "session_update",
+        session: { model: "updated-model" },
+      },
+      {
+        type: "status_change",
+        status: "compacting",
+      },
+      {
+        type: "assistant",
+        message: {
+          id: "msg-1",
+          type: "message",
+          role: "assistant",
+          model: "o3-pro",
+          content: [{ type: "text", text: "hello" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        },
+        parent_tool_use_id: null,
+        timestamp: Date.now(),
+      },
+      {
+        type: "result",
+        data: {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: undefined,
+          duration_ms: 0,
+          duration_api_ms: 0,
+          num_turns: 1,
+          total_cost_usd: 0,
+          stop_reason: "end_turn",
+          usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+          uuid: "r-1",
+          session_id: "test-session",
+        },
+      },
+      {
+        type: "permission_request",
+        request: {
+          request_id: "perm-2",
+          tool_name: "Edit",
+          input: {},
+          description: "Edit file",
+          tool_use_id: "tool-2",
+          timestamp: Date.now(),
+        },
+      },
+    ];
+
+    for (const msg of testMessages) {
+      adapter._trigger("onBrowserMessage", msg);
+    }
+
+    // Each message should trigger one broadcastToBrowsers call, plus the initial
+    // cli_connected broadcast that happens during attachCodexAdapterHandlers setup.
+    // The first call (index 0) is cli_connected, then each message adds one more.
+    expect(deps.broadcastToBrowsers).toHaveBeenCalledTimes(testMessages.length + 1);
+
+    // First call is cli_connected (from attach)
+    expect(deps.broadcastToBrowsers).toHaveBeenNthCalledWith(1, session, {
+      type: "cli_connected",
+    });
+
+    // Verify each subsequent call passed the session and the original message
+    for (let i = 0; i < testMessages.length; i++) {
+      expect(deps.broadcastToBrowsers).toHaveBeenNthCalledWith(
+        i + 2,
+        session,
+        testMessages[i],
+      );
+    }
+  });
+
+  // ── auto-naming via onFirstTurnCompleted ────────────────────────────────
+
+  it("result triggers onFirstTurnCompleted for auto-naming on first successful result", () => {
+    // When a non-error result arrives and auto-naming hasn't been attempted yet,
+    // the handler should call onFirstTurnCompleted with the first user_message content.
+    session.messageHistory.push({
+      type: "user_message",
+      content: "What is the meaning of life?",
+    } as any);
+
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onBrowserMessage", {
+      type: "result",
+      data: {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: null,
+        duration_ms: 100,
+        duration_api_ms: 80,
+        num_turns: 1,
+        total_cost_usd: 0,
+        stop_reason: "end_turn",
+        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        uuid: "r-2",
+        session_id: "test-session",
+      },
+    });
+
+    expect(deps.onFirstTurnCompleted).toHaveBeenCalledOnce();
+    expect(deps.onFirstTurnCompleted).toHaveBeenCalledWith(
+      "test-session",
+      "What is the meaning of life?",
+    );
+    // The session ID should be recorded in autoNamingAttempted
+    expect(deps.autoNamingAttempted.has("test-session")).toBe(true);
+  });
+
+  it("result does NOT trigger onFirstTurnCompleted a second time (only once per session)", () => {
+    // Auto-naming should only fire once per session. Subsequent results should not
+    // re-trigger onFirstTurnCompleted.
+    session.messageHistory.push({
+      type: "user_message",
+      content: "First message",
+    } as any);
+
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    const resultMsg = {
+      type: "result",
+      data: {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: null,
+        duration_ms: 0,
+        duration_api_ms: 0,
+        num_turns: 1,
+        total_cost_usd: 0,
+        stop_reason: "end_turn",
+        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        uuid: "r-3",
+        session_id: "test-session",
+      },
+    };
+
+    adapter._trigger("onBrowserMessage", resultMsg);
+    adapter._trigger("onBrowserMessage", resultMsg);
+
+    // Should only be called once despite two result messages
+    expect(deps.onFirstTurnCompleted).toHaveBeenCalledOnce();
+  });
+
+  it("result does NOT trigger onFirstTurnCompleted when result is an error", () => {
+    // Error results should not trigger auto-naming.
+    session.messageHistory.push({
+      type: "user_message",
+      content: "Some message",
+    } as any);
+
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onBrowserMessage", {
+      type: "result",
+      data: {
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        result: "Something went wrong",
+        duration_ms: 0,
+        duration_api_ms: 0,
+        num_turns: 1,
+        total_cost_usd: 0,
+        stop_reason: "error",
+        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        uuid: "r-4",
+        session_id: "test-session",
+      },
+    });
+
+    expect(deps.onFirstTurnCompleted).not.toHaveBeenCalled();
+  });
+
+  it("result does NOT trigger onFirstTurnCompleted when no user_message exists", () => {
+    // If there's no user_message in the history, onFirstTurnCompleted should not be called
+    // even on a successful result.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onBrowserMessage", {
+      type: "result",
+      data: {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: null,
+        duration_ms: 0,
+        duration_api_ms: 0,
+        num_turns: 1,
+        total_cost_usd: 0,
+        stop_reason: "end_turn",
+        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        uuid: "r-5",
+        session_id: "test-session",
+      },
+    });
+
+    expect(deps.onFirstTurnCompleted).not.toHaveBeenCalled();
+    // But the session should still be marked as naming-attempted
+    expect(deps.autoNamingAttempted.has("test-session")).toBe(true);
+  });
+
+  it("result does NOT trigger onFirstTurnCompleted when deps.onFirstTurnCompleted is null", () => {
+    // When onFirstTurnCompleted is null (not provided), the auto-naming block
+    // should be skipped entirely.
+    session.messageHistory.push({
+      type: "user_message",
+      content: "Some message",
+    } as any);
+
+    deps = createMockDeps({ onFirstTurnCompleted: null });
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onBrowserMessage", {
+      type: "result",
+      data: {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: null,
+        duration_ms: 0,
+        duration_api_ms: 0,
+        num_turns: 1,
+        total_cost_usd: 0,
+        stop_reason: "end_turn",
+        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        uuid: "r-6",
+        session_id: "test-session",
+      },
+    });
+
+    // autoNamingAttempted should NOT be touched when the callback is null
+    expect(deps.autoNamingAttempted.has("test-session")).toBe(false);
+  });
+
+  // ── onSessionMeta ───────────────────────────────────────────────────────
+
+  it("onSessionMeta updates model and cwd on session state", () => {
+    // When session metadata arrives, it should update model, cwd, and
+    // set backend_type to "codex", then refresh git info and persist.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onSessionMeta", {
+      cliSessionId: "codex-thread-123",
+      model: "o3-pro",
+      cwd: "/home/user/project",
+    });
+
+    expect(session.state.model).toBe("o3-pro");
+    expect(session.state.cwd).toBe("/home/user/project");
+    expect(session.state.backend_type).toBe("codex");
+    expect(deps.refreshGitInfo).toHaveBeenCalledWith(session, {
+      broadcastUpdate: true,
+      notifyPoller: true,
+    });
+    expect(deps.persistSession).toHaveBeenCalledWith(session);
+  });
+
+  it("onSessionMeta calls onCLISessionId when cliSessionId is present", () => {
+    // When the meta includes a cliSessionId, the onCLISessionId dep should be called
+    // to track the mapping from our session ID to the Codex thread ID.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onSessionMeta", {
+      cliSessionId: "codex-thread-456",
+      model: "gpt-4.1",
+    });
+
+    expect(deps.onCLISessionId).toHaveBeenCalledWith("test-session", "codex-thread-456");
+  });
+
+  it("onSessionMeta does not call onCLISessionId when cliSessionId is absent", () => {
+    // If no cliSessionId in the meta, onCLISessionId should not be called.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onSessionMeta", { model: "gpt-4.1" });
+
+    expect(deps.onCLISessionId).not.toHaveBeenCalled();
+  });
+
+  it("onSessionMeta does not call onCLISessionId when dep is null", () => {
+    // When onCLISessionId is null, it should be safely skipped.
+    deps = createMockDeps({ onCLISessionId: null });
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    // Should not throw
+    adapter._trigger("onSessionMeta", { cliSessionId: "thread-789" });
+
+    expect(session.state.backend_type).toBe("codex");
+  });
+
+  it("onSessionMeta handles partial meta (only model or only cwd)", () => {
+    // The handler should only update fields that are present in the meta object.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    session.state.model = "old-model";
+    session.state.cwd = "/old/path";
+
+    // Only model provided
+    adapter._trigger("onSessionMeta", { model: "new-model" });
+
+    expect(session.state.model).toBe("new-model");
+    expect(session.state.cwd).toBe("/old/path"); // unchanged
+  });
+
+  // ── onDisconnect ────────────────────────────────────────────────────────
+
+  it("onDisconnect clears pending permissions and broadcasts cli_disconnected", () => {
+    // When the adapter disconnects, all pending permissions should be cancelled
+    // (broadcast permission_cancelled for each), the map cleared, codexAdapter set to null,
+    // session persisted, and a cli_disconnected message broadcast.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    // Add some pending permissions first
+    session.pendingPermissions.set("perm-a", {
+      request_id: "perm-a",
+      tool_name: "Bash",
+      input: {},
+      description: "test",
+      tool_use_id: "t-a",
+      timestamp: Date.now(),
+    });
+    session.pendingPermissions.set("perm-b", {
+      request_id: "perm-b",
+      tool_name: "Edit",
+      input: {},
+      description: "test",
+      tool_use_id: "t-b",
+      timestamp: Date.now(),
+    });
+
+    adapter._trigger("onDisconnect", undefined);
+
+    // Pending permissions should be cleared
+    expect(session.pendingPermissions.size).toBe(0);
+
+    // codexAdapter should be nulled out
+    expect(session.codexAdapter).toBeNull();
+
+    // Should broadcast permission_cancelled for each pending permission
+    expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(session, {
+      type: "permission_cancelled",
+      request_id: "perm-a",
+    });
+    expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(session, {
+      type: "permission_cancelled",
+      request_id: "perm-b",
+    });
+
+    // Should broadcast cli_disconnected
+    expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(session, {
+      type: "cli_disconnected",
+    });
+
+    expect(deps.persistSession).toHaveBeenCalled();
+  });
+
+  it("onDisconnect with no pending permissions still broadcasts cli_disconnected", () => {
+    // Even when there are no pending permissions to cancel, the disconnect handler
+    // should still broadcast cli_disconnected and persist.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onDisconnect", undefined);
+
+    expect(session.pendingPermissions.size).toBe(0);
+    expect(session.codexAdapter).toBeNull();
+    expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(session, {
+      type: "cli_disconnected",
+    });
+    expect(deps.persistSession).toHaveBeenCalled();
+  });
+
+  // ── Pending message flushing ────────────────────────────────────────────
+
+  it("flushes pending messages to adapter on attach", () => {
+    // If there are queued messages in session.pendingMessages, they should be
+    // JSON-parsed and sent to the adapter via sendBrowserMessage during attach.
+    const userMsg = JSON.stringify({ type: "user_message", content: "Hello" });
+    const permResp = JSON.stringify({
+      type: "permission_response",
+      request_id: "perm-1",
+      behavior: "allow",
+    });
+    session.pendingMessages = [userMsg, permResp];
+
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    // Both messages should be sent to the adapter
+    expect(adapter.sendBrowserMessage).toHaveBeenCalledTimes(2);
+    expect(adapter.sendBrowserMessage).toHaveBeenCalledWith({ type: "user_message", content: "Hello" });
+    expect(adapter.sendBrowserMessage).toHaveBeenCalledWith({
+      type: "permission_response",
+      request_id: "perm-1",
+      behavior: "allow",
+    });
+
+    // pendingMessages should be drained
+    expect(session.pendingMessages).toHaveLength(0);
+  });
+
+  it("does not call sendBrowserMessage when pendingMessages is empty", () => {
+    // No messages to flush — sendBrowserMessage should not be called.
+    session.pendingMessages = [];
+
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    expect(adapter.sendBrowserMessage).not.toHaveBeenCalled();
+  });
+
+  it("gracefully handles invalid JSON in pendingMessages", () => {
+    // If a queued message is invalid JSON, it should be skipped without throwing.
+    // The valid messages around it should still be flushed.
+    session.pendingMessages = [
+      JSON.stringify({ type: "user_message", content: "Valid" }),
+      "NOT VALID JSON {{{",
+      JSON.stringify({ type: "user_message", content: "Also valid" }),
+    ];
+
+    // Should not throw
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    // Only the two valid messages should be sent
+    expect(adapter.sendBrowserMessage).toHaveBeenCalledTimes(2);
+    expect(adapter.sendBrowserMessage).toHaveBeenCalledWith({ type: "user_message", content: "Valid" });
+    expect(adapter.sendBrowserMessage).toHaveBeenCalledWith({ type: "user_message", content: "Also valid" });
+    expect(session.pendingMessages).toHaveLength(0);
+  });
+
+  // ── cli_connected broadcast ─────────────────────────────────────────────
+
+  it("broadcasts cli_connected on attach", () => {
+    // After setting up handlers and flushing pending messages, the function
+    // should broadcast cli_connected to all browser sockets.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(session, {
+      type: "cli_connected",
+    });
+  });
+
+  it("broadcasts cli_connected after flushing pending messages", () => {
+    // cli_connected should come after pending messages are flushed, ensuring
+    // browsers know the adapter is ready only after queued work is processed.
+    session.pendingMessages = [JSON.stringify({ type: "user_message", content: "Hello" })];
+
+    const callOrder: string[] = [];
+    (adapter.sendBrowserMessage as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      callOrder.push("sendBrowserMessage");
+    });
+    (deps.broadcastToBrowsers as ReturnType<typeof vi.fn>).mockImplementation((_session: any, msg: any) => {
+      if (msg.type === "cli_connected") {
+        callOrder.push("cli_connected_broadcast");
+      }
+    });
+
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    expect(callOrder).toEqual(["sendBrowserMessage", "cli_connected_broadcast"]);
+  });
+});

@@ -491,4 +491,1329 @@ describe("terminal API", () => {
     expect(JSON.parse(opts.body)).toEqual({ terminalId: "term-1" });
     expect(result).toEqual({ ok: true });
   });
+
+  it("getTerminal sends GET with optional terminalId query param", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ active: true, terminalId: "term-1", cwd: "/workspace" }));
+
+    const result = await api.getTerminal("term-1");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/terminal?terminalId=term-1");
+    expect(result).toEqual({ active: true, terminalId: "term-1", cwd: "/workspace" });
+  });
+
+  it("getTerminal sends GET without terminalId when omitted", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ active: false }));
+
+    const result = await api.getTerminal();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/terminal");
+    expect(result).toEqual({ active: false });
+  });
+});
+
+// ===========================================================================
+// Auth API (getAuthQr, getAuthToken, regenerateAuthToken)
+// ===========================================================================
+describe("auth API", () => {
+  it("getAuthQr sends GET to /api/auth/qr", async () => {
+    const data = { qrCodes: [{ label: "Local", url: "http://localhost:3456", qrDataUrl: "data:image/png;base64,abc" }] };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getAuthQr();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/auth/qr");
+    expect(result).toEqual(data);
+  });
+
+  it("getAuthToken sends GET to /api/auth/token", async () => {
+    const data = { token: "tok_123" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getAuthToken();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/auth/token");
+    expect(result).toEqual(data);
+  });
+
+  it("regenerateAuthToken sends POST to /api/auth/regenerate", async () => {
+    const data = { token: "tok_new" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.regenerateAuthToken();
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/auth/regenerate");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual(data);
+  });
+});
+
+// ===========================================================================
+// autoAuth
+// ===========================================================================
+describe("autoAuth", () => {
+  it("returns token on successful auto-auth", async () => {
+    const { autoAuth } = await import("./api.js");
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, token: "auto_tok" }));
+
+    const result = await autoAuth();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/auth/auto");
+    expect(result).toBe("auto_tok");
+  });
+
+  it("returns null when ok is false", async () => {
+    const { autoAuth } = await import("./api.js");
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: false }));
+
+    const result = await autoAuth();
+    expect(result).toBeNull();
+  });
+
+  it("returns null on fetch failure", async () => {
+    const { autoAuth } = await import("./api.js");
+    mockFetch.mockRejectedValueOnce(new Error("Network error"));
+
+    const result = await autoAuth();
+    expect(result).toBeNull();
+  });
+});
+
+// ===========================================================================
+// verifyAuthToken
+// ===========================================================================
+describe("verifyAuthToken", () => {
+  it("returns true when server confirms token", async () => {
+    const { verifyAuthToken } = await import("./api.js");
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    const result = await verifyAuthToken("valid_token");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/auth/verify");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({ token: "valid_token" });
+    expect(result).toBe(true);
+  });
+
+  it("returns false when server rejects token", async () => {
+    const { verifyAuthToken } = await import("./api.js");
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: false }, 401));
+
+    const result = await verifyAuthToken("bad_token");
+    expect(result).toBe(false);
+  });
+
+  it("returns false on fetch failure", async () => {
+    const { verifyAuthToken } = await import("./api.js");
+    mockFetch.mockRejectedValueOnce(new Error("Network error"));
+
+    const result = await verifyAuthToken("any_token");
+    expect(result).toBe(false);
+  });
+});
+
+// ===========================================================================
+// relaunchSession
+// ===========================================================================
+describe("relaunchSession", () => {
+  it("sends POST to /api/sessions/:id/relaunch", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.relaunchSession("sess-42");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-42/relaunch");
+    expect(opts.method).toBe("POST");
+  });
+});
+
+// ===========================================================================
+// archiveSession / unarchiveSession
+// ===========================================================================
+describe("archiveSession", () => {
+  it("sends POST to /api/sessions/:id/archive without options", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.archiveSession("sess-1");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-1/archive");
+    expect(opts.method).toBe("POST");
+  });
+
+  it("sends force option when specified", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.archiveSession("sess-1", { force: true });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(JSON.parse(opts.body)).toEqual({ force: true });
+  });
+});
+
+describe("unarchiveSession", () => {
+  it("sends POST to /api/sessions/:id/unarchive", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.unarchiveSession("sess-1");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-1/unarchive");
+    expect(opts.method).toBe("POST");
+  });
+});
+
+// ===========================================================================
+// renameSession
+// ===========================================================================
+describe("renameSession", () => {
+  it("sends PATCH to /api/sessions/:id/name with name body", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, name: "New Name" }));
+
+    const result = await api.renameSession("sess-1", "New Name");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-1/name");
+    expect(opts.method).toBe("PATCH");
+    expect(JSON.parse(opts.body)).toEqual({ name: "New Name" });
+    expect(result).toEqual({ ok: true, name: "New Name" });
+  });
+});
+
+// ===========================================================================
+// getHome
+// ===========================================================================
+describe("getHome", () => {
+  it("sends GET to /api/fs/home", async () => {
+    const data = { home: "/home/user", cwd: "/home/user/project" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getHome();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/fs/home");
+    expect(result).toEqual(data);
+  });
+});
+
+// ===========================================================================
+// Environment API (listEnvs, getEnv, deleteEnv, build-related)
+// ===========================================================================
+describe("environment API", () => {
+  it("listEnvs sends GET to /api/envs", async () => {
+    const envs = [{ name: "Dev", slug: "dev", variables: {}, createdAt: 1, updatedAt: 1 }];
+    mockFetch.mockResolvedValueOnce(mockResponse(envs));
+
+    const result = await api.listEnvs();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/envs");
+    expect(result).toEqual(envs);
+  });
+
+  it("getEnv sends GET to /api/envs/:slug", async () => {
+    const env = { name: "Dev", slug: "dev", variables: { A: "1" }, createdAt: 1, updatedAt: 1 };
+    mockFetch.mockResolvedValueOnce(mockResponse(env));
+
+    const result = await api.getEnv("dev");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/envs/dev");
+    expect(result).toEqual(env);
+  });
+
+  it("deleteEnv sends DELETE to /api/envs/:slug", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.deleteEnv("old-env");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/envs/old-env");
+    expect(opts.method).toBe("DELETE");
+  });
+
+  it("buildEnvImage sends POST to /api/envs/:slug/build", async () => {
+    const data = { ok: true, imageTag: "my-env:latest" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.buildEnvImage("my-env");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/envs/my-env/build");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual(data);
+  });
+
+  it("getEnvBuildStatus sends GET to /api/envs/:slug/build-status", async () => {
+    const data = { buildStatus: "success", lastBuiltAt: 1234, imageTag: "my-env:latest" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getEnvBuildStatus("my-env");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/envs/my-env/build-status");
+    expect(result).toEqual(data);
+  });
+
+  it("buildBaseImage sends POST to /api/docker/build-base", async () => {
+    const data = { ok: true, tag: "companion-base:latest" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.buildBaseImage();
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/docker/build-base");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual(data);
+  });
+
+  it("getBaseImageStatus sends GET to /api/docker/base-image", async () => {
+    const data = { exists: true, tag: "companion-base:latest" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getBaseImageStatus();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/docker/base-image");
+    expect(result).toEqual(data);
+  });
+
+  it("createEnv includes docker options when provided", async () => {
+    const envData = { name: "Docker", slug: "docker", variables: {}, createdAt: 1, updatedAt: 1 };
+    mockFetch.mockResolvedValueOnce(mockResponse(envData));
+
+    await api.createEnv("Docker", { KEY: "val" }, {
+      dockerfile: "FROM node:20",
+      baseImage: "node:20",
+      ports: [3000],
+      volumes: ["/data"],
+      initScript: "npm install",
+    });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(JSON.parse(opts.body)).toEqual({
+      name: "Docker",
+      variables: { KEY: "val" },
+      dockerfile: "FROM node:20",
+      baseImage: "node:20",
+      ports: [3000],
+      volumes: ["/data"],
+      initScript: "npm install",
+    });
+  });
+});
+
+// ===========================================================================
+// Linear project API
+// ===========================================================================
+describe("Linear project API", () => {
+  it("listLinearProjects sends GET to /api/linear/projects", async () => {
+    const data = { projects: [{ id: "p1", name: "Q1 Roadmap", state: "started" }] };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.listLinearProjects();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/projects");
+    expect(result).toEqual(data);
+  });
+
+  it("getLinearProjectIssues sends GET with projectId and limit", async () => {
+    const data = { issues: [{ id: "i1", identifier: "ENG-1", title: "Task" }] };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getLinearProjectIssues("proj-1", 10);
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/project-issues?projectId=proj-1&limit=10");
+    expect(result).toEqual(data);
+  });
+
+  it("getLinearProjectIssues uses default limit of 15", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ issues: [] }));
+
+    await api.getLinearProjectIssues("proj-1");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/project-issues?projectId=proj-1&limit=15");
+  });
+
+  it("getLinearProjectMapping sends GET with repoRoot", async () => {
+    const data = { mapping: { repoRoot: "/repo", projectId: "p1", projectName: "Q1", createdAt: 1, updatedAt: 1 } };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getLinearProjectMapping("/repo");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/linear/project-mappings?repoRoot=${encodeURIComponent("/repo")}`);
+    expect(result).toEqual(data);
+  });
+
+  it("upsertLinearProjectMapping sends PUT to /api/linear/project-mappings", async () => {
+    const mapping = { repoRoot: "/repo", projectId: "p1", projectName: "Q1", createdAt: 1, updatedAt: 2 };
+    mockFetch.mockResolvedValueOnce(mockResponse({ mapping }));
+
+    const result = await api.upsertLinearProjectMapping({
+      repoRoot: "/repo",
+      projectId: "p1",
+      projectName: "Q1",
+    });
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/project-mappings");
+    expect(opts.method).toBe("PUT");
+    expect(JSON.parse(opts.body)).toEqual({ repoRoot: "/repo", projectId: "p1", projectName: "Q1" });
+    expect(result).toEqual({ mapping });
+  });
+
+  it("removeLinearProjectMapping sends DELETE with repoRoot body", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.removeLinearProjectMapping("/repo");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/project-mappings");
+    expect(opts.method).toBe("DELETE");
+    expect(JSON.parse(opts.body)).toEqual({ repoRoot: "/repo" });
+  });
+});
+
+// ===========================================================================
+// Linear issue <-> session association
+// ===========================================================================
+describe("Linear issue-session linking", () => {
+  const mockIssue = {
+    id: "iss-1",
+    identifier: "ENG-1",
+    title: "Fix bug",
+    description: "",
+    url: "https://linear.app/ENG-1",
+    branchName: "fix-bug",
+    priorityLabel: "High",
+    stateName: "In Progress",
+    stateType: "started",
+    teamName: "Engineering",
+    teamKey: "ENG",
+    teamId: "t1",
+  };
+
+  it("linkLinearIssue sends PUT with issue body", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.linkLinearIssue("sess-1", mockIssue);
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-1/linear-issue");
+    expect(opts.method).toBe("PUT");
+    expect(JSON.parse(opts.body)).toEqual(mockIssue);
+  });
+
+  it("unlinkLinearIssue sends DELETE", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.unlinkLinearIssue("sess-1");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-1/linear-issue");
+    expect(opts.method).toBe("DELETE");
+  });
+
+  it("getLinkedLinearIssue sends GET without refresh by default", async () => {
+    const data = { issue: mockIssue, comments: [], labels: [] };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getLinkedLinearIssue("sess-1");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-1/linear-issue");
+    expect(result).toEqual(data);
+  });
+
+  it("getLinkedLinearIssue sends GET with refresh=true", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ issue: null }));
+
+    await api.getLinkedLinearIssue("sess-1", true);
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-1/linear-issue?refresh=true");
+  });
+
+  it("addLinearComment sends POST with body text", async () => {
+    const comment = { id: "c1", body: "Hello", createdAt: "2026-01-01", userName: "Ada" };
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, comment }));
+
+    const result = await api.addLinearComment("iss-1", "Hello");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/issues/iss-1/comments");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({ body: "Hello" });
+    expect(result).toEqual({ ok: true, comment });
+  });
+});
+
+// ===========================================================================
+// Git branch, fetch, pull, worktree, PR API
+// ===========================================================================
+describe("git API", () => {
+  it("listBranches sends GET with encoded repoRoot", async () => {
+    const branches = [{ name: "main", isCurrent: true, isRemote: false, worktreePath: null, ahead: 0, behind: 0 }];
+    mockFetch.mockResolvedValueOnce(mockResponse(branches));
+
+    const result = await api.listBranches("/my repo");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/git/branches?repoRoot=${encodeURIComponent("/my repo")}`);
+    expect(result).toEqual(branches);
+  });
+
+  it("gitFetch sends POST with repoRoot", async () => {
+    const data = { success: true, output: "Already up to date" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.gitFetch("/repo");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/git/fetch");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({ repoRoot: "/repo" });
+    expect(result).toEqual(data);
+  });
+
+  it("gitPull sends POST with cwd", async () => {
+    const data = { success: true, output: "up to date", git_ahead: 0, git_behind: 0 };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.gitPull("/repo");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/git/pull");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({ cwd: "/repo" });
+    expect(result).toEqual(data);
+  });
+
+  it("listWorktrees sends GET with encoded repoRoot", async () => {
+    const worktrees = [{ path: "/repo", branch: "main", head: "abc123", isMainWorktree: true, isDirty: false }];
+    mockFetch.mockResolvedValueOnce(mockResponse(worktrees));
+
+    const result = await api.listWorktrees("/repo");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/git/worktrees?repoRoot=${encodeURIComponent("/repo")}`);
+    expect(result).toEqual(worktrees);
+  });
+
+  it("createWorktree sends POST with repoRoot, branch, and options", async () => {
+    const data = { worktreePath: "/repo-wt", branch: "feat", isNew: true };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.createWorktree("/repo", "feat", { baseBranch: "main", createBranch: true });
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/git/worktree");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({
+      repoRoot: "/repo",
+      branch: "feat",
+      baseBranch: "main",
+      createBranch: true,
+    });
+    expect(result).toEqual(data);
+  });
+
+  it("removeWorktree sends DELETE with repoRoot, worktreePath, force", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.removeWorktree("/repo", "/repo-wt", true);
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/git/worktree");
+    expect(opts.method).toBe("DELETE");
+    expect(JSON.parse(opts.body)).toEqual({ repoRoot: "/repo", worktreePath: "/repo-wt", force: true });
+  });
+
+  it("getPRStatus sends GET with cwd and branch", async () => {
+    const data = { available: true, pr: { number: 42, title: "Fix", url: "https://github.com/pr/42", state: "OPEN" } };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getPRStatus("/repo", "fix-branch");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/git/pr-status?cwd=${encodeURIComponent("/repo")}&branch=${encodeURIComponent("fix-branch")}`);
+    expect(result).toEqual(data);
+  });
+});
+
+// ===========================================================================
+// Backends API
+// ===========================================================================
+describe("backends API", () => {
+  it("getBackends sends GET to /api/backends", async () => {
+    const backends = [{ id: "claude", name: "Claude Code", available: true }];
+    mockFetch.mockResolvedValueOnce(mockResponse(backends));
+
+    const result = await api.getBackends();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/backends");
+    expect(result).toEqual(backends);
+  });
+
+  it("getBackendModels sends GET with encoded backendId", async () => {
+    const models = [{ value: "opus", label: "Claude Opus", description: "Most capable" }];
+    mockFetch.mockResolvedValueOnce(mockResponse(models));
+
+    const result = await api.getBackendModels("claude");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/backends/claude/models");
+    expect(result).toEqual(models);
+  });
+});
+
+// ===========================================================================
+// Containers API
+// ===========================================================================
+describe("containers API", () => {
+  it("getContainerStatus sends GET to /api/containers/status", async () => {
+    const data = { available: true, version: "24.0.6" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getContainerStatus();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/containers/status");
+    expect(result).toEqual(data);
+  });
+
+  it("getContainerImages sends GET to /api/containers/images", async () => {
+    const images = ["node:20", "companion-core:latest"];
+    mockFetch.mockResolvedValueOnce(mockResponse(images));
+
+    const result = await api.getContainerImages();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/containers/images");
+    expect(result).toEqual(images);
+  });
+});
+
+// ===========================================================================
+// Image pull manager
+// ===========================================================================
+describe("image pull API", () => {
+  it("getImageStatus sends GET with encoded tag", async () => {
+    const state = { image: "node:20", status: "ready", progress: [] };
+    mockFetch.mockResolvedValueOnce(mockResponse(state));
+
+    const result = await api.getImageStatus("node:20");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/images/${encodeURIComponent("node:20")}/status`);
+    expect(result).toEqual(state);
+  });
+
+  it("pullImage sends POST with encoded tag", async () => {
+    const data = { ok: true, state: { image: "node:20", status: "pulling", progress: [] } };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.pullImage("node:20");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/images/${encodeURIComponent("node:20")}/pull`);
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual(data);
+  });
+});
+
+// ===========================================================================
+// Editor API
+// ===========================================================================
+describe("editor API", () => {
+  it("startEditor sends POST to /api/sessions/:id/editor/start", async () => {
+    const data = { available: true, installed: true, mode: "host", url: "http://localhost:8080" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.startEditor("sess-1");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-1/editor/start");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual(data);
+  });
+});
+
+// ===========================================================================
+// Editor filesystem API
+// ===========================================================================
+describe("editor filesystem API", () => {
+  it("getFileTree sends GET with encoded path", async () => {
+    const data = { path: "/repo", tree: [{ name: "src", path: "/repo/src", type: "directory" }] };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getFileTree("/repo");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/fs/tree?path=${encodeURIComponent("/repo")}`);
+    expect(result).toEqual(data);
+  });
+
+  it("readFile sends GET with encoded path", async () => {
+    const data = { path: "/repo/index.ts", content: "console.log('hello');" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.readFile("/repo/index.ts");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/fs/read?path=${encodeURIComponent("/repo/index.ts")}`);
+    expect(result).toEqual(data);
+  });
+
+  it("writeFile sends PUT to /api/fs/write with path and content", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, path: "/repo/file.ts" }));
+
+    const result = await api.writeFile("/repo/file.ts", "const x = 1;");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/fs/write");
+    expect(opts.method).toBe("PUT");
+    expect(JSON.parse(opts.body)).toEqual({ path: "/repo/file.ts", content: "const x = 1;" });
+    expect(result).toEqual({ ok: true, path: "/repo/file.ts" });
+  });
+
+  it("getFileDiff includes base param when provided", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ path: "/repo/f.ts", diff: "+added" }));
+
+    await api.getFileDiff("/repo/f.ts", "default-branch");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/fs/diff?path=${encodeURIComponent("/repo/f.ts")}&base=${encodeURIComponent("default-branch")}`);
+  });
+
+  it("getChangedFiles sends GET with cwd and optional base", async () => {
+    const data = { files: [{ path: "/repo/a.ts", status: "modified" }] };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getChangedFiles("/repo", "last-commit");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/fs/changed-files?cwd=${encodeURIComponent("/repo")}&base=${encodeURIComponent("last-commit")}`);
+    expect(result).toEqual(data);
+  });
+
+  it("getChangedFiles sends GET without base when omitted", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ files: [] }));
+
+    await api.getChangedFiles("/repo");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/fs/changed-files?cwd=${encodeURIComponent("/repo")}`);
+  });
+
+  it("getClaudeMdFiles sends GET with cwd", async () => {
+    const data = { cwd: "/repo", files: [{ path: "/repo/CLAUDE.md", content: "# Claude" }] };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getClaudeMdFiles("/repo");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/fs/claude-md?cwd=${encodeURIComponent("/repo")}`);
+    expect(result).toEqual(data);
+  });
+
+  it("saveClaudeMd sends PUT to /api/fs/claude-md", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, path: "/repo/CLAUDE.md" }));
+
+    const result = await api.saveClaudeMd("/repo/CLAUDE.md", "# Updated");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/fs/claude-md");
+    expect(opts.method).toBe("PUT");
+    expect(JSON.parse(opts.body)).toEqual({ path: "/repo/CLAUDE.md", content: "# Updated" });
+    expect(result).toEqual({ ok: true, path: "/repo/CLAUDE.md" });
+  });
+
+  it("getClaudeConfig sends GET with cwd", async () => {
+    const data = {
+      project: { root: "/repo", claudeMd: [], settings: null, settingsLocal: null, commands: [] },
+      user: { root: "/home", claudeMd: null, skills: [], agents: [], settings: null, commands: [] },
+    };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getClaudeConfig("/repo");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/fs/claude-config?cwd=${encodeURIComponent("/repo")}`);
+    expect(result).toEqual(data);
+  });
+
+  it("getFileBlob fetches raw file and creates object URL", async () => {
+    const mockBlob = new Blob(["file content"], { type: "text/plain" });
+    const mockObjectUrl = "blob:http://localhost/abc123";
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn().mockReturnValue(mockObjectUrl) });
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      blob: () => Promise.resolve(mockBlob),
+    });
+
+    const result = await api.getFileBlob("/repo/image.png");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/fs/raw?path=${encodeURIComponent("/repo/image.png")}`);
+    expect(result).toBe(mockObjectUrl);
+  });
+
+  it("getFileBlob throws on non-ok response", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      statusText: "Not Found",
+      json: () => Promise.resolve({ error: "File not found" }),
+    });
+
+    await expect(api.getFileBlob("/repo/missing.png")).rejects.toThrow("File not found");
+  });
+});
+
+// ===========================================================================
+// Usage limits (global)
+// ===========================================================================
+describe("getUsageLimits", () => {
+  it("sends GET to /api/usage-limits", async () => {
+    const data = { five_hour: null, seven_day: null, extra_usage: null };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getUsageLimits();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/usage-limits");
+    expect(result).toEqual(data);
+  });
+});
+
+// ===========================================================================
+// Update checking API
+// ===========================================================================
+describe("update API", () => {
+  it("checkForUpdate sends GET to /api/update-check", async () => {
+    const data = { currentVersion: "0.60.0", latestVersion: "0.61.0", updateAvailable: true, isServiceMode: false, updateInProgress: false, lastChecked: 123 };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.checkForUpdate();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/update-check");
+    expect(result).toEqual(data);
+  });
+
+  it("forceCheckForUpdate sends POST to /api/update-check", async () => {
+    const data = { currentVersion: "0.60.0", latestVersion: "0.61.0", updateAvailable: true, isServiceMode: false, updateInProgress: false, lastChecked: 456 };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.forceCheckForUpdate();
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/update-check");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual(data);
+  });
+
+  it("triggerUpdate sends POST to /api/update", async () => {
+    const data = { ok: true, message: "Update started" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.triggerUpdate();
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/update");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual(data);
+  });
+});
+
+// ===========================================================================
+// Cron jobs API
+// ===========================================================================
+describe("cron jobs API", () => {
+  const mockJob = {
+    id: "cron-1",
+    name: "Daily backup",
+    prompt: "Run backup",
+    schedule: "0 0 * * *",
+    recurring: true,
+    backendType: "claude" as const,
+    model: "opus",
+    cwd: "/repo",
+    enabled: true,
+    permissionMode: "auto",
+    createdAt: 1,
+    updatedAt: 1,
+    consecutiveFailures: 0,
+    totalRuns: 5,
+  };
+
+  it("listCronJobs sends GET to /api/cron/jobs", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse([mockJob]));
+
+    const result = await api.listCronJobs();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/cron/jobs");
+    expect(result).toEqual([mockJob]);
+  });
+
+  it("getCronJob sends GET to /api/cron/jobs/:id", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse(mockJob));
+
+    const result = await api.getCronJob("cron-1");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/cron/jobs/cron-1");
+    expect(result).toEqual(mockJob);
+  });
+
+  it("createCronJob sends POST to /api/cron/jobs", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse(mockJob));
+
+    const result = await api.createCronJob({ name: "Daily backup", prompt: "Run backup", schedule: "0 0 * * *" });
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/cron/jobs");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual(mockJob);
+  });
+
+  it("updateCronJob sends PUT to /api/cron/jobs/:id", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ...mockJob, name: "Updated" }));
+
+    const result = await api.updateCronJob("cron-1", { name: "Updated" });
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/cron/jobs/cron-1");
+    expect(opts.method).toBe("PUT");
+    expect(JSON.parse(opts.body)).toEqual({ name: "Updated" });
+    expect(result.name).toBe("Updated");
+  });
+
+  it("deleteCronJob sends DELETE to /api/cron/jobs/:id", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.deleteCronJob("cron-1");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/cron/jobs/cron-1");
+    expect(opts.method).toBe("DELETE");
+  });
+
+  it("toggleCronJob sends POST to /api/cron/jobs/:id/toggle", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ...mockJob, enabled: false }));
+
+    const result = await api.toggleCronJob("cron-1");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/cron/jobs/cron-1/toggle");
+    expect(opts.method).toBe("POST");
+    expect(result.enabled).toBe(false);
+  });
+
+  it("runCronJob sends POST to /api/cron/jobs/:id/run", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.runCronJob("cron-1");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/cron/jobs/cron-1/run");
+    expect(opts.method).toBe("POST");
+  });
+
+  it("getCronJobExecutions sends GET to /api/cron/jobs/:id/executions", async () => {
+    const executions = [{ sessionId: "s1", jobId: "cron-1", startedAt: 1000, completedAt: 2000, success: true }];
+    mockFetch.mockResolvedValueOnce(mockResponse(executions));
+
+    const result = await api.getCronJobExecutions("cron-1");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/cron/jobs/cron-1/executions");
+    expect(result).toEqual(executions);
+  });
+});
+
+// ===========================================================================
+// Background process management
+// ===========================================================================
+describe("process management API", () => {
+  it("killProcess sends POST to /api/sessions/:id/processes/:taskId/kill", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, taskId: "task-1" }));
+
+    const result = await api.killProcess("sess-1", "task-1");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-1/processes/task-1/kill");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual({ ok: true, taskId: "task-1" });
+  });
+
+  it("killAllProcesses sends POST with taskIds array", async () => {
+    const data = { ok: true, results: [{ taskId: "t1", ok: true }, { taskId: "t2", ok: true }] };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.killAllProcesses("sess-1", ["t1", "t2"]);
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-1/processes/kill-all");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({ taskIds: ["t1", "t2"] });
+    expect(result).toEqual(data);
+  });
+
+  it("getSystemProcesses sends GET to /api/sessions/:id/processes/system", async () => {
+    const data = { ok: true, processes: [{ pid: 1234, command: "node", fullCommand: "node server.js", ports: [3000] }] };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getSystemProcesses("sess-1");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-1/processes/system");
+    expect(result).toEqual(data);
+  });
+
+  it("killSystemProcess sends POST with pid in URL", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, pid: 1234 }));
+
+    const result = await api.killSystemProcess("sess-1", 1234);
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-1/processes/system/1234/kill");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual({ ok: true, pid: 1234 });
+  });
+});
+
+// ===========================================================================
+// Agents API
+// ===========================================================================
+describe("agents API", () => {
+  const mockAgent = {
+    id: "agent-1",
+    version: 1,
+    name: "Test Agent",
+    description: "A test agent",
+    backendType: "claude" as const,
+    model: "opus",
+    permissionMode: "auto",
+    cwd: "/repo",
+    prompt: "You are a test agent",
+    enabled: true,
+    createdAt: 1,
+    updatedAt: 1,
+    totalRuns: 0,
+    consecutiveFailures: 0,
+  };
+
+  it("listAgents sends GET to /api/agents", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse([mockAgent]));
+
+    const result = await api.listAgents();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/agents");
+    expect(result).toEqual([mockAgent]);
+  });
+
+  it("getAgent sends GET to /api/agents/:id", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse(mockAgent));
+
+    const result = await api.getAgent("agent-1");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/agents/agent-1");
+    expect(result).toEqual(mockAgent);
+  });
+
+  it("createAgent sends POST to /api/agents", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse(mockAgent));
+
+    const result = await api.createAgent({ name: "Test Agent", prompt: "hello" });
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/agents");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual(mockAgent);
+  });
+
+  it("updateAgent sends PUT to /api/agents/:id", async () => {
+    const updated = { ...mockAgent, name: "Updated Agent" };
+    mockFetch.mockResolvedValueOnce(mockResponse(updated));
+
+    const result = await api.updateAgent("agent-1", { name: "Updated Agent" });
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/agents/agent-1");
+    expect(opts.method).toBe("PUT");
+    expect(JSON.parse(opts.body)).toEqual({ name: "Updated Agent" });
+    expect(result.name).toBe("Updated Agent");
+  });
+
+  it("deleteAgent sends DELETE to /api/agents/:id", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.deleteAgent("agent-1");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/agents/agent-1");
+    expect(opts.method).toBe("DELETE");
+  });
+
+  it("toggleAgent sends POST to /api/agents/:id/toggle", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ...mockAgent, enabled: false }));
+
+    const result = await api.toggleAgent("agent-1");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/agents/agent-1/toggle");
+    expect(opts.method).toBe("POST");
+    expect(result.enabled).toBe(false);
+  });
+
+  it("runAgent sends POST to /api/agents/:id/run with optional input", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, message: "Agent started" }));
+
+    const result = await api.runAgent("agent-1", "Do something");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/agents/agent-1/run");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({ input: "Do something" });
+    expect(result).toEqual({ ok: true, message: "Agent started" });
+  });
+
+  it("getAgentExecutions sends GET to /api/agents/:id/executions", async () => {
+    const executions = [{ sessionId: "s1", agentId: "agent-1", triggerType: "manual", startedAt: 100 }];
+    mockFetch.mockResolvedValueOnce(mockResponse(executions));
+
+    const result = await api.getAgentExecutions("agent-1");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/agents/agent-1/executions");
+    expect(result).toEqual(executions);
+  });
+
+  it("importAgent sends POST to /api/agents/import", async () => {
+    const exportData = { version: 1, name: "Imported", description: "Imported agent", backendType: "claude" as const, model: "opus", permissionMode: "auto", cwd: "/repo", prompt: "hello" };
+    mockFetch.mockResolvedValueOnce(mockResponse(mockAgent));
+
+    const result = await api.importAgent(exportData as any);
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/agents/import");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual(mockAgent);
+  });
+
+  it("exportAgent sends GET to /api/agents/:id/export", async () => {
+    const exportData = { version: 1, name: "Test Agent", description: "A test agent" };
+    mockFetch.mockResolvedValueOnce(mockResponse(exportData));
+
+    const result = await api.exportAgent("agent-1");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/agents/agent-1/export");
+    expect(result).toEqual(exportData);
+  });
+
+  it("regenerateAgentWebhookSecret sends POST to /api/agents/:id/regenerate-secret", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse(mockAgent));
+
+    const result = await api.regenerateAgentWebhookSecret("agent-1");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/agents/agent-1/regenerate-secret");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual(mockAgent);
+  });
+});
+
+// ===========================================================================
+// Skills API
+// ===========================================================================
+describe("skills API", () => {
+  it("listSkills sends GET to /api/skills", async () => {
+    const skills = [{ slug: "commit", name: "Commit", description: "Create a git commit", path: "/home/.claude/skills/commit.md" }];
+    mockFetch.mockResolvedValueOnce(mockResponse(skills));
+
+    const result = await api.listSkills();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/skills");
+    expect(result).toEqual(skills);
+  });
+});
+
+// ===========================================================================
+// Cross-session messaging
+// ===========================================================================
+describe("sendSessionMessage", () => {
+  it("sends POST to /api/sessions/:id/message with content body", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    const result = await api.sendSessionMessage("sess-1", "Hello from another session");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-1/message");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({ content: "Hello from another session" });
+    expect(result).toEqual({ ok: true });
+  });
+});
+
+// ===========================================================================
+// Saved prompts API
+// ===========================================================================
+describe("saved prompts API", () => {
+  const mockPrompt = {
+    id: "p1",
+    name: "Fix tests",
+    content: "Please fix the failing tests",
+    scope: "global" as const,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+
+  it("listPrompts sends GET to /api/prompts without params", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse([mockPrompt]));
+
+    const result = await api.listPrompts();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/prompts");
+    expect(result).toEqual([mockPrompt]);
+  });
+
+  it("listPrompts includes cwd and scope as query params", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse([mockPrompt]));
+
+    await api.listPrompts("/repo", "project");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/prompts?cwd=${encodeURIComponent("/repo")}&scope=project`);
+  });
+
+  it("listPrompts includes only cwd when scope is omitted", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse([]));
+
+    await api.listPrompts("/repo");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`/api/prompts?cwd=${encodeURIComponent("/repo")}`);
+  });
+
+  it("createPrompt sends POST to /api/prompts", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse(mockPrompt));
+
+    const result = await api.createPrompt({
+      name: "Fix tests",
+      content: "Please fix the failing tests",
+      scope: "global",
+    });
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/prompts");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({
+      name: "Fix tests",
+      content: "Please fix the failing tests",
+      scope: "global",
+    });
+    expect(result).toEqual(mockPrompt);
+  });
+
+  it("createPrompt includes cwd for project-scoped prompts", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ...mockPrompt, scope: "project", projectPath: "/repo" }));
+
+    await api.createPrompt({
+      name: "Fix tests",
+      content: "Please fix the failing tests",
+      scope: "project",
+      cwd: "/repo",
+    });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(JSON.parse(opts.body)).toEqual({
+      name: "Fix tests",
+      content: "Please fix the failing tests",
+      scope: "project",
+      cwd: "/repo",
+    });
+  });
+
+  it("updatePrompt sends PUT to /api/prompts/:id", async () => {
+    const updated = { ...mockPrompt, name: "Updated name" };
+    mockFetch.mockResolvedValueOnce(mockResponse(updated));
+
+    const result = await api.updatePrompt("p1", { name: "Updated name" });
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/prompts/p1");
+    expect(opts.method).toBe("PUT");
+    expect(JSON.parse(opts.body)).toEqual({ name: "Updated name" });
+    expect(result).toEqual(updated);
+  });
+
+  it("deletePrompt sends DELETE to /api/prompts/:id", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.deletePrompt("p1");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/prompts/p1");
+    expect(opts.method).toBe("DELETE");
+  });
+});
+
+// ===========================================================================
+// PUT / PATCH / DELETE error handling (verifies these HTTP helpers work like post/get)
+// ===========================================================================
+describe("put() error handling", () => {
+  it("throws with error message from JSON body on non-ok response", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ error: "Env not found" }, 404));
+
+    await expect(api.updateEnv("missing", { name: "X" })).rejects.toThrow("Env not found");
+    expect(captureEventMock).toHaveBeenCalledWith(
+      "api_request_failed",
+      expect.objectContaining({ method: "PUT", status: 404 }),
+    );
+  });
+});
+
+describe("patch() error handling", () => {
+  it("throws with error message from JSON body on non-ok response", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ error: "Name too long" }, 400));
+
+    await expect(api.renameSession("sess-1", "x".repeat(500))).rejects.toThrow("Name too long");
+    expect(captureEventMock).toHaveBeenCalledWith(
+      "api_request_failed",
+      expect.objectContaining({ method: "PATCH", status: 400 }),
+    );
+  });
+});
+
+describe("del() error handling", () => {
+  it("throws with error message from JSON body on non-ok response", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ error: "Cannot delete active session" }, 409));
+
+    await expect(api.deleteSession("active-sess")).rejects.toThrow("Cannot delete active session");
+    expect(captureEventMock).toHaveBeenCalledWith(
+      "api_request_failed",
+      expect.objectContaining({ method: "DELETE", status: 409 }),
+    );
+  });
 });

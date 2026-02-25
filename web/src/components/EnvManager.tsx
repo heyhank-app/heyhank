@@ -528,6 +528,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
         {onClose && (
           <button
             onClick={onClose}
+            aria-label="Close"
             className="w-8 h-8 flex items-center justify-center rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
           >
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
@@ -702,6 +703,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
               <div className="relative">
                 <button
                   onClick={() => setShowBuildLog(false)}
+                  aria-label="Close build log"
                   className="absolute top-1 right-1 text-cc-muted hover:text-cc-fg cursor-pointer"
                 >
                   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
@@ -739,6 +741,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
             />
             <button
               onClick={() => setPorts(ports.filter((_, idx) => idx !== i))}
+              aria-label="Remove port"
               className="w-10 h-10 min-h-[44px] flex items-center justify-center rounded-lg text-cc-muted hover:text-cc-error hover:bg-cc-error/10 transition-colors cursor-pointer shrink-0"
             >
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
@@ -894,6 +897,7 @@ function VarEditor({ rows, onChange }: { rows: VarRow[]; onChange: (rows: VarRow
           />
           <button
             onClick={() => removeRow(i)}
+            aria-label="Remove variable"
             className="w-10 h-10 min-h-[44px] flex items-center justify-center rounded-lg text-cc-muted hover:text-cc-error hover:bg-cc-error/10 transition-colors cursor-pointer shrink-0"
           >
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">

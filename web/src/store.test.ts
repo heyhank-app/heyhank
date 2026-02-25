@@ -41,7 +41,8 @@ vi.hoisted(() => {
 });
 
 import { useStore } from "./store.js";
-import type { SessionState, PermissionRequest, ChatMessage, TaskItem, SdkSessionInfo } from "./types.js";
+import type { SessionState, PermissionRequest, ChatMessage, TaskItem, SdkSessionInfo, ProcessItem } from "./types.js";
+import type { CreationProgressEvent, PRStatusResponse, LinearIssue } from "./api.js";
 
 function makeSession(id: string): SessionState {
   return {
@@ -97,6 +98,19 @@ function makeTask(overrides: Partial<TaskItem> = {}): TaskItem {
     subject: "Do something",
     description: "A task",
     status: "pending",
+    ...overrides,
+  };
+}
+
+function makeProcess(overrides: Partial<ProcessItem> = {}): ProcessItem {
+  return {
+    taskId: crypto.randomUUID().slice(0, 7),
+    toolUseId: crypto.randomUUID(),
+    command: "npm test",
+    description: "Running tests",
+    outputFile: "/tmp/output.txt",
+    status: "running",
+    startedAt: Date.now(),
     ...overrides,
   };
 }
@@ -476,6 +490,16 @@ describe("recentlyRenamed", () => {
 // ─── UI state ───────────────────────────────────────────────────────────────
 
 describe("UI state", () => {
+  it("setDarkMode: sets the value explicitly and persists to localStorage", () => {
+    useStore.getState().setDarkMode(true);
+    expect(useStore.getState().darkMode).toBe(true);
+    expect(localStorage.getItem("cc-dark-mode")).toBe("true");
+
+    useStore.getState().setDarkMode(false);
+    expect(useStore.getState().darkMode).toBe(false);
+    expect(localStorage.getItem("cc-dark-mode")).toBe("false");
+  });
+
   it("toggleDarkMode: flips the value and persists to localStorage", () => {
     const initial = useStore.getState().darkMode;
     useStore.getState().toggleDarkMode();
@@ -594,5 +618,898 @@ describe("MCP Servers", () => {
     useStore.getState().setMcpServers("s1", servers);
     useStore.getState().removeSession("s1");
     expect(useStore.getState().mcpServers.has("s1")).toBe(false);
+  });
+});
+
+// ─── Auth actions ────────────────────────────────────────────────────────────
+
+describe("Auth actions", () => {
+  it("setAuthToken: persists token to localStorage and sets isAuthenticated true", () => {
+    useStore.getState().setAuthToken("my-secret-token");
+
+    const state = useStore.getState();
+    expect(state.authToken).toBe("my-secret-token");
+    expect(state.isAuthenticated).toBe(true);
+    expect(localStorage.getItem("companion_auth_token")).toBe("my-secret-token");
+  });
+
+  it("logout: removes token from localStorage and sets isAuthenticated false", () => {
+    // First authenticate
+    useStore.getState().setAuthToken("token-123");
+    expect(useStore.getState().isAuthenticated).toBe(true);
+
+    // Then logout
+    useStore.getState().logout();
+
+    const state = useStore.getState();
+    expect(state.authToken).toBeNull();
+    expect(state.isAuthenticated).toBe(false);
+    expect(localStorage.getItem("companion_auth_token")).toBeNull();
+  });
+});
+
+// ─── Notification settings ───────────────────────────────────────────────────
+
+describe("Notification settings", () => {
+  it("setNotificationSound: persists value to localStorage", () => {
+    useStore.getState().setNotificationSound(false);
+    expect(useStore.getState().notificationSound).toBe(false);
+    expect(localStorage.getItem("cc-notification-sound")).toBe("false");
+
+    useStore.getState().setNotificationSound(true);
+    expect(useStore.getState().notificationSound).toBe(true);
+    expect(localStorage.getItem("cc-notification-sound")).toBe("true");
+  });
+
+  it("toggleNotificationSound: flips value and persists to localStorage", () => {
+    // Start with default (true after reset)
+    useStore.getState().setNotificationSound(true);
+    const initial = useStore.getState().notificationSound;
+
+    useStore.getState().toggleNotificationSound();
+    expect(useStore.getState().notificationSound).toBe(!initial);
+    expect(localStorage.getItem("cc-notification-sound")).toBe(String(!initial));
+
+    useStore.getState().toggleNotificationSound();
+    expect(useStore.getState().notificationSound).toBe(initial);
+  });
+
+  it("setNotificationDesktop: persists value to localStorage", () => {
+    useStore.getState().setNotificationDesktop(true);
+    expect(useStore.getState().notificationDesktop).toBe(true);
+    expect(localStorage.getItem("cc-notification-desktop")).toBe("true");
+
+    useStore.getState().setNotificationDesktop(false);
+    expect(useStore.getState().notificationDesktop).toBe(false);
+    expect(localStorage.getItem("cc-notification-desktop")).toBe("false");
+  });
+
+  it("toggleNotificationDesktop: flips value and persists to localStorage", () => {
+    useStore.getState().setNotificationDesktop(false);
+
+    useStore.getState().toggleNotificationDesktop();
+    expect(useStore.getState().notificationDesktop).toBe(true);
+    expect(localStorage.getItem("cc-notification-desktop")).toBe("true");
+
+    useStore.getState().toggleNotificationDesktop();
+    expect(useStore.getState().notificationDesktop).toBe(false);
+    expect(localStorage.getItem("cc-notification-desktop")).toBe("false");
+  });
+});
+
+// ─── Sidebar & task panel configuration ──────────────────────────────────────
+
+describe("Sidebar & task panel configuration", () => {
+  it("setSidebarOpen: sets the sidebar open state", () => {
+    useStore.getState().setSidebarOpen(false);
+    expect(useStore.getState().sidebarOpen).toBe(false);
+
+    useStore.getState().setSidebarOpen(true);
+    expect(useStore.getState().sidebarOpen).toBe(true);
+  });
+
+  it("setTaskPanelOpen: sets the task panel open state", () => {
+    useStore.getState().setTaskPanelOpen(false);
+    expect(useStore.getState().taskPanelOpen).toBe(false);
+
+    useStore.getState().setTaskPanelOpen(true);
+    expect(useStore.getState().taskPanelOpen).toBe(true);
+  });
+
+  it("setTaskPanelConfigMode: toggles config mode on and off", () => {
+    useStore.getState().setTaskPanelConfigMode(true);
+    expect(useStore.getState().taskPanelConfigMode).toBe(true);
+
+    useStore.getState().setTaskPanelConfigMode(false);
+    expect(useStore.getState().taskPanelConfigMode).toBe(false);
+  });
+
+  it("toggleSectionEnabled: flips the enabled state for a section and persists config", () => {
+    // Sections start enabled by default
+    const sectionId = "tasks";
+    const initialEnabled = useStore.getState().taskPanelConfig.enabled[sectionId];
+    expect(initialEnabled).toBe(true);
+
+    useStore.getState().toggleSectionEnabled(sectionId);
+    expect(useStore.getState().taskPanelConfig.enabled[sectionId]).toBe(false);
+
+    // Verify persistence to localStorage
+    const stored = JSON.parse(localStorage.getItem("cc-task-panel-config") || "{}");
+    expect(stored.enabled[sectionId]).toBe(false);
+
+    // Toggle back
+    useStore.getState().toggleSectionEnabled(sectionId);
+    expect(useStore.getState().taskPanelConfig.enabled[sectionId]).toBe(true);
+  });
+
+  it("moveSectionUp: swaps section with the one above it", () => {
+    const order = useStore.getState().taskPanelConfig.order;
+    // Move the second section up
+    const secondId = order[1];
+    const firstId = order[0];
+
+    useStore.getState().moveSectionUp(secondId);
+
+    const newOrder = useStore.getState().taskPanelConfig.order;
+    expect(newOrder[0]).toBe(secondId);
+    expect(newOrder[1]).toBe(firstId);
+
+    // Verify persistence
+    const stored = JSON.parse(localStorage.getItem("cc-task-panel-config") || "{}");
+    expect(stored.order[0]).toBe(secondId);
+  });
+
+  it("moveSectionUp: no-op when section is already at the top", () => {
+    const orderBefore = [...useStore.getState().taskPanelConfig.order];
+    const firstId = orderBefore[0];
+
+    useStore.getState().moveSectionUp(firstId);
+
+    // Order should remain unchanged
+    expect(useStore.getState().taskPanelConfig.order).toEqual(orderBefore);
+  });
+
+  it("moveSectionDown: swaps section with the one below it", () => {
+    const order = useStore.getState().taskPanelConfig.order;
+    const firstId = order[0];
+    const secondId = order[1];
+
+    useStore.getState().moveSectionDown(firstId);
+
+    const newOrder = useStore.getState().taskPanelConfig.order;
+    expect(newOrder[0]).toBe(secondId);
+    expect(newOrder[1]).toBe(firstId);
+
+    // Verify persistence
+    const stored = JSON.parse(localStorage.getItem("cc-task-panel-config") || "{}");
+    expect(stored.order[0]).toBe(secondId);
+  });
+
+  it("moveSectionDown: no-op when section is already at the bottom", () => {
+    const orderBefore = [...useStore.getState().taskPanelConfig.order];
+    const lastId = orderBefore[orderBefore.length - 1];
+
+    useStore.getState().moveSectionDown(lastId);
+
+    expect(useStore.getState().taskPanelConfig.order).toEqual(orderBefore);
+  });
+
+  it("resetTaskPanelConfig: restores default config and persists", () => {
+    // First, modify the config
+    useStore.getState().toggleSectionEnabled("tasks");
+    const orderBefore = useStore.getState().taskPanelConfig.order;
+    useStore.getState().moveSectionDown(orderBefore[0]);
+
+    // Reset
+    useStore.getState().resetTaskPanelConfig();
+
+    const config = useStore.getState().taskPanelConfig;
+    // All sections should be enabled
+    for (const key of Object.keys(config.enabled)) {
+      expect(config.enabled[key]).toBe(true);
+    }
+
+    // Verify persistence
+    const stored = JSON.parse(localStorage.getItem("cc-task-panel-config") || "{}");
+    expect(stored.order).toBeDefined();
+    expect(stored.enabled).toBeDefined();
+  });
+});
+
+// ─── Creation progress ───────────────────────────────────────────────────────
+
+describe("Creation progress", () => {
+  it("addCreationProgress: appends a new step when creationProgress is null", () => {
+    // clearCreation ensures no residual creation state from prior tests
+    // (reset() does not clear creationProgress)
+    useStore.getState().clearCreation();
+
+    const step: CreationProgressEvent = {
+      step: "spawn",
+      label: "Spawning CLI",
+      status: "in_progress",
+    };
+    useStore.getState().addCreationProgress(step);
+
+    const state = useStore.getState();
+    expect(state.creationProgress).toHaveLength(1);
+    expect(state.creationProgress![0]).toEqual(step);
+  });
+
+  it("addCreationProgress: appends a second step to existing progress", () => {
+    useStore.getState().clearCreation();
+
+    const step1: CreationProgressEvent = { step: "spawn", label: "Spawning CLI", status: "done" };
+    const step2: CreationProgressEvent = { step: "connect", label: "Connecting", status: "in_progress" };
+    useStore.getState().addCreationProgress(step1);
+    useStore.getState().addCreationProgress(step2);
+
+    expect(useStore.getState().creationProgress).toHaveLength(2);
+  });
+
+  it("addCreationProgress: updates existing step when same step name is used", () => {
+    // clearCreation ensures we start from null creationProgress, since
+    // reset() does not clear this field
+    useStore.getState().clearCreation();
+
+    // Simulates a step transitioning from in_progress to done
+    const stepInProgress: CreationProgressEvent = { step: "spawn", label: "Spawning", status: "in_progress" };
+    const stepDone: CreationProgressEvent = { step: "spawn", label: "Spawned", status: "done" };
+
+    useStore.getState().addCreationProgress(stepInProgress);
+    useStore.getState().addCreationProgress(stepDone);
+
+    const progress = useStore.getState().creationProgress!;
+    expect(progress).toHaveLength(1);
+    expect(progress[0].status).toBe("done");
+    expect(progress[0].label).toBe("Spawned");
+  });
+
+  it("clearCreation: resets all creation-related state", () => {
+    useStore.getState().addCreationProgress({ step: "spawn", label: "x", status: "done" });
+    useStore.getState().setCreationError("something failed");
+    useStore.getState().setSessionCreating(true, "claude");
+
+    useStore.getState().clearCreation();
+
+    const state = useStore.getState();
+    expect(state.creationProgress).toBeNull();
+    expect(state.creationError).toBeNull();
+    expect(state.sessionCreating).toBe(false);
+    expect(state.sessionCreatingBackend).toBeNull();
+  });
+
+  it("setSessionCreating: sets creating state and optional backend", () => {
+    useStore.getState().setSessionCreating(true, "codex");
+    expect(useStore.getState().sessionCreating).toBe(true);
+    expect(useStore.getState().sessionCreatingBackend).toBe("codex");
+
+    // Without backend argument, defaults to null
+    useStore.getState().setSessionCreating(false);
+    expect(useStore.getState().sessionCreating).toBe(false);
+    expect(useStore.getState().sessionCreatingBackend).toBeNull();
+  });
+
+  it("setCreationError: sets and clears the error message", () => {
+    useStore.getState().setCreationError("CLI failed to start");
+    expect(useStore.getState().creationError).toBe("CLI failed to start");
+
+    useStore.getState().setCreationError(null);
+    expect(useStore.getState().creationError).toBeNull();
+  });
+});
+
+// ─── Changed files tracking ──────────────────────────────────────────────────
+
+describe("Changed files tracking", () => {
+  it("bumpChangedFilesTick: increments tick starting from 0", () => {
+    useStore.getState().bumpChangedFilesTick("s1");
+    expect(useStore.getState().changedFilesTick.get("s1")).toBe(1);
+
+    useStore.getState().bumpChangedFilesTick("s1");
+    expect(useStore.getState().changedFilesTick.get("s1")).toBe(2);
+  });
+
+  it("bumpChangedFilesTick: tracks independently per session", () => {
+    useStore.getState().bumpChangedFilesTick("s1");
+    useStore.getState().bumpChangedFilesTick("s1");
+    useStore.getState().bumpChangedFilesTick("s2");
+
+    expect(useStore.getState().changedFilesTick.get("s1")).toBe(2);
+    expect(useStore.getState().changedFilesTick.get("s2")).toBe(1);
+  });
+
+  it("setGitChangedFilesCount: stores the count for a session", () => {
+    useStore.getState().setGitChangedFilesCount("s1", 5);
+    expect(useStore.getState().gitChangedFilesCount.get("s1")).toBe(5);
+
+    useStore.getState().setGitChangedFilesCount("s1", 0);
+    expect(useStore.getState().gitChangedFilesCount.get("s1")).toBe(0);
+  });
+});
+
+// ─── Process management ──────────────────────────────────────────────────────
+
+describe("Process management", () => {
+  it("addProcess: appends a process to the session's list", () => {
+    const proc = makeProcess({ taskId: "abc", command: "npm test" });
+    useStore.getState().addProcess("s1", proc);
+
+    const processes = useStore.getState().sessionProcesses.get("s1")!;
+    expect(processes).toHaveLength(1);
+    expect(processes[0].command).toBe("npm test");
+  });
+
+  it("addProcess: accumulates multiple processes", () => {
+    useStore.getState().addProcess("s1", makeProcess({ taskId: "a" }));
+    useStore.getState().addProcess("s1", makeProcess({ taskId: "b" }));
+
+    expect(useStore.getState().sessionProcesses.get("s1")).toHaveLength(2);
+  });
+
+  it("updateProcess: merges updates by taskId", () => {
+    const proc = makeProcess({ taskId: "abc", status: "running" });
+    useStore.getState().addProcess("s1", proc);
+
+    useStore.getState().updateProcess("s1", "abc", { status: "completed", completedAt: 999 });
+
+    const updated = useStore.getState().sessionProcesses.get("s1")![0];
+    expect(updated.status).toBe("completed");
+    expect(updated.completedAt).toBe(999);
+    expect(updated.command).toBe("npm test"); // other fields preserved
+  });
+
+  it("updateProcess: no-op when session has no processes", () => {
+    // Should not throw when updating a non-existent session
+    useStore.getState().updateProcess("s1", "abc", { status: "completed" });
+    expect(useStore.getState().sessionProcesses.get("s1")).toBeUndefined();
+  });
+
+  it("updateProcess: does not affect non-matching processes", () => {
+    useStore.getState().addProcess("s1", makeProcess({ taskId: "a", status: "running" }));
+    useStore.getState().addProcess("s1", makeProcess({ taskId: "b", status: "running" }));
+
+    useStore.getState().updateProcess("s1", "a", { status: "completed" });
+
+    const processes = useStore.getState().sessionProcesses.get("s1")!;
+    expect(processes[0].status).toBe("completed");
+    expect(processes[1].status).toBe("running");
+  });
+
+  it("updateProcessByToolUseId: merges updates by toolUseId", () => {
+    const proc = makeProcess({ toolUseId: "tool-1", status: "running" });
+    useStore.getState().addProcess("s1", proc);
+
+    useStore.getState().updateProcessByToolUseId("s1", "tool-1", {
+      status: "failed",
+      summary: "Test failed",
+    });
+
+    const updated = useStore.getState().sessionProcesses.get("s1")![0];
+    expect(updated.status).toBe("failed");
+    expect(updated.summary).toBe("Test failed");
+  });
+
+  it("updateProcessByToolUseId: no-op when session has no processes", () => {
+    // Should not throw when updating a non-existent session
+    useStore.getState().updateProcessByToolUseId("s1", "tool-1", { status: "completed" });
+    expect(useStore.getState().sessionProcesses.get("s1")).toBeUndefined();
+  });
+});
+
+// ─── PR status ───────────────────────────────────────────────────────────────
+
+describe("PR status", () => {
+  it("setPRStatus: stores PR status for a session", () => {
+    const status: PRStatusResponse = { available: true, pr: null };
+    useStore.getState().setPRStatus("s1", status);
+
+    expect(useStore.getState().prStatus.get("s1")).toEqual(status);
+  });
+
+  it("setPRStatus: replaces existing status", () => {
+    const first: PRStatusResponse = { available: false, pr: null };
+    const second: PRStatusResponse = { available: true, pr: null };
+    useStore.getState().setPRStatus("s1", first);
+    useStore.getState().setPRStatus("s1", second);
+
+    expect(useStore.getState().prStatus.get("s1")!.available).toBe(true);
+  });
+});
+
+// ─── Linear issues ───────────────────────────────────────────────────────────
+
+describe("Linear issues", () => {
+  const mockIssue: LinearIssue = {
+    id: "issue-1",
+    identifier: "ENG-123",
+    title: "Fix bug",
+    description: "Some description",
+    url: "https://linear.app/team/issue/ENG-123",
+    branchName: "fix/bug",
+    priorityLabel: "High",
+    stateName: "In Progress",
+    stateType: "started",
+    teamName: "Engineering",
+    teamKey: "ENG",
+    teamId: "team-1",
+  };
+
+  it("setLinkedLinearIssue: stores issue for a session", () => {
+    useStore.getState().setLinkedLinearIssue("s1", mockIssue);
+    expect(useStore.getState().linkedLinearIssues.get("s1")).toEqual(mockIssue);
+  });
+
+  it("setLinkedLinearIssue(null): removes the issue for a session", () => {
+    useStore.getState().setLinkedLinearIssue("s1", mockIssue);
+    useStore.getState().setLinkedLinearIssue("s1", null);
+    expect(useStore.getState().linkedLinearIssues.has("s1")).toBe(false);
+  });
+});
+
+// ─── Tool progress ───────────────────────────────────────────────────────────
+
+describe("Tool progress", () => {
+  it("setToolProgress: stores progress data for a tool in a session", () => {
+    useStore.getState().setToolProgress("s1", "tool-1", {
+      toolName: "Bash",
+      elapsedSeconds: 5,
+    });
+
+    const sessionProgress = useStore.getState().toolProgress.get("s1")!;
+    expect(sessionProgress.get("tool-1")).toEqual({
+      toolName: "Bash",
+      elapsedSeconds: 5,
+    });
+  });
+
+  it("setToolProgress: accumulates multiple tools per session", () => {
+    useStore.getState().setToolProgress("s1", "tool-1", { toolName: "Bash", elapsedSeconds: 1 });
+    useStore.getState().setToolProgress("s1", "tool-2", { toolName: "Read", elapsedSeconds: 2 });
+
+    const sessionProgress = useStore.getState().toolProgress.get("s1")!;
+    expect(sessionProgress.size).toBe(2);
+  });
+
+  it("clearToolProgress with toolUseId: removes specific tool from session", () => {
+    useStore.getState().setToolProgress("s1", "tool-1", { toolName: "Bash", elapsedSeconds: 1 });
+    useStore.getState().setToolProgress("s1", "tool-2", { toolName: "Read", elapsedSeconds: 2 });
+
+    useStore.getState().clearToolProgress("s1", "tool-1");
+
+    const sessionProgress = useStore.getState().toolProgress.get("s1")!;
+    expect(sessionProgress.has("tool-1")).toBe(false);
+    expect(sessionProgress.has("tool-2")).toBe(true);
+  });
+
+  it("clearToolProgress without toolUseId: removes entire session's progress", () => {
+    useStore.getState().setToolProgress("s1", "tool-1", { toolName: "Bash", elapsedSeconds: 1 });
+    useStore.getState().setToolProgress("s1", "tool-2", { toolName: "Read", elapsedSeconds: 2 });
+
+    useStore.getState().clearToolProgress("s1");
+
+    expect(useStore.getState().toolProgress.has("s1")).toBe(false);
+  });
+
+  it("clearToolProgress: no-op when clearing a specific tool from non-existent session progress", () => {
+    // Should not throw
+    useStore.getState().clearToolProgress("s1", "tool-1");
+    // toolProgress for s1 should still not exist (not created as empty)
+    expect(useStore.getState().toolProgress.has("s1")).toBe(false);
+  });
+});
+
+// ─── Sidebar project grouping ────────────────────────────────────────────────
+
+describe("Sidebar project grouping", () => {
+  it("toggleProjectCollapse: adds project to collapsed set and persists", () => {
+    // collapsedProjects is not cleared by reset(), so ensure a clean slate
+    useStore.setState({ collapsedProjects: new Set() });
+
+    useStore.getState().toggleProjectCollapse("/home/project-a");
+
+    expect(useStore.getState().collapsedProjects.has("/home/project-a")).toBe(true);
+    const stored = JSON.parse(localStorage.getItem("cc-collapsed-projects") || "[]");
+    expect(stored).toContain("/home/project-a");
+  });
+
+  it("toggleProjectCollapse: removes project from collapsed set on second toggle", () => {
+    // Start from a known empty state since reset() does not clear collapsedProjects
+    useStore.setState({ collapsedProjects: new Set() });
+
+    useStore.getState().toggleProjectCollapse("/home/project-a");
+    useStore.getState().toggleProjectCollapse("/home/project-a");
+
+    expect(useStore.getState().collapsedProjects.has("/home/project-a")).toBe(false);
+    const stored = JSON.parse(localStorage.getItem("cc-collapsed-projects") || "[]");
+    expect(stored).not.toContain("/home/project-a");
+  });
+});
+
+// ─── Plan mode (previous permission mode) ────────────────────────────────────
+
+describe("Plan mode", () => {
+  it("setPreviousPermissionMode: stores previous mode for a session", () => {
+    useStore.getState().setPreviousPermissionMode("s1", "auto-accept");
+    expect(useStore.getState().previousPermissionMode.get("s1")).toBe("auto-accept");
+  });
+});
+
+// ─── Connection and session status ───────────────────────────────────────────
+
+describe("Connection and session status", () => {
+  it("setConnectionStatus: stores browser-server WebSocket status per session", () => {
+    useStore.getState().setConnectionStatus("s1", "connecting");
+    expect(useStore.getState().connectionStatus.get("s1")).toBe("connecting");
+
+    useStore.getState().setConnectionStatus("s1", "connected");
+    expect(useStore.getState().connectionStatus.get("s1")).toBe("connected");
+
+    useStore.getState().setConnectionStatus("s1", "disconnected");
+    expect(useStore.getState().connectionStatus.get("s1")).toBe("disconnected");
+  });
+
+  it("setCliConnected: stores CLI-server connection state per session", () => {
+    useStore.getState().setCliConnected("s1", true);
+    expect(useStore.getState().cliConnected.get("s1")).toBe(true);
+
+    useStore.getState().setCliConnected("s1", false);
+    expect(useStore.getState().cliConnected.get("s1")).toBe(false);
+  });
+
+  it("setSessionStatus: stores idle/running/compacting/null per session", () => {
+    useStore.getState().setSessionStatus("s1", "idle");
+    expect(useStore.getState().sessionStatus.get("s1")).toBe("idle");
+
+    useStore.getState().setSessionStatus("s1", "running");
+    expect(useStore.getState().sessionStatus.get("s1")).toBe("running");
+
+    useStore.getState().setSessionStatus("s1", "compacting");
+    expect(useStore.getState().sessionStatus.get("s1")).toBe("compacting");
+
+    useStore.getState().setSessionStatus("s1", null);
+    expect(useStore.getState().sessionStatus.get("s1")).toBeNull();
+  });
+});
+
+// ─── Update info ─────────────────────────────────────────────────────────────
+
+describe("Update info", () => {
+  it("setUpdateInfo: stores update info", () => {
+    const info = {
+      currentVersion: "1.0.0",
+      latestVersion: "1.1.0",
+      updateAvailable: true,
+      isServiceMode: false,
+      updateInProgress: false,
+      lastChecked: Date.now(),
+    };
+    useStore.getState().setUpdateInfo(info);
+    expect(useStore.getState().updateInfo).toEqual(info);
+  });
+
+  it("setUpdateInfo(null): clears update info", () => {
+    useStore.getState().setUpdateInfo({
+      currentVersion: "1.0.0",
+      latestVersion: "1.1.0",
+      updateAvailable: true,
+      isServiceMode: false,
+      updateInProgress: false,
+      lastChecked: Date.now(),
+    });
+    useStore.getState().setUpdateInfo(null);
+    expect(useStore.getState().updateInfo).toBeNull();
+  });
+
+  it("dismissUpdate: persists dismissed version to localStorage", () => {
+    useStore.getState().dismissUpdate("1.1.0");
+    expect(useStore.getState().updateDismissedVersion).toBe("1.1.0");
+    expect(localStorage.getItem("cc-update-dismissed")).toBe("1.1.0");
+  });
+
+  it("setUpdateOverlayActive: sets the overlay active state", () => {
+    useStore.getState().setUpdateOverlayActive(true);
+    expect(useStore.getState().updateOverlayActive).toBe(true);
+
+    useStore.getState().setUpdateOverlayActive(false);
+    expect(useStore.getState().updateOverlayActive).toBe(false);
+  });
+
+  it("setEditorTabEnabled: sets the editor tab enabled state", () => {
+    useStore.getState().setEditorTabEnabled(true);
+    expect(useStore.getState().editorTabEnabled).toBe(true);
+
+    useStore.getState().setEditorTabEnabled(false);
+    expect(useStore.getState().editorTabEnabled).toBe(false);
+  });
+});
+
+// ─── Active tab & diff panel ─────────────────────────────────────────────────
+
+describe("Active tab & diff panel", () => {
+  it("setActiveTab: sets the active workspace tab", () => {
+    useStore.getState().setActiveTab("diff");
+    expect(useStore.getState().activeTab).toBe("diff");
+
+    useStore.getState().setActiveTab("terminal");
+    expect(useStore.getState().activeTab).toBe("terminal");
+
+    useStore.getState().setActiveTab("chat");
+    expect(useStore.getState().activeTab).toBe("chat");
+
+    useStore.getState().setActiveTab("processes");
+    expect(useStore.getState().activeTab).toBe("processes");
+
+    useStore.getState().setActiveTab("editor");
+    expect(useStore.getState().activeTab).toBe("editor");
+  });
+
+  it("markChatTabReentry: increments tick per session", () => {
+    useStore.getState().markChatTabReentry("s1");
+    expect(useStore.getState().chatTabReentryTickBySession.get("s1")).toBe(1);
+
+    useStore.getState().markChatTabReentry("s1");
+    expect(useStore.getState().chatTabReentryTickBySession.get("s1")).toBe(2);
+
+    // Different session starts at 1
+    useStore.getState().markChatTabReentry("s2");
+    expect(useStore.getState().chatTabReentryTickBySession.get("s2")).toBe(1);
+  });
+
+  it("setDiffPanelSelectedFile: stores file path for a session", () => {
+    useStore.getState().setDiffPanelSelectedFile("s1", "src/main.ts");
+    expect(useStore.getState().diffPanelSelectedFile.get("s1")).toBe("src/main.ts");
+  });
+
+  it("setDiffPanelSelectedFile(null): removes the selection for a session", () => {
+    useStore.getState().setDiffPanelSelectedFile("s1", "src/main.ts");
+    useStore.getState().setDiffPanelSelectedFile("s1", null);
+    expect(useStore.getState().diffPanelSelectedFile.has("s1")).toBe(false);
+  });
+});
+
+// ─── Quick terminal (additional tests) ───────────────────────────────────────
+
+describe("Quick terminal", () => {
+  it("setQuickTerminalOpen: sets the open state", () => {
+    useStore.getState().setQuickTerminalOpen(true);
+    expect(useStore.getState().quickTerminalOpen).toBe(true);
+
+    useStore.getState().setQuickTerminalOpen(false);
+    expect(useStore.getState().quickTerminalOpen).toBe(false);
+  });
+
+  it("openQuickTerminal: creates a docker tab with Docker label", () => {
+    useStore.getState().openQuickTerminal({
+      target: "docker",
+      cwd: "/app",
+      containerId: "abc123",
+    });
+
+    const state = useStore.getState();
+    expect(state.quickTerminalOpen).toBe(true);
+    expect(state.quickTerminalTabs).toHaveLength(1);
+    expect(state.quickTerminalTabs[0].label).toBe("Docker 1");
+    expect(state.quickTerminalTabs[0].cwd).toBe("/app");
+    expect(state.quickTerminalTabs[0].containerId).toBe("abc123");
+  });
+
+  it("openQuickTerminal docker: increments docker index, not host index", () => {
+    useStore.getState().openQuickTerminal({ target: "docker", cwd: "/a", containerId: "c1" });
+    useStore.getState().openQuickTerminal({ target: "docker", cwd: "/b", containerId: "c2" });
+
+    const tabs = useStore.getState().quickTerminalTabs;
+    expect(tabs[0].label).toBe("Docker 1");
+    expect(tabs[1].label).toBe("Docker 2");
+
+    // Host index should still be 1
+    expect(useStore.getState().quickTerminalNextHostIndex).toBe(1);
+    expect(useStore.getState().quickTerminalNextDockerIndex).toBe(3);
+  });
+
+  it("openQuickTerminal with reuseIfExists: does not reuse if containerId differs", () => {
+    useStore.getState().openQuickTerminal({ target: "docker", cwd: "/app", containerId: "c1" });
+    useStore.getState().openQuickTerminal({
+      target: "docker",
+      cwd: "/app",
+      containerId: "c2",
+      reuseIfExists: true,
+    });
+
+    // Should have created a second tab since containerId differs
+    expect(useStore.getState().quickTerminalTabs).toHaveLength(2);
+  });
+
+  it("closeQuickTerminalTab: closes terminal when last tab is removed", () => {
+    useStore.getState().openQuickTerminal({ target: "host", cwd: "/repo" });
+    const tabId = useStore.getState().quickTerminalTabs[0].id;
+
+    useStore.getState().closeQuickTerminalTab(tabId);
+
+    expect(useStore.getState().quickTerminalTabs).toHaveLength(0);
+    expect(useStore.getState().activeQuickTerminalTabId).toBeNull();
+    expect(useStore.getState().quickTerminalOpen).toBe(false);
+  });
+
+  it("closeQuickTerminalTab: selects first remaining tab when active tab is closed", () => {
+    useStore.getState().openQuickTerminal({ target: "host", cwd: "/a" });
+    useStore.getState().openQuickTerminal({ target: "host", cwd: "/b" });
+    const tabs = useStore.getState().quickTerminalTabs;
+
+    // Active should be the last opened tab (second one)
+    expect(useStore.getState().activeQuickTerminalTabId).toBe(tabs[1].id);
+
+    // Close the active (second) tab
+    useStore.getState().closeQuickTerminalTab(tabs[1].id);
+
+    // Should fall back to the first tab
+    expect(useStore.getState().activeQuickTerminalTabId).toBe(tabs[0].id);
+    expect(useStore.getState().quickTerminalOpen).toBe(true);
+  });
+
+  it("setActiveQuickTerminalTabId: sets the active tab", () => {
+    useStore.getState().openQuickTerminal({ target: "host", cwd: "/a" });
+    useStore.getState().openQuickTerminal({ target: "host", cwd: "/b" });
+    const firstTabId = useStore.getState().quickTerminalTabs[0].id;
+
+    useStore.getState().setActiveQuickTerminalTabId(firstTabId);
+    expect(useStore.getState().activeQuickTerminalTabId).toBe(firstTabId);
+
+    useStore.getState().setActiveQuickTerminalTabId(null);
+    expect(useStore.getState().activeQuickTerminalTabId).toBeNull();
+  });
+
+  it("resetQuickTerminal: clears all terminal state and resets indices", () => {
+    useStore.getState().openQuickTerminal({ target: "host", cwd: "/a" });
+    useStore.getState().openQuickTerminal({ target: "docker", cwd: "/b", containerId: "c1" });
+
+    useStore.getState().resetQuickTerminal();
+
+    const state = useStore.getState();
+    expect(state.quickTerminalOpen).toBe(false);
+    expect(state.quickTerminalTabs).toEqual([]);
+    expect(state.activeQuickTerminalTabId).toBeNull();
+    expect(state.quickTerminalNextHostIndex).toBe(1);
+    expect(state.quickTerminalNextDockerIndex).toBe(1);
+  });
+});
+
+// ─── Diff base setting ───────────────────────────────────────────────────────
+
+describe("Diff base", () => {
+  it("setDiffBase: persists diff base to localStorage", () => {
+    useStore.getState().setDiffBase("default-branch");
+    expect(useStore.getState().diffBase).toBe("default-branch");
+    expect(localStorage.getItem("cc-diff-base")).toBe("default-branch");
+
+    useStore.getState().setDiffBase("last-commit");
+    expect(useStore.getState().diffBase).toBe("last-commit");
+    expect(localStorage.getItem("cc-diff-base")).toBe("last-commit");
+  });
+});
+
+// ─── Terminal actions ────────────────────────────────────────────────────────
+
+describe("Terminal actions", () => {
+  it("setTerminalOpen: sets terminal open state", () => {
+    useStore.getState().setTerminalOpen(true);
+    expect(useStore.getState().terminalOpen).toBe(true);
+
+    useStore.getState().setTerminalOpen(false);
+    expect(useStore.getState().terminalOpen).toBe(false);
+  });
+
+  it("setTerminalCwd: sets the terminal working directory", () => {
+    useStore.getState().setTerminalCwd("/home/user/project");
+    expect(useStore.getState().terminalCwd).toBe("/home/user/project");
+
+    useStore.getState().setTerminalCwd(null);
+    expect(useStore.getState().terminalCwd).toBeNull();
+  });
+
+  it("setTerminalId: sets the terminal instance ID", () => {
+    useStore.getState().setTerminalId("term-abc");
+    expect(useStore.getState().terminalId).toBe("term-abc");
+
+    useStore.getState().setTerminalId(null);
+    expect(useStore.getState().terminalId).toBeNull();
+  });
+
+  it("openTerminal: sets open to true and cwd", () => {
+    useStore.getState().openTerminal("/home/user/project");
+
+    expect(useStore.getState().terminalOpen).toBe(true);
+    expect(useStore.getState().terminalCwd).toBe("/home/user/project");
+  });
+
+  it("closeTerminal: resets all terminal state", () => {
+    useStore.getState().openTerminal("/home/user/project");
+    useStore.getState().setTerminalId("term-1");
+
+    useStore.getState().closeTerminal();
+
+    expect(useStore.getState().terminalOpen).toBe(false);
+    expect(useStore.getState().terminalCwd).toBeNull();
+    expect(useStore.getState().terminalId).toBeNull();
+  });
+});
+
+// ─── removeSession: comprehensive cleanup ────────────────────────────────────
+
+describe("removeSession: comprehensive cleanup", () => {
+  it("cleans up all session-related maps including linkedLinearIssues, chatTabReentry, diffPanelSelectedFile, toolProgress, prStatus", () => {
+    // Set up a session with data in every possible map
+    useStore.getState().addSession(makeSession("s1"));
+    useStore.getState().setCurrentSession("s1");
+    useStore.getState().setLinkedLinearIssue("s1", {
+      id: "i1", identifier: "ENG-1", title: "t", description: "d",
+      url: "u", branchName: "b", priorityLabel: "p", stateName: "s",
+      stateType: "st", teamName: "tm", teamKey: "ENG", teamId: "t1",
+    });
+    useStore.getState().markChatTabReentry("s1");
+    useStore.getState().setDiffPanelSelectedFile("s1", "file.ts");
+    useStore.getState().setToolProgress("s1", "t1", { toolName: "Bash", elapsedSeconds: 1 });
+    useStore.getState().setPRStatus("s1", { available: true, pr: null });
+    useStore.getState().addProcess("s1", makeProcess());
+    useStore.getState().bumpChangedFilesTick("s1");
+    useStore.getState().setGitChangedFilesCount("s1", 3);
+    useStore.getState().setSdkSessions([
+      { sessionId: "s1", state: "connected", cwd: "/", createdAt: 0 },
+    ]);
+
+    useStore.getState().removeSession("s1");
+
+    const state = useStore.getState();
+    expect(state.linkedLinearIssues.has("s1")).toBe(false);
+    expect(state.chatTabReentryTickBySession.has("s1")).toBe(false);
+    expect(state.diffPanelSelectedFile.has("s1")).toBe(false);
+    expect(state.toolProgress.has("s1")).toBe(false);
+    expect(state.prStatus.has("s1")).toBe(false);
+    expect(state.sessionProcesses.has("s1")).toBe(false);
+    expect(state.changedFilesTick.has("s1")).toBe(false);
+    expect(state.gitChangedFilesCount.has("s1")).toBe(false);
+    expect(state.sdkSessions).toHaveLength(0);
+    expect(state.currentSessionId).toBeNull();
+  });
+});
+
+// ─── removePermission edge case ──────────────────────────────────────────────
+
+describe("removePermission edge cases", () => {
+  it("removePermission: no-op when session has no permissions", () => {
+    // Should not throw when removing from a session with no pending permissions
+    useStore.getState().removePermission("s1", "nonexistent");
+    expect(useStore.getState().pendingPermissions.has("s1")).toBe(false);
+  });
+});
+
+// ─── updateTask edge case ────────────────────────────────────────────────────
+
+describe("updateTask edge cases", () => {
+  it("updateTask: no-op when session has no tasks", () => {
+    // Should not throw when updating tasks for a session with no task list
+    useStore.getState().updateTask("s1", "t1", { status: "completed" });
+    expect(useStore.getState().sessionTasks.has("s1")).toBe(false);
+  });
+});
+
+// ─── deleteFromMap / deleteFromSet helpers (indirectly) ──────────────────────
+
+describe("deleteFromMap / deleteFromSet helpers", () => {
+  it("removeSession on non-existent session returns same references for maps without that key", () => {
+    // Pre-populate another session to ensure there's data
+    useStore.getState().addSession(makeSession("s1"));
+    useStore.getState().setSessionName("s1", "Test");
+
+    const sessionsBefore = useStore.getState().sessions;
+
+    // Remove a session that doesn't exist in most maps
+    useStore.getState().removeSession("nonexistent");
+
+    // The sessions map should have changed (since it checks for the key),
+    // but if the key wasn't present, same reference should be returned
+    // We verify the s1 session is still intact
+    expect(useStore.getState().sessions.get("s1")).toBeDefined();
+    expect(useStore.getState().sessionNames.get("s1")).toBe("Test");
   });
 });

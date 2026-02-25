@@ -17,6 +17,12 @@ const { mockApi, createSessionStreamMock, mockStoreState, mockStoreGetState } = 
     getLinearProjectIssues: vi.fn(),
     searchLinearIssues: vi.fn(),
     gitFetch: vi.fn(),
+    getBackendModels: vi.fn(),
+    getImageStatus: vi.fn(),
+    pullImage: vi.fn(),
+    gitPull: vi.fn(),
+    linkLinearIssue: vi.fn(),
+    transitionLinearIssue: vi.fn(),
   },
   createSessionStreamMock: vi.fn(),
   mockStoreState: {
@@ -47,29 +53,52 @@ vi.mock("../ws.js", () => ({
   disconnectSession: vi.fn(),
 }));
 
-vi.mock("./EnvManager.js", () => ({ EnvManager: () => null }));
-vi.mock("./FolderPicker.js", () => ({ FolderPicker: () => null }));
+vi.mock("./EnvManager.js", () => ({
+  EnvManager: ({ onClose }: { onClose: () => void }) => (
+    <div data-testid="env-manager">
+      <button onClick={onClose}>Close Env Manager</button>
+    </div>
+  ),
+}));
+vi.mock("./FolderPicker.js", () => ({
+  FolderPicker: ({ onSelect, onClose }: { onSelect: (p: string) => void; onClose: () => void }) => (
+    <div data-testid="folder-picker">
+      <button onClick={() => onSelect("/new-project")}>Select Folder</button>
+      <button onClick={onClose}>Close Picker</button>
+    </div>
+  ),
+}));
 vi.mock("./LinearLogo.js", () => ({ LinearLogo: () => <span>Linear</span> }));
+vi.mock("../utils/routing.js", () => ({
+  navigateToSession: vi.fn(),
+}));
 
 import { HomePage } from "./HomePage.js";
+
+/** Helper to build a default store mock with overridable fields. */
+function buildStoreMock(overrides: Record<string, unknown> = {}) {
+  return {
+    clearCreation: vi.fn(),
+    setSessionCreating: vi.fn(),
+    addCreationProgress: vi.fn(),
+    sdkSessions: [],
+    setSdkSessions: vi.fn(),
+    sessionNames: new Map(),
+    setSessionName: vi.fn(),
+    setPreviousPermissionMode: vi.fn(),
+    appendMessage: vi.fn(),
+    setLinkedLinearIssue: vi.fn(),
+    setCreationError: vi.fn(),
+    clearCreationError: vi.fn(),
+    ...overrides,
+  };
+}
 
 describe("HomePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
-    mockStoreGetState.mockReturnValue({
-      clearCreation: vi.fn(),
-      setSessionCreating: vi.fn(),
-      addCreationProgress: vi.fn(),
-      sdkSessions: [],
-      setSdkSessions: vi.fn(),
-      sessionNames: new Map(),
-      setSessionName: vi.fn(),
-      setPreviousPermissionMode: vi.fn(),
-      appendMessage: vi.fn(),
-      setLinkedLinearIssue: vi.fn(),
-      setCreationError: vi.fn(),
-    });
+    mockStoreGetState.mockReturnValue(buildStoreMock());
 
     mockApi.getHome.mockResolvedValue({ home: "/home/ubuntu", cwd: "/repo" });
     mockApi.listEnvs.mockResolvedValue([]);
@@ -292,5 +321,830 @@ describe("HomePage", () => {
     await screen.findByText(/showing 1 of 1 matching claude session/i);
     expect(screen.getByRole("button", { name: /fork and open beta/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /fork and open alpha/i })).not.toBeInTheDocument();
+  });
+
+  // ─── Basic rendering tests ──────────────────────────────────────────────────
+
+  it("renders the title, logo, textarea, and send button", async () => {
+    // Verifies the core UI elements appear after initial load.
+    render(<HomePage />);
+
+    // Title
+    expect(screen.getByText("The Companion")).toBeInTheDocument();
+
+    // Logo image (the claude logo is the default)
+    const logo = screen.getByAltText("The Companion");
+    expect(logo).toBeInTheDocument();
+    expect(logo).toHaveAttribute("src", "/logo.svg");
+
+    // Textarea
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    expect(textarea).toBeInTheDocument();
+
+    // Send button (disabled by default since textarea is empty)
+    const sendButton = screen.getByTitle("Send message");
+    expect(sendButton).toBeInTheDocument();
+    expect(sendButton).toBeDisabled();
+  });
+
+  it("enables send button only when textarea has text", async () => {
+    // The send button should be disabled when the textarea is empty,
+    // and enabled once the user types a non-whitespace message.
+    render(<HomePage />);
+
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    const sendButton = screen.getByTitle("Send message");
+
+    // Initially disabled
+    expect(sendButton).toBeDisabled();
+
+    // Typing whitespace-only should keep it disabled
+    fireEvent.change(textarea, { target: { value: "   " } });
+    expect(sendButton).toBeDisabled();
+
+    // Typing real text should enable it
+    fireEvent.change(textarea, { target: { value: "Fix the bug" } });
+    expect(sendButton).not.toBeDisabled();
+  });
+
+  // ─── Model dropdown interaction ─────────────────────────────────────────────
+
+  it("opens and selects from the model dropdown", async () => {
+    // Verifies users can open the model picker and change the selected model.
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    // The default model label for claude backend is "Opus 4.6"
+    const modelButton = screen.getByText("Opus 4.6");
+    expect(modelButton).toBeInTheDocument();
+
+    // Open model dropdown
+    fireEvent.click(modelButton);
+
+    // Should see model options
+    const sonnetOption = screen.getByText("Sonnet 4.6");
+    expect(sonnetOption).toBeInTheDocument();
+
+    // Select Sonnet
+    fireEvent.click(sonnetOption);
+
+    // Verify dropdown closed and Sonnet is now shown
+    expect(screen.queryByText("Haiku 4.5")).not.toBeInTheDocument(); // dropdown closed
+    expect(screen.getByText("Sonnet 4.6")).toBeInTheDocument(); // now selected
+  });
+
+  // ─── Mode dropdown interaction ──────────────────────────────────────────────
+
+  it("opens and selects from the mode dropdown", async () => {
+    // Verifies users can change the permission mode (Agent/Plan).
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    // Default mode for claude backend is "Agent"
+    const modeButton = screen.getByText("Agent");
+    fireEvent.click(modeButton);
+
+    // Select Plan mode
+    const planOption = screen.getByText("Plan");
+    fireEvent.click(planOption);
+
+    // Plan should now be selected
+    expect(screen.getByText("Plan")).toBeInTheDocument();
+  });
+
+  // ─── Keyboard shortcuts ─────────────────────────────────────────────────────
+
+  it("cycles permission mode on Shift+Tab", async () => {
+    // Shift+Tab should cycle through available modes (Agent -> Plan -> Agent).
+    render(<HomePage />);
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    await waitFor(() => expect(textarea).toBeInTheDocument());
+
+    // Default mode is "Agent" (bypassPermissions)
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+
+    // Press Shift+Tab to cycle to next mode (Plan)
+    fireEvent.keyDown(textarea, { key: "Tab", shiftKey: true });
+    expect(screen.getByText("Plan")).toBeInTheDocument();
+
+    // Press Shift+Tab again to cycle back to Agent
+    fireEvent.keyDown(textarea, { key: "Tab", shiftKey: true });
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+  });
+
+  it("submits on Enter (without shift) when text is present", async () => {
+    // Enter key should trigger session creation when there's text in the textarea.
+    createSessionStreamMock.mockResolvedValue({
+      sessionId: "new-session",
+      state: "starting",
+      cwd: "/repo",
+    });
+
+    render(<HomePage />);
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.change(textarea, { target: { value: "Build a feature" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
+
+    await waitFor(() => {
+      expect(createSessionStreamMock).toHaveBeenCalled();
+    });
+  });
+
+  it("does not submit on Shift+Enter", async () => {
+    // Shift+Enter should allow newlines without submitting.
+    render(<HomePage />);
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.change(textarea, { target: { value: "Build a feature" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+
+    // Should not have attempted to create a session
+    expect(createSessionStreamMock).not.toHaveBeenCalled();
+  });
+
+  // ─── Folder picker ──────────────────────────────────────────────────────────
+
+  it("opens and uses the folder picker", async () => {
+    // Clicking the folder selector should open the FolderPicker component,
+    // and closing it should remove it from the DOM.
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    // Wait for the cwd to settle from getHome
+    await waitFor(() => {
+      expect(screen.getByText("repo")).toBeInTheDocument();
+    });
+
+    // Find and click the folder button — it shows the directory name "repo"
+    const folderButton = screen.getByText("repo").closest("button")!;
+    fireEvent.click(folderButton);
+
+    // FolderPicker mock should appear
+    expect(screen.getByTestId("folder-picker")).toBeInTheDocument();
+
+    // Close the folder picker
+    fireEvent.click(screen.getByText("Close Picker"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("folder-picker")).not.toBeInTheDocument();
+    });
+  });
+
+  // ─── Backend toggle ─────────────────────────────────────────────────────────
+
+  it("shows backend toggle when multiple backends are available", async () => {
+    // When both Claude and Codex backends are available, the toggle should appear
+    // and switching should reset model/mode to defaults for the new backend.
+    mockApi.getBackends.mockResolvedValue([
+      { id: "claude", name: "Claude", available: true },
+      { id: "codex", name: "Codex", available: true },
+    ]);
+    mockApi.getBackendModels.mockResolvedValue([]);
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    // Both backends should be visible
+    const claudeButton = screen.getByRole("button", { name: "Claude" });
+    const codexButton = screen.getByRole("button", { name: "Codex" });
+    expect(claudeButton).toBeInTheDocument();
+    expect(codexButton).toBeInTheDocument();
+
+    // Switch to Codex
+    fireEvent.click(codexButton);
+
+    // Logo should change to codex
+    await waitFor(() => {
+      const logo = screen.getByAltText("The Companion");
+      expect(logo).toHaveAttribute("src", "/logo-codex.svg");
+    });
+
+    // The "Branch from session" button should disappear (only for claude)
+    expect(screen.queryByRole("button", { name: /branch from session/i })).not.toBeInTheDocument();
+  });
+
+  it("disables unavailable backends in the toggle", async () => {
+    // An unavailable backend should be rendered as a disabled button.
+    mockApi.getBackends.mockResolvedValue([
+      { id: "claude", name: "Claude", available: true },
+      { id: "codex", name: "Codex", available: false },
+    ]);
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    const codexButton = await screen.findByTitle("Codex CLI not found in PATH");
+    expect(codexButton).toBeDisabled();
+  });
+
+  // ─── Environment dropdown ───────────────────────────────────────────────────
+
+  it("opens environment dropdown and selects an environment", async () => {
+    // The env dropdown should list available environments and allow selection.
+    const testEnvs = [
+      { slug: "dev", name: "Development", variables: { API_KEY: "xxx" }, baseImage: "", imageTag: "" },
+      { slug: "prod", name: "Production", variables: { A: "1", B: "2" }, baseImage: "", imageTag: "" },
+    ];
+    mockApi.listEnvs.mockResolvedValue(testEnvs);
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    // Click env selector (shows "No env" by default)
+    const envButton = screen.getByText("No env").closest("button")!;
+    fireEvent.click(envButton);
+
+    // Should see env options
+    await waitFor(() => {
+      expect(screen.getByText("Development")).toBeInTheDocument();
+      expect(screen.getByText("Production")).toBeInTheDocument();
+    });
+
+    // Should show variable counts
+    expect(screen.getByText("1 var")).toBeInTheDocument();
+    expect(screen.getByText("2 vars")).toBeInTheDocument();
+
+    // Select "Development"
+    fireEvent.click(screen.getByText("Development"));
+
+    // Dropdown should close; localStorage should be updated
+    expect(localStorage.getItem("cc-selected-env")).toBe("dev");
+  });
+
+  it("opens env manager from the dropdown", async () => {
+    // The "Manage environments..." link in the dropdown should open the EnvManager modal.
+    mockApi.listEnvs.mockResolvedValue([]);
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    // Open env dropdown
+    const envButton = screen.getByText("No env").closest("button")!;
+    fireEvent.click(envButton);
+
+    // Click "Manage environments..."
+    const manageLink = await screen.findByText("Manage environments...");
+    fireEvent.click(manageLink);
+
+    // EnvManager mock should appear
+    expect(screen.getByTestId("env-manager")).toBeInTheDocument();
+
+    // Close it
+    fireEvent.click(screen.getByText("Close Env Manager"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("env-manager")).not.toBeInTheDocument();
+    });
+  });
+
+  it("clears selected environment with 'No environment' option", async () => {
+    // Selecting "No environment" should clear the env selection and localStorage value.
+    // First select an env through the dropdown, then clear it.
+    const testEnvs = [
+      { slug: "dev", name: "Development", variables: { API_KEY: "xxx" }, baseImage: "", imageTag: "" },
+    ];
+    mockApi.listEnvs.mockResolvedValue(testEnvs);
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    // Open env dropdown and select an env first
+    const envButton = screen.getByText("No env").closest("button")!;
+    fireEvent.click(envButton);
+    const devOption = await screen.findByText("Development");
+    fireEvent.click(devOption);
+    expect(localStorage.getItem("cc-selected-env")).toBe("dev");
+
+    // Re-open the dropdown (listEnvs is called on open, already mocked)
+    fireEvent.click(envButton);
+
+    // Click "No environment" to clear
+    const noEnvButton = await screen.findByText("No environment");
+    fireEvent.click(noEnvButton);
+
+    expect(localStorage.getItem("cc-selected-env")).toBe("");
+  });
+
+  // ─── Session creation flow ──────────────────────────────────────────────────
+
+  it("creates a session and sends the initial message on submit", async () => {
+    // Full end-to-end test of the send flow: type a message, click send,
+    // verify createSessionStream is called with correct params and the message
+    // is appended to the store.
+    const storeMock = buildStoreMock();
+    mockStoreGetState.mockReturnValue(storeMock);
+    createSessionStreamMock.mockResolvedValue({
+      sessionId: "new-session-abc",
+      state: "starting",
+      cwd: "/repo",
+    });
+
+    render(<HomePage />);
+    // Wait for the cwd to settle from the getHome API call
+    await waitFor(() => {
+      expect(screen.getByText("repo")).toBeInTheDocument();
+    });
+
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.change(textarea, { target: { value: "Fix the login bug" } });
+
+    const sendButton = screen.getByTitle("Send message");
+    fireEvent.click(sendButton);
+
+    await waitFor(() => {
+      expect(createSessionStreamMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "claude-opus-4-6",
+          permissionMode: "bypassPermissions",
+          cwd: "/repo",
+          backend: "claude",
+        }),
+        expect.any(Function),
+      );
+    });
+
+    // The message should be appended to the store
+    await waitFor(() => {
+      expect(storeMock.appendMessage).toHaveBeenCalledWith(
+        "new-session-abc",
+        expect.objectContaining({
+          role: "user",
+          content: "Fix the login bug",
+        }),
+      );
+    });
+  });
+
+  it("displays an error when session creation fails", async () => {
+    // When createSessionStream throws, the error should be displayed in the UI
+    // and setCreationError should be called on the store.
+    const storeMock = buildStoreMock();
+    mockStoreGetState.mockReturnValue(storeMock);
+    createSessionStreamMock.mockRejectedValue(new Error("CLI not found"));
+
+    render(<HomePage />);
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.change(textarea, { target: { value: "Do something" } });
+
+    fireEvent.click(screen.getByTitle("Send message"));
+
+    // Error should appear in the UI
+    await waitFor(() => {
+      expect(screen.getByText("CLI not found")).toBeInTheDocument();
+    });
+
+    // Store should have the error
+    expect(storeMock.setCreationError).toHaveBeenCalledWith("CLI not found");
+  });
+
+  it("does not send when textarea is empty", async () => {
+    // Clicking send with an empty textarea should do nothing.
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    const sendButton = screen.getByTitle("Send message");
+    fireEvent.click(sendButton);
+
+    // Should not attempt to create a session
+    expect(createSessionStreamMock).not.toHaveBeenCalled();
+  });
+
+  // ─── Pull prompt (branch behind remote) ─────────────────────────────────────
+
+  it("shows pull prompt when branch is behind remote and handles cancel", async () => {
+    // When the user sends a message but the current branch is behind remote,
+    // a pull prompt should appear with Cancel/Skip/Pull options.
+    // The branches state in HomePage is populated by BranchPicker's onBranchesLoaded callback.
+    mockApi.listBranches.mockResolvedValue([
+      { name: "main", isCurrent: true, isRemote: false, worktreePath: null, ahead: 0, behind: 3 },
+    ]);
+
+    render(<HomePage />);
+    // Wait for cwd and gitRepoInfo to settle, which triggers BranchPicker to load branches
+    await waitFor(() => {
+      expect(screen.getByText("repo")).toBeInTheDocument();
+    });
+    // Wait for BranchPicker to call listBranches and propagate via onBranchesLoaded
+    await waitFor(() => {
+      expect(mockApi.listBranches).toHaveBeenCalled();
+    });
+
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.change(textarea, { target: { value: "Do something" } });
+    fireEvent.click(screen.getByTitle("Send message"));
+
+    // Pull prompt should appear
+    await waitFor(() => {
+      expect(screen.getByText(/3 commits behind/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText("Pull and continue")).toBeInTheDocument();
+    expect(screen.getByText("Continue anyway")).toBeInTheDocument();
+    expect(screen.getByText("Cancel")).toBeInTheDocument();
+
+    // Cancel should dismiss the prompt
+    fireEvent.click(screen.getByText("Cancel"));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/3 commits behind/i)).not.toBeInTheDocument();
+    });
+
+    // No session should have been created
+    expect(createSessionStreamMock).not.toHaveBeenCalled();
+  });
+
+  it("handles 'Continue anyway' (skip pull) and creates session", async () => {
+    // The "Continue anyway" button should dismiss the pull prompt and proceed
+    // with session creation without pulling.
+    mockApi.listBranches.mockResolvedValue([
+      { name: "main", isCurrent: true, isRemote: false, worktreePath: null, ahead: 0, behind: 2 },
+    ]);
+    createSessionStreamMock.mockResolvedValue({
+      sessionId: "skip-pull-session",
+      state: "starting",
+      cwd: "/repo",
+    });
+
+    render(<HomePage />);
+    await waitFor(() => {
+      expect(screen.getByText("repo")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(mockApi.listBranches).toHaveBeenCalled();
+    });
+
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.change(textarea, { target: { value: "Do work" } });
+    fireEvent.click(screen.getByTitle("Send message"));
+
+    // Wait for pull prompt
+    await screen.findByText(/2 commits behind/i);
+
+    // Click "Continue anyway"
+    fireEvent.click(screen.getByText("Continue anyway"));
+
+    // Should proceed to create session
+    await waitFor(() => {
+      expect(createSessionStreamMock).toHaveBeenCalled();
+    });
+  });
+
+  it("handles 'Pull and continue' to pull before creating session", async () => {
+    // The "Pull and continue" button should call gitPull, and on success
+    // proceed with session creation.
+    mockApi.listBranches.mockResolvedValue([
+      { name: "main", isCurrent: true, isRemote: false, worktreePath: null, ahead: 0, behind: 1 },
+    ]);
+    mockApi.gitPull.mockResolvedValue({ success: true, output: "Already up to date." });
+    createSessionStreamMock.mockResolvedValue({
+      sessionId: "pulled-session",
+      state: "starting",
+      cwd: "/repo",
+    });
+
+    render(<HomePage />);
+    await waitFor(() => {
+      expect(screen.getByText("repo")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(mockApi.listBranches).toHaveBeenCalled();
+    });
+
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.change(textarea, { target: { value: "Start working" } });
+    fireEvent.click(screen.getByTitle("Send message"));
+
+    // Wait for pull prompt
+    await screen.findByText(/1 commit behind/i);
+
+    // Click "Pull and continue"
+    fireEvent.click(screen.getByText("Pull and continue"));
+
+    // gitPull should have been called
+    await waitFor(() => {
+      expect(mockApi.gitPull).toHaveBeenCalledWith("/repo");
+    });
+
+    // Session should be created after successful pull
+    await waitFor(() => {
+      expect(createSessionStreamMock).toHaveBeenCalled();
+    });
+  });
+
+  it("shows pull error when git pull fails", async () => {
+    // If gitPull returns success: false, the error should be displayed in the prompt.
+    mockApi.listBranches.mockResolvedValue([
+      { name: "main", isCurrent: true, isRemote: false, worktreePath: null, ahead: 0, behind: 1 },
+    ]);
+    mockApi.gitPull.mockResolvedValue({ success: false, output: "merge conflict in file.ts" });
+
+    render(<HomePage />);
+    await waitFor(() => {
+      expect(screen.getByText("repo")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(mockApi.listBranches).toHaveBeenCalled();
+    });
+
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.change(textarea, { target: { value: "Start working" } });
+    fireEvent.click(screen.getByTitle("Send message"));
+
+    await screen.findByText(/1 commit behind/i);
+    fireEvent.click(screen.getByText("Pull and continue"));
+
+    // Error should be displayed within the pull prompt
+    await waitFor(() => {
+      expect(screen.getByText("merge conflict in file.ts")).toBeInTheDocument();
+    });
+
+    // Session should NOT be created
+    expect(createSessionStreamMock).not.toHaveBeenCalled();
+  });
+
+  // ─── Image thumbnails ───────────────────────────────────────────────────────
+
+  it("shows upload image button", async () => {
+    // The image upload button should be present in the toolbar.
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    const uploadButton = screen.getByTitle("Upload image");
+    expect(uploadButton).toBeInTheDocument();
+
+    // There should also be a hidden file input for image selection
+    const fileInput = screen.getByLabelText("Attach images");
+    expect(fileInput).toBeInTheDocument();
+  });
+
+  // ─── Outside click closes dropdowns ─────────────────────────────────────────
+
+  it("closes model dropdown on outside click", async () => {
+    // Clicking outside an open dropdown should close it.
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    // Open model dropdown
+    const modelButton = screen.getByText("Opus 4.6");
+    fireEvent.click(modelButton);
+    expect(screen.getByText("Sonnet 4.6")).toBeInTheDocument();
+
+    // Click outside (on the document body)
+    fireEvent.pointerDown(document.body);
+
+    // Dropdown should close
+    await waitFor(() => {
+      expect(screen.queryByText("Haiku 4.5")).not.toBeInTheDocument();
+    });
+  });
+
+  // ─── Textarea auto-resize ──────────────────────────────────────────────────
+
+  it("auto-resizes textarea on input", async () => {
+    // The textarea should adjust its height based on content.
+    render(<HomePage />);
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...") as HTMLTextAreaElement;
+
+    // Simulate typing which triggers handleInput
+    fireEvent.change(textarea, { target: { value: "Line 1\nLine 2\nLine 3" } });
+
+    // The handleInput sets height to auto, then to Math.min(scrollHeight, 200)
+    // In jsdom scrollHeight may be 0, but we verify the handler ran without error
+    expect(textarea.value).toBe("Line 1\nLine 2\nLine 3");
+  });
+
+  // ─── localStorage persistence ───────────────────────────────────────────────
+
+  it("restores backend from localStorage", async () => {
+    // When cc-backend is set in localStorage, the component should use that value.
+    localStorage.setItem("cc-backend", "codex");
+    mockApi.getBackends.mockResolvedValue([
+      { id: "claude", name: "Claude", available: true },
+      { id: "codex", name: "Codex", available: true },
+    ]);
+    mockApi.getBackendModels.mockResolvedValue([]);
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    // Logo should be the codex logo since backend was restored from localStorage
+    const logo = screen.getByAltText("The Companion");
+    expect(logo).toHaveAttribute("src", "/logo-codex.svg");
+  });
+
+  // ─── Dynamic model fetching for codex ───────────────────────────────────────
+
+  it("fetches dynamic models for codex backend", async () => {
+    // When the codex backend is selected, dynamic models should be fetched
+    // from the API and used instead of the hardcoded fallback.
+    localStorage.setItem("cc-backend", "codex");
+    mockApi.getBackends.mockResolvedValue([
+      { id: "claude", name: "Claude", available: true },
+      { id: "codex", name: "Codex", available: true },
+    ]);
+    mockApi.getBackendModels.mockResolvedValue([
+      { value: "gpt-custom", label: "GPT Custom" },
+    ]);
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    // The dynamically fetched model should appear
+    await waitFor(() => {
+      expect(screen.getByText("GPT Custom")).toBeInTheDocument();
+    });
+  });
+
+  // ─── Resume candidates error handling ───────────────────────────────────────
+
+  it("shows error when loading resume candidates fails", async () => {
+    // If discoverClaudeSessions or listSessions throws, an error message
+    // should appear in the branching panel.
+    mockApi.listSessions.mockRejectedValue(new Error("Network error"));
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    // Open branching controls
+    fireEvent.click(screen.getByRole("button", { name: /branch from session/i }));
+
+    // Error should appear
+    await waitFor(() => {
+      expect(screen.getByText("Network error")).toBeInTheDocument();
+    });
+  });
+
+  // ─── "Recent only" toggle ───────────────────────────────────────────────────
+
+  it("can switch back to 'Recent only' after showing older sessions", async () => {
+    // After expanding to show older sessions, clicking "Recent only" should
+    // collapse back to just the recent sessions.
+    const now = Date.now();
+    mockApi.discoverClaudeSessions.mockResolvedValue({
+      sessions: [
+        {
+          sessionId: "recent-x",
+          cwd: "/repo",
+          gitBranch: "main",
+          slug: "recent-x",
+          lastActivityAt: now - 60_000,
+          sourceFile: "/path/recent-x.jsonl",
+        },
+        {
+          sessionId: "old-x",
+          cwd: "/old-repo",
+          gitBranch: "dev",
+          slug: "old-x",
+          lastActivityAt: now - (20 * 24 * 60 * 60 * 1000),
+          sourceFile: "/path/old-x.jsonl",
+        },
+      ],
+    });
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.click(screen.getByRole("button", { name: /branch from session/i }));
+
+    // Should show recent only
+    await screen.findByText(/showing 1 of 1 recent claude session/i);
+
+    // Expand to include older
+    fireEvent.click(screen.getByRole("button", { name: /include older \(1\)/i }));
+    await screen.findByText(/showing 2 of 2 detected/i);
+
+    // Switch back to recent only
+    fireEvent.click(screen.getByRole("button", { name: /recent only/i }));
+    await screen.findByText(/showing 1 of 1 recent/i);
+  });
+
+  // ─── Disconnect current session on new creation ──────────────────────────────
+
+  it("disconnects existing session when creating a new one", async () => {
+    // If there is a currentSessionId in the store, creating a new session
+    // should first disconnect the existing one.
+    const { disconnectSession } = await import("../ws.js");
+    mockStoreState.currentSessionId = "old-session-id";
+    createSessionStreamMock.mockResolvedValue({
+      sessionId: "new-session-id",
+      state: "starting",
+      cwd: "/repo",
+    });
+
+    render(<HomePage />);
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.change(textarea, { target: { value: "New task" } });
+    fireEvent.click(screen.getByTitle("Send message"));
+
+    await waitFor(() => {
+      expect(disconnectSession).toHaveBeenCalledWith("old-session-id");
+    });
+
+    // Cleanup
+    mockStoreState.currentSessionId = null;
+  });
+
+  // ─── No sessions detected message ──────────────────────────────────────────
+
+  it("shows 'No Claude sessions detected yet' when there are no sessions", async () => {
+    // When branching controls are open but no sessions exist, a helpful
+    // empty-state message should be displayed.
+    mockApi.discoverClaudeSessions.mockResolvedValue({ sessions: [] });
+    mockApi.listSessions.mockResolvedValue([]);
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.click(screen.getByRole("button", { name: /branch from session/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("No Claude sessions detected yet.")).toBeInTheDocument();
+    });
+  });
+
+  it("shows 'No sessions match this search' when search has no results", async () => {
+    // When the search query filters out all sessions, an appropriate message
+    // should be displayed.
+    const now = Date.now();
+    mockApi.discoverClaudeSessions.mockResolvedValue({
+      sessions: [{
+        sessionId: "s1",
+        cwd: "/repo",
+        gitBranch: "main",
+        slug: "slug-1",
+        lastActivityAt: now - 30_000,
+        sourceFile: "/path/s1.jsonl",
+      }],
+    });
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.click(screen.getByRole("button", { name: /branch from session/i }));
+    await screen.findByRole("button", { name: /fork and open slug-1/i });
+
+    // Search for something that doesn't match
+    const search = screen.getByPlaceholderText("Search sessions, branch, folder, or ID");
+    fireEvent.change(search, { target: { value: "nonexistent-xyz" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("No sessions match this search.")).toBeInTheDocument();
+    });
+  });
+
+  // ─── Refresh detected sessions button ──────────────────────────────────────
+
+  it("refreshes resume candidates when clicking the refresh button", async () => {
+    // The "Refresh detected sessions" button should re-fetch session data.
+    mockApi.discoverClaudeSessions.mockResolvedValue({ sessions: [] });
+    mockApi.listSessions.mockResolvedValue([]);
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.click(screen.getByRole("button", { name: /branch from session/i }));
+
+    // Wait for initial load
+    await waitFor(() => {
+      expect(mockApi.discoverClaudeSessions).toHaveBeenCalledTimes(1);
+    });
+
+    // Click refresh
+    const refreshButton = screen.getByRole("button", { name: /refresh detected sessions/i });
+    fireEvent.click(refreshButton);
+
+    await waitFor(() => {
+      expect(mockApi.discoverClaudeSessions).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ─── Git repo detection on cwd change ──────────────────────────────────────
+
+  it("resets git info when getRepoInfo fails", async () => {
+    // If getRepoInfo rejects (e.g., cwd is not a git repo), the branch picker
+    // should gracefully handle it without crashing.
+    mockApi.getRepoInfo.mockRejectedValue(new Error("Not a git repo"));
+    mockApi.listBranches.mockResolvedValue([]);
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    // Component should still render without errors
+    expect(screen.getByText("The Companion")).toBeInTheDocument();
+  });
+
+  // ─── getHome fallback ──────────────────────────────────────────────────────
+
+  it("falls back to home dir when no cwd or recent dirs", async () => {
+    // When no recent dirs exist and getHome returns a cwd, it should be used.
+    localStorage.removeItem("cc-recent-dirs");
+    mockApi.getHome.mockResolvedValue({ home: "/home/user", cwd: "/fallback/project" });
+    mockApi.getRepoInfo.mockResolvedValue({
+      repoRoot: "/fallback/project",
+      repoName: "project",
+      currentBranch: "main",
+      defaultBranch: "main",
+      isWorktree: false,
+    });
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    // The folder label should show "project" from the cwd path
+    await waitFor(() => {
+      expect(screen.getByText("project")).toBeInTheDocument();
+    });
   });
 });
