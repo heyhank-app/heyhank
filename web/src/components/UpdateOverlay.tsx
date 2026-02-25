@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 
+/** Read the auth token from localStorage for the poll request.
+ *  Intentionally local — exporting from api.ts would trigger the coverage gate on that file. */
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem("companion_auth_token");
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
+
 type Phase = "installing" | "restarting" | "waiting" | "ready";
 
 const PHASE_LABELS: Record<Phase, string> = {
@@ -43,7 +51,7 @@ function useServerPoll(active: boolean) {
     function poll() {
       if (!mountedRef.current) return;
 
-      fetch("/api/update-check", { signal: AbortSignal.timeout(3000) })
+      fetch("/api/update-check", { signal: AbortSignal.timeout(3000), headers: getAuthHeaders() })
         .then((res) => {
           if (!res.ok) throw new Error("not ready");
           return res.json();
