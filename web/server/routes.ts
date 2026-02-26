@@ -1015,6 +1015,7 @@ export function createRoutes(
     const session = launcher.getSession(id);
     if (!session) return c.json({ error: "Session not found" }, 404);
     sessionNames.setName(id, body.name.trim());
+    wsBridge.broadcastNameUpdate(id, body.name.trim());
     return c.json({ ok: true, name: body.name.trim() });
   });
 

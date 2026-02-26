@@ -233,6 +233,7 @@ function createMockBridge() {
     getAllSessions: vi.fn(() => []),
     getCodexRateLimits: vi.fn(() => null),
     markContainerized: vi.fn(),
+    broadcastNameUpdate: vi.fn(),
   } as any;
 }
 
@@ -2868,6 +2869,8 @@ describe("PATCH /api/sessions/:id/name", () => {
     const json = await res.json();
     expect(json).toEqual({ ok: true, name: "Fix auth bug" });
     expect(sessionNames.setName).toHaveBeenCalledWith("s1", "Fix auth bug");
+    // Verify the name update is broadcast to connected browsers via WebSocket
+    expect(bridge.broadcastNameUpdate).toHaveBeenCalledWith("s1", "Fix auth bug");
   });
 
   it("trims whitespace from name", async () => {
