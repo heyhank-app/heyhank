@@ -40,6 +40,7 @@ import {
   handleInterrupt,
   handleSetModel,
   handleSetPermissionMode,
+  handleSetAiValidation,
   handleControlResponse,
   sendControlRequest,
   handleMcpGetStatus,
@@ -54,6 +55,7 @@ import {
 } from "./ws-bridge-browser.js";
 import { validatePermission } from "./ai-validator.js";
 import { getSettings } from "./settings-manager.js";
+import { getEffectiveAiValidation } from "./ai-validation-settings.js";
 
 // ─── Bridge ───────────────────────────────────────────────────────────────────
 
@@ -70,6 +72,7 @@ export class WsBridge {
     "mcp_toggle",
     "mcp_reconnect",
     "mcp_set_servers",
+    "set_ai_validation",
   ]);
   private sessions = new Map<string, Session>();
   private store: SessionStore | null = null;
@@ -814,10 +817,10 @@ export class WsBridge {
       };
 
       // AI Validation Mode: evaluate the tool call before showing to user
-      const settings = getSettings();
+      const aiSettings = getEffectiveAiValidation(session.state);
       if (
-        settings.aiValidationEnabled
-        && settings.openrouterApiKey
+        aiSettings.enabled
+        && aiSettings.openrouterApiKey
         && msg.request.tool_name !== "AskUserQuestion"
         && msg.request.tool_name !== "ExitPlanMode"
       ) {
@@ -834,13 +837,13 @@ export class WsBridge {
           };
 
           // Auto-approve safe tools
-          if (result.verdict === "safe" && settings.aiValidationAutoApprove) {
+          if (result.verdict === "safe" && aiSettings.autoApprove) {
             this.autoRespondPermission(session, msg.request_id, perm, "allow", result.reason);
             return;
           }
 
           // Auto-deny dangerous tools
-          if (result.verdict === "dangerous" && settings.aiValidationAutoDeny) {
+          if (result.verdict === "dangerous" && aiSettings.autoDeny) {
             this.autoRespondPermission(session, msg.request_id, perm, "deny", result.reason);
             return;
           }
@@ -1002,6 +1005,19 @@ export class WsBridge {
 
       case "set_permission_mode":
         handleSetPermissionMode(session, msg.mode, this.sendToCLI.bind(this));
+        break;
+
+      case "set_ai_validation":
+        handleSetAiValidation(session, msg);
+        this.persistSession(session);
+        this.broadcastToBrowsers(session, {
+          type: "session_update",
+          session: {
+            aiValidationEnabled: session.state.aiValidationEnabled,
+            aiValidationAutoApprove: session.state.aiValidationAutoApprove,
+            aiValidationAutoDeny: session.state.aiValidationAutoDeny,
+          },
+        });
         break;
 
       case "mcp_get_status":

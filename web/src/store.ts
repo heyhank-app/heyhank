@@ -172,6 +172,7 @@ interface AppState {
   addPermission: (sessionId: string, perm: PermissionRequest) => void;
   removePermission: (sessionId: string, requestId: string) => void;
   addAiResolvedPermission: (sessionId: string, entry: { request: PermissionRequest; behavior: "allow" | "deny"; reason: string; timestamp: number }) => void;
+  setSessionAiValidation: (sessionId: string, settings: { aiValidationEnabled?: boolean | null; aiValidationAutoApprove?: boolean | null; aiValidationAutoDeny?: boolean | null }) => void;
 
   // Task actions
   addTask: (sessionId: string, task: TaskItem) => void;
@@ -634,6 +635,15 @@ export const useStore = create<AppState>((set) => ({
       if (sessionEntries.length > 50) sessionEntries.splice(0, sessionEntries.length - 50);
       aiResolvedPermissions.set(sessionId, sessionEntries);
       return { aiResolvedPermissions };
+    }),
+
+  setSessionAiValidation: (sessionId, settings) =>
+    set((s) => {
+      const sessions = new Map(s.sessions);
+      const existing = sessions.get(sessionId);
+      if (!existing) return {};
+      sessions.set(sessionId, { ...existing, ...settings });
+      return { sessions };
     }),
 
   addTask: (sessionId, task) =>

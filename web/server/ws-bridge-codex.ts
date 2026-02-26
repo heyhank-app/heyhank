@@ -8,6 +8,7 @@ import type { CodexAdapter } from "./codex-adapter.js";
 import type { Session } from "./ws-bridge-types.js";
 import { validatePermission } from "./ai-validator.js";
 import { getSettings } from "./settings-manager.js";
+import { getEffectiveAiValidation } from "./ai-validation-settings.js";
 
 export interface CodexAttachDeps {
   persistSession: (session: Session) => void;
@@ -61,10 +62,10 @@ export function attachCodexAdapterHandlers(
       const perm = msg.request;
 
       // AI Validation Mode for Codex sessions
-      const settings = getSettings();
+      const aiSettings = getEffectiveAiValidation(session.state);
       if (
-        settings.aiValidationEnabled
-        && settings.openrouterApiKey
+        aiSettings.enabled
+        && aiSettings.openrouterApiKey
         && perm.tool_name !== "AskUserQuestion"
         && perm.tool_name !== "ExitPlanMode"
       ) {
@@ -144,7 +145,7 @@ async function handleCodexAiValidation(
   perm: PermissionRequest,
   deps: CodexAttachDeps,
 ): Promise<void> {
-  const settings = getSettings();
+  const aiSettings = getEffectiveAiValidation(session.state);
   const result = await validatePermission(
     perm.tool_name,
     perm.input,
@@ -158,7 +159,7 @@ async function handleCodexAiValidation(
   };
 
   // Auto-approve safe tools
-  if (result.verdict === "safe" && settings.aiValidationAutoApprove) {
+  if (result.verdict === "safe" && aiSettings.autoApprove) {
     deps.broadcastToBrowsers(session, {
       type: "permission_auto_resolved",
       request: perm,
@@ -174,7 +175,7 @@ async function handleCodexAiValidation(
   }
 
   // Auto-deny dangerous tools
-  if (result.verdict === "dangerous" && settings.aiValidationAutoDeny) {
+  if (result.verdict === "dangerous" && aiSettings.autoDeny) {
     deps.broadcastToBrowsers(session, {
       type: "permission_auto_resolved",
       request: perm,

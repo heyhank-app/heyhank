@@ -260,7 +260,8 @@ export type BrowserOutgoingMessage =
   | { type: "mcp_get_status"; client_msg_id?: string }
   | { type: "mcp_toggle"; serverName: string; enabled: boolean; client_msg_id?: string }
   | { type: "mcp_reconnect"; serverName: string; client_msg_id?: string }
-  | { type: "mcp_set_servers"; servers: Record<string, McpServerConfig>; client_msg_id?: string };
+  | { type: "mcp_set_servers"; servers: Record<string, McpServerConfig>; client_msg_id?: string }
+  | { type: "set_ai_validation"; aiValidationEnabled?: boolean | null; aiValidationAutoApprove?: boolean | null; aiValidationAutoDeny?: boolean | null; client_msg_id?: string };
 
 /** Messages the bridge sends to the browser */
 export type BrowserIncomingMessageBase =
@@ -355,6 +356,12 @@ export interface SessionState {
   agentId?: string;
   /** Human-readable name of the agent that spawned this session */
   agentName?: string;
+  /** Per-session AI validation override. null/undefined = use global default */
+  aiValidationEnabled?: boolean | null;
+  /** Per-session auto-approve override. null/undefined = use global default */
+  aiValidationAutoApprove?: boolean | null;
+  /** Per-session auto-deny override. null/undefined = use global default */
+  aiValidationAutoDeny?: boolean | null;
 }
 
 // ─── MCP Types ───────────────────────────────────────────────────────────────

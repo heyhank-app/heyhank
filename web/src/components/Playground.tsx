@@ -11,6 +11,7 @@ import { ChatView } from "./ChatView.js";
 import { api } from "../api.js";
 import type { PermissionRequest, ChatMessage, ContentBlock, SessionState, McpServerDetail } from "../types.js";
 import { AiValidationBadge } from "./AiValidationBadge.js";
+import { AiValidationToggle } from "./AiValidationToggle.js";
 import type { TaskItem } from "../types.js";
 import type { UpdateInfo, GitHubPRInfo, LinearIssue, LinearComment } from "../api.js";
 import { GitHubPRDisplay, CodexRateLimitsSection, CodexTokenDetailsSection } from "./TaskPanel.js";
@@ -693,6 +694,12 @@ export function Playground() {
             </Card>
             <Card label="Permission with AI recommendation (dangerous)">
               <PermissionBanner permission={PERM_AI_DANGEROUS} sessionId={MOCK_SESSION_ID} />
+            </Card>
+            <Card label="Per-session toggle (disabled)">
+              <PlaygroundAiValidationToggle enabled={false} />
+            </Card>
+            <Card label="Per-session toggle (enabled)">
+              <PlaygroundAiValidationToggle enabled={true} />
             </Card>
             <Card label="Auto-resolved badges">
               <div className="border border-cc-border rounded-xl overflow-hidden bg-cc-card divide-y divide-cc-border">
@@ -2168,6 +2175,64 @@ function TaskRow({ task }: { task: TaskItem }) {
           <span>blocked by {task.blockedBy.map((b) => `#${b}`).join(", ")}</span>
         </p>
       )}
+    </div>
+  );
+}
+
+// ─── Inline AiValidationToggle playground wrapper ───────────────────────────
+
+const PLAYGROUND_AI_VALIDATION_SESSION = "ai-validation-playground";
+
+function PlaygroundAiValidationToggle({ enabled }: { enabled: boolean }) {
+  useEffect(() => {
+    const store = useStore.getState();
+    const prev = store.sessions.get(PLAYGROUND_AI_VALIDATION_SESSION);
+    store.updateSession(PLAYGROUND_AI_VALIDATION_SESSION, {
+      session_id: PLAYGROUND_AI_VALIDATION_SESSION,
+      model: "claude-sonnet-4-20250514",
+      cwd: "/workspace",
+      tools: [],
+      permissionMode: "default",
+      claude_code_version: "1.0.0",
+      mcp_servers: [],
+      agents: [],
+      slash_commands: [],
+      skills: [],
+      total_cost_usd: 0,
+      num_turns: 0,
+      context_used_percent: 0,
+      is_compacting: false,
+      git_branch: "main",
+      is_worktree: false,
+      is_containerized: false,
+      repo_root: "/workspace",
+      git_ahead: 0,
+      git_behind: 0,
+      total_lines_added: 0,
+      total_lines_removed: 0,
+      aiValidationEnabled: enabled,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
+      ...prev,
+    });
+    return () => {
+      if (prev) {
+        useStore.getState().updateSession(PLAYGROUND_AI_VALIDATION_SESSION, prev);
+      }
+    };
+  }, [enabled]);
+
+  // Force the enabled state each render to match the prop
+  useEffect(() => {
+    useStore.getState().setSessionAiValidation(PLAYGROUND_AI_VALIDATION_SESSION, {
+      aiValidationEnabled: enabled,
+    });
+  }, [enabled]);
+
+  return (
+    <div className="flex items-center gap-2 p-2">
+      <AiValidationToggle sessionId={PLAYGROUND_AI_VALIDATION_SESSION} />
+      <span className="text-xs text-cc-muted">Click to toggle</span>
     </div>
   );
 }

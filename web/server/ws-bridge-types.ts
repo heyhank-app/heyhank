@@ -7,6 +7,7 @@ import type {
   BufferedBrowserEvent,
 } from "./session-types.js";
 import type { CodexAdapter } from "./codex-adapter.js";
+import { getSettings } from "./settings-manager.js";
 
 export interface CLISocketData {
   kind: "cli";
@@ -87,5 +88,8 @@ export function makeDefaultState(
     git_behind: 0,
     total_lines_added: 0,
     total_lines_removed: 0,
+    aiValidationEnabled: getSettings().aiValidationEnabled,
+    aiValidationAutoApprove: getSettings().aiValidationAutoApprove,
+    aiValidationAutoDeny: getSettings().aiValidationAutoDeny,
   };
 }

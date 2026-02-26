@@ -592,7 +592,9 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   When enabled, an AI model evaluates tool calls before they execute.
                   Safe operations are auto-approved, dangerous ones are blocked,
                   and uncertain cases are shown to you with a recommendation.
-                  Requires an OpenRouter API key.
+                  Requires an OpenRouter API key. These settings serve as defaults
+                  for new sessions. Each session can override AI validation
+                  independently via the shield icon in the session header.
                 </p>
 
                 <button
