@@ -28,6 +28,7 @@ vi.mock("./prompt-manager.js", () => ({
 
 vi.mock("node:child_process", () => ({
   execSync: vi.fn(() => ""),
+  execFileSync: vi.fn(() => ""),
 }));
 
 const mockResolveBinary = vi.hoisted(() => vi.fn((_name: string) => null as string | null));
@@ -3999,5 +4000,301 @@ describe("POST /api/sessions/create-stream", () => {
     expect(events.find((e) => e.event === "done")).toBeUndefined();
     // CLI should NOT be launched
     expect(launcher.launch).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auth endpoints
+// ---------------------------------------------------------------------------
+
+describe("POST /api/auth/verify", () => {
+  it("returns ok:true for valid token", async () => {
+    // verifyToken is mocked to return true, so any token should succeed
+    const res = await app.request("/api/auth/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "test-token-for-routes" }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+  });
+
+  it("returns 401 for invalid token", async () => {
+    // Temporarily override verifyToken to reject
+    const { verifyToken } = await import("./auth-manager.js");
+    (verifyToken as ReturnType<typeof vi.fn>).mockReturnValueOnce(false);
+
+    const res = await app.request("/api/auth/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "wrong" }),
+    });
+    expect(res.status).toBe(401);
+    const data = await res.json();
+    expect(data.error).toContain("Invalid token");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Container status / images endpoints
+// ---------------------------------------------------------------------------
+
+describe("GET /api/containers/status", () => {
+  it("returns docker availability and version", async () => {
+    // containerManager is already imported and its methods can be spied on
+    const checkSpy = vi.spyOn(containerManager, "checkDocker").mockReturnValue(true);
+    const versionSpy = vi.spyOn(containerManager, "getDockerVersion").mockReturnValue("24.0.7");
+
+    const res = await app.request("/api/containers/status");
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.available).toBe(true);
+    expect(data.version).toBe("24.0.7");
+
+    checkSpy.mockRestore();
+    versionSpy.mockRestore();
+  });
+
+  it("returns null version when docker is unavailable", async () => {
+    const checkSpy = vi.spyOn(containerManager, "checkDocker").mockReturnValue(false);
+
+    const res = await app.request("/api/containers/status");
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.available).toBe(false);
+    expect(data.version).toBeNull();
+
+    checkSpy.mockRestore();
+  });
+});
+
+describe("GET /api/containers/images", () => {
+  it("returns list of available images", async () => {
+    const spy = vi.spyOn(containerManager, "listImages").mockReturnValue(["node:22", "ubuntu:latest"]);
+
+    const res = await app.request("/api/containers/images");
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data).toEqual(["node:22", "ubuntu:latest"]);
+
+    spy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recording management endpoints (recorder=undefined by default)
+// ---------------------------------------------------------------------------
+
+describe("Recording endpoints (no recorder)", () => {
+  it("POST /api/sessions/:id/recording/start returns 501 when recorder is not available", async () => {
+    // Default test setup doesn't pass a recorder to createRoutes
+    const res = await app.request("/api/sessions/sess-1/recording/start", { method: "POST" });
+    expect(res.status).toBe(501);
+    const data = await res.json();
+    expect(data.error).toContain("Recording not available");
+  });
+
+  it("POST /api/sessions/:id/recording/stop returns 501 when recorder is not available", async () => {
+    const res = await app.request("/api/sessions/sess-1/recording/stop", { method: "POST" });
+    expect(res.status).toBe(501);
+    const data = await res.json();
+    expect(data.error).toContain("Recording not available");
+  });
+
+  it("GET /api/sessions/:id/recording/status returns unavailable when no recorder", async () => {
+    const res = await app.request("/api/sessions/sess-1/recording/status");
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.recording).toBe(false);
+    expect(data.available).toBe(false);
+  });
+
+  it("GET /api/recordings returns empty list when no recorder", async () => {
+    const res = await app.request("/api/recordings");
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.recordings).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Process kill endpoints
+// ---------------------------------------------------------------------------
+
+describe("POST /api/sessions/:id/processes/:taskId/kill", () => {
+  it("returns 400 for invalid task ID format", async () => {
+    // Task IDs must be hex strings
+    launcher.getSession.mockReturnValue({ pid: 1234 });
+    const res = await app.request("/api/sessions/sess-1/processes/not-hex!/kill", {
+      method: "POST",
+    });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toContain("Invalid task ID");
+  });
+
+  it("returns 404 when session does not exist", async () => {
+    launcher.getSession.mockReturnValue(undefined);
+    const res = await app.request("/api/sessions/nonexistent/processes/abcdef/kill", {
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 503 when session PID is unknown", async () => {
+    launcher.getSession.mockReturnValue({ pid: null });
+    const res = await app.request("/api/sessions/sess-1/processes/abcdef/kill", {
+      method: "POST",
+    });
+    expect(res.status).toBe(503);
+  });
+
+  it("kills process in container when session has containerId", async () => {
+    launcher.getSession.mockReturnValue({ pid: 1234, containerId: "cid123" });
+    const execSpy = vi.spyOn(containerManager, "execInContainer").mockReturnValue("");
+
+    const res = await app.request("/api/sessions/sess-1/processes/abcdef/kill", {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(execSpy).toHaveBeenCalled();
+
+    execSpy.mockRestore();
+  });
+
+  it("kills process on host when session has no container", async () => {
+    launcher.getSession.mockReturnValue({ pid: 1234 });
+    // execFileSync is mocked at module level — the endpoint uses dynamic import
+    const res = await app.request("/api/sessions/sess-1/processes/abcdef/kill", {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+  });
+});
+
+describe("POST /api/sessions/:id/processes/kill-all", () => {
+  it("returns 404 when session does not exist", async () => {
+    launcher.getSession.mockReturnValue(undefined);
+    const res = await app.request("/api/sessions/nonexistent/processes/kill-all", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskIds: ["abc123"] }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects invalid task IDs and processes valid ones", async () => {
+    launcher.getSession.mockReturnValue({ pid: 1234 });
+    const res = await app.request("/api/sessions/sess-1/processes/kill-all", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskIds: ["abc123", "not-valid!"] }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(data.results).toHaveLength(2);
+    // First one should succeed, second should fail validation
+    expect(data.results[0].ok).toBe(true);
+    expect(data.results[1].ok).toBe(false);
+    expect(data.results[1].error).toContain("Invalid task ID");
+  });
+
+  it("kills processes in container when session has containerId", async () => {
+    launcher.getSession.mockReturnValue({ pid: 1234, containerId: "cid123" });
+    const execSpy = vi.spyOn(containerManager, "execInContainer").mockReturnValue("");
+
+    const res = await app.request("/api/sessions/sess-1/processes/kill-all", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskIds: ["abc123"] }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.results[0].ok).toBe(true);
+    expect(execSpy).toHaveBeenCalled();
+
+    execSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// System process kill endpoint
+// ---------------------------------------------------------------------------
+
+describe("POST /api/sessions/:id/processes/system/:pid/kill", () => {
+  it("returns 400 for invalid PID", async () => {
+    const res = await app.request("/api/sessions/sess-1/processes/system/notanumber/kill", {
+      method: "POST",
+    });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toContain("Invalid PID");
+  });
+
+  it("returns 404 when session does not exist", async () => {
+    launcher.getSession.mockReturnValue(undefined);
+    const res = await app.request("/api/sessions/sess-1/processes/system/9999/kill", {
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses to kill the companion server process", async () => {
+    launcher.getSession.mockReturnValue({ pid: 1234 });
+    const res = await app.request(`/api/sessions/sess-1/processes/system/${process.pid}/kill`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(403);
+    const data = await res.json();
+    expect(data.error).toContain("Cannot kill the Companion server");
+  });
+
+  it("refuses to kill the session's own CLI process", async () => {
+    launcher.getSession.mockReturnValue({ pid: 5678 });
+    const res = await app.request("/api/sessions/sess-1/processes/system/5678/kill", {
+      method: "POST",
+    });
+    expect(res.status).toBe(403);
+    const data = await res.json();
+    expect(data.error).toContain("Use the session kill endpoint");
+  });
+
+  it("kills process in container when session has containerId", async () => {
+    launcher.getSession.mockReturnValue({ pid: 1234, containerId: "cid123" });
+    const execSpy = vi.spyOn(containerManager, "execInContainer").mockReturnValue("");
+
+    const res = await app.request("/api/sessions/sess-1/processes/system/9999/kill", {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(execSpy).toHaveBeenCalledWith(
+      "cid123",
+      ["kill", "-TERM", "9999"],
+      5_000,
+    );
+
+    execSpy.mockRestore();
+  });
+
+  it("kills process on host when session has no container", async () => {
+    launcher.getSession.mockReturnValue({ pid: 1234 });
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+
+    const res = await app.request("/api/sessions/sess-1/processes/system/9999/kill", {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+
+    killSpy.mockRestore();
   });
 });
