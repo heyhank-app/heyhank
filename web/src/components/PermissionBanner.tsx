@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ComponentProps } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useStore } from "../store.js";
@@ -464,8 +464,8 @@ function ExitPlanModeDisplay({ input }: { input: Record<string, unknown> }) {
   return (
     <div className="space-y-2">
       {plan && (
-        <div className="rounded-xl border border-cc-primary/25 overflow-hidden bg-gradient-to-b from-cc-primary/6 to-cc-card">
-          <div className="px-3 py-2 border-b border-cc-primary/20 flex items-center gap-2">
+        <div className="rounded-xl border border-cc-border overflow-hidden bg-cc-card">
+          <div className="px-3 py-2 border-b border-cc-border bg-cc-primary/[0.04] flex items-center gap-2">
             <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-cc-primary/15 text-cc-primary shrink-0">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3">
                 <path d="M3 3.5h10M3 8h10M3 12.5h6" strokeLinecap="round" />
@@ -484,11 +484,30 @@ function ExitPlanModeDisplay({ input }: { input: Record<string, unknown> }) {
                 ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
                 ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
                 li: ({ children }) => <li>{children}</li>,
-                code: ({ children }) => (
-                  <code className="px-1 py-0.5 rounded bg-cc-code-bg/50 text-cc-primary font-mono-code text-[12px]">
-                    {children}
-                  </code>
+                strong: ({ children }) => <strong className="font-semibold text-cc-fg">{children}</strong>,
+                a: ({ href, children }) => (
+                  <a href={href} target="_blank" rel="noopener noreferrer" className="text-cc-primary hover:underline">{children}</a>
                 ),
+                code: (props: ComponentProps<"code">) => {
+                  const { children, className } = props;
+                  const match = /language-(\w+)/.exec(className || "");
+                  const isBlock = match || (typeof children === "string" && children.includes("\n"));
+
+                  if (isBlock) {
+                    return (
+                      <pre className="my-2 px-2.5 py-2 rounded-lg bg-cc-code-bg text-cc-code-fg text-[12px] font-mono-code leading-relaxed overflow-x-auto border border-cc-border">
+                        <code>{children}</code>
+                      </pre>
+                    );
+                  }
+
+                  return (
+                    <code className="px-1.5 py-0.5 rounded-md bg-cc-fg/[0.06] text-cc-code-fg font-mono-code text-[12px]">
+                      {children}
+                    </code>
+                  );
+                },
+                pre: ({ children }) => <>{children}</>,
                 blockquote: ({ children }) => (
                   <blockquote className="border-l-2 border-cc-primary/40 pl-2 text-cc-muted italic my-2">{children}</blockquote>
                 ),
