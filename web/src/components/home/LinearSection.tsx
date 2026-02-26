@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { api, type LinearIssue, type LinearProject, type LinearProjectMapping, type GitRepoInfo } from "../../api.js";
 import { resolveLinearBranch } from "../../utils/linear-branch.js";
 import { LinearLogo } from "../LinearLogo.js";
+import { CreateIssueModal } from "./CreateIssueModal.js";
 
 interface LinearSectionProps {
   cwd: string;
@@ -41,6 +42,7 @@ export function LinearSection({
   const [searchAllProjects, setSearchAllProjects] = useState(false);
   const [globalSearchResults, setGlobalSearchResults] = useState<LinearIssue[]>([]);
   const [globalSearching, setGlobalSearching] = useState(false);
+  const [showCreateIssueModal, setShowCreateIssueModal] = useState(false);
 
   const linearDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -226,6 +228,19 @@ export function LinearSection({
     }
   }
 
+  function handleIssueCreated(issue: LinearIssue) {
+    setShowCreateIssueModal(false);
+    handleSelectLinearIssue(issue);
+    // Refresh the recent issues list if a project is attached
+    if (linearMapping) {
+      setRecentIssuesLoading(true);
+      api.getLinearProjectIssues(linearMapping.projectId, 10)
+        .then(({ issues }) => setRecentIssues(issues))
+        .catch(() => {})
+        .finally(() => setRecentIssuesLoading(false));
+    }
+  }
+
   if (!linearConfigured) return null;
 
   return (
@@ -236,20 +251,32 @@ export function LinearSection({
 
           {/* When a project is attached, show project badge */}
           {linearMapping ? (
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border border-cc-primary/35 bg-cc-primary/10 text-cc-primary">
-              <LinearLogo className="w-3.5 h-3.5" />
-              <span>{linearMapping.projectName}</span>
+            <>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border border-cc-primary/35 bg-cc-primary/10 text-cc-primary">
+                <LinearLogo className="w-3.5 h-3.5" />
+                <span>{linearMapping.projectName}</span>
+                <button
+                  type="button"
+                  onClick={handleDetachProject}
+                  className="ml-0.5 hover:text-cc-error transition-colors cursor-pointer"
+                  title="Detach Linear project"
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                    <path d="M4.646 4.646a.5.5 0 01.708 0L8 7.293l2.646-2.647a.5.5 0 01.708.708L8.707 8l2.647 2.646a.5.5 0 01-.708.708L8 8.707l-2.646 2.647a.5.5 0 01-.708-.708L7.293 8 4.646 5.354a.5.5 0 010-.708z" />
+                  </svg>
+                </button>
+              </div>
               <button
                 type="button"
-                onClick={handleDetachProject}
-                className="ml-0.5 hover:text-cc-error transition-colors cursor-pointer"
-                title="Detach Linear project"
+                onClick={() => setShowCreateIssueModal(true)}
+                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] border border-dashed border-cc-border text-cc-muted hover:text-cc-fg hover:border-cc-primary/40 transition-colors cursor-pointer"
               >
                 <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
-                  <path d="M4.646 4.646a.5.5 0 01.708 0L8 7.293l2.646-2.647a.5.5 0 01.708.708L8.707 8l2.647 2.646a.5.5 0 01-.708.708L8 8.707l-2.646 2.647a.5.5 0 01-.708-.708L7.293 8 4.646 5.354a.5.5 0 010-.708z" />
+                  <path d="M8 2a.5.5 0 01.5.5v5h5a.5.5 0 010 1h-5v5a.5.5 0 01-1 0v-5h-5a.5.5 0 010-1h5v-5A.5.5 0 018 2z" />
                 </svg>
+                <span>Create issue</span>
               </button>
-            </div>
+            </>
           ) : (
             <>
               {/* Linear button — search or configure */}
@@ -286,6 +313,20 @@ export function LinearSection({
                     <path d="M8 2a.5.5 0 01.5.5v5h5a.5.5 0 010 1h-5v5a.5.5 0 01-1 0v-5h-5a.5.5 0 010-1h5v-5A.5.5 0 018 2z" />
                   </svg>
                   <span>Attach project</span>
+                </button>
+              )}
+
+              {/* Create issue button */}
+              {linearConfigured && (
+                <button
+                  type="button"
+                  onClick={() => setShowCreateIssueModal(true)}
+                  className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] border border-dashed border-cc-border text-cc-muted hover:text-cc-fg hover:border-cc-primary/40 transition-colors cursor-pointer"
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                    <path d="M8 2a.5.5 0 01.5.5v5h5a.5.5 0 010 1h-5v5a.5.5 0 01-1 0v-5h-5a.5.5 0 010-1h5v-5A.5.5 0 018 2z" />
+                  </svg>
+                  <span>Create issue</span>
                 </button>
               )}
 
@@ -539,6 +580,14 @@ export function LinearSection({
             </button>
           </div>
         </div>
+      )}
+
+      {showCreateIssueModal && (
+        <CreateIssueModal
+          defaultProjectId={linearMapping?.projectId}
+          onCreated={handleIssueCreated}
+          onClose={() => setShowCreateIssueModal(false)}
+        />
       )}
     </aside>
   );

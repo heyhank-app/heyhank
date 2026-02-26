@@ -108,6 +108,139 @@ export function registerLinearRoutes(api: Hono): void {
     }
   });
 
+  // ─── Create a new Linear issue ──────────────────────────────────────
+
+  api.post("/linear/issues", async (c) => {
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+
+    if (typeof body.title !== "string" || !body.title.trim()) {
+      return c.json({ error: "title is required" }, 400);
+    }
+    if (typeof body.teamId !== "string" || !body.teamId.trim()) {
+      return c.json({ error: "teamId is required" }, 400);
+    }
+
+    const settings = getSettings();
+    const linearApiKey = settings.linearApiKey.trim();
+    if (!linearApiKey) {
+      return c.json({ error: "Linear API key is not configured" }, 400);
+    }
+
+    try {
+      const input: Record<string, unknown> = {
+        title: (body.title as string).trim(),
+        teamId: (body.teamId as string).trim(),
+      };
+      if (typeof body.description === "string" && body.description.trim()) {
+        input.description = body.description.trim();
+      }
+      if (typeof body.priority === "number" && body.priority >= 0 && body.priority <= 4) {
+        input.priority = body.priority;
+      }
+      if (typeof body.projectId === "string" && body.projectId.trim()) {
+        input.projectId = body.projectId.trim();
+      }
+      if (typeof body.assigneeId === "string" && body.assigneeId.trim()) {
+        input.assigneeId = body.assigneeId.trim();
+      }
+      if (typeof body.stateId === "string" && body.stateId.trim()) {
+        input.stateId = body.stateId.trim();
+      }
+
+      const response = await fetch("https://api.linear.app/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: linearApiKey,
+        },
+        body: JSON.stringify({
+          query: `
+            mutation CompanionCreateIssue($input: IssueCreateInput!) {
+              issueCreate(input: $input) {
+                success
+                issue {
+                  id
+                  identifier
+                  title
+                  description
+                  url
+                  branchName
+                  priorityLabel
+                  state { name type }
+                  team { id key name }
+                  assignee { name displayName }
+                }
+              }
+            }
+          `,
+          variables: { input },
+        }),
+      }).catch((e: unknown) => {
+        throw new Error(`Failed to connect to Linear: ${e instanceof Error ? e.message : String(e)}`);
+      });
+
+      const json = await response.json().catch(() => ({})) as {
+        data?: {
+          issueCreate?: {
+            success?: boolean;
+            issue?: {
+              id: string;
+              identifier: string;
+              title: string;
+              description?: string | null;
+              url: string;
+              branchName?: string | null;
+              priorityLabel?: string | null;
+              state?: { name?: string | null; type?: string | null } | null;
+              team?: { id?: string | null; key?: string | null; name?: string | null } | null;
+              assignee?: { name?: string | null; displayName?: string | null } | null;
+            };
+          };
+        };
+        errors?: Array<{ message?: string }>;
+      };
+
+      if (!response.ok || (json.errors && json.errors.length > 0)) {
+        const firstError = json.errors?.[0]?.message || response.statusText || "Issue creation failed";
+        return c.json({ error: firstError }, 502);
+      }
+
+      const result = json.data?.issueCreate;
+      if (!result?.success || !result.issue) {
+        return c.json({ error: "Issue creation failed" }, 502);
+      }
+
+      const issue = result.issue;
+
+      // Invalidate caches so the new issue appears in lists
+      if (typeof body.projectId === "string" && body.projectId.trim()) {
+        linearCache.invalidate(`project-issues:${body.projectId}`);
+      }
+      linearCache.invalidate("search:");
+
+      return c.json({
+        ok: true,
+        issue: {
+          id: issue.id,
+          identifier: issue.identifier,
+          title: issue.title,
+          description: issue.description || "",
+          url: issue.url,
+          branchName: issue.branchName || "",
+          priorityLabel: issue.priorityLabel || "",
+          stateName: issue.state?.name || "",
+          stateType: issue.state?.type || "",
+          teamName: issue.team?.name || "",
+          teamKey: issue.team?.key || "",
+          teamId: issue.team?.id || "",
+          assigneeName: issue.assignee?.displayName || issue.assignee?.name || "",
+        },
+      });
+    } catch (e: unknown) {
+      return c.json({ error: e instanceof Error ? e.message : "Issue creation failed" }, 502);
+    }
+  });
+
   api.get("/linear/connection", async (c) => {
     const settings = getSettings();
     const linearApiKey = settings.linearApiKey.trim();
@@ -151,6 +284,7 @@ export function registerLinearRoutes(api: Hono): void {
         const firstTeam = json.data?.teams?.nodes?.[0];
         return {
           connected: true as const,
+          viewerId: json.data?.viewer?.id || "",
           viewerName: json.data?.viewer?.name || "",
           viewerEmail: json.data?.viewer?.email || "",
           teamName: firstTeam?.name || "",

@@ -19,8 +19,9 @@ const ALWAYS_MANUAL_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
 
 // Dangerous patterns for Bash commands
 const DANGEROUS_BASH_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-  { pattern: /\brm\s+(-\w*r\w*\s*(-\w*f\w*\s*)?|(-\w*f\w*\s*)?-\w*r\w*\s*)[/~.]/, reason: "Recursive delete of root, home, or current directory" },
+  { pattern: /\brm\s+(-\w*r\w*\s+(-\w*f\w*\s+)?|(-\w*f\w*\s+)?-\w*r\w*\s+)[/~.]/, reason: "Recursive delete of root, home, or current directory" },
   { pattern: /\|\s*(ba)?sh\b/, reason: "Piping content to shell execution" },
+  { pattern: /\|\s*bash\b/, reason: "Piping content to bash" },
   { pattern: /\bcurl\b.*\|\s*(ba)?sh/, reason: "Piping remote content to shell" },
   { pattern: /\bwget\b.*\|\s*(ba)?sh/, reason: "Piping remote download to shell" },
   { pattern: /^\s*sudo\b/, reason: "Privilege escalation with sudo" },
@@ -122,7 +123,7 @@ export async function aiEvaluate(
 
   // Build a concise representation of the tool call for the AI
   const inputStr = JSON.stringify(input, null, 0);
-  const truncatedInput = inputStr.length > 2000 ? inputStr.slice(0, 1500) + "\n...(truncated)...\n" + inputStr.slice(-500) : inputStr;
+  const truncatedInput = inputStr.length > 1000 ? inputStr.slice(0, 1000) + "..." : inputStr;
   let userPrompt = `Tool: ${toolName}\nInput: ${truncatedInput}`;
   if (description) {
     userPrompt += `\nDescription: ${description}`;

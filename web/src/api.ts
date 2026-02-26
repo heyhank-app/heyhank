@@ -414,6 +414,7 @@ export interface LinearIssue {
 
 export interface LinearConnectionInfo {
   connected: boolean;
+  viewerId: string;
   viewerName: string;
   viewerEmail: string;
   teamName: string;
@@ -447,6 +448,16 @@ export interface LinearProjectMapping {
   projectName: string;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface CreateLinearIssueInput {
+  title: string;
+  description?: string;
+  teamId: string;
+  priority?: number;
+  projectId?: string;
+  assigneeId?: string;
+  stateId?: string;
 }
 
 export interface GitHubPRInfo {
@@ -862,6 +873,8 @@ export const api = {
     get<LinearIssueDetail>(
       `/sessions/${encodeURIComponent(sessionId)}/linear-issue${refresh ? "?refresh=true" : ""}`,
     ),
+  createLinearIssue: (input: CreateLinearIssueInput) =>
+    post<{ ok: boolean; issue: LinearIssue }>("/linear/issues", input),
   addLinearComment: (issueId: string, body: string) =>
     post<{ ok: boolean; comment: LinearComment }>(
       `/linear/issues/${encodeURIComponent(issueId)}/comments`,

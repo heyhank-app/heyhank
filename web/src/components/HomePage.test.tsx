@@ -1094,21 +1094,35 @@ describe("HomePage", () => {
 
   it("refreshes resume candidates when clicking the refresh button", async () => {
     // The "Refresh detected sessions" button should re-fetch session data.
+    // The button shows "Refreshing..." while loading and then "Refresh detected sessions"
+    // once the API call resolves.
     mockApi.discoverClaudeSessions.mockResolvedValue({ sessions: [] });
     mockApi.listSessions.mockResolvedValue([]);
 
     render(<HomePage />);
     await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
-    fireEvent.click(screen.getByRole("button", { name: /branch from session/i }));
 
-    // Wait for initial load
-    await waitFor(() => {
-      expect(mockApi.discoverClaudeSessions).toHaveBeenCalledTimes(1);
+    // Open the branching controls panel
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /branch from session/i }));
     });
 
-    // Click refresh
+    // Wait for initial API call to resolve and button to appear in idle state.
+    // The loadResumeCandidates sets loading=true, calls discoverClaudeSessions,
+    // then sets loading=false. We need to flush all microtasks.
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(mockApi.discoverClaudeSessions).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    // Now the button should show its idle label
     const refreshButton = screen.getByRole("button", { name: /refresh detected sessions/i });
-    fireEvent.click(refreshButton);
+
+    // Click refresh and wait for second call
+    await act(async () => {
+      fireEvent.click(refreshButton);
+    });
 
     await waitFor(() => {
       expect(mockApi.discoverClaudeSessions).toHaveBeenCalledTimes(2);

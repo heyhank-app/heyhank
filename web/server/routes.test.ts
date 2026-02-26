@@ -2099,6 +2099,7 @@ describe("GET /api/linear/connection", () => {
     const json = await res.json();
     expect(json).toEqual({
       connected: true,
+      viewerId: "u1",
       viewerName: "Ada",
       viewerEmail: "ada@example.com",
       teamName: "Engineering",
