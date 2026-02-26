@@ -12,6 +12,9 @@ export function registerSettingsRoutes(api: Hono): void {
       linearAutoTransition: settings.linearAutoTransition,
       linearAutoTransitionStateName: settings.linearAutoTransitionStateName,
       editorTabEnabled: settings.editorTabEnabled,
+      aiValidationEnabled: settings.aiValidationEnabled,
+      aiValidationAutoApprove: settings.aiValidationAutoApprove,
+      aiValidationAutoDeny: settings.aiValidationAutoDeny,
     });
   });
 
@@ -38,10 +41,21 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.editorTabEnabled !== undefined && typeof body.editorTabEnabled !== "boolean") {
       return c.json({ error: "editorTabEnabled must be a boolean" }, 400);
     }
+    if (body.aiValidationEnabled !== undefined && typeof body.aiValidationEnabled !== "boolean") {
+      return c.json({ error: "aiValidationEnabled must be a boolean" }, 400);
+    }
+    if (body.aiValidationAutoApprove !== undefined && typeof body.aiValidationAutoApprove !== "boolean") {
+      return c.json({ error: "aiValidationAutoApprove must be a boolean" }, 400);
+    }
+    if (body.aiValidationAutoDeny !== undefined && typeof body.aiValidationAutoDeny !== "boolean") {
+      return c.json({ error: "aiValidationAutoDeny must be a boolean" }, 400);
+    }
     const hasAnyField = body.openrouterApiKey !== undefined || body.openrouterModel !== undefined
       || body.linearApiKey !== undefined || body.linearAutoTransition !== undefined
       || body.linearAutoTransitionStateId !== undefined || body.linearAutoTransitionStateName !== undefined
-      || body.editorTabEnabled !== undefined;
+      || body.editorTabEnabled !== undefined
+      || body.aiValidationEnabled !== undefined || body.aiValidationAutoApprove !== undefined
+      || body.aiValidationAutoDeny !== undefined;
     if (!hasAnyField) {
       return c.json({ error: "At least one settings field is required" }, 400);
     }
@@ -79,6 +93,18 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.editorTabEnabled === "boolean"
           ? body.editorTabEnabled
           : undefined,
+      aiValidationEnabled:
+        typeof body.aiValidationEnabled === "boolean"
+          ? body.aiValidationEnabled
+          : undefined,
+      aiValidationAutoApprove:
+        typeof body.aiValidationAutoApprove === "boolean"
+          ? body.aiValidationAutoApprove
+          : undefined,
+      aiValidationAutoDeny:
+        typeof body.aiValidationAutoDeny === "boolean"
+          ? body.aiValidationAutoDeny
+          : undefined,
     });
 
     return c.json({
@@ -88,6 +114,9 @@ export function registerSettingsRoutes(api: Hono): void {
       linearAutoTransition: settings.linearAutoTransition,
       linearAutoTransitionStateName: settings.linearAutoTransitionStateName,
       editorTabEnabled: settings.editorTabEnabled,
+      aiValidationEnabled: settings.aiValidationEnabled,
+      aiValidationAutoApprove: settings.aiValidationAutoApprove,
+      aiValidationAutoDeny: settings.aiValidationAutoDeny,
     });
   });
 }

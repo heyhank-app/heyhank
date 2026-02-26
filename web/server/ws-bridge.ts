@@ -52,6 +52,8 @@ import {
   handleSessionAck,
   handlePermissionResponse,
 } from "./ws-bridge-browser.js";
+import { validatePermission } from "./ai-validator.js";
+import { getSettings } from "./settings-manager.js";
 
 // ─── Bridge ───────────────────────────────────────────────────────────────────
 
@@ -798,7 +800,7 @@ export class WsBridge {
     });
   }
 
-  private handleControlRequest(session: Session, msg: CLIControlRequestMessage) {
+  private async handleControlRequest(session: Session, msg: CLIControlRequestMessage) {
     if (msg.request.subtype === "can_use_tool") {
       const perm: PermissionRequest = {
         request_id: msg.request_id,
@@ -810,6 +812,43 @@ export class WsBridge {
         agent_id: msg.request.agent_id,
         timestamp: Date.now(),
       };
+
+      // AI Validation Mode: evaluate the tool call before showing to user
+      const settings = getSettings();
+      if (
+        settings.aiValidationEnabled
+        && settings.openrouterApiKey
+        && msg.request.tool_name !== "AskUserQuestion"
+        && msg.request.tool_name !== "ExitPlanMode"
+      ) {
+        try {
+          const result = await validatePermission(
+            msg.request.tool_name,
+            msg.request.input,
+            msg.request.description,
+          );
+          perm.ai_validation = {
+            verdict: result.verdict,
+            reason: result.reason,
+            ruleBasedOnly: result.ruleBasedOnly,
+          };
+
+          // Auto-approve safe tools
+          if (result.verdict === "safe" && settings.aiValidationAutoApprove) {
+            this.autoRespondPermission(session, msg.request_id, perm, "allow", result.reason);
+            return;
+          }
+
+          // Auto-deny dangerous tools
+          if (result.verdict === "dangerous" && settings.aiValidationAutoDeny) {
+            this.autoRespondPermission(session, msg.request_id, perm, "deny", result.reason);
+            return;
+          }
+        } catch (err) {
+          console.warn("[ws-bridge] AI validation error, falling through to manual:", err);
+        }
+      }
+
       session.pendingPermissions.set(msg.request_id, perm);
 
       this.broadcastToBrowsers(session, {
@@ -818,6 +857,34 @@ export class WsBridge {
       });
       this.persistSession(session);
     }
+  }
+
+  private autoRespondPermission(
+    session: Session,
+    requestId: string,
+    perm: PermissionRequest,
+    behavior: "allow" | "deny",
+    reason: string,
+  ): void {
+    // Notify browsers that AI auto-handled this permission
+    this.broadcastToBrowsers(session, {
+      type: "permission_auto_resolved",
+      request: perm,
+      behavior,
+      reason,
+    });
+
+    // Send the control_response to CLI
+    handlePermissionResponse(
+      session,
+      {
+        type: "permission_response",
+        request_id: requestId,
+        behavior,
+        message: behavior === "deny" ? `AI validation: ${reason}` : undefined,
+      },
+      this.sendToCLI.bind(this),
+    );
   }
 
   private handleToolProgress(session: Session, msg: CLIToolProgressMessage) {

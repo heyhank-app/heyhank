@@ -1,9 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock settings-manager before importing the module under test
+vi.mock("./settings-manager.js", () => ({
+  DEFAULT_OPENROUTER_MODEL: "openrouter/free",
+  getSettings: vi.fn(),
+}));
+
+// Mock ai-validator before importing the module under test
+vi.mock("./ai-validator.js", () => ({
+  validatePermission: vi.fn(),
+}));
+
 import { attachCodexAdapterHandlers } from "./ws-bridge-codex.js";
 import type { BrowserIncomingMessage, SessionState } from "./session-types.js";
 import type { Session } from "./ws-bridge-types.js";
 import type { CodexAdapter } from "./codex-adapter.js";
 import type { CodexAttachDeps } from "./ws-bridge-codex.js";
+import * as settingsManager from "./settings-manager.js";
+import * as aiValidator from "./ai-validator.js";
 
 // ── Mock Factories ──────────────────────────────────────────────────────────
 
@@ -90,9 +104,25 @@ describe("attachCodexAdapterHandlers", () => {
   let deps: CodexAttachDeps;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     session = createMockSession();
     adapter = createMockAdapter();
     deps = createMockDeps();
+
+    // Default: AI validation disabled — existing tests should not be affected
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      openrouterApiKey: "",
+      openrouterModel: "openrouter/free",
+      linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
+      updatedAt: 0,
+    });
   });
 
   // ── Handler registration ────────────────────────────────────────────────
@@ -791,5 +821,388 @@ describe("attachCodexAdapterHandlers", () => {
     attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
 
     expect(callOrder).toEqual(["sendBrowserMessage", "cli_connected_broadcast"]);
+  });
+
+  // ── AI Validation Mode ──────────────────────────────────────────────────
+
+  describe("AI validation mode", () => {
+    /** Helper: configure settings for AI validation enabled with all auto-actions on */
+    function enableAiValidation() {
+      vi.mocked(settingsManager.getSettings).mockReturnValue({
+        openrouterApiKey: "test-api-key",
+        openrouterModel: "openrouter/free",
+        linearApiKey: "",
+        linearAutoTransition: false,
+        linearAutoTransitionStateId: "",
+        linearAutoTransitionStateName: "",
+        editorTabEnabled: false,
+        aiValidationEnabled: true,
+        aiValidationAutoApprove: true,
+        aiValidationAutoDeny: true,
+        updatedAt: 0,
+      });
+    }
+
+    /** Helper: create a permission_request BrowserIncomingMessage for the given tool */
+    function makePermissionMsg(
+      toolName: string,
+      requestId = "perm-ai-1",
+    ): BrowserIncomingMessage {
+      return {
+        type: "permission_request",
+        request: {
+          request_id: requestId,
+          tool_name: toolName,
+          input: { command: "ls -la" },
+          description: `Execute: ${toolName}`,
+          tool_use_id: `tool-${requestId}`,
+          timestamp: Date.now(),
+        },
+      };
+    }
+
+    it("auto-approves when AI validation returns safe verdict", async () => {
+      // When AI validation is enabled and the validator returns "safe",
+      // the handler should broadcast permission_auto_resolved with behavior "allow"
+      // and send a permission_response to the CLI adapter without prompting the user.
+      enableAiValidation();
+      vi.mocked(aiValidator.validatePermission).mockResolvedValue({
+        verdict: "safe",
+        reason: "Read-only tool",
+        ruleBasedOnly: true,
+      });
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+      adapter._trigger("onBrowserMessage", makePermissionMsg("Bash"));
+
+      // Allow the async handleCodexAiValidation to resolve
+      await vi.waitFor(() => {
+        expect(adapter.sendBrowserMessage).toHaveBeenCalled();
+      });
+
+      // Should broadcast permission_auto_resolved to browsers
+      expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(session, {
+        type: "permission_auto_resolved",
+        request: expect.objectContaining({
+          request_id: "perm-ai-1",
+          tool_name: "Bash",
+          ai_validation: { verdict: "safe", reason: "Read-only tool", ruleBasedOnly: true },
+        }),
+        behavior: "allow",
+        reason: "Read-only tool",
+      });
+
+      // Should send allow response back to CLI
+      expect(adapter.sendBrowserMessage).toHaveBeenCalledWith({
+        type: "permission_response",
+        request_id: "perm-ai-1",
+        behavior: "allow",
+      });
+
+      // Should NOT store in pendingPermissions (auto-resolved, no manual action needed)
+      expect(session.pendingPermissions.has("perm-ai-1")).toBe(false);
+    });
+
+    it("auto-denies when AI validation returns dangerous verdict", async () => {
+      // When AI validation is enabled and the validator returns "dangerous",
+      // the handler should broadcast permission_auto_resolved with behavior "deny"
+      // and send a permission_response "deny" to the CLI adapter.
+      enableAiValidation();
+      vi.mocked(aiValidator.validatePermission).mockResolvedValue({
+        verdict: "dangerous",
+        reason: "Recursive delete of root directory",
+        ruleBasedOnly: true,
+      });
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+      adapter._trigger("onBrowserMessage", makePermissionMsg("Bash", "perm-danger"));
+
+      await vi.waitFor(() => {
+        expect(adapter.sendBrowserMessage).toHaveBeenCalled();
+      });
+
+      // Should broadcast permission_auto_resolved with "deny" to browsers
+      expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(session, {
+        type: "permission_auto_resolved",
+        request: expect.objectContaining({
+          request_id: "perm-danger",
+          tool_name: "Bash",
+          ai_validation: { verdict: "dangerous", reason: "Recursive delete of root directory", ruleBasedOnly: true },
+        }),
+        behavior: "deny",
+        reason: "Recursive delete of root directory",
+      });
+
+      // Should send deny response back to CLI
+      expect(adapter.sendBrowserMessage).toHaveBeenCalledWith({
+        type: "permission_response",
+        request_id: "perm-danger",
+        behavior: "deny",
+      });
+
+      // Should NOT store in pendingPermissions
+      expect(session.pendingPermissions.has("perm-danger")).toBe(false);
+    });
+
+    it("falls through to manual review when AI validation returns uncertain verdict", async () => {
+      // When the validator returns "uncertain", the handler should NOT auto-resolve.
+      // Instead it should store the permission in pendingPermissions and broadcast
+      // the permission_request to browsers for manual review, with ai_validation info attached.
+      enableAiValidation();
+      vi.mocked(aiValidator.validatePermission).mockResolvedValue({
+        verdict: "uncertain",
+        reason: "Complex bash pipeline",
+        ruleBasedOnly: false,
+      });
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+      adapter._trigger("onBrowserMessage", makePermissionMsg("Bash", "perm-uncertain"));
+
+      await vi.waitFor(() => {
+        expect(session.pendingPermissions.has("perm-uncertain")).toBe(true);
+      });
+
+      // Should store in pendingPermissions for manual review
+      const stored = session.pendingPermissions.get("perm-uncertain");
+      expect(stored).toBeDefined();
+      expect(stored!.ai_validation).toEqual({
+        verdict: "uncertain",
+        reason: "Complex bash pipeline",
+        ruleBasedOnly: false,
+      });
+
+      // Should persist session
+      expect(deps.persistSession).toHaveBeenCalled();
+
+      // Should broadcast permission_request to browsers (not permission_auto_resolved)
+      expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(session, {
+        type: "permission_request",
+        request: expect.objectContaining({
+          request_id: "perm-uncertain",
+          ai_validation: { verdict: "uncertain", reason: "Complex bash pipeline", ruleBasedOnly: false },
+        }),
+      });
+
+      // Should NOT send any response back to CLI (user must decide)
+      expect(adapter.sendBrowserMessage).not.toHaveBeenCalled();
+    });
+
+    it("skips AI validation when disabled — uses normal permission flow", () => {
+      // When aiValidationEnabled is false, the handler should go through the normal
+      // flow: store in pendingPermissions, persist, and broadcast the permission_request
+      // without calling validatePermission at all.
+      vi.mocked(settingsManager.getSettings).mockReturnValue({
+        openrouterApiKey: "test-api-key",
+        openrouterModel: "openrouter/free",
+        linearApiKey: "",
+        linearAutoTransition: false,
+        linearAutoTransitionStateId: "",
+        linearAutoTransitionStateName: "",
+        editorTabEnabled: false,
+        aiValidationEnabled: false,  // disabled
+        aiValidationAutoApprove: true,
+        aiValidationAutoDeny: true,
+        updatedAt: 0,
+      });
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+      adapter._trigger("onBrowserMessage", makePermissionMsg("Bash", "perm-no-ai"));
+
+      // validatePermission should NOT have been called
+      expect(aiValidator.validatePermission).not.toHaveBeenCalled();
+
+      // Should store in pendingPermissions (normal flow)
+      expect(session.pendingPermissions.has("perm-no-ai")).toBe(true);
+
+      // Should broadcast permission_request to browsers
+      expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(
+        session,
+        expect.objectContaining({ type: "permission_request" }),
+      );
+    });
+
+    it("skips AI validation when openrouterApiKey is empty", () => {
+      // Even if aiValidationEnabled is true, an empty API key means we can't call
+      // the AI — fall through to normal manual flow.
+      vi.mocked(settingsManager.getSettings).mockReturnValue({
+        openrouterApiKey: "",  // empty
+        openrouterModel: "openrouter/free",
+        linearApiKey: "",
+        linearAutoTransition: false,
+        linearAutoTransitionStateId: "",
+        linearAutoTransitionStateName: "",
+        editorTabEnabled: false,
+        aiValidationEnabled: true,
+        aiValidationAutoApprove: true,
+        aiValidationAutoDeny: true,
+        updatedAt: 0,
+      });
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+      adapter._trigger("onBrowserMessage", makePermissionMsg("Bash", "perm-no-key"));
+
+      // Should NOT call AI validator
+      expect(aiValidator.validatePermission).not.toHaveBeenCalled();
+
+      // Should fall through to normal flow
+      expect(session.pendingPermissions.has("perm-no-key")).toBe(true);
+    });
+
+    it("skips AI validation for AskUserQuestion tool even when enabled", () => {
+      // AskUserQuestion is an interactive tool that always requires the user's direct
+      // attention — it should never be auto-resolved by AI validation.
+      enableAiValidation();
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+      adapter._trigger("onBrowserMessage", makePermissionMsg("AskUserQuestion", "perm-ask"));
+
+      // Should NOT call AI validator
+      expect(aiValidator.validatePermission).not.toHaveBeenCalled();
+
+      // Should go through normal flow
+      expect(session.pendingPermissions.has("perm-ask")).toBe(true);
+      expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(
+        session,
+        expect.objectContaining({ type: "permission_request" }),
+      );
+    });
+
+    it("skips AI validation for ExitPlanMode tool even when enabled", () => {
+      // ExitPlanMode is an interactive tool that always requires the user's direct
+      // attention — it should never be auto-resolved by AI validation.
+      enableAiValidation();
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+      adapter._trigger("onBrowserMessage", makePermissionMsg("ExitPlanMode", "perm-exit"));
+
+      // Should NOT call AI validator
+      expect(aiValidator.validatePermission).not.toHaveBeenCalled();
+
+      // Should go through normal flow
+      expect(session.pendingPermissions.has("perm-exit")).toBe(true);
+      expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(
+        session,
+        expect.objectContaining({ type: "permission_request" }),
+      );
+    });
+
+    it("falls through to manual flow when AI validation throws an error", async () => {
+      // When validatePermission rejects with an error, the .catch() handler should
+      // fall through to the normal manual flow: store in pendingPermissions, persist,
+      // and broadcast to browsers.
+      enableAiValidation();
+      vi.mocked(aiValidator.validatePermission).mockRejectedValue(
+        new Error("Network timeout"),
+      );
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+      adapter._trigger("onBrowserMessage", makePermissionMsg("Bash", "perm-err"));
+
+      // Wait for the .catch() path to execute
+      await vi.waitFor(() => {
+        expect(session.pendingPermissions.has("perm-err")).toBe(true);
+      });
+
+      // Should persist session
+      expect(deps.persistSession).toHaveBeenCalled();
+
+      // Should broadcast permission_request to browsers for manual review
+      expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(
+        session,
+        expect.objectContaining({
+          type: "permission_request",
+          request: expect.objectContaining({ request_id: "perm-err" }),
+        }),
+      );
+
+      // Should NOT auto-resolve
+      expect(adapter.sendBrowserMessage).not.toHaveBeenCalled();
+    });
+
+    it("does not auto-approve safe verdict when aiValidationAutoApprove is false", async () => {
+      // When the verdict is "safe" but auto-approve is disabled, the handler
+      // should fall through to manual review instead of auto-approving.
+      vi.mocked(settingsManager.getSettings).mockReturnValue({
+        openrouterApiKey: "test-api-key",
+        openrouterModel: "openrouter/free",
+        linearApiKey: "",
+        linearAutoTransition: false,
+        linearAutoTransitionStateId: "",
+        linearAutoTransitionStateName: "",
+        editorTabEnabled: false,
+        aiValidationEnabled: true,
+        aiValidationAutoApprove: false,  // disabled
+        aiValidationAutoDeny: true,
+        updatedAt: 0,
+      });
+
+      vi.mocked(aiValidator.validatePermission).mockResolvedValue({
+        verdict: "safe",
+        reason: "Standard dev command",
+        ruleBasedOnly: false,
+      });
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+      adapter._trigger("onBrowserMessage", makePermissionMsg("Bash", "perm-safe-no-auto"));
+
+      await vi.waitFor(() => {
+        expect(session.pendingPermissions.has("perm-safe-no-auto")).toBe(true);
+      });
+
+      // Should NOT auto-resolve — falls through to manual
+      expect(adapter.sendBrowserMessage).not.toHaveBeenCalled();
+
+      // Should broadcast permission_request with ai_validation info attached
+      expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(session, {
+        type: "permission_request",
+        request: expect.objectContaining({
+          request_id: "perm-safe-no-auto",
+          ai_validation: { verdict: "safe", reason: "Standard dev command", ruleBasedOnly: false },
+        }),
+      });
+    });
+
+    it("does not auto-deny dangerous verdict when aiValidationAutoDeny is false", async () => {
+      // When the verdict is "dangerous" but auto-deny is disabled, the handler
+      // should fall through to manual review instead of auto-denying.
+      vi.mocked(settingsManager.getSettings).mockReturnValue({
+        openrouterApiKey: "test-api-key",
+        openrouterModel: "openrouter/free",
+        linearApiKey: "",
+        linearAutoTransition: false,
+        linearAutoTransitionStateId: "",
+        linearAutoTransitionStateName: "",
+        editorTabEnabled: false,
+        aiValidationEnabled: true,
+        aiValidationAutoApprove: true,
+        aiValidationAutoDeny: false,  // disabled
+        updatedAt: 0,
+      });
+
+      vi.mocked(aiValidator.validatePermission).mockResolvedValue({
+        verdict: "dangerous",
+        reason: "Recursive delete",
+        ruleBasedOnly: true,
+      });
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+      adapter._trigger("onBrowserMessage", makePermissionMsg("Bash", "perm-danger-no-auto"));
+
+      await vi.waitFor(() => {
+        expect(session.pendingPermissions.has("perm-danger-no-auto")).toBe(true);
+      });
+
+      // Should NOT auto-resolve — falls through to manual
+      expect(adapter.sendBrowserMessage).not.toHaveBeenCalled();
+
+      // Should broadcast permission_request with ai_validation info attached
+      expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(session, {
+        type: "permission_request",
+        request: expect.objectContaining({
+          request_id: "perm-danger-no-auto",
+          ai_validation: { verdict: "dangerous", reason: "Recursive delete", ruleBasedOnly: true },
+        }),
+      });
+    });
   });
 });

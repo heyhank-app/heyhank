@@ -1,6 +1,7 @@
 import type {
   SessionState,
   PermissionRequest,
+  AiValidationInfo,
   ContentBlock,
   BrowserIncomingMessage,
   BrowserOutgoingMessage,
@@ -10,7 +11,7 @@ import type {
   CreationProgressEvent,
 } from "../server/session-types.js";
 
-export type { SessionState, PermissionRequest, ContentBlock, BrowserIncomingMessage, BrowserOutgoingMessage, BackendType, McpServerDetail, McpServerConfig, CreationProgressEvent };
+export type { SessionState, PermissionRequest, AiValidationInfo, ContentBlock, BrowserIncomingMessage, BrowserOutgoingMessage, BackendType, McpServerDetail, McpServerConfig, CreationProgressEvent };
 
 export interface ChatMessage {
   id: string;

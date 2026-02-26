@@ -10,6 +10,7 @@ import { ClaudeMdEditor } from "./ClaudeMdEditor.js";
 import { ChatView } from "./ChatView.js";
 import { api } from "../api.js";
 import type { PermissionRequest, ChatMessage, ContentBlock, SessionState, McpServerDetail } from "../types.js";
+import { AiValidationBadge } from "./AiValidationBadge.js";
 import type { TaskItem } from "../types.js";
 import type { UpdateInfo, GitHubPRInfo, LinearIssue, LinearComment } from "../api.js";
 import { GitHubPRDisplay, CodexRateLimitsSection, CodexTokenDetailsSection } from "./TaskPanel.js";
@@ -131,6 +132,27 @@ const PERM_DYNAMIC = mockPermission({
   tool_name: "dynamic:code_interpreter",
   input: { code: "print('hello from dynamic tool')" },
   description: "Custom tool call: code_interpreter",
+});
+
+// AI Validation mock: uncertain verdict (shown to user with recommendation)
+const PERM_AI_UNCERTAIN = mockPermission({
+  tool_name: "Bash",
+  input: { command: "npm install --save-dev @types/react" },
+  ai_validation: { verdict: "uncertain", reason: "Package installation modifies node_modules", ruleBasedOnly: false },
+});
+
+// AI Validation mock: safe recommendation (shown when auto-approve is off)
+const PERM_AI_SAFE = mockPermission({
+  tool_name: "Bash",
+  input: { command: "git status" },
+  ai_validation: { verdict: "safe", reason: "Read-only git command", ruleBasedOnly: false },
+});
+
+// AI Validation mock: dangerous recommendation (shown when auto-deny is off)
+const PERM_AI_DANGEROUS = mockPermission({
+  tool_name: "Bash",
+  input: { command: "rm -rf node_modules && rm -rf .git" },
+  ai_validation: { verdict: "dangerous", reason: "Recursive delete of project files", ruleBasedOnly: false },
 });
 
 const PERM_ASK_SINGLE = mockPermission({
@@ -656,6 +678,43 @@ export function Playground() {
             </Card>
             <Card label="Multi-question">
               <PermissionBanner permission={PERM_ASK_MULTI} sessionId={MOCK_SESSION_ID} />
+            </Card>
+          </div>
+        </Section>
+
+        {/* ─── AI Validation ──────────────────────────────── */}
+        <Section title="AI Validation" description="AI-powered permission validation badges and recommendations">
+          <div className="space-y-4">
+            <Card label="Permission with AI recommendation (uncertain)">
+              <PermissionBanner permission={PERM_AI_UNCERTAIN} sessionId={MOCK_SESSION_ID} />
+            </Card>
+            <Card label="Permission with AI recommendation (safe)">
+              <PermissionBanner permission={PERM_AI_SAFE} sessionId={MOCK_SESSION_ID} />
+            </Card>
+            <Card label="Permission with AI recommendation (dangerous)">
+              <PermissionBanner permission={PERM_AI_DANGEROUS} sessionId={MOCK_SESSION_ID} />
+            </Card>
+            <Card label="Auto-resolved badges">
+              <div className="border border-cc-border rounded-xl overflow-hidden bg-cc-card divide-y divide-cc-border">
+                <AiValidationBadge entry={{
+                  request: mockPermission({ tool_name: "Read", input: { file_path: "/src/index.ts" } }),
+                  behavior: "allow",
+                  reason: "Read is a read-only tool",
+                  timestamp: Date.now(),
+                }} />
+                <AiValidationBadge entry={{
+                  request: mockPermission({ tool_name: "Bash", input: { command: "rm -rf /" } }),
+                  behavior: "deny",
+                  reason: "Recursive delete of root directory",
+                  timestamp: Date.now(),
+                }} />
+                <AiValidationBadge entry={{
+                  request: mockPermission({ tool_name: "Grep", input: { pattern: "TODO", path: "/src" } }),
+                  behavior: "allow",
+                  reason: "Grep is a read-only tool",
+                  timestamp: Date.now(),
+                }} />
+              </div>
             </Card>
           </div>
         </Section>

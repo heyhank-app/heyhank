@@ -553,4 +553,231 @@ describe("SettingsPage", () => {
     const authButtons = screen.getAllByRole("button", { name: "Authentication" });
     expect(authButtons.length).toBeGreaterThanOrEqual(1);
   });
+
+  // ─── AI Validation section tests ──────────────────────────────────
+
+  // The AI Validation section renders with its heading and the toggle button
+  // when an OpenRouter key is configured (configured === true).
+  it("renders AI Validation section with toggle when OpenRouter key is configured", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    // Section heading should be present inside the #ai-validation section
+    const section = document.getElementById("ai-validation");
+    expect(section).toBeInTheDocument();
+
+    // The main toggle button should be enabled (not disabled) when key is configured
+    const toggleBtn = screen.getByRole("button", { name: /AI Validation Mode/i });
+    expect(toggleBtn).toBeInTheDocument();
+    expect(toggleBtn).not.toBeDisabled();
+
+    // It should show "Off" by default since aiValidationEnabled defaults to false
+    expect(toggleBtn).toHaveTextContent("Off");
+  });
+
+  // When no OpenRouter API key is configured, the AI Validation toggle should
+  // be disabled and a warning message should appear.
+  it("disables AI Validation toggle when OpenRouter key is NOT configured", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      openrouterApiKeyConfigured: false,
+      openrouterModel: "openrouter/free",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
+    });
+
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key not configured");
+
+    const toggleBtn = screen.getByRole("button", { name: /AI Validation Mode/i });
+    expect(toggleBtn).toBeDisabled();
+
+    // Warning message should be shown
+    expect(
+      screen.getByText("Configure an OpenRouter API key above to enable AI validation."),
+    ).toBeInTheDocument();
+  });
+
+  // Clicking the AI Validation Mode toggle should call updateSettings with
+  // aiValidationEnabled set to the opposite of its current value.
+  it("calls updateSettings with aiValidationEnabled when toggle is clicked", async () => {
+    mockApi.updateSettings.mockResolvedValue({
+      openrouterApiKeyConfigured: true,
+      openrouterModel: "openrouter/free",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
+      aiValidationEnabled: true,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
+    });
+
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    fireEvent.click(screen.getByRole("button", { name: /AI Validation Mode/i }));
+
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({ aiValidationEnabled: true });
+    });
+  });
+
+  // When AI Validation is enabled (and OpenRouter key is configured), the
+  // auto-approve and auto-deny sub-toggles should appear.
+  it("shows auto-approve and auto-deny sub-toggles when AI Validation is enabled", async () => {
+    // Return settings with aiValidationEnabled: true so sub-toggles render
+    mockApi.getSettings.mockResolvedValueOnce({
+      openrouterApiKeyConfigured: true,
+      openrouterModel: "openrouter/free",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
+      aiValidationEnabled: true,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
+    });
+
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    // Sub-toggles should be visible
+    expect(screen.getByRole("button", { name: /Auto-approve safe tools/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Auto-deny dangerous tools/i })).toBeInTheDocument();
+  });
+
+  // Sub-toggles should NOT appear when AI Validation is disabled.
+  it("hides auto-approve and auto-deny sub-toggles when AI Validation is disabled", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      openrouterApiKeyConfigured: true,
+      openrouterModel: "openrouter/free",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
+    });
+
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    expect(screen.queryByRole("button", { name: /Auto-approve safe tools/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Auto-deny dangerous tools/i })).not.toBeInTheDocument();
+  });
+
+  // Clicking the auto-approve toggle should call updateSettings with the
+  // aiValidationAutoApprove field toggled to the opposite value.
+  it("calls updateSettings with aiValidationAutoApprove when auto-approve is toggled", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      openrouterApiKeyConfigured: true,
+      openrouterModel: "openrouter/free",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
+      aiValidationEnabled: true,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
+    });
+    mockApi.updateSettings.mockResolvedValue({
+      openrouterApiKeyConfigured: true,
+      openrouterModel: "openrouter/free",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
+      aiValidationEnabled: true,
+      aiValidationAutoApprove: false,
+      aiValidationAutoDeny: true,
+    });
+
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    // Auto-approve is currently "On" (true), clicking should toggle to false
+    fireEvent.click(screen.getByRole("button", { name: /Auto-approve safe tools/i }));
+
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({ aiValidationAutoApprove: false });
+    });
+  });
+
+  // Clicking the auto-deny toggle should call updateSettings with the
+  // aiValidationAutoDeny field toggled to the opposite value.
+  it("calls updateSettings with aiValidationAutoDeny when auto-deny is toggled", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      openrouterApiKeyConfigured: true,
+      openrouterModel: "openrouter/free",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
+      aiValidationEnabled: true,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
+    });
+    mockApi.updateSettings.mockResolvedValue({
+      openrouterApiKeyConfigured: true,
+      openrouterModel: "openrouter/free",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
+      aiValidationEnabled: true,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: false,
+    });
+
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    // Auto-deny is currently "On" (true), clicking should toggle to false
+    fireEvent.click(screen.getByRole("button", { name: /Auto-deny dangerous tools/i }));
+
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({ aiValidationAutoDeny: false });
+    });
+  });
+
+  // When the API call in toggleAiValidation fails, the UI should revert
+  // the optimistic update back to the original value.
+  it("reverts AI Validation toggle on API failure", async () => {
+    mockApi.updateSettings.mockRejectedValueOnce(new Error("network error"));
+
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    const toggleBtn = screen.getByRole("button", { name: /AI Validation Mode/i });
+    // Initially off
+    expect(toggleBtn).toHaveTextContent("Off");
+
+    // Click to enable — optimistic update sets it to "On"
+    fireEvent.click(toggleBtn);
+
+    // After the API rejects, the toggle should revert back to "Off"
+    await waitFor(() => {
+      expect(toggleBtn).toHaveTextContent("Off");
+    });
+  });
+
+  // The AI Validation section includes its anchor ID for sidebar navigation.
+  it("renders AI Validation section with anchor ID for navigation", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    expect(document.getElementById("ai-validation")).toBeInTheDocument();
+  });
+
+  // The AI Validation category appears in the sidebar navigation.
+  it("includes AI Validation in category navigation", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("OpenRouter key configured");
+
+    const aiValButtons = screen.getAllByRole("button", { name: "AI Validation" });
+    expect(aiValButtons.length).toBeGreaterThanOrEqual(1);
+  });
 });

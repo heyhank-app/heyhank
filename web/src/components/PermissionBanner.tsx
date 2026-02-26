@@ -101,6 +101,23 @@ export function PermissionBanner({
               <ToolInputDisplay toolName={permission.tool_name} input={permission.input} description={permission.description} />
             )}
 
+            {/* AI validation recommendation (shown for "uncertain" verdicts that fall through to manual) */}
+            {permission.ai_validation && !isAskUser && (
+              <div className={`mt-2 flex items-center gap-1.5 text-[11px] px-2 py-1.5 rounded-md ${
+                permission.ai_validation.verdict === "safe"
+                  ? "bg-cc-success/10 text-cc-success"
+                  : permission.ai_validation.verdict === "dangerous"
+                    ? "bg-cc-error/10 text-cc-error"
+                    : "bg-cc-warning/10 text-cc-warning"
+              }`}>
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0">
+                  <path d="M8 1a2.5 2.5 0 00-2.5 2.5v.382a8 8 0 00-1.074.646l-.33-.191a2.5 2.5 0 00-3.415.912 2.5 2.5 0 00.916 3.42l.33.19A8 8 0 001.5 9.5v.382A8 8 0 002 10.5l-.33.19a2.5 2.5 0 00-.916 3.42 2.5 2.5 0 003.415.912l.33-.191a8 8 0 001.074.646V16A2.5 2.5 0 008 13.5 2.5 2.5 0 0010.5 16v-.713a8 8 0 001.074-.646l.33.191a2.5 2.5 0 003.415-.912 2.5 2.5 0 00-.916-3.42L14 10.5V9.5l.33-.19a2.5 2.5 0 00.916-3.42 2.5 2.5 0 00-3.415-.912l-.33.191A8 8 0 0010.5 4.882V4.5A2.5 2.5 0 008 2V1z"/>
+                </svg>
+                <span className="font-medium">AI analysis:</span>
+                <span>{permission.ai_validation.reason}</span>
+              </div>
+            )}
+
             {/* Actions - only for non-AskUserQuestion tools */}
             {!isAskUser && (
               <div className="flex items-center gap-2 mt-3 flex-wrap">

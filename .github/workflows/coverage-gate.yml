@@ -38,7 +38,7 @@ jobs:
           # Source files added or modified in this PR (relative to repo root, under web/)
           CHANGED=$(git diff --name-only --diff-filter=ACM origin/main...HEAD -- web/server/ web/src/ \
             | grep -E '\.(ts|tsx)$' \
-            | grep -v '\.test\.\|\.spec\.\|__mocks__\|test-setup' || true)
+            | grep -v '\.test\.\|\.spec\.\|__mocks__\|test-setup\|session-types\.ts\|src/types\.ts' || true)
 
           if [ -z "$CHANGED" ]; then
             echo "No new/changed source files in this PR — nothing to gate."

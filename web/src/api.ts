@@ -377,6 +377,9 @@ export interface AppSettings {
   linearAutoTransition: boolean;
   linearAutoTransitionStateName: string;
   editorTabEnabled: boolean;
+  aiValidationEnabled: boolean;
+  aiValidationAutoApprove: boolean;
+  aiValidationAutoDeny: boolean;
 }
 
 export interface LinearWorkflowState {

@@ -659,6 +659,16 @@ function handleParsedMessage(
       break;
     }
 
+    case "permission_auto_resolved": {
+      store.addAiResolvedPermission(sessionId, {
+        request: data.request,
+        behavior: data.behavior,
+        reason: data.reason,
+        timestamp: Date.now(),
+      });
+      break;
+    }
+
     case "tool_progress": {
       store.setToolProgress(sessionId, data.tool_use_id, {
         toolName: data.tool_name,

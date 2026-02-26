@@ -75,6 +75,9 @@ vi.mock("./settings-manager.js", () => ({
     linearAutoTransitionStateId: "",
     linearAutoTransitionStateName: "",
     editorTabEnabled: false,
+    aiValidationEnabled: false,
+    aiValidationAutoApprove: true,
+    aiValidationAutoDeny: true,
     updatedAt: 0,
   })),
   updateSettings: vi.fn((patch) => ({
@@ -85,6 +88,9 @@ vi.mock("./settings-manager.js", () => ({
     linearAutoTransitionStateId: patch.linearAutoTransitionStateId ?? "",
     linearAutoTransitionStateName: patch.linearAutoTransitionStateName ?? "",
     editorTabEnabled: patch.editorTabEnabled ?? false,
+    aiValidationEnabled: patch.aiValidationEnabled ?? false,
+    aiValidationAutoApprove: patch.aiValidationAutoApprove ?? true,
+    aiValidationAutoDeny: patch.aiValidationAutoDeny ?? true,
     updatedAt: Date.now(),
   })),
 }));
@@ -1575,6 +1581,9 @@ describe("GET /api/settings", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 123,
     });
 
@@ -1589,6 +1598,9 @@ describe("GET /api/settings", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
     });
   });
 
@@ -1601,6 +1613,9 @@ describe("GET /api/settings", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 123,
     });
 
@@ -1615,6 +1630,9 @@ describe("GET /api/settings", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
     });
   });
 });
@@ -1629,6 +1647,9 @@ describe("PUT /api/settings", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 456,
     });
 
@@ -1647,6 +1668,9 @@ describe("PUT /api/settings", () => {
       linearAutoTransitionStateId: undefined,
       linearAutoTransitionStateName: undefined,
       editorTabEnabled: undefined,
+      aiValidationEnabled: undefined,
+      aiValidationAutoApprove: undefined,
+      aiValidationAutoDeny: undefined,
     });
     const json = await res.json();
     expect(json).toEqual({
@@ -1656,6 +1680,9 @@ describe("PUT /api/settings", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
     });
   });
 
@@ -1668,6 +1695,9 @@ describe("PUT /api/settings", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 789,
     });
 
@@ -1698,6 +1728,9 @@ describe("PUT /api/settings", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 999,
     });
 
@@ -1797,6 +1830,9 @@ describe("GET /api/linear/issues", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -1815,6 +1851,9 @@ describe("GET /api/linear/issues", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -1887,6 +1926,9 @@ describe("GET /api/linear/issues", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -1966,6 +2008,9 @@ describe("GET /api/linear/issues", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -2010,6 +2055,9 @@ describe("GET /api/linear/connection", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -2028,6 +2076,9 @@ describe("GET /api/linear/connection", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -2068,6 +2119,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearAutoTransitionStateId: "state-123",
       linearAutoTransitionStateName: "In Progress",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -2091,6 +2145,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -2113,6 +2170,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearAutoTransitionStateId: "state-123",
       linearAutoTransitionStateName: "In Progress",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -2136,6 +2196,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearAutoTransitionStateId: "state-doing",
       linearAutoTransitionStateName: "Doing",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -2194,6 +2257,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearAutoTransitionStateId: "state-doing",
       linearAutoTransitionStateName: "Doing",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -2231,6 +2297,9 @@ describe("GET /api/linear/projects", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -2249,6 +2318,9 @@ describe("GET /api/linear/projects", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -2298,6 +2370,9 @@ describe("GET /api/linear/project-issues", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -2316,6 +2391,9 @@ describe("GET /api/linear/project-issues", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -2380,6 +2458,9 @@ describe("GET /api/linear/project-issues", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 

@@ -282,6 +282,7 @@ export type BrowserIncomingMessageBase =
   | { type: "result"; data: CLIResultMessage }
   | { type: "permission_request"; request: PermissionRequest }
   | { type: "permission_cancelled"; request_id: string }
+  | { type: "permission_auto_resolved"; request: PermissionRequest; behavior: "allow" | "deny"; reason: string }
   | { type: "tool_progress"; tool_use_id: string; tool_name: string; elapsed_time_seconds: number }
   | { type: "tool_use_summary"; summary: string; tool_use_ids: string[] }
   | { type: "status_change"; status: "compacting" | "idle" | "running" | null }
@@ -390,6 +391,12 @@ export type PermissionUpdate =
   | { type: "addDirectories"; directories: string[]; destination: PermissionDestination }
   | { type: "removeDirectories"; directories: string[]; destination: PermissionDestination };
 
+export interface AiValidationInfo {
+  verdict: "safe" | "dangerous" | "uncertain";
+  reason: string;
+  ruleBasedOnly: boolean;
+}
+
 export interface PermissionRequest {
   request_id: string;
   tool_name: string;
@@ -399,6 +406,7 @@ export interface PermissionRequest {
   tool_use_id: string;
   agent_id?: string;
   timestamp: number;
+  ai_validation?: AiValidationInfo;
 }
 
 // ─── Session Creation Progress (SSE streaming) ──────────────────────────────

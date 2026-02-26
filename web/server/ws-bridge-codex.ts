@@ -1,10 +1,13 @@
 import type {
   BrowserIncomingMessage,
   BrowserOutgoingMessage,
+  PermissionRequest,
   SessionState,
 } from "./session-types.js";
 import type { CodexAdapter } from "./codex-adapter.js";
 import type { Session } from "./ws-bridge-types.js";
+import { validatePermission } from "./ai-validator.js";
+import { getSettings } from "./settings-manager.js";
 
 export interface CodexAttachDeps {
   persistSession: (session: Session) => void;
@@ -55,7 +58,28 @@ export function attachCodexAdapterHandlers(
     }
 
     if (msg.type === "permission_request") {
-      session.pendingPermissions.set(msg.request.request_id, msg.request);
+      const perm = msg.request;
+
+      // AI Validation Mode for Codex sessions
+      const settings = getSettings();
+      if (
+        settings.aiValidationEnabled
+        && settings.openrouterApiKey
+        && perm.tool_name !== "AskUserQuestion"
+        && perm.tool_name !== "ExitPlanMode"
+      ) {
+        // Run AI validation async — don't broadcast yet
+        handleCodexAiValidation(session, adapter, perm, deps).catch((err) => {
+          console.warn("[ws-bridge-codex] AI validation error, falling through to manual:", err);
+          // On error, fall through to normal flow
+          session.pendingPermissions.set(perm.request_id, perm);
+          deps.persistSession(session);
+          deps.broadcastToBrowsers(session, msg);
+        });
+        return;
+      }
+
+      session.pendingPermissions.set(perm.request_id, perm);
       deps.persistSession(session);
     }
 
@@ -112,4 +136,64 @@ export function attachCodexAdapterHandlers(
 
   deps.broadcastToBrowsers(session, { type: "cli_connected" });
   console.log(`[ws-bridge] Codex adapter attached for session ${sessionId}`);
+}
+
+async function handleCodexAiValidation(
+  session: Session,
+  adapter: CodexAdapter,
+  perm: PermissionRequest,
+  deps: CodexAttachDeps,
+): Promise<void> {
+  const settings = getSettings();
+  const result = await validatePermission(
+    perm.tool_name,
+    perm.input,
+    perm.description,
+  );
+
+  perm.ai_validation = {
+    verdict: result.verdict,
+    reason: result.reason,
+    ruleBasedOnly: result.ruleBasedOnly,
+  };
+
+  // Auto-approve safe tools
+  if (result.verdict === "safe" && settings.aiValidationAutoApprove) {
+    deps.broadcastToBrowsers(session, {
+      type: "permission_auto_resolved",
+      request: perm,
+      behavior: "allow",
+      reason: result.reason,
+    });
+    adapter.sendBrowserMessage({
+      type: "permission_response",
+      request_id: perm.request_id,
+      behavior: "allow",
+    });
+    return;
+  }
+
+  // Auto-deny dangerous tools
+  if (result.verdict === "dangerous" && settings.aiValidationAutoDeny) {
+    deps.broadcastToBrowsers(session, {
+      type: "permission_auto_resolved",
+      request: perm,
+      behavior: "deny",
+      reason: result.reason,
+    });
+    adapter.sendBrowserMessage({
+      type: "permission_response",
+      request_id: perm.request_id,
+      behavior: "deny",
+    });
+    return;
+  }
+
+  // Uncertain or auto-action disabled: fall through to manual
+  session.pendingPermissions.set(perm.request_id, perm);
+  deps.persistSession(session);
+  deps.broadcastToBrowsers(session, {
+    type: "permission_request",
+    request: perm,
+  });
 }

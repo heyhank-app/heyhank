@@ -13,6 +13,7 @@ const CATEGORIES = [
   { id: "authentication", label: "Authentication" },
   { id: "notifications", label: "Notifications" },
   { id: "openrouter", label: "OpenRouter" },
+  { id: "ai-validation", label: "AI Validation" },
   { id: "updates", label: "Updates" },
   { id: "telemetry", label: "Telemetry" },
   { id: "environments", label: "Environments" },
@@ -47,6 +48,9 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [updateStatus, setUpdateStatus] = useState("");
   const [updateError, setUpdateError] = useState("");
   const [telemetryEnabled, setTelemetryEnabled] = useState(getTelemetryPreferenceEnabled());
+  const [aiValidationEnabled, setAiValidationEnabled] = useState(false);
+  const [aiValidationAutoApprove, setAiValidationAutoApprove] = useState(true);
+  const [aiValidationAutoDeny, setAiValidationAutoDeny] = useState(true);
   const [activeSection, setActiveSection] = useState<CategoryId>("general");
   const [apiKeyFocused, setApiKeyFocused] = useState(false);
 
@@ -113,6 +117,9 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
         setOpenrouterModel(s.openrouterModel || "openrouter/free");
         setEditorTabEnabled(s.editorTabEnabled);
         setStoreEditorTabEnabled(s.editorTabEnabled);
+        if (typeof s.aiValidationEnabled === "boolean") setAiValidationEnabled(s.aiValidationEnabled);
+        if (typeof s.aiValidationAutoApprove === "boolean") setAiValidationAutoApprove(s.aiValidationAutoApprove);
+        if (typeof s.aiValidationAutoDeny === "boolean") setAiValidationAutoDeny(s.aiValidationAutoDeny);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
@@ -147,6 +154,26 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function toggleAiValidation(field: "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny") {
+    const current = field === "aiValidationEnabled" ? aiValidationEnabled
+      : field === "aiValidationAutoApprove" ? aiValidationAutoApprove
+      : aiValidationAutoDeny;
+    const newValue = !current;
+    // Optimistic UI update
+    if (field === "aiValidationEnabled") setAiValidationEnabled(newValue);
+    else if (field === "aiValidationAutoApprove") setAiValidationAutoApprove(newValue);
+    else setAiValidationAutoDeny(newValue);
+
+    try {
+      await api.updateSettings({ [field]: newValue });
+    } catch {
+      // Revert on failure
+      if (field === "aiValidationEnabled") setAiValidationEnabled(current);
+      else if (field === "aiValidationAutoApprove") setAiValidationAutoApprove(current);
+      else setAiValidationAutoDeny(current);
     }
   }
 
@@ -555,6 +582,70 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   </button>
                 </div>
               </form>
+            </section>
+
+            {/* AI Validation */}
+            <section id="ai-validation" ref={setSectionRef("ai-validation")}>
+              <h2 className="text-sm font-semibold text-cc-fg mb-4">AI Validation</h2>
+              <div className="space-y-3">
+                <p className="text-xs text-cc-muted leading-relaxed">
+                  When enabled, an AI model evaluates tool calls before they execute.
+                  Safe operations are auto-approved, dangerous ones are blocked,
+                  and uncertain cases are shown to you with a recommendation.
+                  Requires an OpenRouter API key.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() => toggleAiValidation("aiValidationEnabled")}
+                  disabled={!configured}
+                  className={`w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg transition-colors ${
+                    !configured
+                      ? "bg-cc-hover text-cc-muted cursor-not-allowed opacity-60"
+                      : "bg-cc-hover hover:bg-cc-active text-cc-fg cursor-pointer"
+                  }`}
+                >
+                  <span className="text-sm">AI Validation Mode</span>
+                  <span className={`text-xs font-medium ${aiValidationEnabled && configured ? "text-cc-success" : "text-cc-muted"}`}>
+                    {aiValidationEnabled && configured ? "On" : "Off"}
+                  </span>
+                </button>
+                {!configured && (
+                  <p className="text-[11px] text-cc-warning">Configure an OpenRouter API key above to enable AI validation.</p>
+                )}
+
+                {aiValidationEnabled && configured && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => toggleAiValidation("aiValidationAutoApprove")}
+                      className="w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg bg-cc-hover hover:bg-cc-active text-cc-fg transition-colors cursor-pointer"
+                    >
+                      <div>
+                        <span className="text-sm">Auto-approve safe tools</span>
+                        <p className="text-[11px] text-cc-muted mt-0.5">Automatically allow read-only tools and benign commands</p>
+                      </div>
+                      <span className={`text-xs font-medium ${aiValidationAutoApprove ? "text-cc-success" : "text-cc-muted"}`}>
+                        {aiValidationAutoApprove ? "On" : "Off"}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleAiValidation("aiValidationAutoDeny")}
+                      className="w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg bg-cc-hover hover:bg-cc-active text-cc-fg transition-colors cursor-pointer"
+                    >
+                      <div>
+                        <span className="text-sm">Auto-deny dangerous tools</span>
+                        <p className="text-[11px] text-cc-muted mt-0.5">Automatically block destructive commands like rm -rf</p>
+                      </div>
+                      <span className={`text-xs font-medium ${aiValidationAutoDeny ? "text-cc-success" : "text-cc-muted"}`}>
+                        {aiValidationAutoDeny ? "On" : "Off"}
+                      </span>
+                    </button>
+                  </>
+                )}
+              </div>
             </section>
 
             {/* Updates */}

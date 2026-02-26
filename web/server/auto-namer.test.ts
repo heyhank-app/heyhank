@@ -21,6 +21,9 @@ beforeEach(() => {
     linearAutoTransitionStateId: "",
     linearAutoTransitionStateName: "",
     editorTabEnabled: false,
+    aiValidationEnabled: false,
+    aiValidationAutoApprove: true,
+    aiValidationAutoDeny: true,
     updatedAt: 0,
   });
 });
@@ -48,6 +51,9 @@ describe("generateSessionTitle", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
 
@@ -82,6 +88,9 @@ describe("generateSessionTitle", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
     mockFetch.mockResolvedValueOnce({
@@ -157,6 +166,9 @@ describe("generateSessionTitle", () => {
       linearAutoTransitionStateId: "",
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
       updatedAt: 0,
     });
     mockFetch.mockResolvedValueOnce({

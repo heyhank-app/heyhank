@@ -17,6 +17,9 @@ export interface CompanionSettings {
   linearAutoTransitionStateId: string;
   linearAutoTransitionStateName: string;
   editorTabEnabled: boolean;
+  aiValidationEnabled: boolean;
+  aiValidationAutoApprove: boolean;
+  aiValidationAutoDeny: boolean;
   updatedAt: number;
 }
 
@@ -32,6 +35,9 @@ let settings: CompanionSettings = {
   linearAutoTransitionStateId: "",
   linearAutoTransitionStateName: "",
   editorTabEnabled: false,
+  aiValidationEnabled: false,
+  aiValidationAutoApprove: true,
+  aiValidationAutoDeny: true,
   updatedAt: 0,
 };
 
@@ -47,6 +53,9 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
     linearAutoTransitionStateId: typeof raw?.linearAutoTransitionStateId === "string" ? raw.linearAutoTransitionStateId : "",
     linearAutoTransitionStateName: typeof raw?.linearAutoTransitionStateName === "string" ? raw.linearAutoTransitionStateName : "",
     editorTabEnabled: typeof raw?.editorTabEnabled === "boolean" ? raw.editorTabEnabled : false,
+    aiValidationEnabled: typeof raw?.aiValidationEnabled === "boolean" ? raw.aiValidationEnabled : false,
+    aiValidationAutoApprove: typeof raw?.aiValidationAutoApprove === "boolean" ? raw.aiValidationAutoApprove : true,
+    aiValidationAutoDeny: typeof raw?.aiValidationAutoDeny === "boolean" ? raw.aiValidationAutoDeny : true,
     updatedAt: typeof raw?.updatedAt === "number" ? raw.updatedAt : 0,
   };
 }
@@ -75,7 +84,7 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "openrouterApiKey" | "openrouterModel" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "editorTabEnabled">>,
+  patch: Partial<Pick<CompanionSettings, "openrouterApiKey" | "openrouterModel" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "editorTabEnabled" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
@@ -86,6 +95,9 @@ export function updateSettings(
     linearAutoTransitionStateId: patch.linearAutoTransitionStateId ?? settings.linearAutoTransitionStateId,
     linearAutoTransitionStateName: patch.linearAutoTransitionStateName ?? settings.linearAutoTransitionStateName,
     editorTabEnabled: patch.editorTabEnabled ?? settings.editorTabEnabled,
+    aiValidationEnabled: patch.aiValidationEnabled ?? settings.aiValidationEnabled,
+    aiValidationAutoApprove: patch.aiValidationAutoApprove ?? settings.aiValidationAutoApprove,
+    aiValidationAutoDeny: patch.aiValidationAutoDeny ?? settings.aiValidationAutoDeny,
     updatedAt: Date.now(),
   });
   persist();

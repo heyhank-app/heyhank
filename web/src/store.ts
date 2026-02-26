@@ -55,6 +55,14 @@ interface AppState {
   // Pending permissions per session (outer key = sessionId, inner key = request_id)
   pendingPermissions: Map<string, Map<string, PermissionRequest>>;
 
+  // AI-resolved permissions log per session
+  aiResolvedPermissions: Map<string, Array<{
+    request: PermissionRequest;
+    behavior: "allow" | "deny";
+    reason: string;
+    timestamp: number;
+  }>>;
+
   /** Browser↔Server WebSocket connection state per session */
   connectionStatus: Map<string, "connecting" | "connected" | "disconnected">;
   /** CLI process↔Server connection state (pushed by server via "cli_connected"/"cli_disconnected") */
@@ -163,6 +171,7 @@ interface AppState {
   // Permission actions
   addPermission: (sessionId: string, perm: PermissionRequest) => void;
   removePermission: (sessionId: string, requestId: string) => void;
+  addAiResolvedPermission: (sessionId: string, entry: { request: PermissionRequest; behavior: "allow" | "deny"; reason: string; timestamp: number }) => void;
 
   // Task actions
   addTask: (sessionId: string, task: TaskItem) => void;
@@ -333,6 +342,7 @@ export const useStore = create<AppState>((set) => ({
   streamingStartedAt: new Map(),
   streamingOutputTokens: new Map(),
   pendingPermissions: new Map(),
+  aiResolvedPermissions: new Map(),
   connectionStatus: new Map(),
   cliConnected: new Map(),
   sessionStatus: new Map(),
@@ -517,6 +527,7 @@ export const useStore = create<AppState>((set) => ({
         sessionStatus: deleteFromMap(s.sessionStatus, sessionId),
         previousPermissionMode: deleteFromMap(s.previousPermissionMode, sessionId),
         pendingPermissions: deleteFromMap(s.pendingPermissions, sessionId),
+        aiResolvedPermissions: deleteFromMap(s.aiResolvedPermissions, sessionId),
         sessionTasks: deleteFromMap(s.sessionTasks, sessionId),
         changedFilesTick: deleteFromMap(s.changedFilesTick, sessionId),
         gitChangedFilesCount: deleteFromMap(s.gitChangedFilesCount, sessionId),
@@ -613,6 +624,16 @@ export const useStore = create<AppState>((set) => ({
         pendingPermissions.set(sessionId, updated);
       }
       return { pendingPermissions };
+    }),
+
+  addAiResolvedPermission: (sessionId, entry) =>
+    set((s) => {
+      const aiResolvedPermissions = new Map(s.aiResolvedPermissions);
+      const sessionEntries = [...(aiResolvedPermissions.get(sessionId) || []), entry];
+      // Keep only the last 50 entries per session to avoid unbounded growth
+      if (sessionEntries.length > 50) sessionEntries.splice(0, sessionEntries.length - 50);
+      aiResolvedPermissions.set(sessionId, sessionEntries);
+      return { aiResolvedPermissions };
     }),
 
   addTask: (sessionId, task) =>
@@ -910,6 +931,7 @@ export const useStore = create<AppState>((set) => ({
       streamingStartedAt: new Map(),
       streamingOutputTokens: new Map(),
       pendingPermissions: new Map(),
+      aiResolvedPermissions: new Map(),
       connectionStatus: new Map(),
       cliConnected: new Map(),
       sessionStatus: new Map(),
