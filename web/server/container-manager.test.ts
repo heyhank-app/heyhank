@@ -237,3 +237,130 @@ describe("ContainerManager workspace copy", () => {
       .rejects.toThrow("workspace copy failed (exit 2): tar: write error");
   });
 });
+
+describe("ContainerManager gitOpsInContainer", () => {
+  beforeEach(() => {
+    mockExecSync.mockReset();
+  });
+
+  it("runs fetch, checkout, and pull in sequence and reports success", () => {
+    // All git commands succeed inside the container
+    mockExecSync.mockReturnValue("");
+
+    const manager = new ContainerManager();
+    const result = manager.gitOpsInContainer("cid-123", {
+      branch: "feat/new",
+      currentBranch: "main",
+      defaultBranch: "main",
+    });
+
+    expect(result.fetchOk).toBe(true);
+    expect(result.checkoutOk).toBe(true);
+    expect(result.pullOk).toBe(true);
+    expect(result.errors).toHaveLength(0);
+
+    // Verify commands were executed in the container
+    const cmds = mockExecSync.mock.calls.map((c) => String(c[0] ?? ""));
+    expect(cmds.some((c) => c.includes("git fetch --prune"))).toBe(true);
+    expect(cmds.some((c) => c.includes("git checkout"))).toBe(true);
+    expect(cmds.some((c) => c.includes("git pull"))).toBe(true);
+  });
+
+  it("treats fetch failure as non-fatal and continues with checkout/pull", () => {
+    // git fetch fails but checkout and pull succeed
+    mockExecSync.mockImplementation((...args: unknown[]) => {
+      const cmd = String(args[0] ?? "");
+      if (cmd.includes("git fetch")) throw new Error("network unreachable");
+      return "";
+    });
+
+    const manager = new ContainerManager();
+    const result = manager.gitOpsInContainer("cid-123", {
+      branch: "feat/new",
+      currentBranch: "main",
+    });
+
+    expect(result.fetchOk).toBe(false);
+    expect(result.checkoutOk).toBe(true);
+    expect(result.pullOk).toBe(true);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain("fetch:");
+  });
+
+  it("reports checkout failure when branch does not exist and createBranch is false", () => {
+    mockExecSync.mockImplementation((...args: unknown[]) => {
+      const cmd = String(args[0] ?? "");
+      if (cmd.includes("git checkout")) throw new Error("pathspec did not match");
+      return "";
+    });
+
+    const manager = new ContainerManager();
+    const result = manager.gitOpsInContainer("cid-123", {
+      branch: "nonexistent",
+      currentBranch: "main",
+    });
+
+    expect(result.checkoutOk).toBe(false);
+    expect(result.errors.some((e) => e.includes("does not exist"))).toBe(true);
+  });
+
+  it("creates a new branch when checkout fails and createBranch is true", () => {
+    // The simple checkout should fail, then the "checkout -b" fallback should succeed.
+    mockExecSync.mockImplementation((...args: unknown[]) => {
+      const cmd = String(args[0] ?? "");
+      // Match simple checkout (no -b flag) — the -b flag follows "checkout" directly
+      if (cmd.includes("git checkout") && !cmd.includes("checkout -b")) {
+        throw new Error("pathspec did not match");
+      }
+      return "";
+    });
+
+    const manager = new ContainerManager();
+    const result = manager.gitOpsInContainer("cid-123", {
+      branch: "feat/new",
+      currentBranch: "main",
+      createBranch: true,
+      defaultBranch: "main",
+    });
+
+    expect(result.checkoutOk).toBe(true);
+    const cmds = mockExecSync.mock.calls.map((c) => String(c[0] ?? ""));
+    expect(cmds.some((c) => c.includes("checkout -b"))).toBe(true);
+  });
+
+  it("treats pull failure as non-fatal", () => {
+    mockExecSync.mockImplementation((...args: unknown[]) => {
+      const cmd = String(args[0] ?? "");
+      if (cmd.includes("git pull")) throw new Error("no tracking info");
+      return "";
+    });
+
+    const manager = new ContainerManager();
+    const result = manager.gitOpsInContainer("cid-123", {
+      branch: "feat/new",
+      currentBranch: "main",
+    });
+
+    expect(result.pullOk).toBe(false);
+    expect(result.checkoutOk).toBe(true);
+    expect(result.errors.some((e) => e.includes("pull:"))).toBe(true);
+  });
+
+  it("skips checkout when currentBranch matches requested branch", () => {
+    mockExecSync.mockReturnValue("");
+
+    const manager = new ContainerManager();
+    const result = manager.gitOpsInContainer("cid-123", {
+      branch: "main",
+      currentBranch: "main",
+    });
+
+    expect(result.checkoutOk).toBe(true);
+    const cmds = mockExecSync.mock.calls.map((c) => String(c[0] ?? ""));
+    // Should not have any checkout command
+    expect(cmds.some((c) => c.includes("git checkout"))).toBe(false);
+    // But should still fetch and pull
+    expect(cmds.some((c) => c.includes("git fetch"))).toBe(true);
+    expect(cmds.some((c) => c.includes("git pull"))).toBe(true);
+  });
+});
