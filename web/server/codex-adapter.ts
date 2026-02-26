@@ -378,6 +378,7 @@ export class CodexAdapter {
   // Track request types that need different response formats
   private pendingUserInputQuestionIds = new Map<string, string[]>(); // request_id -> ordered Codex question IDs
   private pendingReviewDecisions = new Set<string>(); // request_ids that need ReviewDecision format
+  private pendingExitPlanModeRequests = new Set<string>(); // request_ids for ExitPlanMode approvals
   private pendingDynamicToolCalls = new Map<string, {
     jsonRpcId: number;
     callId: string;
@@ -452,6 +453,7 @@ export class CodexAdapter {
           clearTimeout(pending.timeout);
         }
         this.pendingDynamicToolCalls.clear();
+        this.pendingExitPlanModeRequests.clear();
         this.disconnectCb?.();
       });
     }
@@ -494,6 +496,7 @@ export class CodexAdapter {
       clearTimeout(pending.timeout);
     }
     this.pendingDynamicToolCalls.clear();
+    this.pendingExitPlanModeRequests.clear();
     this.disconnectCb?.();
   }
 
@@ -775,6 +778,33 @@ export class CodexAdapter {
 
       const result = this.buildDynamicToolCallResponse(msg, pendingDynamic.toolName);
       await this.transport.respond(jsonRpcId, result);
+      return;
+    }
+
+    // ExitPlanMode requests need DynamicToolCallResponse + collaboration mode update
+    if (this.pendingExitPlanModeRequests.has(msg.request_id)) {
+      this.pendingExitPlanModeRequests.delete(msg.request_id);
+      this.pendingApprovals.delete(msg.request_id);
+
+      if (msg.behavior === "allow") {
+        // Exit plan mode: switch collaboration mode back to default
+        this.currentCollaborationModeKind = "default";
+        this.currentPermissionMode = this.lastNonPlanPermissionMode;
+        this.emit({
+          type: "session_update",
+          session: { permissionMode: this.currentPermissionMode },
+        });
+
+        await this.transport.respond(jsonRpcId, {
+          contentItems: [{ type: "inputText", text: "Plan approved. Exiting plan mode." }],
+          success: true,
+        });
+      } else {
+        await this.transport.respond(jsonRpcId, {
+          contentItems: [{ type: "inputText", text: "Plan denied by user." }],
+          success: false,
+        });
+      }
       return;
     }
 
@@ -1077,7 +1107,11 @@ export class CodexAdapter {
           this.handleMcpToolCallApproval(id, params);
           break;
         case "item/tool/call":
-          this.handleDynamicToolCall(id, params);
+          if ((params as Record<string, unknown>).tool === "ExitPlanMode") {
+            this.handleExitPlanModeRequest(id, params);
+          } else {
+            this.handleDynamicToolCall(id, params);
+          }
           break;
         case "item/tool/requestUserInput":
           this.handleUserInputRequest(id, params);
@@ -1307,6 +1341,35 @@ export class CodexAdapter {
       },
       description: questions[0]?.question || "User input requested",
       tool_use_id: params.itemId as string || requestId,
+      timestamp: Date.now(),
+    };
+
+    this.emit({ type: "permission_request", request: perm });
+  }
+
+  private handleExitPlanModeRequest(jsonRpcId: number, params: Record<string, unknown>): void {
+    const callId = params.callId as string || `exitplan-${randomUUID()}`;
+    const toolArgs = params.arguments as Record<string, unknown> || {};
+    const requestId = `codex-exitplan-${randomUUID()}`;
+
+    console.log(`[codex-adapter] ExitPlanMode request received (callId=${callId})`);
+
+    this.pendingApprovals.set(requestId, jsonRpcId);
+    this.pendingExitPlanModeRequests.add(requestId);
+
+    // Emit tool_use with the bare "ExitPlanMode" name (no "dynamic:" prefix)
+    this.emitToolUseTracked(callId, "ExitPlanMode", toolArgs);
+
+    // Build permission request with the format ExitPlanModeDisplay expects
+    const perm: PermissionRequest = {
+      request_id: requestId,
+      tool_name: "ExitPlanMode",
+      input: {
+        plan: typeof toolArgs.plan === "string" ? toolArgs.plan : "",
+        allowedPrompts: Array.isArray(toolArgs.allowedPrompts) ? toolArgs.allowedPrompts : [],
+      },
+      description: "Plan approval requested",
+      tool_use_id: callId,
       timestamp: Date.now(),
     };
 
