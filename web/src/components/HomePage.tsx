@@ -23,6 +23,9 @@ import { FolderPicker } from "./FolderPicker.js";
 import { readFileAsBase64, type ImageAttachment } from "../utils/image.js";
 import { LinearSection } from "./home/LinearSection.js";
 import { BranchPicker } from "./home/BranchPicker.js";
+import { MentionMenu } from "./MentionMenu.js";
+import { useMentionMenu } from "../utils/use-mention-menu.js";
+import type { SavedPrompt } from "../api.js";
 import type { SdkSessionInfo } from "../types.js";
 
 let idCounter = 0;
@@ -149,12 +152,30 @@ export function HomePage() {
   const [pulling, setPulling] = useState(false);
   const [pullError, setPullError] = useState("");
 
+  const [caretPos, setCaretPos] = useState(0);
+  const pendingSelectionRef = useRef<number | null>(null);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const modeDropdownRef = useRef<HTMLDivElement>(null);
   const envDropdownRef = useRef<HTMLDivElement>(null);
 
   const currentSessionId = useStore((s) => s.currentSessionId);
+
+  // @ mention support for saved prompts
+  const mention = useMentionMenu({
+    text,
+    caretPos,
+    cwd: cwd || undefined,
+  });
+
+  // Restore cursor position after prompt insertion
+  useEffect(() => {
+    if (pendingSelectionRef.current === null || !textareaRef.current) return;
+    const next = pendingSelectionRef.current;
+    textareaRef.current.setSelectionRange(next, next);
+    pendingSelectionRef.current = null;
+  }, [text]);
 
   // Auto-focus textarea (desktop only — on mobile it triggers the keyboard immediately)
   useEffect(() => {
@@ -449,12 +470,66 @@ export function HomePage() {
 
   function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setText(e.target.value);
+    setCaretPos(e.target.selectionStart ?? e.target.value.length);
     const ta = e.target;
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
   }
 
+  function syncCaret() {
+    if (!textareaRef.current) return;
+    setCaretPos(textareaRef.current.selectionStart ?? 0);
+  }
+
+  function handleSelectPrompt(prompt: SavedPrompt) {
+    const result = mention.selectPrompt(prompt);
+    pendingSelectionRef.current = result.nextCursor;
+    setText(result.nextText);
+    mention.setMentionMenuOpen(false);
+    setCaretPos(result.nextCursor);
+    textareaRef.current?.focus();
+    // Auto-resize textarea after prompt insertion
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + "px";
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
+    // @ mention menu navigation
+    if (mention.mentionMenuOpen) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        mention.setMentionMenuOpen(false);
+        return;
+      }
+    }
+    if (mention.mentionMenuOpen && mention.filteredPrompts.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        mention.setMentionMenuIndex((i) => (i + 1) % mention.filteredPrompts.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        mention.setMentionMenuIndex((i) => (i - 1 + mention.filteredPrompts.length) % mention.filteredPrompts.length);
+        return;
+      }
+      if ((e.key === "Tab" && !e.shiftKey) || (e.key === "Enter" && !e.shiftKey)) {
+        e.preventDefault();
+        handleSelectPrompt(mention.filteredPrompts[mention.mentionMenuIndex]);
+        return;
+      }
+    }
+    if (
+      mention.mentionMenuOpen
+      && mention.filteredPrompts.length === 0
+      && ((e.key === "Enter" && !e.shiftKey) || (e.key === "Tab" && !e.shiftKey))
+    ) {
+      e.preventDefault();
+      return;
+    }
+
     if (e.key === "Tab" && e.shiftKey) {
       e.preventDefault();
       const currentModes = getModesForBackend(backend);
@@ -781,7 +856,16 @@ export function HomePage() {
         <div className="grid grid-cols-1 gap-3 sm:gap-4 items-start">
           <div>
             {/* Input card */}
-            <div className="bg-cc-card border border-cc-border rounded-[14px] shadow-sm overflow-hidden">
+            <div className="relative bg-cc-card border border-cc-border rounded-[14px] shadow-sm">
+              <MentionMenu
+                open={mention.mentionMenuOpen}
+                loading={mention.promptsLoading}
+                prompts={mention.filteredPrompts}
+                selectedIndex={mention.mentionMenuIndex}
+                onSelect={handleSelectPrompt}
+                menuRef={mention.mentionMenuRef}
+                className="absolute left-2 right-2 bottom-full mb-1"
+              />
               {selectedLinearIssue && (
                 <div className="px-3 pt-3">
                   <div className="inline-flex max-w-full items-center gap-2 rounded-md border border-cc-border bg-cc-hover/60 px-2.5 py-1.5 text-[11px] text-cc-muted">
@@ -804,6 +888,8 @@ export function HomePage() {
                 value={text}
                 onChange={handleInput}
                 onKeyDown={handleKeyDown}
+                onClick={syncCaret}
+                onKeyUp={syncCaret}
                 onPaste={handlePaste}
                 aria-label="Task description"
               placeholder="Fix a bug, build a feature, refactor code..."
