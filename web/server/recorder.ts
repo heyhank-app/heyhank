@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type { BackendType } from "./session-types.js";
 
-const DEFAULT_MAX_LINES = 100_000;
+const DEFAULT_MAX_LINES = 1_000_000;
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ export class SessionRecorder {
  * Always enabled by default. Disable explicitly with COMPANION_RECORD=0.
  *
  * Automatic rotation: when total lines across all recording files exceed
- * maxLines (default 100 000, override with COMPANION_RECORDINGS_MAX_LINES),
+ * maxLines (default 1 000 000, override with COMPANION_RECORDINGS_MAX_LINES),
  * the oldest files are deleted until we're back under the limit.
  */
 export class RecorderManager {

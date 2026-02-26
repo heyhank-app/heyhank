@@ -107,7 +107,7 @@ The server automatically records **all raw protocol messages** (both Claude Code
 - **Format**: JSONL — one JSON object per line. First line is a header with session metadata, subsequent lines are raw message entries.
 - **File naming**: `{sessionId}_{backendType}_{ISO-timestamp}_{randomSuffix}.jsonl`
 - **Disable**: set `COMPANION_RECORD=0` or `COMPANION_RECORD=false`
-- **Rotation**: automatic cleanup when total lines exceed 100k (configurable via `COMPANION_RECORDINGS_MAX_LINES`)
+- **Rotation**: automatic cleanup when total lines exceed 1M (configurable via `COMPANION_RECORDINGS_MAX_LINES`)
 
 Each entry captures:
 ```json
