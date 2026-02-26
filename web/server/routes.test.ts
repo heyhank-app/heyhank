@@ -803,6 +803,140 @@ describe("POST /api/sessions/create", () => {
     // CLI should NOT have been launched
     expect(launcher.launch).not.toHaveBeenCalled();
   });
+
+  it("skips host git ops for Docker sessions and runs them in container instead", async () => {
+    // THE-189: git fetch/checkout/pull should happen inside the container, not on the host.
+    vi.mocked(gitUtils.getRepoInfo).mockReturnValue({
+      repoRoot: "/repo",
+      repoName: "my-repo",
+      currentBranch: "main",
+      defaultBranch: "main",
+      isWorktree: false,
+    } as any);
+    vi.mocked(envManager.getEnv).mockReturnValue({
+      name: "Docker",
+      slug: "docker",
+      variables: { CLAUDE_CODE_OAUTH_TOKEN: "token" },
+      baseImage: "the-companion:latest",
+      createdAt: 1000,
+      updatedAt: 1000,
+    } as any);
+    vi.mocked(envManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+    vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
+      containerId: "cid-git",
+      name: "companion-git",
+      image: "the-companion:latest",
+      portMappings: [],
+      hostCwd: "/repo",
+      containerCwd: "/workspace",
+      state: "running",
+    });
+    vi.spyOn(containerManager, "retrack").mockImplementation(() => {});
+    const gitOpsSpy = vi.spyOn(containerManager, "gitOpsInContainer").mockReturnValueOnce({
+      fetchOk: true,
+      checkoutOk: true,
+      pullOk: true,
+      errors: [],
+    });
+
+    const res = await app.request("/api/sessions/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/repo", branch: "feat/new", envSlug: "docker" }),
+    });
+
+    expect(res.status).toBe(200);
+    // Host git ops should NOT have been called
+    expect(gitUtils.gitFetch).not.toHaveBeenCalled();
+    expect(gitUtils.checkoutOrCreateBranch).not.toHaveBeenCalled();
+    expect(gitUtils.gitPull).not.toHaveBeenCalled();
+    // In-container git ops SHOULD have been called
+    expect(gitOpsSpy).toHaveBeenCalledWith("cid-git", expect.objectContaining({
+      branch: "feat/new",
+      currentBranch: "main",
+    }));
+  });
+
+  it("does not call gitOpsInContainer for Docker sessions without a branch", async () => {
+    // When no branch is specified, no git ops at all (host or container).
+    vi.mocked(envManager.getEnv).mockReturnValue({
+      name: "Docker",
+      slug: "docker",
+      variables: { CLAUDE_CODE_OAUTH_TOKEN: "token" },
+      baseImage: "the-companion:latest",
+      createdAt: 1000,
+      updatedAt: 1000,
+    } as any);
+    vi.mocked(envManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+    vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
+      containerId: "cid-nobranch",
+      name: "companion-nobranch",
+      image: "the-companion:latest",
+      portMappings: [],
+      hostCwd: "/test",
+      containerCwd: "/workspace",
+      state: "running",
+    });
+    vi.spyOn(containerManager, "retrack").mockImplementation(() => {});
+    const gitOpsSpy = vi.spyOn(containerManager, "gitOpsInContainer");
+
+    const res = await app.request("/api/sessions/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/test", envSlug: "docker" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(gitOpsSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 and cleans up container when in-container checkout fails", async () => {
+    // THE-189: checkout failure inside container should clean up and return error.
+    vi.mocked(gitUtils.getRepoInfo).mockReturnValue({
+      repoRoot: "/repo",
+      repoName: "my-repo",
+      currentBranch: "main",
+      defaultBranch: "main",
+      isWorktree: false,
+    } as any);
+    vi.mocked(envManager.getEnv).mockReturnValue({
+      name: "Docker",
+      slug: "docker",
+      variables: { CLAUDE_CODE_OAUTH_TOKEN: "token" },
+      baseImage: "the-companion:latest",
+      createdAt: 1000,
+      updatedAt: 1000,
+    } as any);
+    vi.mocked(envManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+    vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
+      containerId: "cid-failcheckout",
+      name: "companion-failcheckout",
+      image: "the-companion:latest",
+      portMappings: [],
+      hostCwd: "/repo",
+      containerCwd: "/workspace",
+      state: "running",
+    });
+    const removeSpy = vi.spyOn(containerManager, "removeContainer").mockImplementation(() => {});
+    vi.spyOn(containerManager, "gitOpsInContainer").mockReturnValueOnce({
+      fetchOk: true,
+      checkoutOk: false,
+      pullOk: false,
+      errors: ['checkout: branch "nonexistent" does not exist'],
+    });
+
+    const res = await app.request("/api/sessions/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/repo", branch: "nonexistent", envSlug: "docker" }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("Failed to checkout branch");
+    expect(removeSpy).toHaveBeenCalled();
+    expect(launcher.launch).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/sessions", () => {
@@ -3733,6 +3867,136 @@ describe("POST /api/sessions/create-stream", () => {
     // No done event
     expect(events.find((e) => e.event === "done")).toBeUndefined();
 
+    // CLI should NOT be launched
+    expect(launcher.launch).not.toHaveBeenCalled();
+  });
+
+  it("skips host git ops and emits in-container git progress for Docker sessions with branch", async () => {
+    // THE-189: git ops should run inside the container, not on the host.
+    vi.mocked(gitUtils.getRepoInfo).mockReturnValue({
+      repoRoot: "/repo",
+      repoName: "my-repo",
+      currentBranch: "main",
+      defaultBranch: "main",
+      isWorktree: false,
+    } as any);
+    vi.mocked(envManager.getEnv).mockReturnValue({
+      name: "Docker",
+      slug: "docker",
+      variables: { CLAUDE_CODE_OAUTH_TOKEN: "token" },
+      baseImage: "the-companion:latest",
+      createdAt: 1000,
+      updatedAt: 1000,
+    } as any);
+    vi.mocked(envManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+    vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
+      containerId: "cid-git-stream",
+      name: "companion-git-stream",
+      image: "the-companion:latest",
+      portMappings: [],
+      hostCwd: "/repo",
+      containerCwd: "/workspace",
+      state: "running",
+    });
+    vi.spyOn(containerManager, "retrack").mockImplementation(() => {});
+    const gitOpsSpy = vi.spyOn(containerManager, "gitOpsInContainer").mockReturnValueOnce({
+      fetchOk: true,
+      checkoutOk: true,
+      pullOk: true,
+      errors: [],
+    });
+
+    const res = await app.request("/api/sessions/create-stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/repo", branch: "feat/new", envSlug: "docker" }),
+    });
+
+    expect(res.status).toBe(200);
+    const events = await parseSSE(res);
+    const steps = events
+      .filter((e) => e.event === "progress")
+      .map((e) => JSON.parse(e.data).step);
+
+    // Host git ops should NOT have been called
+    expect(gitUtils.gitFetch).not.toHaveBeenCalled();
+    expect(gitUtils.checkoutOrCreateBranch).not.toHaveBeenCalled();
+    expect(gitUtils.gitPull).not.toHaveBeenCalled();
+
+    // In-container git ops SHOULD have been called
+    expect(gitOpsSpy).toHaveBeenCalledWith("cid-git-stream", expect.objectContaining({
+      branch: "feat/new",
+      currentBranch: "main",
+    }));
+
+    // Git progress events should appear AFTER container creation steps
+    expect(steps).toContain("creating_container");
+    expect(steps).toContain("copying_workspace");
+    expect(steps).toContain("fetching_git");
+    expect(steps).toContain("pulling_git");
+    const containerIdx = steps.indexOf("creating_container");
+    const fetchIdx = steps.indexOf("fetching_git");
+    expect(fetchIdx).toBeGreaterThan(containerIdx);
+
+    // Session should be launched
+    expect(launcher.launch).toHaveBeenCalled();
+  });
+
+  it("emits checkout error and cleans up when in-container checkout fails (stream)", async () => {
+    // THE-189: checkout failure inside container should emit error and clean up.
+    vi.mocked(gitUtils.getRepoInfo).mockReturnValue({
+      repoRoot: "/repo",
+      repoName: "my-repo",
+      currentBranch: "main",
+      defaultBranch: "main",
+      isWorktree: false,
+    } as any);
+    vi.mocked(envManager.getEnv).mockReturnValue({
+      name: "Docker",
+      slug: "docker",
+      variables: { CLAUDE_CODE_OAUTH_TOKEN: "token" },
+      baseImage: "the-companion:latest",
+      createdAt: 1000,
+      updatedAt: 1000,
+    } as any);
+    vi.mocked(envManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+    vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
+      containerId: "cid-fail-git",
+      name: "companion-fail-git",
+      image: "the-companion:latest",
+      portMappings: [],
+      hostCwd: "/repo",
+      containerCwd: "/workspace",
+      state: "running",
+    });
+    const removeSpy = vi.spyOn(containerManager, "removeContainer").mockImplementation(() => {});
+    vi.spyOn(containerManager, "gitOpsInContainer").mockReturnValueOnce({
+      fetchOk: true,
+      checkoutOk: false,
+      pullOk: false,
+      errors: ['checkout: branch "nonexistent" does not exist'],
+    });
+
+    const res = await app.request("/api/sessions/create-stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/repo", branch: "nonexistent", envSlug: "docker" }),
+    });
+
+    expect(res.status).toBe(200);
+    const events = await parseSSE(res);
+
+    // Should have error event for checkout failure
+    const errorEvent = events.find((e) => e.event === "error");
+    expect(errorEvent).toBeDefined();
+    const errorData = JSON.parse(errorEvent!.data);
+    expect(errorData.error).toContain("Failed to checkout branch");
+    expect(errorData.step).toBe("checkout_branch");
+
+    // Container should be cleaned up
+    expect(removeSpy).toHaveBeenCalled();
+    // No done event
+    expect(events.find((e) => e.event === "done")).toBeUndefined();
     // CLI should NOT be launched
     expect(launcher.launch).not.toHaveBeenCalled();
   });

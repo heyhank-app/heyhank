@@ -180,20 +180,24 @@ export function createRoutes(
 
       // Resolve environment variables from envSlug
       let envVars: Record<string, string> | undefined = body.env;
-      if (body.envSlug) {
-        const companionEnv = envManager.getEnv(body.envSlug);
-        if (companionEnv) {
-          console.log(
-            `[routes] Injecting env "${companionEnv.name}" (${Object.keys(companionEnv.variables).length} vars):`,
-            Object.keys(companionEnv.variables).join(", "),
-          );
-          envVars = { ...companionEnv.variables, ...body.env };
-        } else {
-          console.warn(
-            `[routes] Environment "${body.envSlug}" not found, ignoring`,
-          );
-        }
+      const companionEnv = body.envSlug ? envManager.getEnv(body.envSlug) : null;
+      if (body.envSlug && companionEnv) {
+        console.log(
+          `[routes] Injecting env "${companionEnv.name}" (${Object.keys(companionEnv.variables).length} vars):`,
+          Object.keys(companionEnv.variables).join(", "),
+        );
+        envVars = { ...companionEnv.variables, ...body.env };
+      } else if (body.envSlug) {
+        console.warn(
+          `[routes] Environment "${body.envSlug}" not found, ignoring`,
+        );
       }
+
+      // Resolve Docker image early so we know whether git ops should run on host or in container
+      let effectiveImage = companionEnv
+        ? (body.envSlug ? envManager.getEffectiveImage(body.envSlug) : null)
+        : (body.container?.image || null);
+      const isDockerSession = !!effectiveImage;
 
       let cwd = body.cwd;
       let worktreeInfo: { isWorktree: boolean; repoRoot: string; branch: string; actualBranch: string; worktreePath: string } | undefined;
@@ -203,7 +207,9 @@ export function createRoutes(
         return c.json({ error: "Invalid branch name" }, 400);
       }
 
-      if (body.useWorktree && body.branch && cwd) {
+      // For Docker sessions, skip host git ops — they'll run inside the container after workspace copy.
+      // For non-Docker sessions, run git ops on the host as before.
+      if (!isDockerSession && body.useWorktree && body.branch && cwd) {
         // Worktree isolation: create/reuse a worktree for the selected branch
         const repoInfo = gitUtils.getRepoInfo(cwd);
         if (repoInfo) {
@@ -221,7 +227,7 @@ export function createRoutes(
             worktreePath: result.worktreePath,
           };
         }
-      } else if (body.branch && cwd) {
+      } else if (!isDockerSession && body.branch && cwd) {
         // Non-worktree: checkout the selected branch in-place (lightweight)
         const repoInfo = gitUtils.getRepoInfo(cwd);
         if (repoInfo) {
@@ -243,12 +249,6 @@ export function createRoutes(
           }
         }
       }
-
-      // Resolve Docker image from environment or explicit container config
-      const companionEnv = body.envSlug ? envManager.getEnv(body.envSlug) : null;
-      let effectiveImage = companionEnv
-        ? (body.envSlug ? envManager.getEffectiveImage(body.envSlug) : null)
-        : (body.container?.image || null);
 
       let containerInfo: ContainerInfo | undefined;
       let containerId: string | undefined;
@@ -334,6 +334,26 @@ export function createRoutes(
           return c.json({
             error: `Failed to copy workspace to container: ${reason}`,
           }, 503);
+        }
+
+        // Run git fetch/checkout/pull inside the container (instead of on host)
+        if (body.branch) {
+          const repoInfo = cwd ? gitUtils.getRepoInfo(cwd) : null;
+          const gitResult = containerManager.gitOpsInContainer(containerInfo.containerId, {
+            branch: body.branch,
+            currentBranch: repoInfo?.currentBranch || "HEAD",
+            createBranch: body.createBranch,
+            defaultBranch: repoInfo?.defaultBranch,
+          });
+          if (gitResult.errors.length > 0) {
+            console.warn(`[routes] In-container git ops warnings: ${gitResult.errors.join("; ")}`);
+          }
+          if (!gitResult.checkoutOk) {
+            containerManager.removeContainer(tempId);
+            return c.json({
+              error: `Failed to checkout branch "${body.branch}" inside container: ${gitResult.errors.join("; ")}`,
+            }, 400);
+          }
         }
 
         // Run per-environment init script if configured
@@ -456,6 +476,12 @@ export function createRoutes(
           envVars = { ...companionEnv.variables, ...body.env };
         }
 
+        // Resolve Docker image early so we know whether git ops should run on host or in container
+        let effectiveImage = companionEnv
+          ? (body.envSlug ? envManager.getEffectiveImage(body.envSlug) : null)
+          : (body.container?.image || null);
+        const isDockerSession = !!effectiveImage;
+
         await emitProgress(stream, "resolving_env", "Environment resolved", "done");
 
         let cwd = body.cwd;
@@ -470,8 +496,8 @@ export function createRoutes(
           return;
         }
 
-        // --- Step: Git operations ---
-        if (body.useWorktree && body.branch && cwd) {
+        // --- Step: Git operations (host only — Docker sessions do this inside the container) ---
+        if (!isDockerSession && body.useWorktree && body.branch && cwd) {
           await emitProgress(stream, "creating_worktree", "Creating worktree...", "in_progress");
           const repoInfo = gitUtils.getRepoInfo(cwd);
           if (repoInfo) {
@@ -490,7 +516,7 @@ export function createRoutes(
             };
           }
           await emitProgress(stream, "creating_worktree", "Worktree ready", "done");
-        } else if (body.branch && cwd) {
+        } else if (!isDockerSession && body.branch && cwd) {
           const repoInfo = gitUtils.getRepoInfo(cwd);
           if (repoInfo) {
             await emitProgress(stream, "fetching_git", "Fetching from remote...", "in_progress");
@@ -517,11 +543,6 @@ export function createRoutes(
             await emitProgress(stream, "pulling_git", "Up to date", "done");
           }
         }
-
-        // --- Step: Docker image resolution ---
-        let effectiveImage = companionEnv
-          ? (body.envSlug ? envManager.getEffectiveImage(body.envSlug) : null)
-          : (body.container?.image || null);
 
         let containerInfo: ContainerInfo | undefined;
         let containerId: string | undefined;
@@ -641,6 +662,44 @@ export function createRoutes(
               }),
             });
             return;
+          }
+
+          // --- Step: Git operations inside container ---
+          if (body.branch) {
+            const repoInfo = cwd ? gitUtils.getRepoInfo(cwd) : null;
+
+            await emitProgress(stream, "fetching_git", "Fetching from remote (in container)...", "in_progress");
+            const gitResult = containerManager.gitOpsInContainer(containerInfo.containerId, {
+              branch: body.branch,
+              currentBranch: repoInfo?.currentBranch || "HEAD",
+              createBranch: body.createBranch,
+              defaultBranch: repoInfo?.defaultBranch,
+            });
+            await emitProgress(stream, "fetching_git", gitResult.fetchOk ? "Fetch complete" : "Fetch skipped", "done");
+
+            if (repoInfo?.currentBranch !== body.branch) {
+              await emitProgress(stream, "checkout_branch",
+                gitResult.checkoutOk ? `On branch ${body.branch}` : `Checkout failed`,
+                gitResult.checkoutOk ? "done" : "error",
+              );
+            }
+
+            await emitProgress(stream, "pulling_git", gitResult.pullOk ? "Up to date" : "Pull skipped", "done");
+
+            if (gitResult.errors.length > 0) {
+              console.warn(`[routes] In-container git ops warnings: ${gitResult.errors.join("; ")}`);
+            }
+            if (!gitResult.checkoutOk) {
+              containerManager.removeContainer(tempId);
+              await stream.writeSSE({
+                event: "error",
+                data: JSON.stringify({
+                  error: `Failed to checkout branch "${body.branch}" inside container: ${gitResult.errors.join("; ")}`,
+                  step: "checkout_branch",
+                }),
+              });
+              return;
+            }
           }
 
           // --- Step: Init script ---
