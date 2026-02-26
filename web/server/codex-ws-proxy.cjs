@@ -24,6 +24,14 @@ let queue = [];
 let connectAttempt = 0;
 const startedAt = Date.now();
 
+// Reconnection state — after a successful initial connection, transient
+// WebSocket drops are retried with exponential backoff before giving up.
+const MAX_RECONNECT_ATTEMPTS = 10;
+const RECONNECT_BASE_MS = 200;
+const RECONNECT_MAX_MS = 5000;
+let reconnecting = false;
+let reconnectAttempt = 0;
+
 function log(msg) {
   process.stderr.write(`[codex-ws-proxy] ${msg}\n`);
 }
@@ -53,19 +61,48 @@ function failAndExit(message, code = 1) {
   process.exit(code);
 }
 
+/**
+ * Attempt to reconnect after a post-open WebSocket drop.
+ * Uses exponential backoff up to MAX_RECONNECT_ATTEMPTS before giving up.
+ */
+function scheduleReconnect(reason) {
+  if (closed || exiting) return;
+  reconnectAttempt++;
+  if (reconnectAttempt > MAX_RECONNECT_ATTEMPTS) {
+    failAndExit(`WebSocket reconnection failed after ${MAX_RECONNECT_ATTEMPTS} attempts (last: ${reason})`);
+    return;
+  }
+
+  reconnecting = true;
+  const delay = Math.min(RECONNECT_BASE_MS * Math.pow(2, reconnectAttempt - 1), RECONNECT_MAX_MS);
+  log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempt}/${MAX_RECONNECT_ATTEMPTS}) — ${reason}`);
+  setTimeout(connect, delay);
+}
+
 function connect() {
   if (closed || exiting) return;
-  connectAttempt += 1;
-  const elapsed = Date.now() - startedAt;
-  if (!opened && elapsed > timeoutMs) {
-    failAndExit(`Failed to connect within ${timeoutMs}ms`);
-    return;
+
+  // During initial connection (before first successful open), enforce timeout.
+  if (!opened) {
+    connectAttempt += 1;
+    const elapsed = Date.now() - startedAt;
+    if (elapsed > timeoutMs) {
+      failAndExit(`Failed to connect within ${timeoutMs}ms`);
+      return;
+    }
   }
 
   ws = new WebSocket(url, { perMessageDeflate: false });
 
   ws.once("open", () => {
-    opened = true;
+    if (!opened) {
+      opened = true;
+    }
+    if (reconnecting) {
+      log(`Reconnected successfully (attempt ${reconnectAttempt})`);
+      reconnecting = false;
+      reconnectAttempt = 0;
+    }
     flushQueue();
   });
 
@@ -83,17 +120,19 @@ function connect() {
       setTimeout(connect, Math.min(100 * connectAttempt, 500));
       return;
     }
-    failAndExit(`WebSocket closed (code=${code}${why})`);
+    // Post-open close — attempt reconnection with backoff
+    scheduleReconnect(`WebSocket closed (code=${code}${why})`);
   });
 
   ws.once("error", (err) => {
     if (closed || exiting) return;
-    // Retry during startup; after a successful connection, surface and exit.
+    // Retry during startup; after a successful connection, use reconnect logic.
     if (!opened) {
       setTimeout(connect, Math.min(100 * connectAttempt, 500));
       return;
     }
-    failAndExit(`WebSocket error: ${err && err.message ? err.message : String(err)}`);
+    // Post-open error — attempt reconnection with backoff
+    scheduleReconnect(`WebSocket error: ${err && err.message ? err.message : String(err)}`);
   });
 }
 

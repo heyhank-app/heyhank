@@ -193,9 +193,7 @@ export function SessionItem({
             <BackendBadge type={s.backendType} />
             {s.isContainerized && (
               <span className="flex items-center px-1 py-0.5 rounded bg-blue-400/10" title="Docker">
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 text-blue-400">
-                  <path d="M8.5 1a.5.5 0 00-.5.5V3H6V1.5a.5.5 0 00-1 0V3H3.5a.5.5 0 000 1H5v2H3.5a.5.5 0 000 1H5v1.5a.5.5 0 001 0V7h2v1.5a.5.5 0 001 0V7h1.5a.5.5 0 000-1H9V4h1.5a.5.5 0 000-1H9V1.5a.5.5 0 00-.5-.5zM8 4v2H6V4h2z" />
-                </svg>
+                <img src="/logo-docker.svg" alt="Docker logo" className="w-3 h-3" />
               </span>
             )}
             {s.cronJobId && (

@@ -239,7 +239,10 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    expect(screen.getByTitle("Docker")).toBeInTheDocument();
+    const badge = screen.getByTitle("Docker");
+    expect(badge).toBeInTheDocument();
+    const dockerLogo = badge.querySelector('img[src="/logo-docker.svg"]');
+    expect(dockerLogo).toBeInTheDocument();
   });
 
   it("session items do not show git stats (removed in redesign)", () => {

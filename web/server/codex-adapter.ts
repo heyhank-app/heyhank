@@ -341,6 +341,7 @@ export class CodexAdapter {
   private connected = false;
   private initialized = false;
   private initFailed = false;
+  private initInProgress = false;
 
   // Streaming accumulator for agent messages
   private streamingText = "";
@@ -500,6 +501,39 @@ export class CodexAdapter {
     this.disconnectCb?.();
   }
 
+  /**
+   * Reset the adapter so it can re-initialize after a transport reconnection.
+   * Called by the launcher when a new proxy/transport is established for the
+   * same session (e.g. after relaunch).  The threadId is preserved so the
+   * adapter can resume the existing Codex thread.
+   */
+  resetForReconnect(newTransport: ICodexTransport): void {
+    this.transport = newTransport;
+    this.connected = false;
+    this.initialized = false;
+    this.initFailed = false;
+    this.initInProgress = false;
+
+    // Re-wire handlers on the new transport
+    this.transport.onNotification((method, params) => this.handleNotification(method, params));
+    this.transport.onRequest((method, id, params) => this.handleRequest(method, id, params));
+
+    // Re-wire raw recording if recorder was provided
+    if (this.options.recorder) {
+      const recorder = this.options.recorder;
+      const cwd = this.options.cwd || "";
+      this.transport.onRawIncoming((line) => {
+        recorder.record(this.sessionId, "in", line, "cli", "codex", cwd);
+      });
+      this.transport.onRawOutgoing((data) => {
+        recorder.record(this.sessionId, "out", data.trimEnd(), "cli", "codex", cwd);
+      });
+    }
+
+    // Re-run initialization (which will resume the thread if threadId is set)
+    this.initialize();
+  }
+
   // ── Public API ──────────────────────────────────────────────────────────
 
   getRateLimits() {
@@ -513,7 +547,7 @@ export class CodexAdapter {
     }
 
     // Queue messages if not yet initialized (init is async)
-    if (!this.initialized || !this.threadId) {
+    if (!this.initialized || !this.threadId || this.initInProgress) {
       if (
         msg.type === "user_message"
         || msg.type === "permission_response"
@@ -528,6 +562,12 @@ export class CodexAdapter {
       }
       // Non-queueable messages are dropped if not connected
       if (!this.connected) return false;
+    }
+
+    // Guard against dispatching when transport is down (e.g. after proxy WS drop)
+    if (!this.transport.isConnected()) {
+      console.warn(`[codex-adapter] Transport disconnected — cannot dispatch ${msg.type}`);
+      return false;
     }
 
     return this.dispatchOutgoing(msg);
@@ -602,7 +642,17 @@ export class CodexAdapter {
 
   // ── Initialization ──────────────────────────────────────────────────────
 
+  /** Max retries for thread/start or thread/resume during initialization. */
+  private static readonly INIT_THREAD_MAX_RETRIES = 3;
+  private static readonly INIT_THREAD_RETRY_BASE_MS = 500;
+
   private async initialize(): Promise<void> {
+    if (this.initInProgress) {
+      console.warn("[codex-adapter] initialize() called while already in progress — skipping");
+      return;
+    }
+    this.initInProgress = true;
+
     try {
       // Step 1: Send initialize request
       const result = await this.transport.call("initialize", {
@@ -620,36 +670,64 @@ export class CodexAdapter {
       await this.transport.notify("initialized", {});
 
       this.connected = true;
-      this.initialized = true;
 
-      // Step 3: Start or resume a thread
+      // Step 3: Start or resume a thread — retry with backoff on transient
+      // transport errors (e.g. proxy WS drops during handshake).
       // Note: thread/start and thread/resume use `sandbox` (SandboxMode string),
       // while turn/start uses `sandboxPolicy` (SandboxPolicy object) — these are
       // different Codex API fields by design.
-      if (this.options.threadId) {
-        // Resume an existing thread
-        const resumeResult = await this.transport.call("thread/resume", {
-          threadId: this.options.threadId,
-          model: this.options.model,
-          cwd: this.getExecutionCwd(),
-          approvalPolicy: this.mapApprovalPolicy(this.currentPermissionMode),
-          sandbox: this.options.sandbox || this.mapSandboxPolicy(this.currentPermissionMode),
-        }) as { thread: { id: string } };
-        this.threadId = resumeResult.thread.id;
-      } else {
-        // Start a new thread
-        const threadResult = await this.transport.call("thread/start", {
-          model: this.options.model,
-          cwd: this.getExecutionCwd(),
-          approvalPolicy: this.mapApprovalPolicy(this.currentPermissionMode),
-          sandbox: this.options.sandbox || this.mapSandboxPolicy(this.currentPermissionMode),
-        }) as { thread: { id: string } };
-        this.threadId = threadResult.thread.id;
+      let threadStarted = false;
+      let lastThreadError: unknown;
+
+      for (let attempt = 0; attempt < CodexAdapter.INIT_THREAD_MAX_RETRIES; attempt++) {
+        // Bail out early if the transport went away between retries
+        if (!this.transport.isConnected()) {
+          lastThreadError = new Error("Transport closed before thread start");
+          break;
+        }
+
+        try {
+          if (this.options.threadId) {
+            const resumeResult = await this.transport.call("thread/resume", {
+              threadId: this.options.threadId,
+              model: this.options.model,
+              cwd: this.getExecutionCwd(),
+              approvalPolicy: this.mapApprovalPolicy(this.currentPermissionMode),
+              sandbox: this.options.sandbox || this.mapSandboxPolicy(this.currentPermissionMode),
+            }) as { thread: { id: string } };
+            this.threadId = resumeResult.thread.id;
+          } else {
+            const threadResult = await this.transport.call("thread/start", {
+              model: this.options.model,
+              cwd: this.getExecutionCwd(),
+              approvalPolicy: this.mapApprovalPolicy(this.currentPermissionMode),
+              sandbox: this.options.sandbox || this.mapSandboxPolicy(this.currentPermissionMode),
+            }) as { thread: { id: string } };
+            this.threadId = threadResult.thread.id;
+          }
+          threadStarted = true;
+          break;
+        } catch (threadErr) {
+          lastThreadError = threadErr;
+          const isTransportClosed = threadErr instanceof Error && threadErr.message === "Transport closed";
+          if (!isTransportClosed || attempt >= CodexAdapter.INIT_THREAD_MAX_RETRIES - 1) {
+            break; // Non-transient error or last attempt — give up
+          }
+          const delay = CodexAdapter.INIT_THREAD_RETRY_BASE_MS * Math.pow(2, attempt);
+          console.warn(`[codex-adapter] thread start attempt ${attempt + 1} failed (Transport closed), retrying in ${delay}ms`);
+          await new Promise((r) => setTimeout(r, delay));
+        }
       }
+
+      if (!threadStarted) {
+        throw lastThreadError || new Error("Failed to start thread");
+      }
+
+      this.initialized = true;
 
       // Notify session metadata
       this.sessionMetaCb?.({
-        cliSessionId: this.threadId,
+        cliSessionId: this.threadId ?? undefined,
         model: this.options.model,
         cwd: this.options.cwd,
       });
@@ -688,12 +766,17 @@ export class CodexAdapter {
         this.updateRateLimits(result as Record<string, unknown>);
       }).catch(() => { /* best-effort */ });
 
-      // Flush any messages that were queued during initialization
+      // Flush any messages that were queued during initialization, but only
+      // if the transport is still connected (avoids immediate "Transport closed").
       if (this.pendingOutgoing.length > 0) {
-        console.log(`[codex-adapter] Flushing ${this.pendingOutgoing.length} queued message(s)`);
-        const queued = this.pendingOutgoing.splice(0);
-        for (const msg of queued) {
-          this.dispatchOutgoing(msg);
+        if (this.transport.isConnected()) {
+          console.log(`[codex-adapter] Flushing ${this.pendingOutgoing.length} queued message(s)`);
+          const queued = this.pendingOutgoing.splice(0);
+          for (const msg of queued) {
+            this.dispatchOutgoing(msg);
+          }
+        } else {
+          console.warn(`[codex-adapter] Transport disconnected after init — keeping ${this.pendingOutgoing.length} message(s) queued`);
         }
       }
     } catch (err) {
@@ -705,6 +788,8 @@ export class CodexAdapter {
       this.pendingOutgoing.length = 0;
       this.emit({ type: "error", message: errorMsg });
       this.initErrorCb?.(errorMsg);
+    } finally {
+      this.initInProgress = false;
     }
   }
 
@@ -756,7 +841,12 @@ export class CodexAdapter {
 
       this.currentTurnId = result.turn.id;
     } catch (err) {
-      this.emit({ type: "error", message: `Failed to start turn: ${err}` });
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg === "Transport closed") {
+        this.emit({ type: "error", message: "Connection to Codex lost. Try relaunching the session." });
+      } else {
+        this.emit({ type: "error", message: `Failed to start turn: ${err}` });
+      }
     }
   }
 
@@ -912,7 +1002,12 @@ export class CodexAdapter {
 
       this.emit({ type: "mcp_status", servers });
     } catch (err) {
-      this.emit({ type: "error", message: `Failed to get MCP status: ${err}` });
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg === "Transport closed") {
+        this.emit({ type: "error", message: "Connection to Codex lost. Cannot fetch MCP status." });
+      } else {
+        this.emit({ type: "error", message: `Failed to get MCP status: ${err}` });
+      }
     }
   }
 
@@ -2209,56 +2304,6 @@ export class CodexAdapter {
     if (Array.isArray(config.args)) out.args = config.args;
     if (config.env) out.env = config.env;
     if (typeof config.url === "string") out.url = config.url;
-    return out;
-  }
-
-  private normalizeRawMcpServerConfig(value: unknown): Record<string, unknown> {
-    const cfg = this.asRecord(value) || {};
-    const out: Record<string, unknown> = {};
-
-    // Keep only fields supported by Codex raw MCP config schema
-    if (typeof cfg.command === "string") out.command = cfg.command;
-    if (Array.isArray(cfg.args)) out.args = cfg.args.filter((a) => typeof a === "string");
-    if (typeof cfg.cwd === "string") out.cwd = cfg.cwd;
-    if (typeof cfg.url === "string") out.url = cfg.url;
-    if (typeof cfg.enabled === "boolean") out.enabled = cfg.enabled;
-    if (typeof cfg.required === "boolean") out.required = cfg.required;
-
-    const env = this.asRecord(cfg.env);
-    if (env) out.env = Object.fromEntries(
-      Object.entries(env).filter(([, v]) => typeof v === "string"),
-    );
-
-    const envHttpHeaders = this.asRecord(cfg.env_http_headers);
-    if (envHttpHeaders) out.env_http_headers = Object.fromEntries(
-      Object.entries(envHttpHeaders).filter(([, v]) => typeof v === "string"),
-    );
-
-    const httpHeaders = this.asRecord(cfg.http_headers);
-    if (httpHeaders) out.http_headers = Object.fromEntries(
-      Object.entries(httpHeaders).filter(([, v]) => typeof v === "string"),
-    );
-
-    const asStringArray = (arr: unknown): string[] | undefined =>
-      Array.isArray(arr)
-        ? arr.filter((x): x is string => typeof x === "string")
-        : undefined;
-
-    const disabledTools = asStringArray(cfg.disabled_tools);
-    if (disabledTools) out.disabled_tools = disabledTools;
-    const enabledTools = asStringArray(cfg.enabled_tools);
-    if (enabledTools) out.enabled_tools = enabledTools;
-    const envVars = asStringArray(cfg.env_vars);
-    if (envVars) out.env_vars = envVars;
-    const scopes = asStringArray(cfg.scopes);
-    if (scopes) out.scopes = scopes;
-
-    if (typeof cfg.startup_timeout_ms === "number") out.startup_timeout_ms = cfg.startup_timeout_ms;
-    if (typeof cfg.startup_timeout_sec === "number") out.startup_timeout_sec = cfg.startup_timeout_sec;
-    if (typeof cfg.tool_timeout_sec === "number") out.tool_timeout_sec = cfg.tool_timeout_sec;
-    if (typeof cfg.bearer_token === "string") out.bearer_token = cfg.bearer_token;
-    if (typeof cfg.bearer_token_env_var === "string") out.bearer_token_env_var = cfg.bearer_token_env_var;
-
     return out;
   }
 

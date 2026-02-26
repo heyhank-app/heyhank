@@ -849,6 +849,11 @@ export class CliLauncher {
       if (exitHandled) return;
       exitHandled = true;
       console.log(`[cli-launcher] Codex WS session ${sessionId} exited via ${source} (code=${exitCode})`);
+
+      // Notify the adapter that the transport is gone so it can clean up
+      // pending promises and stop accepting messages immediately.
+      adapter.handleTransportClose();
+
       const session = this.sessions.get(sessionId);
       if (session) {
         session.state = "exited";
