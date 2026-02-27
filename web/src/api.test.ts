@@ -299,7 +299,7 @@ describe("updateEnv", () => {
 // ===========================================================================
 describe("settings", () => {
   it("sends GET to /api/settings", async () => {
-    const settings = { openrouterApiKeyConfigured: true, openrouterModel: "openrouter/free", linearApiKeyConfigured: false };
+    const settings = { anthropicApiKeyConfigured: true, anthropicModel: "claude-sonnet-4.6", linearApiKeyConfigured: false };
     mockFetch.mockResolvedValueOnce(mockResponse(settings));
 
     const result = await api.getSettings();
@@ -310,15 +310,15 @@ describe("settings", () => {
   });
 
   it("sends PUT to /api/settings", async () => {
-    const settings = { openrouterApiKeyConfigured: true, openrouterModel: "openrouter/free", linearApiKeyConfigured: true };
+    const settings = { anthropicApiKeyConfigured: true, anthropicModel: "claude-sonnet-4.6", linearApiKeyConfigured: true };
     mockFetch.mockResolvedValueOnce(mockResponse(settings));
 
-    await api.updateSettings({ openrouterApiKey: "or-key", linearApiKey: "lin_api_123" });
+    await api.updateSettings({ anthropicApiKey: "sk-ant-key", linearApiKey: "lin_api_123" });
 
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe("/api/settings");
     expect(opts.method).toBe("PUT");
-    expect(JSON.parse(opts.body)).toEqual({ openrouterApiKey: "or-key", linearApiKey: "lin_api_123" });
+    expect(JSON.parse(opts.body)).toEqual({ anthropicApiKey: "sk-ant-key", linearApiKey: "lin_api_123" });
   });
 
   it("searches Linear issues with query + limit", async () => {
@@ -379,6 +379,28 @@ describe("settings", () => {
     const [url] = mockFetch.mock.calls[0];
     expect(url).toBe("/api/linear/states");
     expect(result).toEqual(data);
+  });
+
+  it("verifyAnthropicKey sends POST to /api/settings/anthropic/verify", async () => {
+    const data = { valid: true };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.verifyAnthropicKey("sk-ant-api03-test-key");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/settings/anthropic/verify");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({ apiKey: "sk-ant-api03-test-key" });
+    expect(result).toEqual({ valid: true });
+  });
+
+  it("verifyAnthropicKey returns error when key is invalid", async () => {
+    const data = { valid: false, error: "Invalid API key" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.verifyAnthropicKey("bad-key");
+
+    expect(result).toEqual({ valid: false, error: "Invalid API key" });
   });
 });
 

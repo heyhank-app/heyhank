@@ -5,7 +5,7 @@ import {
   getSettings,
   updateSettings,
   _resetForTest,
-  DEFAULT_OPENROUTER_MODEL,
+  DEFAULT_ANTHROPIC_MODEL,
 } from "./settings-manager.js";
 
 let tempDir: string;
@@ -25,8 +25,8 @@ afterEach(() => {
 describe("settings-manager", () => {
   it("returns defaults when file is missing", () => {
     expect(getSettings()).toEqual({
-      openrouterApiKey: "",
-      openrouterModel: DEFAULT_OPENROUTER_MODEL,
+      anthropicApiKey: "",
+      anthropicModel: DEFAULT_ANTHROPIC_MODEL,
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -40,15 +40,15 @@ describe("settings-manager", () => {
   });
 
   it("updates and persists settings", () => {
-    const updated = updateSettings({ openrouterApiKey: "or-key" });
-    expect(updated.openrouterApiKey).toBe("or-key");
-    expect(updated.openrouterModel).toBe(DEFAULT_OPENROUTER_MODEL);
+    const updated = updateSettings({ anthropicApiKey: "sk-ant-key" });
+    expect(updated.anthropicApiKey).toBe("sk-ant-key");
+    expect(updated.anthropicModel).toBe(DEFAULT_ANTHROPIC_MODEL);
     expect(updated.linearApiKey).toBe("");
     expect(updated.updatedAt).toBeGreaterThan(0);
 
     const saved = JSON.parse(readFileSync(settingsPath, "utf-8"));
-    expect(saved.openrouterApiKey).toBe("or-key");
-    expect(saved.openrouterModel).toBe(DEFAULT_OPENROUTER_MODEL);
+    expect(saved.anthropicApiKey).toBe("sk-ant-key");
+    expect(saved.anthropicModel).toBe(DEFAULT_ANTHROPIC_MODEL);
     expect(saved.linearApiKey).toBe("");
   });
 
@@ -56,8 +56,8 @@ describe("settings-manager", () => {
     writeFileSync(
       settingsPath,
       JSON.stringify({
-        openrouterApiKey: "existing",
-        openrouterModel: "openai/gpt-4o-mini",
+        anthropicApiKey: "existing",
+        anthropicModel: "claude-haiku-3",
         linearApiKey: "lin_api_abc",
         updatedAt: 123,
       }),
@@ -67,8 +67,8 @@ describe("settings-manager", () => {
     _resetForTest(settingsPath);
 
     expect(getSettings()).toEqual({
-      openrouterApiKey: "existing",
-      openrouterModel: "openai/gpt-4o-mini",
+      anthropicApiKey: "existing",
+      anthropicModel: "claude-haiku-3",
       linearApiKey: "lin_api_abc",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -85,29 +85,29 @@ describe("settings-manager", () => {
     writeFileSync(settingsPath, "not-json", "utf-8");
     _resetForTest(settingsPath);
 
-    expect(getSettings().openrouterModel).toBe(DEFAULT_OPENROUTER_MODEL);
+    expect(getSettings().anthropicModel).toBe(DEFAULT_ANTHROPIC_MODEL);
   });
 
   it("updates only model while preserving existing key", () => {
-    updateSettings({ openrouterApiKey: "or-key" });
-    const updated = updateSettings({ openrouterModel: "openai/gpt-4o-mini" });
+    updateSettings({ anthropicApiKey: "sk-ant-key" });
+    const updated = updateSettings({ anthropicModel: "claude-haiku-3" });
 
-    expect(updated.openrouterApiKey).toBe("or-key");
-    expect(updated.openrouterModel).toBe("openai/gpt-4o-mini");
+    expect(updated.anthropicApiKey).toBe("sk-ant-key");
+    expect(updated.anthropicModel).toBe("claude-haiku-3");
     expect(updated.linearApiKey).toBe("");
   });
 
   it("uses default model when empty model is provided", () => {
-    const updated = updateSettings({ openrouterModel: "" });
-    expect(updated.openrouterModel).toBe(DEFAULT_OPENROUTER_MODEL);
+    const updated = updateSettings({ anthropicModel: "" });
+    expect(updated.anthropicModel).toBe(DEFAULT_ANTHROPIC_MODEL);
   });
 
   it("normalizes malformed file shape to defaults", () => {
     writeFileSync(
       settingsPath,
       JSON.stringify({
-        openrouterApiKey: 123,
-        openrouterModel: null,
+        anthropicApiKey: 123,
+        anthropicModel: null,
         linearApiKey: 123,
         updatedAt: "x",
       }),
@@ -116,8 +116,8 @@ describe("settings-manager", () => {
     _resetForTest(settingsPath);
 
     expect(getSettings()).toEqual({
-      openrouterApiKey: "",
-      openrouterModel: DEFAULT_OPENROUTER_MODEL,
+      anthropicApiKey: "",
+      anthropicModel: DEFAULT_ANTHROPIC_MODEL,
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -130,25 +130,25 @@ describe("settings-manager", () => {
     });
   });
 
-  it("updates linear key without touching openrouter settings", () => {
-    updateSettings({ openrouterApiKey: "or-key", openrouterModel: "openrouter/free" });
+  it("updates linear key without touching anthropic settings", () => {
+    updateSettings({ anthropicApiKey: "sk-ant-key", anthropicModel: "claude-sonnet-4.6" });
     const updated = updateSettings({ linearApiKey: "lin_api_123" });
 
-    expect(updated.openrouterApiKey).toBe("or-key");
-    expect(updated.openrouterModel).toBe("openrouter/free");
+    expect(updated.anthropicApiKey).toBe("sk-ant-key");
+    expect(updated.anthropicModel).toBe("claude-sonnet-4.6");
     expect(updated.linearApiKey).toBe("lin_api_123");
   });
 
   it("ignores undefined patch values and preserves existing keys", () => {
-    updateSettings({ openrouterApiKey: "or-key", linearApiKey: "lin_api_123" });
+    updateSettings({ anthropicApiKey: "sk-ant-key", linearApiKey: "lin_api_123" });
     const updated = updateSettings({
-      openrouterApiKey: undefined,
-      openrouterModel: "openai/gpt-4o-mini",
+      anthropicApiKey: undefined,
+      anthropicModel: "claude-haiku-3",
       linearApiKey: undefined,
     });
 
-    expect(updated.openrouterApiKey).toBe("or-key");
-    expect(updated.openrouterModel).toBe("openai/gpt-4o-mini");
+    expect(updated.anthropicApiKey).toBe("sk-ant-key");
+    expect(updated.anthropicModel).toBe("claude-haiku-3");
     expect(updated.linearApiKey).toBe("lin_api_123");
   });
 

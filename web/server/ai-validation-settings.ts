@@ -5,13 +5,13 @@ export interface EffectiveAiValidationSettings {
   enabled: boolean;
   autoApprove: boolean;
   autoDeny: boolean;
-  openrouterApiKey: string;
+  anthropicApiKey: string;
 }
 
 /**
  * Resolve effective AI validation settings for a session.
  * Session-level overrides take priority; falls back to global settings.
- * The openrouterApiKey is always from global settings.
+ * The anthropicApiKey is always from global settings.
  */
 export function getEffectiveAiValidation(
   sessionState: SessionState,
@@ -30,6 +30,6 @@ export function getEffectiveAiValidation(
       sessionState.aiValidationAutoDeny != null
         ? sessionState.aiValidationAutoDeny
         : global.aiValidationAutoDeny,
-    openrouterApiKey: global.openrouterApiKey,
+    anthropicApiKey: global.anthropicApiKey,
   };
 }

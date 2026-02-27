@@ -7,11 +7,11 @@ import {
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 
-export const DEFAULT_OPENROUTER_MODEL = "openrouter/free";
+export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4.6";
 
 export interface CompanionSettings {
-  openrouterApiKey: string;
-  openrouterModel: string;
+  anthropicApiKey: string;
+  anthropicModel: string;
   linearApiKey: string;
   linearAutoTransition: boolean;
   linearAutoTransitionStateId: string;
@@ -28,8 +28,8 @@ const DEFAULT_PATH = join(homedir(), ".companion", "settings.json");
 let loaded = false;
 let filePath = DEFAULT_PATH;
 let settings: CompanionSettings = {
-  openrouterApiKey: "",
-  openrouterModel: DEFAULT_OPENROUTER_MODEL,
+  anthropicApiKey: "",
+  anthropicModel: DEFAULT_ANTHROPIC_MODEL,
   linearApiKey: "",
   linearAutoTransition: false,
   linearAutoTransitionStateId: "",
@@ -43,11 +43,11 @@ let settings: CompanionSettings = {
 
 function normalize(raw: Partial<CompanionSettings> | null | undefined): CompanionSettings {
   return {
-    openrouterApiKey: typeof raw?.openrouterApiKey === "string" ? raw.openrouterApiKey : "",
-    openrouterModel:
-      typeof raw?.openrouterModel === "string" && raw.openrouterModel.trim()
-        ? raw.openrouterModel
-        : DEFAULT_OPENROUTER_MODEL,
+    anthropicApiKey: typeof raw?.anthropicApiKey === "string" ? raw.anthropicApiKey : "",
+    anthropicModel:
+      typeof raw?.anthropicModel === "string" && raw.anthropicModel.trim()
+        ? raw.anthropicModel
+        : DEFAULT_ANTHROPIC_MODEL,
     linearApiKey: typeof raw?.linearApiKey === "string" ? raw.linearApiKey : "",
     linearAutoTransition: typeof raw?.linearAutoTransition === "boolean" ? raw.linearAutoTransition : false,
     linearAutoTransitionStateId: typeof raw?.linearAutoTransitionStateId === "string" ? raw.linearAutoTransitionStateId : "",
@@ -84,12 +84,12 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "openrouterApiKey" | "openrouterModel" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "editorTabEnabled" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny">>,
+  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "editorTabEnabled" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
-    openrouterApiKey: patch.openrouterApiKey ?? settings.openrouterApiKey,
-    openrouterModel: patch.openrouterModel ?? settings.openrouterModel,
+    anthropicApiKey: patch.anthropicApiKey ?? settings.anthropicApiKey,
+    anthropicModel: patch.anthropicModel ?? settings.anthropicModel,
     linearApiKey: patch.linearApiKey ?? settings.linearApiKey,
     linearAutoTransition: patch.linearAutoTransition ?? settings.linearAutoTransition,
     linearAutoTransitionStateId: patch.linearAutoTransitionStateId ?? settings.linearAutoTransitionStateId,

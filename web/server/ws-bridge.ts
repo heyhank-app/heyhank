@@ -820,7 +820,7 @@ export class WsBridge {
       const aiSettings = getEffectiveAiValidation(session.state);
       if (
         aiSettings.enabled
-        && aiSettings.openrouterApiKey
+        && aiSettings.anthropicApiKey
         && msg.request.tool_name !== "AskUserQuestion"
         && msg.request.tool_name !== "ExitPlanMode"
       ) {

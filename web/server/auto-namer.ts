@@ -1,6 +1,6 @@
-import { DEFAULT_OPENROUTER_MODEL, getSettings } from "./settings-manager.js";
+import { DEFAULT_ANTHROPIC_MODEL, getSettings } from "./settings-manager.js";
 
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
 function sanitizeTitle(raw: string): string | null {
   const title = raw.replace(/^"|"$/g, "").replace(/^'|'$/g, "").trim();
@@ -8,27 +8,9 @@ function sanitizeTitle(raw: string): string | null {
   return title;
 }
 
-function extractTextContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((item) => {
-        if (typeof item === "string") return item;
-        if (item && typeof item === "object") {
-          const maybe = item as { text?: unknown };
-          return typeof maybe.text === "string" ? maybe.text : "";
-        }
-        return "";
-      })
-      .join("\n")
-      .trim();
-  }
-  return "";
-}
-
 /**
- * Generates a short session title using OpenRouter.
- * Returns null if OpenRouter isn't configured or if generation fails.
+ * Generates a short session title using the Anthropic Messages API.
+ * Returns null if Anthropic isn't configured or if generation fails.
  */
 export async function generateSessionTitle(
   firstUserMessage: string,
@@ -39,13 +21,13 @@ export async function generateSessionTitle(
 ): Promise<string | null> {
   const timeout = options?.timeoutMs || 15_000;
   const settings = getSettings();
-  const apiKey = settings.openrouterApiKey.trim();
+  const apiKey = settings.anthropicApiKey.trim();
 
   if (!apiKey) {
     return null;
   }
 
-  const model = settings.openrouterModel?.trim() || DEFAULT_OPENROUTER_MODEL;
+  const model = settings.anthropicModel?.trim() || DEFAULT_ANTHROPIC_MODEL;
   const truncated = firstUserMessage.slice(0, 500);
   const userPrompt = `Generate a concise 3-5 word session title for this user request. Output only the title.\n\nRequest: ${truncated}`;
 
@@ -53,14 +35,16 @@ export async function generateSessionTitle(
   const timer = setTimeout(() => controller.abort(), timeout);
 
   try {
-    const res = await fetch(OPENROUTER_URL, {
+    const res = await fetch(ANTHROPIC_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
         model,
+        max_tokens: 256,
         messages: [
           {
             role: "user",
@@ -73,22 +57,20 @@ export async function generateSessionTitle(
     });
 
     if (!res.ok) {
-      console.warn(`[auto-namer] OpenRouter request failed: ${res.status} ${res.statusText}`);
+      console.warn(`[auto-namer] Anthropic request failed: ${res.status} ${res.statusText}`);
       return null;
     }
 
     const data = await res.json() as {
-      choices?: Array<{
-        message?: {
-          content?: unknown;
-        };
-      }>;
+      content?: Array<{ type: string; text?: string }>;
     };
 
-    const raw = extractTextContent(data.choices?.[0]?.message?.content);
+    const raw = data.content?.[0]?.type === "text"
+      ? (data.content[0].text ?? "")
+      : "";
     return sanitizeTitle(raw);
   } catch (err) {
-    console.warn("[auto-namer] Failed to generate session title via OpenRouter:", err);
+    console.warn("[auto-namer] Failed to generate session title via Anthropic:", err);
     return null;
   } finally {
     clearTimeout(timer);

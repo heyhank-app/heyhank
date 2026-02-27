@@ -371,8 +371,8 @@ export interface EditorStartResult {
 }
 
 export interface AppSettings {
-  openrouterApiKeyConfigured: boolean;
-  openrouterModel: string;
+  anthropicApiKeyConfigured: boolean;
+  anthropicModel: string;
   linearApiKeyConfigured: boolean;
   linearAutoTransition: boolean;
   linearAutoTransitionStateName: string;
@@ -828,14 +828,16 @@ export const api = {
   // Settings
   getSettings: () => get<AppSettings>("/settings"),
   updateSettings: (data: {
-    openrouterApiKey?: string;
-    openrouterModel?: string;
+    anthropicApiKey?: string;
+    anthropicModel?: string;
     linearApiKey?: string;
     linearAutoTransition?: boolean;
     linearAutoTransitionStateId?: string;
     linearAutoTransitionStateName?: string;
     editorTabEnabled?: boolean;
   }) => put<AppSettings>("/settings", data),
+  verifyAnthropicKey: (apiKey: string) =>
+    post<{ valid: boolean; error?: string }>("/settings/anthropic/verify", { apiKey }),
   searchLinearIssues: (query: string, limit = 8) =>
     get<{ issues: LinearIssue[] }>(
       `/linear/issues?query=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(limit))}`,

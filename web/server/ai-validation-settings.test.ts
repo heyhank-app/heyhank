@@ -60,7 +60,7 @@ describe("getEffectiveAiValidation", () => {
     expect(result.enabled).toBe(false);
     expect(result.autoApprove).toBe(true);
     expect(result.autoDeny).toBe(true);
-    expect(result.openrouterApiKey).toBe("");
+    expect(result.anthropicApiKey).toBe("");
   });
 
   it("returns global defaults when session fields are null (explicit inherit)", () => {
@@ -112,17 +112,17 @@ describe("getEffectiveAiValidation", () => {
     expect(result.autoDeny).toBe(false);
   });
 
-  it("openrouterApiKey always comes from global settings", () => {
-    updateSettings({ openrouterApiKey: "sk-test-key-123" });
+  it("anthropicApiKey always comes from global settings", () => {
+    updateSettings({ anthropicApiKey: "sk-test-key-123" });
 
     const session = makeSessionState({ aiValidationEnabled: true });
     const result = getEffectiveAiValidation(session);
-    expect(result.openrouterApiKey).toBe("sk-test-key-123");
+    expect(result.anthropicApiKey).toBe("sk-test-key-123");
   });
 
   it("returns empty API key when global has none, regardless of session settings", () => {
     const session = makeSessionState({ aiValidationEnabled: true });
     const result = getEffectiveAiValidation(session);
-    expect(result.openrouterApiKey).toBe("");
+    expect(result.anthropicApiKey).toBe("");
   });
 });

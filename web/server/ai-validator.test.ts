@@ -171,11 +171,11 @@ describe("aiEvaluate", () => {
     expect(result.reason).toContain("API key");
   });
 
-  it("calls OpenRouter and returns parsed result", async () => {
-    updateSettings({ openrouterApiKey: "test-key", openrouterModel: "test/model" });
+  it("calls Anthropic and returns parsed result", async () => {
+    updateSettings({ anthropicApiKey: "test-key", anthropicModel: "test-model" });
 
     const mockResponse = {
-      choices: [{ message: { content: '{"verdict": "safe", "reason": "Simple list command"}' } }],
+      content: [{ type: "text", text: '{"verdict": "safe", "reason": "Simple list command"}' }],
     };
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
@@ -190,7 +190,7 @@ describe("aiEvaluate", () => {
   });
 
   it("returns uncertain on HTTP error", async () => {
-    updateSettings({ openrouterApiKey: "test-key" });
+    updateSettings({ anthropicApiKey: "test-key" });
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: false,
@@ -204,7 +204,7 @@ describe("aiEvaluate", () => {
   });
 
   it("returns uncertain on network error", async () => {
-    updateSettings({ openrouterApiKey: "test-key" });
+    updateSettings({ anthropicApiKey: "test-key" });
 
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network error"));
 
@@ -214,11 +214,11 @@ describe("aiEvaluate", () => {
   });
 
   it("returns uncertain on malformed API response", async () => {
-    updateSettings({ openrouterApiKey: "test-key" });
+    updateSettings({ anthropicApiKey: "test-key" });
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ choices: [{ message: { content: "not json" } }] }),
+      json: () => Promise.resolve({ content: [{ type: "text", text: "not json" }] }),
     } as Response);
 
     const result = await aiEvaluate("Bash", { command: "ls" });
@@ -247,12 +247,12 @@ describe("validatePermission", () => {
   });
 
   it("falls through to AI for unknown commands", async () => {
-    updateSettings({ openrouterApiKey: "test-key" });
+    updateSettings({ anthropicApiKey: "test-key" });
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({
-        choices: [{ message: { content: '{"verdict": "safe", "reason": "Standard dev command"}' } }],
+        content: [{ type: "text", text: '{"verdict": "safe", "reason": "Standard dev command"}' }],
       }),
     } as Response);
 

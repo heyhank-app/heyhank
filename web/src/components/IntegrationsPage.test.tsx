@@ -32,8 +32,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockState = { currentSessionId: null };
   mockApi.getSettings.mockResolvedValue({
-    openrouterApiKeyConfigured: false,
-    openrouterModel: "openrouter/free",
+    anthropicApiKeyConfigured: false,
+    anthropicModel: "claude-sonnet-4.6",
     linearApiKeyConfigured: true,
   });
   mockApi.getLinearConnection.mockResolvedValue({

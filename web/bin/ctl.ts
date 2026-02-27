@@ -368,9 +368,9 @@ async function handleSettings(base: string, args: string[]): Promise<void> {
     case "set": {
       const flags = parseFlags(args.slice(1));
       const body: Record<string, unknown> = {};
-      if (flags["openrouter-key"]) body.openrouterApiKey = flags["openrouter-key"];
-      if (flags["openrouter-model"]) body.openrouterModel = flags["openrouter-model"];
-      if (Object.keys(body).length === 0) err("Usage: companion settings set --openrouter-key <key> or --openrouter-model <model>");
+      if (flags["anthropic-key"]) body.anthropicApiKey = flags["anthropic-key"];
+      if (flags["anthropic-model"]) body.anthropicModel = flags["anthropic-model"];
+      if (Object.keys(body).length === 0) err("Usage: companion settings set --anthropic-key <key> or --anthropic-model <model>");
       out(await apiPut(base, "/settings", body));
       break;
     }

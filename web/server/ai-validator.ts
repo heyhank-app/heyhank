@@ -1,6 +1,6 @@
-import { getSettings, DEFAULT_OPENROUTER_MODEL } from "./settings-manager.js";
+import { getSettings, DEFAULT_ANTHROPIC_MODEL } from "./settings-manager.js";
 
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const AI_TIMEOUT_MS = 5_000;
 
 export type AiVerdict = "safe" | "dangerous" | "uncertain";
@@ -105,7 +105,7 @@ Rules:
 Be conservative: when in doubt, say "uncertain" rather than "safe".`;
 
 /**
- * Call the AI model via OpenRouter to evaluate a tool call.
+ * Call the AI model via Anthropic to evaluate a tool call.
  */
 export async function aiEvaluate(
   toolName: string,
@@ -113,13 +113,13 @@ export async function aiEvaluate(
   description?: string,
 ): Promise<AiValidationResult> {
   const settings = getSettings();
-  const apiKey = settings.openrouterApiKey.trim();
+  const apiKey = settings.anthropicApiKey.trim();
 
   if (!apiKey) {
-    return { verdict: "uncertain", reason: "No OpenRouter API key configured", ruleBasedOnly: false };
+    return { verdict: "uncertain", reason: "No Anthropic API key configured", ruleBasedOnly: false };
   }
 
-  const model = settings.openrouterModel?.trim() || DEFAULT_OPENROUTER_MODEL;
+  const model = settings.anthropicModel?.trim() || DEFAULT_ANTHROPIC_MODEL;
 
   // Build a concise representation of the tool call for the AI
   const inputStr = JSON.stringify(input, null, 0);
@@ -133,16 +133,18 @@ export async function aiEvaluate(
   const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
 
   try {
-    const res = await fetch(OPENROUTER_URL, {
+    const res = await fetch(ANTHROPIC_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
         model,
+        max_tokens: 256,
+        system: SYSTEM_PROMPT,
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: userPrompt },
         ],
         temperature: 0,
@@ -151,16 +153,16 @@ export async function aiEvaluate(
     });
 
     if (!res.ok) {
-      console.warn(`[ai-validator] OpenRouter request failed: ${res.status} ${res.statusText}`);
+      console.warn(`[ai-validator] Anthropic request failed: ${res.status} ${res.statusText}`);
       return { verdict: "uncertain", reason: "AI service request failed", ruleBasedOnly: false };
     }
 
     const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: unknown } }>;
+      content?: Array<{ type: string; text?: string }>;
     };
 
-    const raw = typeof data.choices?.[0]?.message?.content === "string"
-      ? data.choices[0].message.content
+    const raw = data.content?.[0]?.type === "text"
+      ? (data.content[0].text ?? "")
       : "";
 
     return parseAiResponse(raw);

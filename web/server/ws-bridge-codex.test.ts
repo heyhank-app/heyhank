@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock settings-manager before importing the module under test
 vi.mock("./settings-manager.js", () => ({
-  DEFAULT_OPENROUTER_MODEL: "openrouter/free",
+  DEFAULT_ANTHROPIC_MODEL: "claude-sonnet-4.6",
   getSettings: vi.fn(),
 }));
 
@@ -111,8 +111,8 @@ describe("attachCodexAdapterHandlers", () => {
 
     // Default: AI validation disabled — existing tests should not be affected
     vi.mocked(settingsManager.getSettings).mockReturnValue({
-      openrouterApiKey: "",
-      openrouterModel: "openrouter/free",
+      anthropicApiKey: "",
+      anthropicModel: "claude-sonnet-4.6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -862,8 +862,8 @@ describe("attachCodexAdapterHandlers", () => {
     /** Helper: configure settings for AI validation enabled with all auto-actions on */
     function enableAiValidation() {
       vi.mocked(settingsManager.getSettings).mockReturnValue({
-        openrouterApiKey: "test-api-key",
-        openrouterModel: "openrouter/free",
+        anthropicApiKey: "test-api-key",
+        anthropicModel: "claude-sonnet-4.6",
         linearApiKey: "",
         linearAutoTransition: false,
         linearAutoTransitionStateId: "",
@@ -1025,8 +1025,8 @@ describe("attachCodexAdapterHandlers", () => {
       // flow: store in pendingPermissions, persist, and broadcast the permission_request
       // without calling validatePermission at all.
       vi.mocked(settingsManager.getSettings).mockReturnValue({
-        openrouterApiKey: "test-api-key",
-        openrouterModel: "openrouter/free",
+        anthropicApiKey: "test-api-key",
+        anthropicModel: "claude-sonnet-4.6",
         linearApiKey: "",
         linearAutoTransition: false,
         linearAutoTransitionStateId: "",
@@ -1054,12 +1054,12 @@ describe("attachCodexAdapterHandlers", () => {
       );
     });
 
-    it("skips AI validation when openrouterApiKey is empty", () => {
+    it("skips AI validation when anthropicApiKey is empty", () => {
       // Even if aiValidationEnabled is true, an empty API key means we can't call
       // the AI — fall through to normal manual flow.
       vi.mocked(settingsManager.getSettings).mockReturnValue({
-        openrouterApiKey: "",  // empty
-        openrouterModel: "openrouter/free",
+        anthropicApiKey: "",  // empty
+        anthropicModel: "claude-sonnet-4.6",
         linearApiKey: "",
         linearAutoTransition: false,
         linearAutoTransitionStateId: "",
@@ -1156,8 +1156,8 @@ describe("attachCodexAdapterHandlers", () => {
       // When the verdict is "safe" but auto-approve is disabled, the handler
       // should fall through to manual review instead of auto-approving.
       vi.mocked(settingsManager.getSettings).mockReturnValue({
-        openrouterApiKey: "test-api-key",
-        openrouterModel: "openrouter/free",
+        anthropicApiKey: "test-api-key",
+        anthropicModel: "claude-sonnet-4.6",
         linearApiKey: "",
         linearAutoTransition: false,
         linearAutoTransitionStateId: "",
@@ -1199,8 +1199,8 @@ describe("attachCodexAdapterHandlers", () => {
       // When the verdict is "dangerous" but auto-deny is disabled, the handler
       // should fall through to manual review instead of auto-denying.
       vi.mocked(settingsManager.getSettings).mockReturnValue({
-        openrouterApiKey: "test-api-key",
-        openrouterModel: "openrouter/free",
+        anthropicApiKey: "test-api-key",
+        anthropicModel: "claude-sonnet-4.6",
         linearApiKey: "",
         linearAutoTransition: false,
         linearAutoTransitionStateId: "",

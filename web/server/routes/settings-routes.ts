@@ -1,13 +1,13 @@
 import type { Hono } from "hono";
-import { DEFAULT_OPENROUTER_MODEL, getSettings, updateSettings } from "../settings-manager.js";
+import { DEFAULT_ANTHROPIC_MODEL, getSettings, updateSettings } from "../settings-manager.js";
 import { linearCache } from "../linear-cache.js";
 
 export function registerSettingsRoutes(api: Hono): void {
   api.get("/settings", (c) => {
     const settings = getSettings();
     return c.json({
-      openrouterApiKeyConfigured: !!settings.openrouterApiKey.trim(),
-      openrouterModel: settings.openrouterModel || DEFAULT_OPENROUTER_MODEL,
+      anthropicApiKeyConfigured: !!settings.anthropicApiKey.trim(),
+      anthropicModel: settings.anthropicModel || DEFAULT_ANTHROPIC_MODEL,
       linearApiKeyConfigured: !!settings.linearApiKey.trim(),
       linearAutoTransition: settings.linearAutoTransition,
       linearAutoTransitionStateName: settings.linearAutoTransitionStateName,
@@ -20,11 +20,11 @@ export function registerSettingsRoutes(api: Hono): void {
 
   api.put("/settings", async (c) => {
     const body = await c.req.json().catch(() => ({}));
-    if (body.openrouterApiKey !== undefined && typeof body.openrouterApiKey !== "string") {
-      return c.json({ error: "openrouterApiKey must be a string" }, 400);
+    if (body.anthropicApiKey !== undefined && typeof body.anthropicApiKey !== "string") {
+      return c.json({ error: "anthropicApiKey must be a string" }, 400);
     }
-    if (body.openrouterModel !== undefined && typeof body.openrouterModel !== "string") {
-      return c.json({ error: "openrouterModel must be a string" }, 400);
+    if (body.anthropicModel !== undefined && typeof body.anthropicModel !== "string") {
+      return c.json({ error: "anthropicModel must be a string" }, 400);
     }
     if (body.linearApiKey !== undefined && typeof body.linearApiKey !== "string") {
       return c.json({ error: "linearApiKey must be a string" }, 400);
@@ -50,7 +50,7 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.aiValidationAutoDeny !== undefined && typeof body.aiValidationAutoDeny !== "boolean") {
       return c.json({ error: "aiValidationAutoDeny must be a boolean" }, 400);
     }
-    const hasAnyField = body.openrouterApiKey !== undefined || body.openrouterModel !== undefined
+    const hasAnyField = body.anthropicApiKey !== undefined || body.anthropicModel !== undefined
       || body.linearApiKey !== undefined || body.linearAutoTransition !== undefined
       || body.linearAutoTransitionStateId !== undefined || body.linearAutoTransitionStateName !== undefined
       || body.editorTabEnabled !== undefined
@@ -65,13 +65,13 @@ export function registerSettingsRoutes(api: Hono): void {
     }
 
     const settings = updateSettings({
-      openrouterApiKey:
-        typeof body.openrouterApiKey === "string"
-          ? body.openrouterApiKey.trim()
+      anthropicApiKey:
+        typeof body.anthropicApiKey === "string"
+          ? body.anthropicApiKey.trim()
           : undefined,
-      openrouterModel:
-        typeof body.openrouterModel === "string"
-          ? (body.openrouterModel.trim() || DEFAULT_OPENROUTER_MODEL)
+      anthropicModel:
+        typeof body.anthropicModel === "string"
+          ? (body.anthropicModel.trim() || DEFAULT_ANTHROPIC_MODEL)
           : undefined,
       linearApiKey:
         typeof body.linearApiKey === "string"
@@ -108,8 +108,8 @@ export function registerSettingsRoutes(api: Hono): void {
     });
 
     return c.json({
-      openrouterApiKeyConfigured: !!settings.openrouterApiKey.trim(),
-      openrouterModel: settings.openrouterModel || DEFAULT_OPENROUTER_MODEL,
+      anthropicApiKeyConfigured: !!settings.anthropicApiKey.trim(),
+      anthropicModel: settings.anthropicModel || DEFAULT_ANTHROPIC_MODEL,
       linearApiKeyConfigured: !!settings.linearApiKey.trim(),
       linearAutoTransition: settings.linearAutoTransition,
       linearAutoTransitionStateName: settings.linearAutoTransitionStateName,
@@ -118,5 +118,36 @@ export function registerSettingsRoutes(api: Hono): void {
       aiValidationAutoApprove: settings.aiValidationAutoApprove,
       aiValidationAutoDeny: settings.aiValidationAutoDeny,
     });
+  });
+
+  api.post("/settings/anthropic/verify", async (c) => {
+    const body = await c.req.json().catch(() => ({} as { apiKey?: string }));
+    const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+    if (!apiKey) {
+      return c.json({ valid: false, error: "API key is required" }, 400);
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/models", {
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        signal: controller.signal,
+      });
+
+      if (res.ok) {
+        return c.json({ valid: true });
+      }
+      return c.json({ valid: false, error: `API returned ${res.status}` });
+    } catch (err) {
+      const isAbort = err instanceof Error && err.name === "AbortError";
+      return c.json({ valid: false, error: isAbort ? "Request timed out" : "Request failed" });
+    } finally {
+      clearTimeout(timer);
+    }
   });
 }
