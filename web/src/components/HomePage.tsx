@@ -546,10 +546,7 @@ export function HomePage() {
 
   function buildInitialMessage(msg: string): string {
     if (!selectedLinearIssue) return msg;
-    const description = selectedLinearIssue.description?.trim();
-    const safeDescription = description
-      ? (description.length > 1600 ? `${description.slice(0, 1600)}...` : description)
-      : "";
+    const description = (selectedLinearIssue.description ?? "").trim();
     const context = [
       "Linear issue context:",
       `- Identifier: ${selectedLinearIssue.identifier}`,
@@ -558,7 +555,7 @@ export function HomePage() {
       selectedLinearIssue.priorityLabel ? `- Priority: ${selectedLinearIssue.priorityLabel}` : "",
       selectedLinearIssue.teamName ? `- Team: ${selectedLinearIssue.teamName}` : "",
       `- URL: ${selectedLinearIssue.url}`,
-      safeDescription ? `- Description: ${safeDescription}` : "",
+      description ? `- Description:\n${description}` : "",
     ].filter(Boolean).join("\n");
     return `${context}\n\nUser request:\n${msg}`;
   }
