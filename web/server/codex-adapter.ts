@@ -570,7 +570,36 @@ export class CodexAdapter {
       return false;
     }
 
+    // Drain any messages that were queued during init but not yet flushed
+    // (e.g. if the post-init flush found the transport temporarily unavailable
+    // but it recovered by the time the next message arrives).
+    this.flushPendingOutgoing();
+
     return this.dispatchOutgoing(msg);
+  }
+
+  /**
+   * Drain any messages still sitting in the pendingOutgoing queue.
+   * Called both at the end of initialize() and as a safety net in
+   * sendBrowserMessage() — the latter covers edge cases where the
+   * post-init flush was skipped (e.g. transport was momentarily
+   * unavailable right after init completed in a Docker container).
+   */
+  private flushPendingOutgoing(): void {
+    if (this.pendingOutgoing.length === 0) return;
+    if (!this.transport.isConnected()) {
+      console.warn(
+        `[codex-adapter] Session ${this.sessionId}: transport disconnected — keeping ${this.pendingOutgoing.length} message(s) queued`,
+      );
+      return;
+    }
+    console.log(
+      `[codex-adapter] Session ${this.sessionId}: flushing ${this.pendingOutgoing.length} queued message(s)`,
+    );
+    const queued = this.pendingOutgoing.splice(0);
+    for (const msg of queued) {
+      this.dispatchOutgoing(msg);
+    }
   }
 
   private dispatchOutgoing(msg: BrowserOutgoingMessage): boolean {
@@ -724,6 +753,7 @@ export class CodexAdapter {
       }
 
       this.initialized = true;
+      console.log(`[codex-adapter] Session ${this.sessionId} initialized (threadId=${this.threadId})`);
 
       // Notify session metadata
       this.sessionMetaCb?.({
@@ -768,17 +798,7 @@ export class CodexAdapter {
 
       // Flush any messages that were queued during initialization, but only
       // if the transport is still connected (avoids immediate "Transport closed").
-      if (this.pendingOutgoing.length > 0) {
-        if (this.transport.isConnected()) {
-          console.log(`[codex-adapter] Flushing ${this.pendingOutgoing.length} queued message(s)`);
-          const queued = this.pendingOutgoing.splice(0);
-          for (const msg of queued) {
-            this.dispatchOutgoing(msg);
-          }
-        } else {
-          console.warn(`[codex-adapter] Transport disconnected after init — keeping ${this.pendingOutgoing.length} message(s) queued`);
-        }
-      }
+      this.flushPendingOutgoing();
     } catch (err) {
       const errorMsg = `Codex initialization failed: ${err}`;
       console.error(`[codex-adapter] ${errorMsg}`);
