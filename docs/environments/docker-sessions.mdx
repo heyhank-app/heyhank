@@ -1,0 +1,97 @@
+---
+title: Docker Sessions
+description: Run agent sessions in isolated Docker containers
+---
+
+# Docker Sessions
+
+Docker sessions run the agent CLI inside a container, providing an isolated filesystem, pre-installed toolchains, and port forwarding. This is useful for untrusted workloads, reproducible environments, and projects with specific system dependencies.
+
+## Prerequisites
+
+- Docker must be installed and running on your machine
+- The Environments page shows a **Docker** badge (green if available, amber if not detected)
+
+## The container image
+
+The default image (`the-companion:latest`) is based on Ubuntu 24.04 and includes:
+
+| Tool | Version |
+|---|---|
+| Node.js | 22 LTS (via nvm, with pnpm) |
+| Bun | Latest |
+| Deno | Latest |
+| Go | 1.23 |
+| Rust | Latest (via rustup) |
+| Python | System + poetry + uv |
+| Docker CLI | Latest (for nested Docker) |
+| GitHub CLI (gh) | Latest |
+| Claude Code CLI | Latest |
+| Codex CLI | Latest |
+| VS Code Server | code-server |
+
+Plus system tools: git, curl, wget, make, jq, cmake, sqlite3, ffmpeg, imagemagick.
+
+## Set up a Docker environment
+
+1. Go to **Environments** and create a new profile (or edit an existing one)
+2. Open the **Docker** tab
+3. Select a **base image** from the dropdown (e.g., `the-companion:latest`) or enter a custom image name
+4. Click **Pull** to download the image — progress is shown in real time
+
+### Custom Dockerfile
+
+If you need additional dependencies:
+
+1. In the Docker tab, write a custom **Dockerfile**:
+
+```dockerfile
+FROM the-companion:latest
+
+# Add project-specific dependencies
+RUN apt-get update && apt-get install -y postgresql-client
+RUN pip install pandas numpy
+
+WORKDIR /workspace
+CMD ["sleep", "infinity"]
+```
+
+2. Click **Build Image** to build and tag the custom image
+3. The build status (idle, building, success, error) is shown on the profile card
+
+## What happens when a Docker session starts
+
+1. A container is created with an isolated named volume
+2. Your **working directory** is copied into `/workspace` inside the container
+3. **Auth files** are seeded from your host machine:
+   - Claude Code credentials (`~/.claude`)
+   - Codex auth and config
+   - Git identity and GitHub token (SSH remotes are rewritten to HTTPS)
+4. The **init script** runs (if configured)
+5. The CLI subprocess starts inside the container
+
+## Port forwarding
+
+Ports defined in the environment profile are automatically mapped to random available host ports. This prevents conflicts when running multiple Docker sessions.
+
+The container always exposes port 13337 (VS Code Server). Codex sessions also expose port 4502 for WebSocket.
+
+Check the mapped ports in the session terminal.
+
+## Volume mounts
+
+Add volume mounts in the environment profile to share directories between host and container. Volumes are specified as `host_path:container_path` pairs.
+
+## Auth and Git inside containers
+
+The Companion automatically:
+- Copies your Claude Code / Codex credentials into the container
+- Sets up `gh` as the git credential helper for GitHub authentication
+- Copies your git identity (`user.name`, `user.email`)
+- Disables GPG signing (unavailable in containers)
+- Marks `/workspace` as a safe directory
+- Rewrites SSH git remotes to HTTPS (containers lack SSH keys)
+
+<Note>
+Docker sessions and [git worktrees](/git/branches-and-worktrees) are mutually exclusive. Containers already provide filesystem isolation, so worktrees are not needed.
+</Note>

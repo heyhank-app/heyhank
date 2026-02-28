@@ -1,0 +1,63 @@
+---
+title: Using Prompts
+description: Insert saved prompts into conversations with @mentions
+---
+
+# Using Prompts
+
+Once you've [created prompts](/prompts/creating-prompts), you can insert them into any session using the `@` mention syntax.
+
+## How to use
+
+1. Open a session and click in the **composer** (message input)
+2. Type `@` followed by the prompt name (e.g., `@review-pr`)
+3. A **mention menu** appears with matching prompts
+4. Select the prompt — its content is inserted inline into your message
+5. Press Enter to send
+
+## How filtering works
+
+- The mention menu shows prompts matching your text using fuzzy search on the prompt title
+- **Global prompts** always appear
+- **Project-scoped prompts** only appear when the session's working directory matches one of the prompt's associated folders
+
+## Example workflow
+
+### 1. Create a "review-pr" prompt
+
+Go to **Prompts** and create:
+
+- **Name**: `review-pr`
+- **Content**: `Review this pull request. Check for bugs, security issues, and code style. Suggest improvements. Run the test suite and report any failures.`
+- **Scope**: Global
+
+### 2. Use it in a session
+
+Open a session in your project directory and type:
+
+```
+@review-pr
+```
+
+The composer expands to:
+
+```
+Review this pull request. Check for bugs, security issues, and code style.
+Suggest improvements. Run the test suite and report any failures.
+```
+
+You can add extra context before sending:
+
+```
+@review-pr Focus especially on the authentication changes in auth.ts.
+```
+
+### 3. Project-specific variant
+
+Create another prompt scoped to your backend project:
+
+- **Name**: `review-pr`
+- **Content**: `Review this pull request. Run "bun run test" and "bun run typecheck". Check that all API routes have input validation. Ensure SQL queries use parameterized statements.`
+- **Scope**: Project (`/home/user/backend`)
+
+When you're in a session with cwd `/home/user/backend`, the project-scoped version appears first in the mention menu. In other sessions, only the global version appears.

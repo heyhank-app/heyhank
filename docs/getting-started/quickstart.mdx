@@ -1,0 +1,70 @@
+---
+title: Quickstart
+description: Go from zero to your first session in under a minute
+---
+
+# Quickstart
+
+## Prerequisites
+
+Install [Bun](https://bun.sh) and at least one agent CLI:
+
+```bash
+# Bun
+curl -fsSL https://bun.sh/install | bash
+
+# Claude Code
+npm install -g @anthropic-ai/claude-code
+
+# Codex (optional)
+npm install -g @openai/codex
+```
+
+Make sure your CLI is authenticated before proceeding (run `claude` or `codex` once in your terminal to set up credentials).
+
+## 1. Start the server
+
+```bash
+bunx the-companion
+```
+
+Open [http://localhost:3456](http://localhost:3456).
+
+## 2. Create a session
+
+Click **New Session** on the home page. Choose:
+
+- **Backend**: Claude Code or Codex
+- **Working directory**: The project folder the agent will operate in
+- **Model** (Claude Code): Which Claude model to use
+- **Branch** (optional): Select or create a git branch
+- **Environment** (optional): Apply an [environment profile](/environments/environment-profiles)
+
+Click **Start** to launch the session.
+
+## 3. Chat with the agent
+
+Type a prompt in the composer and press Enter. You'll see:
+
+- **Streaming responses** as the agent thinks
+- **Tool call blocks** showing each action (file reads, writes, bash commands)
+- **Task items** extracted from the agent's work plan
+
+## 4. Handle permissions
+
+When the agent wants to write a file or run a command, a permission banner appears:
+
+<img src="/screenshots/readme-permissions.png" alt="Permission approval UI" />
+
+- **Allow**: Execute this tool call
+- **Deny**: Skip this action
+- **Allow all**: Auto-approve for the rest of the session
+
+See [Permissions](/sessions/permissions) for more control options.
+
+## Next steps
+
+- [Create saved prompts](/prompts/creating-prompts) for reusable instructions
+- [Build agents](/agents/creating-agents) for automated workflows
+- [Set up Docker environments](/environments/docker-sessions) for isolated sessions
+- [Connect Linear](/integrations/linear) for issue-driven development

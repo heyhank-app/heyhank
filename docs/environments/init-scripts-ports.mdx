@@ -1,0 +1,78 @@
+---
+title: Init Scripts & Ports
+description: Run setup commands and expose container ports
+---
+
+# Init Scripts & Ports
+
+## Init scripts
+
+The **Init Script** tab in the environment profile editor lets you write a shell script that runs before the session starts. This is useful for installing dependencies, seeding data, or running setup commands.
+
+### How it works
+
+- The script runs via `sh -lc` (login shell)
+- In Docker sessions: runs inside the container as root
+- Timeout: **120 seconds** (configurable via `COMPANION_INIT_SCRIPT_TIMEOUT` env var)
+- If the script fails (non-zero exit code), the session creation is aborted
+
+### Examples
+
+Install project dependencies:
+
+```bash
+cd /workspace
+bun install
+```
+
+Set up a Python environment:
+
+```bash
+cd /workspace
+pip install -r requirements.txt
+python manage.py migrate
+```
+
+Install system packages (Docker sessions only):
+
+```bash
+apt-get update && apt-get install -y redis-tools
+redis-cli ping
+```
+
+Seed a database:
+
+```bash
+cd /workspace
+createdb myapp_dev 2>/dev/null || true
+psql myapp_dev < db/seed.sql
+```
+
+### Syntax highlighting
+
+The init script editor supports shell syntax highlighting in the UI.
+
+## Ports
+
+The **Ports** tab lets you define container ports to expose. Each port you add is automatically mapped to a random available host port when the container starts.
+
+### Add ports
+
+1. Open the environment profile editor
+2. Go to the **Ports** tab
+3. Enter a port number and click **Add**
+4. Repeat for each port you need
+
+### Common ports
+
+| Port | Service |
+|---|---|
+| 3000 | Node.js / React dev server |
+| 5432 | PostgreSQL |
+| 6379 | Redis |
+| 8000 | Python / Django |
+| 8080 | General web server |
+
+### Port mapping
+
+Ports are mapped with `-p 0:PORT` so the host port is automatically assigned (preventing conflicts across multiple sessions). Check the actual mapped port in the session terminal after the container starts.

@@ -131,6 +131,7 @@ Preview builds are **not** production-stable. Use `latest` / semver tags for sta
 In **Settings > Updates**, switch the update channel to **Prerelease** to receive preview builds. The default channel is **Stable** (semver releases only). Switching channels takes effect immediately on the next update check.
 
 ## Docs
+- **Full documentation**: [`docs/`](docs/) (Mintlify — run `cd docs && mint dev` to preview locally)
 - Protocol reverse engineering: [`WEBSOCKET_PROTOCOL_REVERSED.md`](WEBSOCKET_PROTOCOL_REVERSED.md)
 - Contributor and architecture guide: [`CLAUDE.md`](CLAUDE.md)
 

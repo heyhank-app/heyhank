@@ -1,0 +1,53 @@
+---
+title: Creating Agents
+description: Build reusable agent configurations with custom prompts and settings
+---
+
+# Creating Agents
+
+Agents are reusable configurations that spawn sessions with specific settings, prompts, and triggers. Navigate to **Agents** in the sidebar (or go to `#/agents`).
+
+## Create an agent
+
+1. Click **+ New Agent**
+2. Fill in the **identity** section:
+   - **Name**: A descriptive name (e.g., "PR Reviewer", "Test Runner")
+   - **Description**: What this agent does
+   - **Icon**: Choose from 18 icons (bot, terminal, pencil, search, shield, rocket, wrench, etc.)
+
+3. Write the **system prompt**:
+   - This is the instruction the agent receives when it starts
+   - Use `{{input}}` as a placeholder for dynamic input provided at run time
+   - Example: `Review the following pull request and provide feedback: {{input}}`
+
+4. Configure the **controls row**:
+   - **Backend**: Claude Code or Codex
+   - **Model**: Which model to use (e.g., Claude Sonnet 4, Claude Opus)
+   - **Permission mode**: Default, Accept Edits, or Bypass
+   - **Working directory**: The folder the agent operates in (or "temp" for auto-created)
+   - **Branch** (optional): Git branch to check out
+   - **Environment profile** (optional): Apply an [environment profile](/environments/environment-profiles)
+   - **Internet access** (Codex only): Toggle network access
+
+5. Click **Save**
+
+## Run an agent manually
+
+Click the **Run** button on an agent card. If the agent's prompt contains `{{input}}`, a modal appears asking for the input value. The agent creates a new session and starts executing.
+
+## Enable and disable
+
+Toggle agents on/off with the **switch** on each agent card. Disabled agents won't execute scheduled or webhook triggers, but can still be run manually.
+
+## Agent cards
+
+Each agent card shows:
+- Name, description, and icon
+- Backend type and model
+- Trigger badges (Manual, Webhook, Schedule)
+- Stats: total runs, last run time, next scheduled run
+- Action buttons: Run, Edit, Export, Toggle, Delete
+
+## Storage
+
+Agents are stored as individual JSON files in `~/.companion/agents/`. The agent ID is a slug derived from the name (e.g., "PR Reviewer" becomes `pr-reviewer`).

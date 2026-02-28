@@ -1,0 +1,55 @@
+---
+title: Creating Prompts
+description: Create, edit, and organize reusable saved prompts
+---
+
+# Creating Prompts
+
+Saved prompts let you store reusable instructions that can be inserted into any session. Navigate to **Prompts** in the sidebar (or go to `#/prompts`).
+
+## Create a prompt
+
+1. Click **New Prompt**
+2. Enter a **name** (e.g., `review-pr`, `fix-tests`, `explain-code`)
+3. Write the **prompt content** — the actual instructions the agent will receive
+4. Choose a **scope**:
+   - **Global**: Available in all sessions regardless of working directory
+   - **Project**: Only appears in sessions whose working directory matches one of the associated folders
+5. For project-scoped prompts, click **Add Folder** to associate one or more project paths
+6. Click **Save**
+
+## Edit and delete
+
+- Click the **pencil icon** on any prompt card to edit its name, content, scope, or associated folders
+- Click the **trash icon** to delete a prompt
+- Use the **search bar** at the top to filter prompts by name or content
+
+## Scope: global vs project
+
+| Scope | Visible in | Use case |
+|---|---|---|
+| Global | All sessions | General instructions like "review this PR" or "explain this code" |
+| Project | Sessions whose cwd matches an associated folder | Project-specific instructions like "use our ESLint config" or "follow our API conventions" |
+
+A single prompt can be associated with multiple project folders. For example, a "run tests" prompt could be linked to both your frontend and backend repos with different test commands.
+
+## Grouped view
+
+The Prompts page groups prompts by scope:
+
+- **Global** section at the top with all global prompts
+- **Per-folder** sections below, one for each unique project path
+
+## Storage
+
+Prompts are stored at `~/.companion/prompts.json` as a JSON array. Each prompt has a unique ID, name, content, scope, and timestamps.
+
+## REST API
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/prompts` | List all prompts (optional `?cwd=` and `?scope=` filters) |
+| `GET` | `/api/prompts/:id` | Get a single prompt |
+| `POST` | `/api/prompts` | Create a prompt |
+| `PUT` | `/api/prompts/:id` | Update a prompt |
+| `DELETE` | `/api/prompts/:id` | Delete a prompt |

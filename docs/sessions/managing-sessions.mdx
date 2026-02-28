@@ -1,0 +1,52 @@
+---
+title: Managing Sessions
+description: Switch between, monitor, and control active sessions
+---
+
+# Managing Sessions
+
+## Sidebar
+
+The sidebar lists all active and recent sessions. Each entry shows the session name, backend type, connection status, and working directory. Click a session to switch to it.
+
+## Chat view
+
+The chat view displays messages in a timeline:
+
+- **User messages**: Your prompts
+- **Assistant messages**: Streaming agent responses
+- **Tool call blocks**: Expandable blocks showing the tool name, input, and output
+- **Permission banners**: Inline approve/deny buttons for sensitive actions
+
+## Task panel
+
+The right-side panel shows a structured breakdown of the agent's work. Tasks are automatically extracted from `TodoWrite`, `TaskCreate`, and `TaskUpdate` tool calls. Each task shows its status: pending, in progress, or completed.
+
+## Interrupting the agent
+
+Click the **stop button** in the composer area to interrupt a running agent. This sends an interrupt signal to the CLI subprocess.
+
+## Archiving sessions
+
+Remove sessions from the sidebar by archiving them. This:
+
+- Stops the CLI subprocess
+- Removes the session file from disk
+- If a Docker container is running, removes the container and its volume
+- If a [Linear issue](/integrations/linear) is linked, prompts you to choose what happens to the issue status
+
+<Warning>
+Archiving a Docker session removes the container and all uncommitted changes inside it. Make sure you've committed or pushed any work before archiving.
+</Warning>
+
+## Session tabs
+
+Sessions may have additional tabs beyond the chat:
+
+| Tab | Description |
+|---|---|
+| **Chat** | Main conversation view |
+| **Diff** | File changes made during the session |
+| **Editor** | In-app code editor (CodeMirror) |
+| **Terminal** | Terminal access to the session's environment |
+| **Process** | Raw CLI process output |

@@ -1,0 +1,82 @@
+---
+title: Protocol Recordings
+description: Debug issues with automatic WebSocket message recordings
+---
+
+# Protocol Recordings
+
+The Companion automatically records all WebSocket messages to JSONL files. Use recordings to debug issues, understand agent behavior, or build test fixtures.
+
+## Where recordings are stored
+
+- **Directory**: `~/.companion/recordings/`
+- **Override**: Set `COMPANION_RECORDINGS_DIR` env var
+- **File naming**: `{sessionId}_{backendType}_{ISO-timestamp}_{randomSuffix}.jsonl`
+
+## Recording format
+
+Each file is JSONL (one JSON object per line). The first line is a header with session metadata. Subsequent lines are message entries:
+
+```json
+{"ts": 1771153996875, "dir": "in", "raw": "{\"type\":\"system\",...}", "ch": "cli"}
+```
+
+| Field | Description |
+|---|---|
+| `ts` | Timestamp (milliseconds since epoch) |
+| `dir` | `"in"` (received by server) or `"out"` (sent by server) |
+| `ch` | `"cli"` (agent process) or `"browser"` (frontend) |
+| `raw` | The exact original message — never re-serialized |
+
+## Inspecting recordings
+
+```bash
+# View the first 20 messages
+head -20 ~/.companion/recordings/SESSION_*.jsonl
+
+# Filter for CLI messages only
+grep '"ch":"cli"' ~/.companion/recordings/SESSION_*.jsonl
+
+# Find permission requests
+grep 'can_use_tool' ~/.companion/recordings/SESSION_*.jsonl
+
+# Pretty-print a single entry
+sed -n '5p' ~/.companion/recordings/SESSION_*.jsonl | python3 -m json.tool
+```
+
+## Enable and disable
+
+Recording is enabled by default. Disable it with:
+
+```bash
+COMPANION_RECORD=0 the-companion
+```
+
+## Per-session control
+
+Use the REST API to start/stop recording for individual sessions:
+
+```bash
+# Check recording status
+curl http://localhost:3456/api/sessions/SESSION_ID/recording/status \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Stop recording
+curl -X POST http://localhost:3456/api/sessions/SESSION_ID/recording/stop \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Start recording
+curl -X POST http://localhost:3456/api/sessions/SESSION_ID/recording/start \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## List all recordings
+
+```bash
+curl http://localhost:3456/api/recordings \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Rotation
+
+Automatic cleanup triggers when total lines across all recordings exceed 1,000,000 (configurable with `COMPANION_RECORDINGS_MAX_LINES`).

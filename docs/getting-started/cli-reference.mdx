@@ -1,0 +1,52 @@
+---
+title: CLI Reference
+description: Complete reference for The Companion CLI
+---
+
+# CLI Reference
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `the-companion` | Start server in foreground (default) |
+| `the-companion serve` | Start server in foreground (explicit) |
+| `the-companion install` | Register as a background service (launchd/systemd) |
+| `the-companion start` | Start the background service |
+| `the-companion stop` | Stop the background service |
+| `the-companion restart` | Restart the background service |
+| `the-companion uninstall` | Remove the background service |
+| `the-companion status` | Show service status |
+| `the-companion logs` | Tail service log files |
+
+## Options
+
+| Option | Description | Default |
+|---|---|---|
+| `--port <n>` | Override the server port | `3456` |
+
+## Environment variables
+
+| Variable | Description |
+|---|---|
+| `COMPANION_AUTH_TOKEN` | Auth token (overrides `~/.companion/auth.json`) |
+| `COMPANION_RECORD` | Set to `0` or `false` to disable protocol recording |
+| `COMPANION_RECORDINGS_DIR` | Override recordings directory (default: `~/.companion/recordings/`) |
+| `COMPANION_RECORDINGS_MAX_LINES` | Max total lines before recording rotation (default: 1,000,000) |
+| `COMPANION_INIT_SCRIPT_TIMEOUT` | Init script timeout in seconds (default: 120) |
+
+## Examples
+
+```bash
+# Custom port
+the-companion --port 8080
+
+# Custom auth token
+COMPANION_AUTH_TOKEN="my-token" the-companion
+
+# Install and run as service
+the-companion install && the-companion start && the-companion status
+
+# View logs
+the-companion logs
+```

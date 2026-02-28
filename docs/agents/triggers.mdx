@@ -1,0 +1,92 @@
+---
+title: Triggers
+description: Automate agent execution with webhooks and schedules
+---
+
+# Triggers
+
+Agents can be triggered in three ways: manually, via webhook, or on a schedule.
+
+## Manual trigger
+
+Always available. Click the **Run** button on the agent card. If the prompt uses `{{input}}`, a modal asks for the input value.
+
+## Webhook trigger
+
+Expose your agent as an HTTP endpoint that external services can call.
+
+### Setup
+
+1. Open the agent editor
+2. In the **Triggers** section, toggle **Webhook** on
+3. A unique URL and secret are generated automatically
+4. Copy the webhook URL
+
+### Calling the webhook
+
+Send a POST request to the webhook URL:
+
+```bash
+curl -X POST https://your-companion:3456/api/agents/pr-reviewer/webhook/YOUR_SECRET \
+  -H "Content-Type: application/json" \
+  -d '{"input": "Review PR #42 on the main branch"}'
+```
+
+The `input` field is optional. If provided, it replaces `{{input}}` in the agent's prompt.
+
+### Regenerate secret
+
+Click **Regenerate Secret** in the agent editor to invalidate the old URL and generate a new one.
+
+### Use cases
+
+- Trigger a code review agent from a GitHub webhook on PR creation
+- Run a deployment agent from your CI/CD pipeline
+- Start a test runner from a Slack bot
+
+## Schedule trigger
+
+Run agents automatically on a recurring schedule or at a specific time.
+
+### Recurring (cron)
+
+1. In the agent editor, toggle **Schedule** on
+2. Choose a **preset** or enter a custom cron expression:
+
+| Preset | Cron expression |
+|---|---|
+| Every hour | `0 * * * *` |
+| Daily at 8am | `0 8 * * *` |
+| Weekdays at 9am | `0 9 * * 1-5` |
+| Weekly on Monday | `0 9 * * 1` |
+
+3. The agent card shows the next scheduled run time
+
+### One-time (datetime)
+
+1. Toggle **Schedule** on
+2. Switch to **One-time** mode
+3. Pick a date and time using the datetime picker
+4. The agent runs once at the specified time
+
+### Schedule display
+
+Agent cards show:
+- A **Schedule** badge when scheduling is enabled
+- The **next run** timestamp
+- A humanized description (e.g., "Every weekday at 9:00 AM")
+
+## Execution history
+
+Each agent tracks:
+- **Total runs**: Number of times the agent has executed
+- **Last run**: Timestamp of the most recent execution
+- **Last session**: Link to the session created by the last run
+- **Consecutive failures**: Count resets on success
+
+View execution history via the API:
+
+```bash
+curl http://localhost:3456/api/agents/pr-reviewer/executions \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```

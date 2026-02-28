@@ -1,0 +1,73 @@
+---
+title: Installation
+description: How to install and run The Companion
+---
+
+# Installation
+
+## Requirements
+
+- [Bun](https://bun.sh) runtime
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI and/or [Codex](https://github.com/openai/codex) CLI
+
+## Try it instantly
+
+```bash
+bunx the-companion
+```
+
+Open [http://localhost:3456](http://localhost:3456).
+
+## Install globally
+
+```bash
+bun install -g the-companion
+```
+
+### Background service
+
+Register as a background service so it starts automatically and survives reboots:
+
+```bash
+# Register (launchd on macOS, systemd on Linux)
+the-companion install
+
+# Start the service
+the-companion start
+```
+
+### Custom port
+
+```bash
+the-companion --port 8080
+```
+
+## Authentication
+
+The server auto-generates an auth token on first start, stored at `~/.companion/auth.json`.
+
+```bash
+# Show the current token
+cd web && bun run generate-token
+
+# Force-regenerate
+cd web && bun run generate-token --force
+```
+
+Or set via environment variable:
+
+```bash
+COMPANION_AUTH_TOKEN="my-secret-token" bunx the-companion
+```
+
+## Preview / prerelease builds
+
+Every push to `main` publishes preview artifacts:
+
+| Artifact | Tag | Example |
+|---|---|---|
+| Docker image (moving) | `preview-main` | `docker.io/stangirard/the-companion:preview-main` |
+| Docker image (immutable) | `preview-<sha>` | `docker.io/stangirard/the-companion:preview-abc1234` |
+| npm package | `next` | `bunx the-companion@next` |
+
+In **Settings > Updates**, switch to **Prerelease** channel to receive preview builds.

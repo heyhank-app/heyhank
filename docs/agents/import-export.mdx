@@ -1,0 +1,48 @@
+---
+title: Import & Export
+description: Share agent configurations across teams
+---
+
+# Import & Export
+
+## Export an agent
+
+1. On the **Agents** page, find the agent you want to export
+2. Click the **download icon** on the agent card
+3. A `.agent.json` file is downloaded to your machine
+
+The exported file contains the agent's full configuration: name, description, prompt, backend settings, triggers, MCP servers, environment variables, and more.
+
+Tracking fields (ID, creation date, run count, etc.) are excluded from the export so the agent starts fresh when imported.
+
+## Import an agent
+
+1. On the **Agents** page, click **Import**
+2. Select a `.agent.json` file
+3. The agent is created in a **disabled** state for safety — review its configuration before enabling it
+
+<Warning>
+Imported agents start disabled. Review the agent's prompt, environment variables, and permissions before enabling it, especially if the file came from an external source.
+</Warning>
+
+## REST API
+
+```bash
+# Export
+curl http://localhost:3456/api/agents/pr-reviewer/export \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -o pr-reviewer.agent.json
+
+# Import
+curl -X POST http://localhost:3456/api/agents/import \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d @pr-reviewer.agent.json
+```
+
+## Use cases
+
+- Share agent configurations across your team
+- Version control agent definitions alongside your code
+- Back up agent configurations before making changes
+- Create template agents that others can customize

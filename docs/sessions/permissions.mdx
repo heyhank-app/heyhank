@@ -1,0 +1,58 @@
+---
+title: Permissions
+description: Control what the agent can do with permission modes and AI validation
+---
+
+# Permissions
+
+When an agent wants to perform a sensitive action — writing files, running commands, accessing the network — The Companion intercepts the request and presents it for your approval.
+
+<img src="/screenshots/readme-permissions.png" alt="Permission approval UI" />
+
+## How it works
+
+1. The CLI sends a permission request (e.g., "can I run `rm -rf node_modules`?")
+2. A **permission banner** appears inline in the chat with the tool name and input
+3. You click **Allow** or **Deny**
+4. Your response is sent back to the CLI, which proceeds or skips accordingly
+
+If you don't respond, the agent waits indefinitely — it will never act without your explicit consent.
+
+## Permission modes
+
+You can set the permission mode per session to control how much approval is required.
+
+| Mode | Behavior |
+|---|---|
+| **Default** | Every sensitive tool call requires individual approval |
+| **Accept Edits** | File edits are auto-approved; commands and network access still need approval |
+| **Bypass** | All tool calls are auto-approved without prompting |
+
+<Warning>
+Bypass mode removes all safety gates. Only use this in isolated environments or when you fully trust the agent's task.
+</Warning>
+
+### Change the mode
+
+You can change the permission mode at any time during a session. The change takes effect immediately for all subsequent tool calls.
+
+## AI validation
+
+AI validation uses a separate model to evaluate tool calls before execution. It categorizes each request as safe, dangerous, or uncertain.
+
+### Setup
+
+1. Go to **Settings** and enter your **Anthropic API key**
+2. Toggle **AI Validation** on
+
+### How it works
+
+| Category | Behavior |
+|---|---|
+| **Safe** (read-only, benign commands) | Auto-approved if "auto-approve safe" is enabled |
+| **Dangerous** (destructive commands like `rm -rf`) | Auto-denied if "auto-deny dangerous" is enabled |
+| **Uncertain** | Shown to you with the AI's recommendation |
+
+### Per-session override
+
+Click the **shield icon** in the session header to toggle AI validation on or off for that specific session, overriding the global setting.

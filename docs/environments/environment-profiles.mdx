@@ -1,0 +1,77 @@
+---
+title: Environment Profiles
+description: Define reusable sets of environment variables and Docker configurations
+---
+
+# Environment Profiles
+
+Environment profiles let you define reusable configurations — environment variables, Docker settings, init scripts, and port mappings — that are applied when launching sessions or agents.
+
+Navigate to **Environments** in the sidebar, or access from **Settings > Environments**.
+
+## Create a profile
+
+1. Click **New Environment**
+2. Enter a **name** (e.g., "Production API", "GLM v5 Setup")
+3. The profile editor has four tabs:
+
+### Variables tab
+
+Add key-value environment variables. Click **Add Variable**, enter the key and value, repeat as needed.
+
+These variables are injected into the CLI subprocess when a session starts with this profile.
+
+### Docker tab
+
+Configure a Docker container for isolated sessions. See [Docker Sessions](/environments/docker-sessions) for full details.
+
+### Ports tab
+
+Define container ports to expose. See [Init Scripts & Ports](/environments/init-scripts-ports).
+
+### Init Script tab
+
+Write a shell script that runs before the session starts. See [Init Scripts & Ports](/environments/init-scripts-ports).
+
+## Apply a profile
+
+### To a session
+
+When creating a new session on the Home page, select an environment profile from the **Environment** dropdown. The profile's variables are injected into the CLI subprocess.
+
+### To an agent
+
+In the agent editor, select an environment profile from the **Env Profile** dropdown in the controls row. The profile is applied every time the agent runs.
+
+## Use case: alternative model providers
+
+You can use environment variables to configure alternative model providers. For example, to use GLM v5 instead of the default Claude model:
+
+1. Create a new environment profile named "GLM v5"
+2. In the **Variables** tab, set the environment variables that your CLI uses for model configuration:
+
+| Variable | Value |
+|---|---|
+| `ANTHROPIC_BASE_URL` | `https://your-glm-endpoint.example.com/v1` |
+| `ANTHROPIC_API_KEY` | `your-glm-api-key` |
+| `ANTHROPIC_MODEL` | `glm-v5` |
+
+3. Select this profile when creating sessions or configuring agents
+
+<Tip>
+The exact variables depend on your model provider's compatibility layer. Many providers offer OpenAI- or Anthropic-compatible APIs that accept the same environment variables.
+</Tip>
+
+## Storage
+
+Profiles are stored as individual JSON files in `~/.companion/envs/`, named by slug (e.g., `glm-v5.json`).
+
+## REST API
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/envs` | List all profiles |
+| `GET` | `/api/envs/:slug` | Get a single profile |
+| `POST` | `/api/envs` | Create a profile |
+| `PUT` | `/api/envs/:slug` | Update a profile |
+| `DELETE` | `/api/envs/:slug` | Delete a profile |

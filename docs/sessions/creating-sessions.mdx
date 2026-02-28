@@ -1,0 +1,62 @@
+---
+title: Creating Sessions
+description: How to create and configure agent sessions
+---
+
+# Creating Sessions
+
+A session is a conversation with an agent backed by a CLI subprocess. Each session has its own message history, tool call log, task list, and permission state.
+
+## From the UI
+
+Click **New Session** on the home page. Configure:
+
+| Option | Description |
+|---|---|
+| **Backend** | Claude Code or Codex |
+| **Working directory** | The folder the agent operates in |
+| **Model** (Claude Code) | Which Claude model to use |
+| **Branch** (optional) | Git branch to check out or create |
+| **Use worktree** (optional) | Create an isolated [git worktree](/git/branches-and-worktrees) |
+| **Environment** (optional) | Apply an [environment profile](/environments/environment-profiles) |
+| **Linear issue** (optional) | Link a [Linear issue](/integrations/linear) for context |
+
+Click **Start** to launch the session.
+
+## What happens at creation
+
+1. The server spawns a CLI subprocess (Claude Code or Codex) with `--sdk-url` pointing back to the server
+2. The CLI connects to the server over WebSocket
+3. The server bridges messages between the CLI and your browser
+4. If a branch is selected, the server checks it out (or creates a worktree)
+5. If a Docker environment is configured, the session runs inside a container
+
+## Backend differences
+
+### Claude Code
+- Uses the NDJSON WebSocket protocol
+- Supports model selection, permission modes, and session resumption via `--resume`
+- Requires an Anthropic API key or Claude Pro/Team/Enterprise subscription
+
+### Codex
+- Uses a JSON-RPC WebSocket protocol
+- Has its own authentication (OpenAI account)
+- Supports an internet access toggle
+- Some features like permission modes may work differently
+
+The UI adapts to show only the options available for the selected backend.
+
+## Via the REST API
+
+```bash
+curl -X POST http://localhost:3456/api/sessions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{
+    "cwd": "/path/to/project",
+    "backendType": "claude",
+    "branch": "feature/my-branch",
+    "useWorktree": true,
+    "envSlug": "my-env-profile"
+  }'
+```

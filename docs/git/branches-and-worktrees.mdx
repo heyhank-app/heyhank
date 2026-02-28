@@ -1,0 +1,83 @@
+---
+title: Branches & Worktrees
+description: Use git branches and worktrees to isolate agent sessions
+---
+
+# Branches & Worktrees
+
+The Companion lets you select a git branch when creating a session and optionally create an isolated git worktree so multiple agents can work on the same repo without interfering with each other.
+
+## Branch picker
+
+On the home page, when creating a session in a git repository:
+
+1. A **branch dropdown** appears showing all local and remote branches
+2. Each branch shows status indicators:
+   - Green up/down arrows with counts (commits ahead/behind upstream)
+   - Blue **wt** badge if a worktree already exists for that branch
+   - Green **current** badge for the currently checked-out branch
+3. Type to **filter** branches by name
+4. If your search doesn't match an existing branch, an option to **create a new branch** appears
+
+### What happens when you select a branch
+
+Without worktrees: the server runs `git fetch` and `git checkout` in the project directory, then `git pull`. This is a simple branch switch — the same as doing it manually in the terminal.
+
+## Worktree toggle
+
+Click the **Worktree** button (git branch icon) next to the branch picker to enable worktree isolation.
+
+### What worktrees do
+
+A git worktree is an independent working tree with its own branch, staging area, and files. When you enable worktrees:
+
+1. The Companion creates a new working directory at `~/.companion/worktrees/{repo-name}/{branch}/`
+2. The session uses this worktree as its working directory instead of the original repo
+3. Your original checkout is untouched
+4. Multiple sessions can work on the same branch — each gets its own worktree with a unique branch name (e.g., `main-wt-5391`)
+
+### When to use worktrees
+
+- **Parallel sessions on the same branch**: Two agents working on `main` simultaneously
+- **Protecting your checkout**: Keep your own work in the original repo while an agent works in a worktree
+- **Isolated experiments**: Let the agent make changes without affecting your local state
+
+### How naming works
+
+| Scenario | Worktree path | Actual branch |
+|---|---|---|
+| First session on `feature/login` | `~/.companion/worktrees/my-repo/feature--login/` | `feature/login` |
+| Second session on `feature/login` | `~/.companion/worktrees/my-repo/feature--login-wt-8374/` | `feature/login-wt-8374` |
+| First session on `main` | `~/.companion/worktrees/my-repo/main/` | `main` |
+
+Branch name collisions are resolved by appending a random 4-digit suffix. The user-selected branch is tracked separately from the actual git branch name.
+
+## Worktrees in agents
+
+The agent editor has the same branch and worktree controls. When an agent runs:
+
+- **Branch**: The branch to check out
+- **Create branch**: Creates the branch if it doesn't exist
+- **Use worktree**: Isolates the session in a worktree
+
+## Cleanup
+
+Worktrees are tracked in `~/.companion/worktrees.json`. When you archive a session, its worktree can be cleaned up. Worktrees with uncommitted changes are flagged before deletion.
+
+## Docker sessions
+
+<Note>
+Worktrees are not used with Docker sessions. Containers already provide full filesystem isolation — the host workspace is copied into `/workspace` inside the container.
+</Note>
+
+## REST API
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/git/repo-info?path=` | Check if a path is a git repo |
+| `GET` | `/git/branches?repoRoot=` | List all branches with metadata |
+| `POST` | `/git/fetch` | Run `git fetch --prune` |
+| `GET` | `/git/worktrees?repoRoot=` | List all worktrees |
+| `POST` | `/git/worktree` | Create or reuse a worktree |
+| `DELETE` | `/git/worktree` | Remove a worktree |
+| `POST` | `/git/pull` | Run `git pull` |

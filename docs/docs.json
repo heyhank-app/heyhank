@@ -1,0 +1,87 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "maple",
+  "name": "The Companion",
+  "description": "Web UI for Claude Code and Codex sessions. Run multiple agents, inspect tool calls, and gate risky actions with explicit approvals.",
+  "colors": {
+    "primary": "#6366F1",
+    "light": "#818CF8",
+    "dark": "#4F46E5"
+  },
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": [
+        "index",
+        "getting-started/installation",
+        "getting-started/quickstart",
+        "getting-started/cli-reference"
+      ]
+    },
+    {
+      "group": "Saved Prompts",
+      "pages": [
+        "prompts/creating-prompts",
+        "prompts/using-prompts"
+      ]
+    },
+    {
+      "group": "Agents",
+      "pages": [
+        "agents/creating-agents",
+        "agents/triggers",
+        "agents/advanced-config",
+        "agents/import-export"
+      ]
+    },
+    {
+      "group": "Environments & Docker",
+      "pages": [
+        "environments/environment-profiles",
+        "environments/docker-sessions",
+        "environments/init-scripts-ports"
+      ]
+    },
+    {
+      "group": "Sessions & Permissions",
+      "pages": [
+        "sessions/creating-sessions",
+        "sessions/managing-sessions",
+        "sessions/permissions",
+        "sessions/session-recovery"
+      ]
+    },
+    {
+      "group": "Git Workflows",
+      "pages": [
+        "git/branches-and-worktrees"
+      ]
+    },
+    {
+      "group": "Integrations",
+      "pages": [
+        "integrations/linear"
+      ]
+    },
+    {
+      "group": "Troubleshooting",
+      "pages": [
+        "troubleshooting/common-issues",
+        "troubleshooting/recordings"
+      ]
+    }
+  ],
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "url": "https://github.com/thevibecompany/the-companion"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/thevibecompany/the-companion"
+    }
+  }
+}

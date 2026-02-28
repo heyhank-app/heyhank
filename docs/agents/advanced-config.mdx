@@ -1,0 +1,63 @@
+---
+title: Advanced Configuration
+description: MCP servers, skills, allowed tools, and environment variables
+---
+
+# Advanced Configuration
+
+The agent editor has an **Advanced** section (click to expand) with additional configuration options.
+
+## MCP servers
+
+Add [Model Context Protocol](https://modelcontextprotocol.io/) servers to give the agent access to external tools and data sources.
+
+### Add an MCP server
+
+1. In the agent editor, expand **Advanced**
+2. Under **MCP Servers**, click **Add Server**
+3. Fill in:
+   - **Name**: Identifier for the server (e.g., `github`, `database`)
+   - **Type**: `stdio` (command-line process), `sse` (server-sent events), or `http`
+   - **Command + Args** (stdio): The command to run (e.g., `npx -y @modelcontextprotocol/server-github`)
+   - **URL** (sse/http): The server URL
+   - **Environment variables** (optional): JSON key-value pairs passed to the server process
+
+### Example: GitHub MCP server
+
+```
+Name: github
+Type: stdio
+Command: npx
+Args: -y @modelcontextprotocol/server-github
+Env: {"GITHUB_TOKEN": "ghp_..."}
+```
+
+## Skills
+
+Toggle available skills from `~/.claude/skills/`. Skills are discovered at runtime and provide additional capabilities to the agent. Check the skills you want to enable for this agent.
+
+## Allowed tools
+
+Restrict which tools the agent can use by adding tool names to the allowlist. Type a tool name and press Enter. Leave empty to allow all tools.
+
+Common tool names: `Read`, `Write`, `Edit`, `Bash`, `Grep`, `Glob`, `WebFetch`, `WebSearch`.
+
+## Per-agent environment variables
+
+Add key-value environment variables specific to this agent. These are merged with (and override) variables from the selected environment profile.
+
+Click **Add Variable**, enter a key and value, and save. These variables are injected into the CLI subprocess when the agent runs.
+
+## Git configuration
+
+| Option | Description |
+|---|---|
+| **Branch** | Git branch to check out when the session starts |
+| **Create branch** | If checked, creates the branch if it doesn't exist |
+| **Use worktree** | Creates an isolated [git worktree](/git/branches-and-worktrees) for the session |
+
+## Codex-specific
+
+| Option | Description |
+|---|---|
+| **Internet access** | Toggle network access for Codex sessions (off by default) |
