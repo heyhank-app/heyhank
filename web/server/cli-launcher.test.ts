@@ -1112,6 +1112,66 @@ describe("persistence", () => {
       expect(newLauncher.restoreFromDisk()).toBe(0);
     });
 
+    it("recovers Docker WS sessions using container liveness instead of PID", () => {
+      // Docker WS mode sessions have containerId + codexWsPort.
+      // The stored PID is from `docker exec -d` which exits immediately,
+      // so container liveness must be checked instead.
+      const savedSessions = [
+        {
+          sessionId: "docker-ws-1",
+          pid: 55555,
+          state: "connected" as const,
+          cwd: "/tmp/project",
+          createdAt: Date.now(),
+          containerId: "abc123",
+          codexWsPort: 32819,
+        },
+      ];
+      store.saveLauncher(savedSessions);
+
+      mockIsContainerAlive.mockReturnValueOnce("running");
+
+      const newLauncher = new CliLauncher(3456);
+      newLauncher.setStore(store);
+      const recovered = newLauncher.restoreFromDisk();
+
+      expect(recovered).toBe(1);
+      expect(mockIsContainerAlive).toHaveBeenCalledWith("abc123");
+
+      const session = newLauncher.getSession("docker-ws-1");
+      expect(session).toBeDefined();
+      expect(session?.state).toBe("starting");
+    });
+
+    it("marks Docker WS sessions as exited when container is stopped", () => {
+      const savedSessions = [
+        {
+          sessionId: "docker-ws-dead",
+          pid: 66666,
+          state: "connected" as const,
+          cwd: "/tmp/project",
+          createdAt: Date.now(),
+          containerId: "dead-container",
+          codexWsPort: 32820,
+        },
+      ];
+      store.saveLauncher(savedSessions);
+
+      mockIsContainerAlive.mockReturnValueOnce("stopped");
+
+      const newLauncher = new CliLauncher(3456);
+      newLauncher.setStore(store);
+      const recovered = newLauncher.restoreFromDisk();
+
+      expect(recovered).toBe(0);
+      expect(mockIsContainerAlive).toHaveBeenCalledWith("dead-container");
+
+      const session = newLauncher.getSession("docker-ws-dead");
+      expect(session).toBeDefined();
+      expect(session?.state).toBe("exited");
+      expect(session?.exitCode).toBe(-1);
+    });
+
     it("preserves already-exited sessions from disk", () => {
       const savedSessions = [
         {

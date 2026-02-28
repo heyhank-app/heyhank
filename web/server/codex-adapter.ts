@@ -138,7 +138,7 @@ interface CodexMcpStatusListResponse {
 
 /** Abstract transport for Codex JSON-RPC communication. */
 export interface ICodexTransport {
-  call(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  call(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<unknown>;
   notify(method: string, params?: Record<string, unknown>): Promise<void>;
   respond(id: number, result: unknown): Promise<void>;
   onNotification(handler: (method: string, params: Record<string, unknown>) => void): void;
@@ -147,6 +147,18 @@ export interface ICodexTransport {
   onRawOutgoing(cb: (data: string) => void): void;
   isConnected(): boolean;
 }
+
+/** Default RPC call timeout in milliseconds. */
+const DEFAULT_RPC_TIMEOUT_MS = 60_000;
+
+/** Per-method timeout overrides (ms). */
+const RPC_METHOD_TIMEOUTS: Record<string, number> = {
+  "turn/start": 120_000,
+  "turn/interrupt": 15_000,
+  "codex/configureSession": 30_000,
+  "thread/start": 30_000,
+  "thread/resume": 30_000,
+};
 
 // ─── Adapter Options ──────────────────────────────────────────────────────────
 
@@ -170,6 +182,7 @@ export interface CodexAdapterOptions {
 export class StdioTransport implements ICodexTransport {
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private pendingTimers = new Map<number, ReturnType<typeof setTimeout>>();
   private notificationHandler: ((method: string, params: Record<string, unknown>) => void) | null = null;
   private requestHandler: ((method: string, id: number, params: Record<string, unknown>) => void) | null = null;
   private rawInCb: ((line: string) => void) | null = null;
@@ -215,8 +228,12 @@ export class StdioTransport implements ICodexTransport {
       console.error("[codex-adapter] stdout reader error:", err);
     } finally {
       this.connected = false;
-      // Reject all pending promises so callers don't hang indefinitely
-      // when the Codex process crashes or exits unexpectedly.
+      // Clear all pending RPC timers and reject promises so callers don't
+      // hang indefinitely when the Codex process crashes or exits.
+      for (const [id, timer] of this.pendingTimers) {
+        clearTimeout(timer);
+      }
+      this.pendingTimers.clear();
       for (const [id, { reject }] of this.pending) {
         reject(new Error("Transport closed"));
       }
@@ -255,9 +272,15 @@ export class StdioTransport implements ICodexTransport {
         this.requestHandler?.(msg.method, msg.id as number, (msg as JsonRpcRequest).params || {});
       } else {
         // This is a response to one of our requests
-        const pending = this.pending.get(msg.id as number);
+        const msgId = msg.id as number;
+        const pending = this.pending.get(msgId);
         if (pending) {
-          this.pending.delete(msg.id as number);
+          this.pending.delete(msgId);
+          const timer = this.pendingTimers.get(msgId);
+          if (timer) {
+            clearTimeout(timer);
+            this.pendingTimers.delete(msgId);
+          }
           const resp = msg as JsonRpcResponse;
           if (resp.error) {
             pending.reject(new Error(resp.error.message));
@@ -272,15 +295,25 @@ export class StdioTransport implements ICodexTransport {
     }
   }
 
-  /** Send a request and wait for the matching response. */
-  async call(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+  /** Send a request and wait for the matching response.
+   *  Rejects with a timeout error if no response arrives within the deadline. */
+  async call(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<unknown> {
     const id = this.nextId++;
+    const effectiveTimeout = timeoutMs ?? RPC_METHOD_TIMEOUTS[method] ?? DEFAULT_RPC_TIMEOUT_MS;
     return new Promise(async (resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        this.pendingTimers.delete(id);
+        reject(new Error(`RPC timeout: ${method} did not respond within ${effectiveTimeout}ms`));
+      }, effectiveTimeout);
+      this.pendingTimers.set(id, timer);
       this.pending.set(id, { resolve, reject });
       const request = JSON.stringify({ method, id, params });
       try {
         await this.writeRaw(request + "\n");
       } catch (err) {
+        clearTimeout(timer);
+        this.pendingTimers.delete(id);
         this.pending.delete(id);
         reject(err instanceof Error ? err : new Error(String(err)));
       }
@@ -874,7 +907,9 @@ export class CodexAdapter {
       this.currentTurnId = result.turn.id;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      if (errMsg === "Transport closed") {
+      if (errMsg.startsWith("RPC timeout")) {
+        this.emit({ type: "error", message: "Codex is not responding. Try relaunching the session." });
+      } else if (errMsg === "Transport closed") {
         this.emit({ type: "error", message: "Connection to Codex lost. Try relaunching the session." });
       } else {
         this.emit({ type: "error", message: `Failed to start turn: ${err}` });
@@ -979,7 +1014,12 @@ export class CodexAdapter {
         turnId: this.currentTurnId,
       });
     } catch (err) {
-      console.warn("[codex-adapter] Interrupt failed:", err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.startsWith("RPC timeout")) {
+        this.emit({ type: "error", message: "Codex is not responding to interrupt. Try relaunching the session." });
+      } else {
+        console.warn("[codex-adapter] Interrupt failed:", err);
+      }
     }
   }
 

@@ -32,8 +32,34 @@ const RECONNECT_MAX_MS = 5000;
 let reconnecting = false;
 let reconnectAttempt = 0;
 
+// Heartbeat — detect zombie WebSocket connections where the TCP socket is open
+// but the remote Codex process has stopped responding.
+const PING_INTERVAL_MS = 30000;
+const PONG_TIMEOUT_MS = 10000;
+let pingTimer = null;
+let pongTimer = null;
+
 function log(msg) {
   process.stderr.write(`[codex-ws-proxy] ${msg}\n`);
+}
+
+function startHeartbeat() {
+  stopHeartbeat();
+  pingTimer = setInterval(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
+    ws.ping();
+    pongTimer = setTimeout(() => {
+      log("Pong timeout — connection appears dead");
+      try { ws.terminate(); } catch {}
+      // terminate() fires the close event which triggers scheduleReconnect
+    }, PONG_TIMEOUT_MS);
+  }, PING_INTERVAL_MS);
+}
+
+function stopHeartbeat() {
+  if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+  if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
 }
 
 function decodeMessageData(data) {
@@ -56,6 +82,7 @@ function flushQueue() {
 function failAndExit(message, code = 1) {
   if (exiting) return;
   exiting = true;
+  stopHeartbeat();
   log(message);
   try { if (ws) ws.close(); } catch {}
   process.exit(code);
@@ -67,6 +94,7 @@ function failAndExit(message, code = 1) {
  */
 function scheduleReconnect(reason) {
   if (closed || exiting) return;
+  stopHeartbeat();
   reconnectAttempt++;
   if (reconnectAttempt > MAX_RECONNECT_ATTEMPTS) {
     failAndExit(`WebSocket reconnection failed after ${MAX_RECONNECT_ATTEMPTS} attempts (last: ${reason})`);
@@ -103,6 +131,7 @@ function connect() {
       reconnecting = false;
       reconnectAttempt = 0;
     }
+    startHeartbeat();
     flushQueue();
   });
 
@@ -112,7 +141,13 @@ function connect() {
     process.stdout.write(raw + "\n");
   });
 
+  ws.on("pong", () => {
+    // Heartbeat response received — connection is alive
+    if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
+  });
+
   ws.once("close", (code, reason) => {
+    stopHeartbeat();
     if (closed || exiting) return;
     const why = reason ? ` reason=${reason}` : "";
     // If connection closes before we ever opened, keep retrying until timeout.
@@ -153,6 +188,7 @@ rl.on("line", (line) => {
 
 rl.on("close", () => {
   closed = true;
+  stopHeartbeat();
   try {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close();
@@ -163,12 +199,14 @@ rl.on("close", () => {
 
 process.on("SIGINT", () => {
   closed = true;
+  stopHeartbeat();
   try { if (ws) ws.close(); } catch {}
   process.exit(0);
 });
 
 process.on("SIGTERM", () => {
   closed = true;
+  stopHeartbeat();
   try { if (ws) ws.close(); } catch {}
   process.exit(0);
 });

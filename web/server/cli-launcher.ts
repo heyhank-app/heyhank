@@ -220,20 +220,37 @@ export class CliLauncher {
       if (this.sessions.has(info.sessionId)) continue;
 
       // Check if the process is still alive
-      if (info.pid && info.state !== "exited") {
-        try {
-          process.kill(info.pid, 0); // signal 0 = just check if alive
-          info.state = "starting"; // WS not yet re-established, wait for CLI to reconnect
-          this.sessions.set(info.sessionId, info);
-          recovered++;
-        } catch {
-          // Process is dead
-          info.state = "exited";
-          info.exitCode = -1;
+      if (info.state !== "exited") {
+        if (info.containerId && info.codexWsPort) {
+          // Docker WS mode: the stored PID is `docker exec -d` which exits
+          // immediately after launch.  Check container liveness instead.
+          const containerState = containerManager.isContainerAlive(info.containerId);
+          if (containerState === "running") {
+            info.state = "starting";
+            this.sessions.set(info.sessionId, info);
+            recovered++;
+          } else {
+            info.state = "exited";
+            info.exitCode = -1;
+            this.sessions.set(info.sessionId, info);
+          }
+        } else if (info.pid) {
+          try {
+            process.kill(info.pid, 0); // signal 0 = just check if alive
+            info.state = "starting"; // WS not yet re-established, wait for CLI to reconnect
+            this.sessions.set(info.sessionId, info);
+            recovered++;
+          } catch {
+            // Process is dead
+            info.state = "exited";
+            info.exitCode = -1;
+            this.sessions.set(info.sessionId, info);
+          }
+        } else {
           this.sessions.set(info.sessionId, info);
         }
       } else {
-        // Already exited or no PID
+        // Already exited
         this.sessions.set(info.sessionId, info);
       }
     }
