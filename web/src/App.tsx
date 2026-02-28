@@ -24,6 +24,7 @@ const IntegrationsPage = lazy(() => import("./components/IntegrationsPage.js").t
 const LinearSettingsPage = lazy(() => import("./components/LinearSettingsPage.js").then((m) => ({ default: m.LinearSettingsPage })));
 const PromptsPage = lazy(() => import("./components/PromptsPage.js").then((m) => ({ default: m.PromptsPage })));
 const EnvManager = lazy(() => import("./components/EnvManager.js").then((m) => ({ default: m.EnvManager })));
+const DockerBuilderPage = lazy(() => import("./components/DockerBuilderPage.js").then((m) => ({ default: m.DockerBuilderPage })));
 const CronManager = lazy(() => import("./components/CronManager.js").then((m) => ({ default: m.CronManager })));
 const AgentsPage = lazy(() => import("./components/AgentsPage.js").then((m) => ({ default: m.AgentsPage })));
 const TerminalPage = lazy(() => import("./components/TerminalPage.js").then((m) => ({ default: m.TerminalPage })));
@@ -67,6 +68,7 @@ export default function App() {
   const isLinearIntegrationPage = route.page === "integration-linear";
   const isTerminalPage = route.page === "terminal";
   const isEnvironmentsPage = route.page === "environments";
+  const isDockerBuilderPage = route.page === "docker-builder";
   const isScheduledPage = route.page === "scheduled";
   const isAgentsPage = route.page === "agents" || route.page === "agent-detail";
   const isSessionView = route.page === "session" || route.page === "home";
@@ -219,6 +221,12 @@ export default function App() {
           {isEnvironmentsPage && (
             <div className="absolute inset-0">
               <Suspense fallback={<LazyFallback />}><EnvManager embedded /></Suspense>
+            </div>
+          )}
+
+          {isDockerBuilderPage && (
+            <div className="absolute inset-0">
+              <Suspense fallback={<LazyFallback />}><DockerBuilderPage /></Suspense>
             </div>
           )}
 

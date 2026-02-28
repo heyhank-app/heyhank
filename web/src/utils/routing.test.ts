@@ -44,6 +44,10 @@ describe("parseHash", () => {
     expect(parseHash("#/environments")).toEqual({ page: "environments" });
   });
 
+  it("parses docker-builder route", () => {
+    expect(parseHash("#/docker-builder")).toEqual({ page: "docker-builder" });
+  });
+
   it("parses scheduled route (redirects to agents)", () => {
     expect(parseHash("#/scheduled")).toEqual({ page: "agents" });
   });

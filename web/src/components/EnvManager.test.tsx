@@ -31,8 +31,6 @@ const mockGetContainerImages = vi.fn();
 const mockUpdateEnv = vi.fn();
 const mockCreateEnv = vi.fn();
 const mockDeleteEnv = vi.fn();
-const mockBuildEnvImage = vi.fn();
-const mockGetEnvBuildStatus = vi.fn();
 const mockGetImageStatus = vi.fn();
 const mockPullImage = vi.fn();
 
@@ -44,8 +42,6 @@ vi.mock("../api.js", () => ({
     updateEnv: (...args: unknown[]) => mockUpdateEnv(...args),
     createEnv: (...args: unknown[]) => mockCreateEnv(...args),
     deleteEnv: (...args: unknown[]) => mockDeleteEnv(...args),
-    buildEnvImage: (...args: unknown[]) => mockBuildEnvImage(...args),
-    getEnvBuildStatus: (...args: unknown[]) => mockGetEnvBuildStatus(...args),
     getImageStatus: (...args: unknown[]) => mockGetImageStatus(...args),
     pullImage: (...args: unknown[]) => mockPullImage(...args),
   },
@@ -80,8 +76,6 @@ beforeEach(() => {
   mockDeleteEnv.mockResolvedValue({});
   mockGetImageStatus.mockResolvedValue({ image: "", status: "ready", progress: [] });
   mockPullImage.mockResolvedValue({ ok: true, state: { image: "", status: "pulling", progress: [] } });
-  mockBuildEnvImage.mockResolvedValue({ ok: true, imageTag: "env-production:latest" });
-  mockGetEnvBuildStatus.mockResolvedValue({ buildStatus: "success" });
 });
 
 // ─── Render & Accessibility ────────────────────────────────────
@@ -940,90 +934,46 @@ describe("EnvManager VarEditor", () => {
   });
 });
 
-// ─── Build Flow ────────────────────────────────────────────────
+// ─── Docker Builder link (build moved to Docker Builder page) ──
 
-describe("EnvManager build flow", () => {
-  it("triggers build and polls for status", async () => {
-    // Setup: env with a dockerfile so the Build button appears
+describe("EnvManager Docker Builder link", () => {
+  it("shows 'Open Docker Builder' link in embedded header", async () => {
+    render(<EnvManager embedded />);
+    await screen.findByText("Production");
+    // The header should contain a link to the Docker Builder page
+    const link = screen.getByText("Open Docker Builder");
+    expect(link).toBeInTheDocument();
+    expect(link.closest("a")).toHaveAttribute("href", "#/docker-builder");
+  });
+
+  it("shows Docker Builder link in docker tab when dockerfile is present", async () => {
     mockListEnvs.mockResolvedValue([
       makeEnv({ dockerfile: "FROM node:20\nRUN npm install" }),
     ]);
-    mockGetEnvBuildStatus.mockResolvedValue({ buildStatus: "success" });
 
     render(<EnvManager embedded />);
     await screen.findByText("Production");
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
-    // The "Build Image" button should be visible since dockerfile is set
+    // The docker section should show a link to the Docker Builder
     await waitFor(() => {
-      expect(screen.getByText("Build Image")).toBeInTheDocument();
+      const builderLink = screen.getByText("Docker Builder");
+      expect(builderLink.closest("a")).toHaveAttribute("href", "#/docker-builder");
     });
-
-    fireEvent.click(screen.getByText("Build Image"));
-
-    await waitFor(() => {
-      expect(mockBuildEnvImage).toHaveBeenCalledWith("production");
-    });
-
-    // Should show build log
-    expect(screen.getByText(/Starting build/)).toBeInTheDocument();
   });
 
-  it("shows build error on failure", async () => {
+  it("does not show Build Image button (build moved to Docker Builder)", async () => {
     mockListEnvs.mockResolvedValue([
-      makeEnv({ dockerfile: "FROM node:20" }),
-    ]);
-    mockBuildEnvImage.mockRejectedValue(new Error("Docker daemon not running"));
-
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Build Image")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText("Build Image"));
-
-    await screen.findByText(/Docker daemon not running/);
-  });
-
-  it("shows build success status badge on env", async () => {
-    mockListEnvs.mockResolvedValue([
-      makeEnv({
-        dockerfile: "FROM node:20",
-        buildStatus: "success",
-        lastBuiltAt: Date.now() - 86400000, // yesterday
-        imageTag: "env-production:latest",
-      }),
+      makeEnv({ dockerfile: "FROM node:20\nRUN npm install" }),
     ]);
 
     render(<EnvManager embedded />);
     await screen.findByText("Production");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
-    await waitFor(() => {
-      expect(screen.getByText(/Built/)).toBeInTheDocument();
-    });
-  });
-
-  it("shows build error status badge on env", async () => {
-    mockListEnvs.mockResolvedValue([
-      makeEnv({
-        dockerfile: "FROM node:20",
-        buildStatus: "error",
-      }),
-    ]);
-
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Build failed")).toBeInTheDocument();
-    });
+    // Build Image button should not exist in EnvManager anymore
+    expect(screen.queryByText("Build Image")).not.toBeInTheDocument();
   });
 });
 

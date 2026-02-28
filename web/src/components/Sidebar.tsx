@@ -53,6 +53,7 @@ const NAV_ITEMS: NavItem[] = [
     hash: "#/environments",
     viewBox: "0 0 16 16",
     iconPath: "M8 1a2 2 0 012 2v1h2a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h2V3a2 2 0 012-2zm0 1.5a.5.5 0 00-.5.5v1h1V3a.5.5 0 00-.5-.5zM4 5.5a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V6a.5.5 0 00-.5-.5H4z",
+    activePages: ["environments", "docker-builder"],
   },
   {
     id: "agents",

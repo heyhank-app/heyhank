@@ -36,11 +36,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
   const [editInitScript, setEditInitScript] = useState("");
   const [error, setError] = useState("");
 
-  // Docker build state
-  const [building, setBuilding] = useState(false);
-  const [buildLog, setBuildLog] = useState("");
-  const [showBuildLog, setShowBuildLog] = useState(false);
-
   // Docker availability
   const [dockerAvailable, setDockerAvailable] = useState<boolean | null>(null);
   const [availableImages, setAvailableImages] = useState<string[]>([]);
@@ -143,8 +138,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
     setEditPorts(env.ports || []);
     setEditInitScript(env.initScript || "");
     setError("");
-    setBuildLog("");
-    setShowBuildLog(false);
   }
 
   function cancelEdit() {
@@ -219,36 +212,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
     }
   }
 
-  async function handleBuild(slug: string) {
-    setBuilding(true);
-    setBuildLog("Starting build...\n");
-    setShowBuildLog(true);
-    try {
-      await api.buildEnvImage(slug);
-      // Poll build status
-      const poll = async () => {
-        const status = await api.getEnvBuildStatus(slug);
-        if (status.buildStatus === "building") {
-          setTimeout(poll, 2000);
-        } else {
-          setBuilding(false);
-          if (status.buildStatus === "success") {
-            setBuildLog((prev) => prev + "\nBuild successful!");
-          } else {
-            setBuildLog((prev) => prev + `\nBuild failed: ${status.buildError || "Unknown error"}`);
-          }
-          refresh();
-          // Refresh images list
-          api.getContainerImages().then(setAvailableImages).catch(() => {});
-        }
-      };
-      setTimeout(poll, 2000);
-    } catch (e: unknown) {
-      setBuilding(false);
-      setBuildLog((prev) => prev + `\nBuild error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-
   const dockerBadge = dockerAvailable === null ? null : dockerAvailable ? (
     <span className="text-[10px] px-2 py-1 rounded-md bg-green-500/10 text-green-500 font-medium">Docker</span>
   ) : (
@@ -266,10 +229,18 @@ export function EnvManager({ onClose, embedded = false }: Props) {
             <div className="min-w-0">
               <h1 className="text-lg font-semibold text-cc-fg">Environments</h1>
               <p className="mt-0.5 text-[13px] text-cc-muted leading-relaxed">
-                Reusable environment profiles with optional Docker isolation.
+                Reusable runtime profiles.
               </p>
             </div>
-            {dockerBadge}
+            <div className="flex items-center gap-2 shrink-0">
+              <a
+                href="#/docker-builder"
+                className="text-[11px] px-2.5 py-1.5 rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors"
+              >
+                Open Docker Builder
+              </a>
+              {dockerBadge}
+            </div>
           </div>
 
           {/* Toolbar */}
@@ -371,8 +342,8 @@ export function EnvManager({ onClose, embedded = false }: Props) {
                           <VarEditor rows={editVars} onChange={setEditVars} />
                         </div>
                         <div>
-                          <div className="text-[11px] font-medium text-cc-muted mb-1.5">Docker</div>
-                          {renderDockerTab(editDockerfile, setEditDockerfile, editBaseImage, setEditBaseImage, env.slug, env)}
+                          <div className="text-[11px] font-medium text-cc-muted mb-1.5">Docker Image (optional)</div>
+                          {renderDockerTab(editDockerfile, setEditDockerfile, editBaseImage, setEditBaseImage, env)}
                         </div>
                         <div>
                           <div className="text-[11px] font-medium text-cc-muted mb-1.5">Ports</div>
@@ -491,7 +462,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
                 className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow" />
               <div className="space-y-3">
                 <div><div className="text-[11px] font-medium text-cc-muted mb-1.5">Variables</div><VarEditor rows={editVars} onChange={setEditVars} /></div>
-                <div><div className="text-[11px] font-medium text-cc-muted mb-1.5">Docker</div>{renderDockerTab(editDockerfile, setEditDockerfile, editBaseImage, setEditBaseImage, env.slug, env)}</div>
+                <div><div className="text-[11px] font-medium text-cc-muted mb-1.5">Docker Image (optional)</div>{renderDockerTab(editDockerfile, setEditDockerfile, editBaseImage, setEditBaseImage, env)}</div>
                 <div><div className="text-[11px] font-medium text-cc-muted mb-1.5">Ports</div>{renderPortsTab(editPorts, setEditPorts)}</div>
                 <div><div className="text-[11px] font-medium text-cc-muted mb-1.5">Init Script</div>{renderInitScriptTab(editInitScript, setEditInitScript)}</div>
               </div>
@@ -579,7 +550,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
     setDockerfile: (v: string) => void,
     baseImage: string,
     setBaseImage: (v: string) => void,
-    slug?: string,
     env?: CompanionEnv,
   ) {
     const effectiveImg = env?.imageTag || baseImage;
@@ -671,51 +641,13 @@ export function EnvManager({ onClose, embedded = false }: Props) {
           />
         </div>
 
-        {/* Build button + status */}
-        {slug && dockerfile && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => handleBuild(slug)}
-                disabled={building}
-                className={`px-3 py-2.5 min-h-[44px] text-xs font-medium rounded-lg transition-colors ${
-                  building
-                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                    : "bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 cursor-pointer"
-                }`}
-              >
-                {building ? "Building..." : "Build Image"}
-              </button>
-              {env?.buildStatus === "success" && env.lastBuiltAt && (
-                <span className="text-[10px] text-green-500">
-                  Built {new Date(env.lastBuiltAt).toLocaleDateString()}
-                </span>
-              )}
-              {env?.buildStatus === "error" && (
-                <span className="text-[10px] text-cc-error">Build failed</span>
-              )}
-              {env?.imageTag && (
-                <span className="text-[10px] text-cc-muted font-mono-code">{env.imageTag}</span>
-              )}
-            </div>
-
-            {showBuildLog && buildLog && (
-              <div className="relative">
-                <button
-                  onClick={() => setShowBuildLog(false)}
-                  aria-label="Close build log"
-                  className="absolute top-1 right-1 text-cc-muted hover:text-cc-fg cursor-pointer"
-                >
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
-                    <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
-                  </svg>
-                </button>
-                <pre className="px-3 py-2 text-[10px] font-mono-code bg-cc-code-bg rounded-lg text-cc-muted max-h-[200px] overflow-auto whitespace-pre-wrap">
-                  {buildLog}
-                </pre>
-              </div>
-            )}
-          </div>
+        {/* Link to Docker Builder for building */}
+        {dockerfile && (
+          <p className="text-[10px] text-cc-muted">
+            Use the{" "}
+            <a href="#/docker-builder" className="text-cc-primary hover:underline">Docker Builder</a>
+            {" "}to build this image.
+          </p>
         )}
       </div>
     );
