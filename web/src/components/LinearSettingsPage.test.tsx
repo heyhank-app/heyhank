@@ -12,6 +12,7 @@ const mockApi = {
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
   getLinearConnection: vi.fn(),
+  getLinearStates: vi.fn(),
 };
 
 vi.mock("../api.js", () => ({
@@ -19,6 +20,7 @@ vi.mock("../api.js", () => ({
     getSettings: (...args: unknown[]) => mockApi.getSettings(...args),
     updateSettings: (...args: unknown[]) => mockApi.updateSettings(...args),
     getLinearConnection: (...args: unknown[]) => mockApi.getLinearConnection(...args),
+    getLinearStates: (...args: unknown[]) => mockApi.getLinearStates(...args),
   },
 }));
 
@@ -37,11 +39,33 @@ beforeEach(() => {
     anthropicApiKeyConfigured: false,
     anthropicModel: "claude-sonnet-4.6",
     linearApiKeyConfigured: true,
+    linearAutoTransition: false,
+    linearAutoTransitionStateName: "",
+    linearArchiveTransition: false,
+    linearArchiveTransitionStateName: "",
   });
   mockApi.updateSettings.mockResolvedValue({
     anthropicApiKeyConfigured: false,
     anthropicModel: "claude-sonnet-4.6",
     linearApiKeyConfigured: true,
+    linearAutoTransition: false,
+    linearAutoTransitionStateName: "",
+    linearArchiveTransition: false,
+    linearArchiveTransitionStateName: "",
+  });
+  mockApi.getLinearStates.mockResolvedValue({
+    teams: [
+      {
+        id: "team-1",
+        key: "ENG",
+        name: "Engineering",
+        states: [
+          { id: "s-backlog", name: "Backlog", type: "backlog" },
+          { id: "s-inprogress", name: "In Progress", type: "started" },
+          { id: "s-done", name: "Done", type: "completed" },
+        ],
+      },
+    ],
   });
   mockApi.getLinearConnection.mockResolvedValue({
     connected: true,
@@ -115,5 +139,77 @@ describe("LinearSettingsPage", () => {
       expect(mockApi.updateSettings).toHaveBeenCalledWith({ linearApiKey: "" });
     });
     expect(await screen.findByText("Linear disconnected.")).toBeInTheDocument();
+  });
+});
+
+describe("LinearSettingsPage — archive transition settings", () => {
+  it("renders the 'On session archive' section when connected", async () => {
+    // Verifies that the archive transition settings section appears when the
+    // Linear integration is connected and team states are available.
+    render(<LinearSettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("On session archive")).toBeInTheDocument();
+    });
+  });
+
+  it("toggle enables the archive transition state selector", async () => {
+    // Verifies that clicking the toggle shows the target status selector.
+    render(<LinearSettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("On session archive")).toBeInTheDocument();
+    });
+
+    // The archive transition toggle should show "Disabled" initially
+    const archiveSection = screen.getByText("On session archive").closest("div");
+    expect(archiveSection).toBeTruthy();
+
+    // Find the toggle button in the archive section (second switch on the page)
+    const switches = screen.getAllByRole("switch");
+    // The first switch is auto-transition, the second is archive transition
+    const archiveSwitch = switches[switches.length - 1];
+    fireEvent.click(archiveSwitch);
+
+    // After enabling, the state selector should appear
+    await waitFor(() => {
+      expect(screen.getByLabelText("Target status")).toBeInTheDocument();
+    });
+  });
+
+  it("saves archive transition settings", async () => {
+    // Verifies that saving archive transition settings calls updateSettings
+    // with the correct fields.
+    render(<LinearSettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("On session archive")).toBeInTheDocument();
+    });
+
+    // Enable the toggle
+    const switches = screen.getAllByRole("switch");
+    const archiveSwitch = switches[switches.length - 1];
+    fireEvent.click(archiveSwitch);
+
+    // Wait for state selector
+    await waitFor(() => {
+      expect(screen.getByLabelText("Target status")).toBeInTheDocument();
+    });
+
+    // Note: We can't test the exact label match since there are multiple "Target status"
+    // labels on the page. Instead, find by id.
+    const stateSelect = document.getElementById("archive-transition-state") as HTMLSelectElement;
+    expect(stateSelect).toBeTruthy();
+    fireEvent.change(stateSelect, { target: { value: "s-backlog" } });
+
+    // Click the last Save button (for archive transition section)
+    const saveButtons = screen.getAllByRole("button", { name: "Save" });
+    const lastSaveBtn = saveButtons[saveButtons.length - 1];
+    fireEvent.click(lastSaveBtn);
+
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({
+        linearArchiveTransition: true,
+        linearArchiveTransitionStateId: "s-backlog",
+        linearArchiveTransitionStateName: "Backlog",
+      });
+    });
   });
 });

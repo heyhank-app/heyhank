@@ -14,6 +14,171 @@ function linearIssueStateCategory(issue: { stateType?: string; stateName?: strin
   return 0;
 }
 
+/**
+ * Transition a Linear issue to a specific workflow state.
+ * Returns a result object — never throws.
+ */
+export async function transitionLinearIssue(
+  issueId: string,
+  stateId: string,
+  linearApiKey: string,
+): Promise<{
+  ok: boolean;
+  error?: string;
+  issue?: { id: string; identifier: string; stateName: string; stateType: string };
+}> {
+  try {
+    const updateResponse = await fetch("https://api.linear.app/graphql", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: linearApiKey,
+      },
+      body: JSON.stringify({
+        query: `
+          mutation CompanionTransitionIssue($issueId: String!, $stateId: String!) {
+            issueUpdate(id: $issueId, input: { stateId: $stateId }) {
+              success
+              issue {
+                id
+                identifier
+                state { name type }
+              }
+            }
+          }
+        `,
+        variables: { issueId, stateId },
+      }),
+    });
+
+    const updateJson = await updateResponse.json().catch(() => ({})) as {
+      data?: {
+        issueUpdate?: {
+          success?: boolean;
+          issue?: {
+            id?: string;
+            identifier?: string;
+            state?: { name?: string; type?: string };
+          };
+        };
+      };
+      errors?: Array<{ message?: string }>;
+    };
+
+    if (!updateResponse.ok || (updateJson.errors && updateJson.errors.length > 0)) {
+      const errMsg = updateJson.errors?.[0]?.message || updateResponse.statusText || "Failed to update issue state";
+      return { ok: false, error: errMsg };
+    }
+
+    const updatedIssue = updateJson.data?.issueUpdate?.issue;
+
+    // Invalidate cached issue data so the next fetch picks up the new state
+    linearCache.invalidate(`issue:${issueId}`);
+
+    return {
+      ok: true,
+      issue: {
+        id: updatedIssue?.id || issueId,
+        identifier: updatedIssue?.identifier || "",
+        stateName: updatedIssue?.state?.name || "",
+        stateType: updatedIssue?.state?.type || "",
+      },
+    };
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: `Linear transition failed: ${errMsg}` };
+  }
+}
+
+export interface LinearTeamState {
+  id: string;
+  name: string;
+  type: string;
+}
+
+export interface LinearTeam {
+  id: string;
+  key: string;
+  name: string;
+  states: LinearTeamState[];
+}
+
+/**
+ * Fetch all Linear team workflow states (cached for 5 minutes).
+ * Returns empty array on error.
+ */
+export async function fetchLinearTeamStates(linearApiKey: string): Promise<LinearTeam[]> {
+  try {
+    return await linearCache.getOrFetch("states", 300_000, async () => {
+      const response = await fetch("https://api.linear.app/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: linearApiKey,
+        },
+        body: JSON.stringify({
+          query: `
+            query CompanionWorkflowStates {
+              teams {
+                nodes {
+                  id
+                  key
+                  name
+                  states {
+                    nodes {
+                      id
+                      name
+                      type
+                    }
+                  }
+                }
+              }
+            }
+          `,
+        }),
+      });
+
+      const json = await response.json().catch(() => ({})) as {
+        data?: {
+          teams?: {
+            nodes?: Array<{
+              id?: string;
+              key?: string | null;
+              name?: string | null;
+              states?: {
+                nodes?: Array<{
+                  id?: string;
+                  name?: string | null;
+                  type?: string | null;
+                }>;
+              };
+            }>;
+          };
+        };
+        errors?: Array<{ message?: string }>;
+      };
+
+      if (!response.ok || (json.errors && json.errors.length > 0)) {
+        const firstError = json.errors?.[0]?.message || response.statusText || "Linear request failed";
+        throw new Error(firstError);
+      }
+
+      return (json.data?.teams?.nodes || []).map((team) => ({
+        id: team.id || "",
+        key: team.key || "",
+        name: team.name || "",
+        states: (team.states?.nodes || []).map((state) => ({
+          id: state.id || "",
+          name: state.name || "",
+          type: state.type || "",
+        })),
+      }));
+    });
+  } catch {
+    return [];
+  }
+}
+
 export function registerLinearRoutes(api: Hono): void {
   api.get("/linear/issues", async (c) => {
     const query = (c.req.query("query") || "").trim();
@@ -530,74 +695,10 @@ export function registerLinearRoutes(api: Hono): void {
     }
 
     try {
-      const teams = await linearCache.getOrFetch("states", 300_000, async () => {
-        const response = await fetch("https://api.linear.app/graphql", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: linearApiKey,
-          },
-          body: JSON.stringify({
-            query: `
-              query CompanionWorkflowStates {
-                teams {
-                  nodes {
-                    id
-                    key
-                    name
-                    states {
-                      nodes {
-                        id
-                        name
-                        type
-                      }
-                    }
-                  }
-                }
-              }
-            `,
-          }),
-        }).catch((e: unknown) => {
-          throw new Error(`Failed to connect to Linear: ${e instanceof Error ? e.message : String(e)}`);
-        });
-
-        const json = await response.json().catch(() => ({})) as {
-          data?: {
-            teams?: {
-              nodes?: Array<{
-                id?: string;
-                key?: string | null;
-                name?: string | null;
-                states?: {
-                  nodes?: Array<{
-                    id?: string;
-                    name?: string | null;
-                    type?: string | null;
-                  }>;
-                };
-              }>;
-            };
-          };
-          errors?: Array<{ message?: string }>;
-        };
-
-        if (!response.ok || (json.errors && json.errors.length > 0)) {
-          const firstError = json.errors?.[0]?.message || response.statusText || "Linear request failed";
-          throw new Error(firstError);
-        }
-
-        return (json.data?.teams?.nodes || []).map((team) => ({
-          id: team.id || "",
-          key: team.key || "",
-          name: team.name || "",
-          states: (team.states?.nodes || []).map((state) => ({
-            id: state.id || "",
-            name: state.name || "",
-            type: state.type || "",
-          })),
-        }));
-      });
-
+      const teams = await fetchLinearTeamStates(linearApiKey);
+      if (teams.length === 0) {
+        return c.json({ error: "Failed to fetch Linear workflow states" }, 502);
+      }
       return c.json({ teams });
     } catch (e: unknown) {
       return c.json({ error: e instanceof Error ? e.message : "Linear request failed" }, 502);
@@ -819,68 +920,16 @@ export function registerLinearRoutes(api: Hono): void {
       return c.json({ ok: true, skipped: true, reason: "no_target_state_configured" });
     }
 
-    try {
-      const updateResponse = await fetch("https://api.linear.app/graphql", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: linearApiKey,
-        },
-        body: JSON.stringify({
-          query: `
-            mutation CompanionTransitionIssue($issueId: String!, $stateId: String!) {
-              issueUpdate(id: $issueId, input: { stateId: $stateId }) {
-                success
-                issue {
-                  id
-                  identifier
-                  state { name type }
-                }
-              }
-            }
-          `,
-          variables: { issueId, stateId },
-        }),
-      });
-
-      const updateJson = await updateResponse.json().catch(() => ({})) as {
-        data?: {
-          issueUpdate?: {
-            success?: boolean;
-            issue?: {
-              id?: string;
-              identifier?: string;
-              state?: { name?: string; type?: string };
-            };
-          };
-        };
-        errors?: Array<{ message?: string }>;
-      };
-
-      if (!updateResponse.ok || (updateJson.errors && updateJson.errors.length > 0)) {
-        const errMsg = updateJson.errors?.[0]?.message || updateResponse.statusText || "Failed to update issue state";
-        return c.json({ error: errMsg }, 502);
-      }
-
-      const updatedIssue = updateJson.data?.issueUpdate?.issue;
-
-      // Invalidate cached issue data so the next fetch picks up the new state
-      linearCache.invalidate(`issue:${issueId}`);
-
-      return c.json({
-        ok: true,
-        skipped: false,
-        issue: {
-          id: updatedIssue?.id || issueId,
-          identifier: updatedIssue?.identifier || "",
-          stateName: updatedIssue?.state?.name || "",
-          stateType: updatedIssue?.state?.type || "",
-        },
-      });
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      return c.json({ error: `Linear transition failed: ${errMsg}` }, 502);
+    const result = await transitionLinearIssue(issueId, stateId, linearApiKey);
+    if (!result.ok) {
+      return c.json({ error: result.error }, 502);
     }
+
+    return c.json({
+      ok: true,
+      skipped: false,
+      issue: result.issue,
+    });
   });
 
 }

@@ -11,6 +11,8 @@ export function registerSettingsRoutes(api: Hono): void {
       linearApiKeyConfigured: !!settings.linearApiKey.trim(),
       linearAutoTransition: settings.linearAutoTransition,
       linearAutoTransitionStateName: settings.linearAutoTransitionStateName,
+      linearArchiveTransition: settings.linearArchiveTransition,
+      linearArchiveTransitionStateName: settings.linearArchiveTransitionStateName,
       editorTabEnabled: settings.editorTabEnabled,
       aiValidationEnabled: settings.aiValidationEnabled,
       aiValidationAutoApprove: settings.aiValidationAutoApprove,
@@ -38,6 +40,15 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.linearAutoTransitionStateName !== undefined && typeof body.linearAutoTransitionStateName !== "string") {
       return c.json({ error: "linearAutoTransitionStateName must be a string" }, 400);
     }
+    if (body.linearArchiveTransition !== undefined && typeof body.linearArchiveTransition !== "boolean") {
+      return c.json({ error: "linearArchiveTransition must be a boolean" }, 400);
+    }
+    if (body.linearArchiveTransitionStateId !== undefined && typeof body.linearArchiveTransitionStateId !== "string") {
+      return c.json({ error: "linearArchiveTransitionStateId must be a string" }, 400);
+    }
+    if (body.linearArchiveTransitionStateName !== undefined && typeof body.linearArchiveTransitionStateName !== "string") {
+      return c.json({ error: "linearArchiveTransitionStateName must be a string" }, 400);
+    }
     if (body.editorTabEnabled !== undefined && typeof body.editorTabEnabled !== "boolean") {
       return c.json({ error: "editorTabEnabled must be a boolean" }, 400);
     }
@@ -53,6 +64,8 @@ export function registerSettingsRoutes(api: Hono): void {
     const hasAnyField = body.anthropicApiKey !== undefined || body.anthropicModel !== undefined
       || body.linearApiKey !== undefined || body.linearAutoTransition !== undefined
       || body.linearAutoTransitionStateId !== undefined || body.linearAutoTransitionStateName !== undefined
+      || body.linearArchiveTransition !== undefined || body.linearArchiveTransitionStateId !== undefined
+      || body.linearArchiveTransitionStateName !== undefined
       || body.editorTabEnabled !== undefined
       || body.aiValidationEnabled !== undefined || body.aiValidationAutoApprove !== undefined
       || body.aiValidationAutoDeny !== undefined;
@@ -89,6 +102,18 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.linearAutoTransitionStateName === "string"
           ? body.linearAutoTransitionStateName.trim()
           : undefined,
+      linearArchiveTransition:
+        typeof body.linearArchiveTransition === "boolean"
+          ? body.linearArchiveTransition
+          : undefined,
+      linearArchiveTransitionStateId:
+        typeof body.linearArchiveTransitionStateId === "string"
+          ? body.linearArchiveTransitionStateId.trim()
+          : undefined,
+      linearArchiveTransitionStateName:
+        typeof body.linearArchiveTransitionStateName === "string"
+          ? body.linearArchiveTransitionStateName.trim()
+          : undefined,
       editorTabEnabled:
         typeof body.editorTabEnabled === "boolean"
           ? body.editorTabEnabled
@@ -113,6 +138,8 @@ export function registerSettingsRoutes(api: Hono): void {
       linearApiKeyConfigured: !!settings.linearApiKey.trim(),
       linearAutoTransition: settings.linearAutoTransition,
       linearAutoTransitionStateName: settings.linearAutoTransitionStateName,
+      linearArchiveTransition: settings.linearArchiveTransition,
+      linearArchiveTransitionStateName: settings.linearArchiveTransitionStateName,
       editorTabEnabled: settings.editorTabEnabled,
       aiValidationEnabled: settings.aiValidationEnabled,
       aiValidationAutoApprove: settings.aiValidationAutoApprove,

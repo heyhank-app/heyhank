@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useStore } from "../store.js";
-import { api } from "../api.js";
+import { api, type ArchiveInfo } from "../api.js";
+import { ArchiveLinearModal, type LinearTransitionChoice } from "./ArchiveLinearModal.js";
 import { connectSession, connectAllSessions, disconnectSession } from "../ws.js";
 import { navigateToSession, navigateHome, parseHash } from "../utils/routing.js";
 import { ProjectGroup } from "./ProjectGroup.js";
@@ -78,6 +79,9 @@ export function Sidebar() {
   const [editingName, setEditingName] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null);
+  const [archiveModalSessionId, setArchiveModalSessionId] = useState<string | null>(null);
+  const [archiveModalInfo, setArchiveModalInfo] = useState<ArchiveInfo | null>(null);
+  const [archiveModalContainerized, setArchiveModalContainerized] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [hash, setHash] = useState(() => (typeof window !== "undefined" ? window.location.hash : ""));
@@ -93,6 +97,7 @@ export function Sidebar() {
   const recentlyRenamed = useStore((s) => s.recentlyRenamed);
   const clearRecentlyRenamed = useStore((s) => s.clearRecentlyRenamed);
   const pendingPermissions = useStore((s) => s.pendingPermissions);
+  const linkedLinearIssues = useStore((s) => s.linkedLinearIssues);
   const collapsedProjects = useStore((s) => s.collapsedProjects);
   const toggleProjectCollapse = useStore((s) => s.toggleProjectCollapse);
   const route = parseHash(hash);
@@ -239,23 +244,47 @@ export function Sidebar() {
     setConfirmDeleteAll(false);
   }, []);
 
-  const handleArchiveSession = useCallback((e: React.MouseEvent, sessionId: string) => {
+  const handleArchiveSession = useCallback(async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
-    // Check if session uses a container — if so, ask for confirmation
     const sdkInfo = sdkSessions.find((s) => s.sessionId === sessionId);
     const bridgeState = sessions.get(sessionId);
     const isContainerized = bridgeState?.is_containerized || !!sdkInfo?.containerId || false;
+
+    // Check if session has a linked non-done Linear issue
+    const linkedIssue = linkedLinearIssues.get(sessionId);
+    const stateType = (linkedIssue?.stateType || "").toLowerCase();
+    const isIssueDone = stateType === "completed" || stateType === "canceled" || stateType === "cancelled";
+
+    if (linkedIssue && !isIssueDone) {
+      // Fetch archive info (backlog availability, configured transition state)
+      try {
+        const info = await api.getArchiveInfo(sessionId);
+        if (info.issueNotDone) {
+          setArchiveModalSessionId(sessionId);
+          setArchiveModalInfo(info);
+          setArchiveModalContainerized(isContainerized);
+          return;
+        }
+      } catch {
+        // Fall through to normal archive flow on error
+      }
+    }
+
+    // No linked non-done issue — use existing container-only confirmation or direct archive
     if (isContainerized) {
       setConfirmArchiveId(sessionId);
       return;
     }
     doArchive(sessionId);
-  }, [sdkSessions, sessions]);
+  }, [sdkSessions, sessions, linkedLinearIssues]);
 
-  const doArchive = useCallback(async (sessionId: string, force?: boolean) => {
+  const doArchive = useCallback(async (sessionId: string, force?: boolean, linearTransition?: LinearTransitionChoice) => {
     try {
       disconnectSession(sessionId);
-      await api.archiveSession(sessionId, force ? { force: true } : undefined);
+      const opts: { force?: boolean; linearTransition?: LinearTransitionChoice } = {};
+      if (force) opts.force = true;
+      if (linearTransition && linearTransition !== "none") opts.linearTransition = linearTransition;
+      await api.archiveSession(sessionId, Object.keys(opts).length > 0 ? opts : undefined);
     } catch {
       // best-effort
     }
@@ -280,6 +309,19 @@ export function Sidebar() {
 
   const cancelArchive = useCallback(() => {
     setConfirmArchiveId(null);
+  }, []);
+
+  const handleArchiveModalConfirm = useCallback((choice: LinearTransitionChoice, force?: boolean) => {
+    if (archiveModalSessionId) {
+      doArchive(archiveModalSessionId, force, choice);
+      setArchiveModalSessionId(null);
+      setArchiveModalInfo(null);
+    }
+  }, [archiveModalSessionId, doArchive]);
+
+  const handleArchiveModalCancel = useCallback(() => {
+    setArchiveModalSessionId(null);
+    setArchiveModalInfo(null);
   }, []);
 
   const handleUnarchiveSession = useCallback(async (e: React.MouseEvent, sessionId: string) => {
@@ -650,6 +692,19 @@ export function Sidebar() {
             </div>
           </div>
         </div>
+      )}
+      {/* Archive Linear transition modal */}
+      {archiveModalSessionId && archiveModalInfo && (
+        <ArchiveLinearModal
+          issueIdentifier={archiveModalInfo.issue?.identifier || ""}
+          issueStateName={archiveModalInfo.issue?.stateName || ""}
+          isContainerized={archiveModalContainerized}
+          archiveTransitionConfigured={archiveModalInfo.archiveTransitionConfigured || false}
+          archiveTransitionStateName={archiveModalInfo.archiveTransitionStateName}
+          hasBacklogState={archiveModalInfo.hasBacklogState || false}
+          onConfirm={handleArchiveModalConfirm}
+          onCancel={handleArchiveModalCancel}
+        />
       )}
     </aside>
   );

@@ -376,10 +376,27 @@ export interface AppSettings {
   linearApiKeyConfigured: boolean;
   linearAutoTransition: boolean;
   linearAutoTransitionStateName: string;
+  linearArchiveTransition: boolean;
+  linearArchiveTransitionStateName: string;
   editorTabEnabled: boolean;
   aiValidationEnabled: boolean;
   aiValidationAutoApprove: boolean;
   aiValidationAutoDeny: boolean;
+}
+
+export interface ArchiveInfo {
+  hasLinkedIssue: boolean;
+  issueNotDone: boolean;
+  issue?: {
+    id: string;
+    identifier: string;
+    stateName: string;
+    stateType: string;
+    teamId: string;
+  };
+  hasBacklogState?: boolean;
+  archiveTransitionConfigured?: boolean;
+  archiveTransitionStateName?: string;
 }
 
 export interface LinearWorkflowState {
@@ -768,8 +785,11 @@ export const api = {
   relaunchSession: (sessionId: string) =>
     post(`/sessions/${encodeURIComponent(sessionId)}/relaunch`),
 
-  archiveSession: (sessionId: string, opts?: { force?: boolean }) =>
+  archiveSession: (sessionId: string, opts?: { force?: boolean; linearTransition?: "none" | "backlog" | "configured" }) =>
     post(`/sessions/${encodeURIComponent(sessionId)}/archive`, opts),
+
+  getArchiveInfo: (sessionId: string) =>
+    get<ArchiveInfo>(`/sessions/${encodeURIComponent(sessionId)}/archive-info`),
 
   unarchiveSession: (sessionId: string) =>
     post(`/sessions/${encodeURIComponent(sessionId)}/unarchive`),
@@ -834,6 +854,9 @@ export const api = {
     linearAutoTransition?: boolean;
     linearAutoTransitionStateId?: string;
     linearAutoTransitionStateName?: string;
+    linearArchiveTransition?: boolean;
+    linearArchiveTransitionStateId?: string;
+    linearArchiveTransitionStateName?: string;
     editorTabEnabled?: boolean;
   }) => put<AppSettings>("/settings", data),
   verifyAnthropicKey: (apiKey: string) =>

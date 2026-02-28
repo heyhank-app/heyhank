@@ -31,6 +31,15 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
   const [savingAutoTransition, setSavingAutoTransition] = useState(false);
   const [autoTransitionSaved, setAutoTransitionSaved] = useState(false);
 
+  // Archive transition state
+  const [archiveTransition, setArchiveTransition] = useState(false);
+  const [archiveSelectedStateId, setArchiveSelectedStateId] = useState("");
+  const [archiveSelectedStateName, setArchiveSelectedStateName] = useState("");
+  const [archiveSelectedTeamId, setArchiveSelectedTeamId] = useState("");
+  const [archiveWorkflowStates, setArchiveWorkflowStates] = useState<LinearWorkflowState[]>([]);
+  const [savingArchiveTransition, setSavingArchiveTransition] = useState(false);
+  const [archiveTransitionSaved, setArchiveTransitionSaved] = useState(false);
+
   async function refreshConnectionStatus() {
     setCheckingConnection(true);
     setError("");
@@ -76,6 +85,8 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
         setConfigured(settings.linearApiKeyConfigured);
         setAutoTransition(settings.linearAutoTransition);
         setSelectedStateName(settings.linearAutoTransitionStateName);
+        setArchiveTransition(settings.linearArchiveTransition);
+        setArchiveSelectedStateName(settings.linearArchiveTransitionStateName);
         if (settings.linearApiKeyConfigured) {
           refreshConnectionStatus().then(() => {
             fetchWorkflowStates().then(() => {
@@ -106,6 +117,31 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
       }
     }
   }, [workflowStates, selectedStateName]);
+
+  // Sync archive team states when archiveSelectedTeamId changes
+  useEffect(() => {
+    const team = teams.find((t) => t.id === archiveSelectedTeamId);
+    if (team) {
+      setArchiveWorkflowStates(team.states);
+    }
+  }, [teams, archiveSelectedTeamId]);
+
+  // Initialize archiveSelectedTeamId when teams load
+  useEffect(() => {
+    if (teams.length > 0 && !archiveSelectedTeamId) {
+      setArchiveSelectedTeamId(teams[0].id);
+    }
+  }, [teams, archiveSelectedTeamId]);
+
+  // Sync archiveSelectedStateId when archiveWorkflowStates or archiveSelectedStateName changes
+  useEffect(() => {
+    if (archiveWorkflowStates.length > 0 && archiveSelectedStateName) {
+      const match = archiveWorkflowStates.find((s) => s.name === archiveSelectedStateName);
+      if (match) {
+        setArchiveSelectedStateId(match.id);
+      }
+    }
+  }, [archiveWorkflowStates, archiveSelectedStateName]);
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
@@ -151,6 +187,9 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
       setAutoTransition(false);
       setSelectedStateId("");
       setSelectedStateName("");
+      setArchiveTransition(false);
+      setArchiveSelectedStateId("");
+      setArchiveSelectedStateName("");
       setConnectionNote("Linear disconnected.");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -174,6 +213,24 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingAutoTransition(false);
+    }
+  }
+
+  async function onSaveArchiveTransition() {
+    setSavingArchiveTransition(true);
+    setArchiveTransitionSaved(false);
+    try {
+      await api.updateSettings({
+        linearArchiveTransition: archiveTransition,
+        linearArchiveTransitionStateId: archiveSelectedStateId,
+        linearArchiveTransitionStateName: archiveSelectedStateName,
+      });
+      setArchiveTransitionSaved(true);
+      setTimeout(() => setArchiveTransitionSaved(false), 1800);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingArchiveTransition(false);
     }
   }
 
@@ -431,6 +488,116 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
                 }`}
               >
                 {savingAutoTransition ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Archive transition settings — only when connected */}
+        {connected && teams.length > 0 && (
+          <div className="mt-4 bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-4">
+            <h2 className="text-sm font-semibold text-cc-fg">On session archive</h2>
+            <p className="text-xs text-cc-muted">
+              When archiving a session linked to a Linear issue that is not done, optionally move it to a chosen status.
+            </p>
+
+            {/* Toggle */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={archiveTransition}
+                onClick={() => setArchiveTransition(!archiveTransition)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                  archiveTransition ? "bg-cc-primary" : "bg-cc-hover"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+                    archiveTransition ? "translate-x-4" : "translate-x-0"
+                  }`}
+                />
+              </button>
+              <span className="text-sm text-cc-fg">
+                {archiveTransition ? "Enabled" : "Disabled"}
+              </span>
+            </div>
+
+            {/* Team selector — only when multiple teams */}
+            {archiveTransition && teams.length > 1 && (
+              <div>
+                <label className="block text-sm font-medium mb-1.5" htmlFor="archive-transition-team">
+                  Team
+                </label>
+                <select
+                  id="archive-transition-team"
+                  value={archiveSelectedTeamId}
+                  onChange={(e) => {
+                    setArchiveSelectedTeamId(e.target.value);
+                    setArchiveSelectedStateId("");
+                    setArchiveSelectedStateName("");
+                  }}
+                  className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg focus:outline-none focus:border-cc-primary/60"
+                >
+                  {teams.map((team) => (
+                    <option key={team.id} value={team.id}>
+                      {team.name} ({team.key})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* State selector */}
+            {archiveTransition && (
+              <div>
+                <label className="block text-sm font-medium mb-1.5" htmlFor="archive-transition-state">
+                  Target status
+                </label>
+                {loadingStates ? (
+                  <p className="text-xs text-cc-muted">Loading workflow states...</p>
+                ) : archiveWorkflowStates.length === 0 ? (
+                  <p className="text-xs text-cc-muted">No workflow states found.</p>
+                ) : (
+                  <select
+                    id="archive-transition-state"
+                    value={archiveSelectedStateId}
+                    onChange={(e) => {
+                      const state = archiveWorkflowStates.find((s) => s.id === e.target.value);
+                      setArchiveSelectedStateId(e.target.value);
+                      setArchiveSelectedStateName(state?.name || "");
+                    }}
+                    className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg focus:outline-none focus:border-cc-primary/60"
+                  >
+                    <option value="">Select a status...</option>
+                    {archiveWorkflowStates.map((state) => (
+                      <option key={state.id} value={state.id}>
+                        {state.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+
+            {archiveTransitionSaved && (
+              <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
+                Archive transition settings saved.
+              </div>
+            )}
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={onSaveArchiveTransition}
+                disabled={savingArchiveTransition || (archiveTransition && !archiveSelectedStateId)}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  savingArchiveTransition || (archiveTransition && !archiveSelectedStateId)
+                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                    : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+                }`}
+              >
+                {savingArchiveTransition ? "Saving..." : "Save"}
               </button>
             </div>
           </div>

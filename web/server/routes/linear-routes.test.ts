@@ -7,6 +7,9 @@ const mockSettings = {
   linearAutoTransition: false,
   linearAutoTransitionStateId: "",
   linearAutoTransitionStateName: "",
+    linearArchiveTransition: false,
+    linearArchiveTransitionStateId: "",
+    linearArchiveTransitionStateName: "",
 };
 
 vi.mock("../settings-manager.js", () => ({
@@ -50,7 +53,7 @@ import { getSettings } from "../settings-manager.js";
 import { linearCache } from "../linear-cache.js";
 import * as sessionLinearIssues from "../session-linear-issues.js";
 import * as linearProjectManager from "../linear-project-manager.js";
-import { registerLinearRoutes } from "./linear-routes.js";
+import { registerLinearRoutes, transitionLinearIssue, fetchLinearTeamStates } from "./linear-routes.js";
 
 // ─── Test setup ─────────────────────────────────────────────────────────────
 
@@ -819,7 +822,9 @@ describe("GET /api/linear/states", () => {
     expect(json.teams[0].states[0].type).toBe("");
   });
 
-  it("returns 502 on Linear API error (covers lines 468-470)", async () => {
+  it("returns 502 when fetchLinearTeamStates returns empty (Linear API error)", async () => {
+    // fetchLinearTeamStates catches errors internally and returns [].
+    // When it returns empty, the route returns a generic 502.
     mockFetch().mockResolvedValue(
       linearError("Rate limited"),
     );
@@ -827,16 +832,16 @@ describe("GET /api/linear/states", () => {
     const res = await app.request("/api/linear/states");
     expect(res.status).toBe(502);
     const json = await res.json();
-    expect(json.error).toBe("Rate limited");
+    expect(json.error).toBe("Failed to fetch Linear workflow states");
   });
 
-  it("returns 502 on network error", async () => {
+  it("returns 502 when fetchLinearTeamStates returns empty (network error)", async () => {
     mockFetch().mockRejectedValue(new Error("timeout"));
 
     const res = await app.request("/api/linear/states");
     expect(res.status).toBe(502);
     const json = await res.json();
-    expect(json.error).toMatch(/Failed to connect to Linear/);
+    expect(json.error).toBe("Failed to fetch Linear workflow states");
   });
 });
 
@@ -1379,5 +1384,102 @@ describe("linearIssueStateCategory (via issue filtering)", () => {
     // triage (0) before started (1)
     expect(json.issues[0].identifier).toBe("B-1");
     expect(json.issues[1].identifier).toBe("S-1");
+  });
+});
+
+// =============================================================================
+// transitionLinearIssue helper (exported function)
+// =============================================================================
+
+describe("transitionLinearIssue helper", () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("returns success with issue details on successful transition", async () => {
+    mockFetch().mockResolvedValue(
+      linearOk({
+        issueUpdate: {
+          success: true,
+          issue: {
+            id: "issue-1",
+            identifier: "ENG-42",
+            state: { name: "Backlog", type: "backlog" },
+          },
+        },
+      }),
+    );
+
+    const result = await transitionLinearIssue("issue-1", "state-backlog", "lin_api_key");
+    expect(result.ok).toBe(true);
+    expect(result.issue).toEqual({
+      id: "issue-1",
+      identifier: "ENG-42",
+      stateName: "Backlog",
+      stateType: "backlog",
+    });
+    expect(linearCache.invalidate).toHaveBeenCalledWith("issue:issue-1");
+  });
+
+  it("returns error when Linear returns GraphQL errors", async () => {
+    mockFetch().mockResolvedValue(linearError("State not found"));
+
+    const result = await transitionLinearIssue("issue-1", "bad-state", "lin_api_key");
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("State not found");
+  });
+
+  it("returns error when fetch throws", async () => {
+    mockFetch().mockRejectedValue(new Error("Network error"));
+
+    const result = await transitionLinearIssue("issue-1", "state-1", "lin_api_key");
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Network error/);
+  });
+});
+
+// =============================================================================
+// fetchLinearTeamStates helper (exported function)
+// =============================================================================
+
+describe("fetchLinearTeamStates helper", () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("returns team states from Linear API", async () => {
+    // linearCache.getOrFetch executes the fetcher (mocked above)
+    mockFetch().mockResolvedValue(
+      linearOk({
+        teams: {
+          nodes: [
+            {
+              id: "team-1",
+              key: "ENG",
+              name: "Engineering",
+              states: {
+                nodes: [
+                  { id: "s1", name: "Backlog", type: "backlog" },
+                  { id: "s2", name: "In Progress", type: "started" },
+                ],
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    const teams = await fetchLinearTeamStates("lin_api_key");
+    expect(teams).toHaveLength(1);
+    expect(teams[0].id).toBe("team-1");
+    expect(teams[0].states).toHaveLength(2);
+    expect(teams[0].states[0].type).toBe("backlog");
+  });
+
+  it("returns empty array on fetch error", async () => {
+    mockFetch().mockRejectedValue(new Error("Network error"));
+
+    const teams = await fetchLinearTeamStates("lin_api_key");
+    expect(teams).toEqual([]);
   });
 });
