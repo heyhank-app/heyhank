@@ -1777,6 +1777,37 @@ describe("saved prompts API", () => {
     });
   });
 
+  it("createPrompt includes projectPaths for multi-folder targeting", async () => {
+    // Validates projectPaths array is sent in the POST body.
+    mockFetch.mockResolvedValueOnce(mockResponse({ ...mockPrompt, scope: "project", projectPaths: ["/repo-a", "/repo-b"] }));
+
+    await api.createPrompt({
+      name: "Fix tests",
+      content: "Please fix the failing tests",
+      scope: "project",
+      projectPaths: ["/repo-a", "/repo-b"],
+    });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(JSON.parse(opts.body)).toEqual({
+      name: "Fix tests",
+      content: "Please fix the failing tests",
+      scope: "project",
+      projectPaths: ["/repo-a", "/repo-b"],
+    });
+  });
+
+  it("updatePrompt sends scope and projectPaths", async () => {
+    // Validates scope and projectPaths updates are included in PUT body.
+    const updated = { ...mockPrompt, scope: "project" as const, projectPaths: ["/repo"] };
+    mockFetch.mockResolvedValueOnce(mockResponse(updated));
+
+    await api.updatePrompt("p1", { scope: "project", projectPaths: ["/repo"] });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(JSON.parse(opts.body)).toEqual({ scope: "project", projectPaths: ["/repo"] });
+  });
+
   it("updatePrompt sends PUT to /api/prompts/:id", async () => {
     const updated = { ...mockPrompt, name: "Updated name" };
     mockFetch.mockResolvedValueOnce(mockResponse(updated));

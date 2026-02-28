@@ -24,6 +24,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
   const [savePromptOpen, setSavePromptOpen] = useState(false);
   const [savePromptName, setSavePromptName] = useState("");
+  const [savePromptScope, setSavePromptScope] = useState<"global" | "project">("global");
   const [savePromptError, setSavePromptError] = useState<string | null>(null);
   const [caretPos, setCaretPos] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -305,16 +306,24 @@ export function Composer({ sessionId }: { sessionId: string }) {
     const content = text.trim();
     const name = savePromptName.trim();
     if (!content || !name) return;
-    const payload: { name: string; content: string; scope: "global" | "project"; cwd?: string } = {
+    if (savePromptScope === "project" && !sessionData?.cwd) {
+      setSavePromptError("No project folder available for this session");
+      return;
+    }
+    const payload: { name: string; content: string; scope: "global" | "project"; projectPaths?: string[] } = {
       name,
       content,
-      scope: "global",
+      scope: savePromptScope,
     };
+    if (savePromptScope === "project") {
+      payload.projectPaths = [sessionData!.cwd!];
+    }
     try {
       await api.createPrompt(payload);
       await mention.refreshPrompts();
       setSavePromptOpen(false);
       setSavePromptName("");
+      setSavePromptScope("global");
       setSavePromptError(null);
     } catch (error) {
       const message = error instanceof Error && error.message ? error.message : "Could not save prompt.";
@@ -431,7 +440,37 @@ export function Composer({ sessionId }: { sessionId: string }) {
                 aria-label="Prompt title"
                 className="w-full px-2 py-1.5 text-sm bg-cc-input-bg border border-cc-border rounded-md text-cc-fg focus:outline-none focus:border-cc-primary/40"
               />
-              <div className="text-[11px] text-cc-muted">Scope: global • stored locally</div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  aria-pressed={savePromptScope === "global"}
+                  onClick={() => setSavePromptScope("global")}
+                  className={`px-2 py-0.5 text-[11px] rounded border transition-colors cursor-pointer ${
+                    savePromptScope === "global"
+                      ? "border-cc-primary/40 text-cc-primary bg-cc-primary/8"
+                      : "border-cc-border text-cc-muted hover:text-cc-fg"
+                  }`}
+                >
+                  Global
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={savePromptScope === "project"}
+                  onClick={() => setSavePromptScope("project")}
+                  className={`px-2 py-0.5 text-[11px] rounded border transition-colors cursor-pointer ${
+                    savePromptScope === "project"
+                      ? "border-cc-primary/40 text-cc-primary bg-cc-primary/8"
+                      : "border-cc-border text-cc-muted hover:text-cc-fg"
+                  }`}
+                >
+                  This project
+                </button>
+              </div>
+              {savePromptScope === "project" && sessionData?.cwd && (
+                <div className="text-[10px] text-cc-muted font-mono-code truncate" title={sessionData.cwd}>
+                  {sessionData.cwd}
+                </div>
+              )}
               {savePromptError ? (
                 <div className="text-[11px] text-cc-error">{savePromptError}</div>
               ) : null}
@@ -439,6 +478,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
                 <button
                   onClick={() => {
                     setSavePromptOpen(false);
+                    setSavePromptScope("global");
                     setSavePromptError(null);
                   }}
                   className="px-2 py-1 text-[11px] rounded-md border border-cc-border text-cc-muted hover:text-cc-fg cursor-pointer"

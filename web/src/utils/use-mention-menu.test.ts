@@ -112,7 +112,7 @@ describe("useMentionMenu", () => {
       useMentionMenu({ text: "", caretPos: 0, cwd: "/repo" }),
     );
     await act(async () => {});
-    expect(mockListPrompts).toHaveBeenCalledWith("/repo", "global");
+    expect(mockListPrompts).toHaveBeenCalledWith("/repo");
   });
 
   it("reloads prompts when cwd changes", async () => {
@@ -121,11 +121,11 @@ describe("useMentionMenu", () => {
       { initialProps: { text: "", caretPos: 0, cwd: "/repo-a" } },
     );
     await act(async () => {});
-    expect(mockListPrompts).toHaveBeenCalledWith("/repo-a", "global");
+    expect(mockListPrompts).toHaveBeenCalledWith("/repo-a");
 
     rerender({ text: "", caretPos: 0, cwd: "/repo-b" });
     await act(async () => {});
-    expect(mockListPrompts).toHaveBeenCalledWith("/repo-b", "global");
+    expect(mockListPrompts).toHaveBeenCalledWith("/repo-b");
   });
 
   it("filters out prompts with empty names", async () => {

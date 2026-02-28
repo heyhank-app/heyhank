@@ -1830,7 +1830,7 @@ describe("Saved prompts API", () => {
     expect(promptManager.listPrompts).toHaveBeenCalledWith({ cwd: "/repo", scope: undefined });
   });
 
-  it("creates a prompt", async () => {
+  it("creates a prompt with legacy cwd", async () => {
     // Confirms payload mapping for prompt creation including project cwd.
     const created = {
       id: "p1",
@@ -1838,6 +1838,7 @@ describe("Saved prompts API", () => {
       content: "Review this PR",
       scope: "project" as const,
       projectPath: "/repo",
+      projectPaths: ["/repo"],
       createdAt: 1,
       updatedAt: 1,
     };
@@ -1860,6 +1861,42 @@ describe("Saved prompts API", () => {
       "Review this PR",
       "project",
       "/repo",
+      undefined,
+    );
+  });
+
+  it("creates a prompt with projectPaths", async () => {
+    // Confirms projectPaths array is forwarded to prompt manager.
+    const created = {
+      id: "p2",
+      name: "Multi",
+      content: "Multi-project prompt",
+      scope: "project" as const,
+      projectPath: "/repo-a",
+      projectPaths: ["/repo-a", "/repo-b"],
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    vi.mocked(promptManager.createPrompt).mockReturnValue(created);
+
+    const res = await app.request("/api/prompts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Multi",
+        content: "Multi-project prompt",
+        scope: "project",
+        projectPaths: ["/repo-a", "/repo-b"],
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(promptManager.createPrompt).toHaveBeenCalledWith(
+      "Multi",
+      "Multi-project prompt",
+      "project",
+      undefined,
+      ["/repo-a", "/repo-b"],
     );
   });
 
@@ -1883,6 +1920,35 @@ describe("Saved prompts API", () => {
     expect(promptManager.updatePrompt).toHaveBeenCalledWith("p1", {
       name: "Updated",
       content: "Updated content",
+      scope: undefined,
+      projectPaths: undefined,
+    });
+  });
+
+  it("updates a prompt scope and projectPaths", async () => {
+    // Confirms scope and projectPaths updates are forwarded.
+    vi.mocked(promptManager.updatePrompt).mockReturnValue({
+      id: "p1",
+      name: "Updated",
+      content: "Updated content",
+      scope: "project",
+      projectPath: "/repo",
+      projectPaths: ["/repo"],
+      createdAt: 1,
+      updatedAt: 2,
+    });
+
+    const res = await app.request("/api/prompts/p1", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: "project", projectPaths: ["/repo"] }),
+    });
+    expect(res.status).toBe(200);
+    expect(promptManager.updatePrompt).toHaveBeenCalledWith("p1", {
+      name: undefined,
+      content: undefined,
+      scope: "project",
+      projectPaths: ["/repo"],
     });
   });
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type SavedPrompt } from "../api.js";
 import { useStore } from "../store.js";
 import { navigateHome, navigateToSession } from "../utils/routing.js";
+import { FolderPicker } from "./FolderPicker.js";
 
 interface PromptsPageProps {
   embedded?: boolean;
@@ -14,9 +15,15 @@ export function PromptsPage({ embedded = false }: PromptsPageProps) {
   const [error, setError] = useState("");
   const [name, setName] = useState("");
   const [content, setContent] = useState("");
+  const [createScope, setCreateScope] = useState<"global" | "project">("global");
+  const [createFolders, setCreateFolders] = useState<string[]>([]);
+  const [showFolderPicker, setShowFolderPicker] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editContent, setEditContent] = useState("");
+  const [editScope, setEditScope] = useState<"global" | "project">("global");
+  const [editFolders, setEditFolders] = useState<string[]>([]);
+  const [showEditFolderPicker, setShowEditFolderPicker] = useState(false);
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
 
@@ -43,7 +50,7 @@ export function PromptsPage({ embedded = false }: PromptsPageProps) {
     setLoading(true);
     setError("");
     try {
-      const items = await api.listPrompts(cwd || undefined, "global");
+      const items = await api.listPrompts(cwd || undefined);
       setPrompts(items);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -59,6 +66,10 @@ export function PromptsPage({ embedded = false }: PromptsPageProps) {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim() || !content.trim()) return;
+    if (createScope === "project" && createFolders.length === 0) {
+      setError("Select at least one project folder");
+      return;
+    }
 
     setSaving(true);
     setError("");
@@ -66,10 +77,13 @@ export function PromptsPage({ embedded = false }: PromptsPageProps) {
       await api.createPrompt({
         name: name.trim(),
         content: content.trim(),
-        scope: "global",
+        scope: createScope,
+        projectPaths: createScope === "project" ? createFolders : undefined,
       });
       setName("");
       setContent("");
+      setCreateScope("global");
+      setCreateFolders([]);
       setShowCreate(false);
       await loadPrompts();
     } catch (e: unknown) {
@@ -90,14 +104,22 @@ export function PromptsPage({ embedded = false }: PromptsPageProps) {
 
   async function handleSaveEdit() {
     if (!editingId || !editName.trim() || !editContent.trim()) return;
+    if (editScope === "project" && editFolders.length === 0) {
+      setError("Select at least one project folder");
+      return;
+    }
     try {
       await api.updatePrompt(editingId, {
         name: editName.trim(),
         content: editContent.trim(),
+        scope: editScope,
+        projectPaths: editScope === "project" ? editFolders : undefined,
       });
       setEditingId(null);
       setEditName("");
       setEditContent("");
+      setEditScope("global");
+      setEditFolders([]);
       await loadPrompts();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -194,6 +216,20 @@ export function PromptsPage({ embedded = false }: PromptsPageProps) {
               />
             </div>
 
+            {/* Scope selector */}
+            <ScopeSelector
+              scope={createScope}
+              onScopeChange={(s) => {
+                setCreateScope(s);
+                if (s === "project" && createFolders.length === 0 && cwd) {
+                  setCreateFolders([cwd]);
+                }
+              }}
+              folders={createFolders}
+              onRemoveFolder={(path) => setCreateFolders((f) => f.filter((p) => p !== path))}
+              onAddFolder={() => setShowFolderPicker(true)}
+            />
+
             {error && (
               <div className="px-3 py-2 rounded-lg bg-cc-error/10 text-xs text-cc-error">
                 {error}
@@ -222,8 +258,6 @@ export function PromptsPage({ embedded = false }: PromptsPageProps) {
         {/* Stats */}
         <div className="flex items-center gap-2 mb-3 text-[12px] text-cc-muted">
           <span>{visiblePrompts === totalPrompts ? `${totalPrompts} prompt${totalPrompts !== 1 ? "s" : ""}` : `${visiblePrompts} of ${totalPrompts}`}</span>
-          <span className="text-cc-border">·</span>
-          <span>global scope</span>
         </div>
 
         {/* Prompt list */}
@@ -242,17 +276,32 @@ export function PromptsPage({ embedded = false }: PromptsPageProps) {
                 isEditing={editingId === prompt.id}
                 editName={editName}
                 editContent={editContent}
+                editScope={editScope}
+                editFolders={editFolders}
+                cwd={cwd}
                 onEditNameChange={setEditName}
                 onEditContentChange={setEditContent}
+                onEditScopeChange={(s) => {
+                  setEditScope(s);
+                  if (s === "project" && editFolders.length === 0 && cwd) {
+                    setEditFolders([cwd]);
+                  }
+                }}
+                onEditRemoveFolder={(path) => setEditFolders((f) => f.filter((p) => p !== path))}
+                onEditAddFolder={() => setShowEditFolderPicker(true)}
                 onStartEdit={() => {
                   setEditingId(prompt.id);
                   setEditName(prompt.name);
                   setEditContent(prompt.content);
+                  setEditScope(prompt.scope);
+                  setEditFolders(prompt.projectPaths ?? (prompt.projectPath ? [prompt.projectPath] : []));
                 }}
                 onCancelEdit={() => {
                   setEditingId(null);
                   setEditName("");
                   setEditContent("");
+                  setEditScope("global");
+                  setEditFolders([]);
                 }}
                 onSaveEdit={() => void handleSaveEdit()}
                 onDelete={() => void handleDelete(prompt.id)}
@@ -261,7 +310,133 @@ export function PromptsPage({ embedded = false }: PromptsPageProps) {
           </div>
         )}
       </div>
+
+      {/* Folder picker for create */}
+      {showFolderPicker && (
+        <FolderPicker
+          initialPath={cwd || "/"}
+          onSelect={(path) => {
+            setCreateFolders((prev) => prev.includes(path) ? prev : [...prev, path]);
+            setShowFolderPicker(false);
+          }}
+          onClose={() => setShowFolderPicker(false)}
+        />
+      )}
+
+      {/* Folder picker for edit */}
+      {showEditFolderPicker && (
+        <FolderPicker
+          initialPath={cwd || "/"}
+          onSelect={(path) => {
+            setEditFolders((prev) => prev.includes(path) ? prev : [...prev, path]);
+            setShowEditFolderPicker(false);
+          }}
+          onClose={() => setShowEditFolderPicker(false)}
+        />
+      )}
     </div>
+  );
+}
+
+/* ─── Scope Selector ─────────────────────────────────────────────── */
+
+interface ScopeSelectorProps {
+  scope: "global" | "project";
+  onScopeChange: (scope: "global" | "project") => void;
+  folders: string[];
+  onRemoveFolder: (path: string) => void;
+  onAddFolder: () => void;
+}
+
+function ScopeSelector({ scope, onScopeChange, folders, onRemoveFolder, onAddFolder }: ScopeSelectorProps) {
+  return (
+    <div className="space-y-2">
+      <label className="block text-xs font-medium text-cc-muted">Scope</label>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          aria-pressed={scope === "global"}
+          onClick={() => onScopeChange("global")}
+          className={`px-3 py-1.5 text-xs rounded-md border transition-colors cursor-pointer ${
+            scope === "global"
+              ? "border-cc-primary/40 text-cc-primary bg-cc-primary/8"
+              : "border-cc-border text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+          }`}
+        >
+          Global
+        </button>
+        <button
+          type="button"
+          aria-pressed={scope === "project"}
+          onClick={() => onScopeChange("project")}
+          className={`px-3 py-1.5 text-xs rounded-md border transition-colors cursor-pointer ${
+            scope === "project"
+              ? "border-cc-primary/40 text-cc-primary bg-cc-primary/8"
+              : "border-cc-border text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+          }`}
+        >
+          Project folders
+        </button>
+      </div>
+
+      {scope === "project" && (
+        <div className="space-y-1.5">
+          {folders.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {folders.map((folder) => (
+                <span
+                  key={folder}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-cc-hover text-xs font-mono-code text-cc-fg"
+                >
+                  <span className="truncate max-w-[200px]" title={folder}>
+                    {folder.split("/").pop() || folder}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onRemoveFolder(folder)}
+                    className="text-cc-muted hover:text-cc-error cursor-pointer shrink-0"
+                    aria-label={`Remove folder ${folder}`}
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
+                      <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={onAddFolder}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs text-cc-muted hover:text-cc-fg hover:bg-cc-hover rounded-md border border-dashed border-cc-border transition-colors cursor-pointer"
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3">
+              <path d="M8 3v10M3 8h10" strokeLinecap="round" />
+            </svg>
+            Add folder
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Scope Badge ────────────────────────────────────────────────── */
+
+function ScopeBadge({ prompt }: { prompt: SavedPrompt }) {
+  if (prompt.scope === "global") {
+    return <span className="text-[10px] uppercase tracking-wider text-cc-muted opacity-60">global</span>;
+  }
+  const paths = prompt.projectPaths ?? (prompt.projectPath ? [prompt.projectPath] : []);
+  const firstDir = paths[0]?.split("/").pop() || paths[0] || "";
+  const extra = paths.length > 1 ? ` +${paths.length - 1}` : "";
+  return (
+    <span
+      className="text-[10px] uppercase tracking-wider text-cc-primary/70"
+      title={paths.join("\n")}
+    >
+      {firstDir}{extra}
+    </span>
   );
 }
 
@@ -272,8 +447,14 @@ interface PromptRowProps {
   isEditing: boolean;
   editName: string;
   editContent: string;
+  editScope: "global" | "project";
+  editFolders: string[];
+  cwd: string;
   onEditNameChange: (v: string) => void;
   onEditContentChange: (v: string) => void;
+  onEditScopeChange: (s: "global" | "project") => void;
+  onEditRemoveFolder: (path: string) => void;
+  onEditAddFolder: () => void;
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onSaveEdit: () => void;
@@ -285,8 +466,13 @@ function PromptRow({
   isEditing,
   editName,
   editContent,
+  editScope,
+  editFolders,
   onEditNameChange,
   onEditContentChange,
+  onEditScopeChange,
+  onEditRemoveFolder,
+  onEditAddFolder,
   onStartEdit,
   onCancelEdit,
   onSaveEdit,
@@ -310,6 +496,15 @@ function PromptRow({
           rows={4}
           className="w-full px-3 py-2.5 text-sm bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 resize-y transition-shadow"
         />
+
+        <ScopeSelector
+          scope={editScope}
+          onScopeChange={onEditScopeChange}
+          folders={editFolders}
+          onRemoveFolder={onEditRemoveFolder}
+          onAddFolder={onEditAddFolder}
+        />
+
         <div className="flex justify-end gap-2">
           <button
             onClick={onCancelEdit}
@@ -346,7 +541,7 @@ function PromptRow({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-cc-fg truncate">{prompt.name}</span>
-          <span className="text-[10px] uppercase tracking-wider text-cc-muted opacity-60">{prompt.scope}</span>
+          <ScopeBadge prompt={prompt} />
         </div>
         <p className="mt-0.5 text-xs text-cc-muted line-clamp-2 leading-relaxed">{prompt.content}</p>
       </div>
@@ -376,4 +571,3 @@ function PromptRow({
     </div>
   );
 }
-

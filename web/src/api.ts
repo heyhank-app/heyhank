@@ -606,6 +606,7 @@ export interface SavedPrompt {
   content: string;
   scope: "global" | "project";
   projectPath?: string;
+  projectPaths?: string[];
   createdAt: number;
   updatedAt: number;
 }
@@ -1101,9 +1102,9 @@ export const api = {
     const query = params.toString();
     return get<SavedPrompt[]>(`/prompts${query ? `?${query}` : ""}`);
   },
-  createPrompt: (data: { name: string; content: string; scope: "global" | "project"; cwd?: string }) =>
+  createPrompt: (data: { name: string; content: string; scope: "global" | "project"; cwd?: string; projectPaths?: string[] }) =>
     post<SavedPrompt>("/prompts", data),
-  updatePrompt: (id: string, data: { name?: string; content?: string }) =>
+  updatePrompt: (id: string, data: { name?: string; content?: string; scope?: "global" | "project"; projectPaths?: string[] }) =>
     put<SavedPrompt>(`/prompts/${encodeURIComponent(id)}`, data),
   deletePrompt: (id: string) =>
     del<{ ok: boolean }>(`/prompts/${encodeURIComponent(id)}`),

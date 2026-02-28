@@ -1,6 +1,11 @@
 import type { Hono } from "hono";
 import * as promptManager from "../prompt-manager.js";
 
+function sanitizePaths(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((p): p is string => typeof p === "string");
+}
+
 export function registerPromptRoutes(api: Hono): void {
   api.get("/prompts", (c) => {
     try {
@@ -29,7 +34,8 @@ export function registerPromptRoutes(api: Hono): void {
         String(body.title || body.name || ""),
         String(body.content || ""),
         body.scope,
-        body.cwd,
+        body.cwd ?? body.projectPath,
+        sanitizePaths(body.projectPaths),
       );
       return c.json(prompt, 201);
     } catch (e: unknown) {
@@ -43,6 +49,8 @@ export function registerPromptRoutes(api: Hono): void {
       const prompt = promptManager.updatePrompt(c.req.param("id"), {
         name: body.title ?? body.name,
         content: body.content,
+        scope: body.scope,
+        projectPaths: sanitizePaths(body.projectPaths),
       });
       if (!prompt) return c.json({ error: "Prompt not found" }, 404);
       return c.json(prompt);

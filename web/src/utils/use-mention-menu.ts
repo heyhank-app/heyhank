@@ -24,7 +24,7 @@ export function useMentionMenu({ text, caretPos, cwd, enabled = true }: UseMenti
   const refreshPrompts = useCallback(async () => {
     setPromptsLoading(true);
     try {
-      const prompts = await api.listPrompts(cwd, "global");
+      const prompts = await api.listPrompts(cwd);
       setSavedPrompts(prompts.filter((p) => !!p.name.trim()));
     } catch {
       setSavedPrompts([]);

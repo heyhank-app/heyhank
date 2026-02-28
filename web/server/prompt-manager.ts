@@ -10,6 +10,7 @@ export interface SavedPrompt {
   content: string;
   scope: PromptScope;
   projectPath?: string;
+  projectPaths?: string[];
   createdAt: number;
   updatedAt: number;
 }
@@ -17,6 +18,8 @@ export interface SavedPrompt {
 export interface PromptUpdateFields {
   name?: string;
   content?: string;
+  scope?: PromptScope;
+  projectPaths?: string[];
 }
 
 const COMPANION_DIR = join(homedir(), ".companion");
@@ -63,10 +66,25 @@ function sortPrompts(prompts: SavedPrompt[]): SavedPrompt[] {
 
 function visibleForCwd(prompt: SavedPrompt, cwd: string): boolean {
   if (prompt.scope === "global") return true;
-  if (!prompt.projectPath) return false;
+  const paths = resolveProjectPaths(prompt);
+  if (paths.length === 0) return false;
   const normalizedCwd = normalizePath(cwd);
-  const normalizedProject = normalizePath(prompt.projectPath);
-  return normalizedCwd === normalizedProject || normalizedCwd.startsWith(`${normalizedProject}/`);
+  return paths.some((p) => {
+    const normalizedProject = normalizePath(p);
+    return normalizedCwd === normalizedProject || normalizedCwd.startsWith(`${normalizedProject}/`);
+  });
+}
+
+/** Merges legacy projectPath and projectPaths into a single deduplicated list. */
+function resolveProjectPaths(prompt: SavedPrompt): string[] {
+  const paths: string[] = [];
+  if (prompt.projectPaths && prompt.projectPaths.length > 0) {
+    paths.push(...prompt.projectPaths);
+  }
+  if (prompt.projectPath && !paths.some((p) => normalizePath(p) === normalizePath(prompt.projectPath!))) {
+    paths.push(prompt.projectPath);
+  }
+  return paths;
 }
 
 export function listPrompts(opts?: { cwd?: string; scope?: "global" | "project" | "all" }): SavedPrompt[] {
@@ -92,13 +110,19 @@ export function createPrompt(
   content: string,
   scope: PromptScope,
   projectPath?: string,
+  projectPaths?: string[],
 ): SavedPrompt {
   const cleanName = name?.trim();
   const cleanContent = content?.trim();
   if (!cleanName) throw new Error("Prompt name is required");
   if (!cleanContent) throw new Error("Prompt content is required");
   if (scope !== "global" && scope !== "project") throw new Error("Invalid prompt scope");
-  if (scope === "project" && !projectPath?.trim()) throw new Error("Project path is required for project prompts");
+
+  // Merge projectPaths and legacy projectPath into a single deduplicated list
+  const mergedPaths = dedupeAndNormalizePaths(projectPaths, projectPath);
+  if (scope === "project" && mergedPaths.length === 0) {
+    throw new Error("Project path is required for project prompts");
+  }
 
   const prompts = loadPrompts();
   const now = Date.now();
@@ -107,13 +131,30 @@ export function createPrompt(
     name: cleanName,
     content: cleanContent,
     scope,
-    projectPath: scope === "project" ? normalizePath(projectPath!) : undefined,
+    projectPath: scope === "project" ? mergedPaths[0] : undefined,
+    projectPaths: scope === "project" ? mergedPaths : undefined,
     createdAt: now,
     updatedAt: now,
   };
   prompts.push(prompt);
   savePrompts(prompts);
   return prompt;
+}
+
+function dedupeAndNormalizePaths(paths?: string[], legacyPath?: string): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  const all = [...(paths ?? []), ...(legacyPath?.trim() ? [legacyPath] : [])];
+  for (const p of all) {
+    const trimmed = p.trim();
+    if (!trimmed) continue;
+    const normalized = normalizePath(trimmed);
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      result.push(normalized);
+    }
+  }
+  return result;
 }
 
 export function updatePrompt(id: string, updates: PromptUpdateFields): SavedPrompt | null {
@@ -128,10 +169,33 @@ export function updatePrompt(id: string, updates: PromptUpdateFields): SavedProm
     throw new Error("Prompt content cannot be empty");
   }
 
+  const newScope = updates.scope ?? prompts[index].scope;
+  if (updates.scope !== undefined && updates.scope !== "global" && updates.scope !== "project") {
+    throw new Error("Invalid prompt scope");
+  }
+
+  let newProjectPaths = prompts[index].projectPaths;
+  let newProjectPath = prompts[index].projectPath;
+  if (updates.projectPaths !== undefined) {
+    const normalized = dedupeAndNormalizePaths(updates.projectPaths);
+    newProjectPaths = normalized.length > 0 ? normalized : undefined;
+    newProjectPath = normalized.length > 0 ? normalized[0] : undefined;
+  }
+  if (newScope === "project" && (!newProjectPaths || newProjectPaths.length === 0)) {
+    throw new Error("Project path is required for project prompts");
+  }
+  if (newScope === "global") {
+    newProjectPaths = undefined;
+    newProjectPath = undefined;
+  }
+
   const updated: SavedPrompt = {
     ...prompts[index],
     name: updates.name !== undefined ? updates.name.trim() : prompts[index].name,
     content: updates.content !== undefined ? updates.content.trim() : prompts[index].content,
+    scope: newScope,
+    projectPath: newProjectPath,
+    projectPaths: newProjectPaths,
     updatedAt: Date.now(),
   };
   prompts[index] = updated;
