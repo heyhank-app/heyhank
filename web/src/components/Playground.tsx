@@ -1104,6 +1104,7 @@ export function Playground() {
                   isServiceMode: true,
                   updateInProgress: false,
                   lastChecked: Date.now(),
+                  channel: "stable",
                 }}
               />
             </Card>
@@ -1116,6 +1117,7 @@ export function Playground() {
                   isServiceMode: false,
                   updateInProgress: false,
                   lastChecked: Date.now(),
+                  channel: "stable",
                 }}
               />
             </Card>
@@ -1128,6 +1130,20 @@ export function Playground() {
                   isServiceMode: true,
                   updateInProgress: true,
                   lastChecked: Date.now(),
+                  channel: "stable",
+                }}
+              />
+            </Card>
+            <Card label="Prerelease channel update">
+              <PlaygroundUpdateBanner
+                updateInfo={{
+                  currentVersion: "0.22.1",
+                  latestVersion: "0.23.0-preview.20260228120000.abc1234",
+                  updateAvailable: true,
+                  isServiceMode: true,
+                  updateInProgress: false,
+                  lastChecked: Date.now(),
+                  channel: "prerelease",
                 }}
               />
             </Card>

@@ -9,6 +9,8 @@ import { homedir } from "node:os";
 
 export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4.6";
 
+export type UpdateChannel = "stable" | "prerelease";
+
 export interface CompanionSettings {
   anthropicApiKey: string;
   anthropicModel: string;
@@ -23,6 +25,7 @@ export interface CompanionSettings {
   aiValidationEnabled: boolean;
   aiValidationAutoApprove: boolean;
   aiValidationAutoDeny: boolean;
+  updateChannel: UpdateChannel;
   updatedAt: number;
 }
 
@@ -44,6 +47,7 @@ let settings: CompanionSettings = {
   aiValidationEnabled: false,
   aiValidationAutoApprove: true,
   aiValidationAutoDeny: true,
+  updateChannel: "stable",
   updatedAt: 0,
 };
 
@@ -65,6 +69,7 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
     aiValidationEnabled: typeof raw?.aiValidationEnabled === "boolean" ? raw.aiValidationEnabled : false,
     aiValidationAutoApprove: typeof raw?.aiValidationAutoApprove === "boolean" ? raw.aiValidationAutoApprove : true,
     aiValidationAutoDeny: typeof raw?.aiValidationAutoDeny === "boolean" ? raw.aiValidationAutoDeny : true,
+    updateChannel: raw?.updateChannel === "prerelease" ? "prerelease" : "stable",
     updatedAt: typeof raw?.updatedAt === "number" ? raw.updatedAt : 0,
   };
 }
@@ -93,7 +98,7 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "editorTabEnabled" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny">>,
+  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "editorTabEnabled" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "updateChannel">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
@@ -110,6 +115,7 @@ export function updateSettings(
     aiValidationEnabled: patch.aiValidationEnabled ?? settings.aiValidationEnabled,
     aiValidationAutoApprove: patch.aiValidationAutoApprove ?? settings.aiValidationAutoApprove,
     aiValidationAutoDeny: patch.aiValidationAutoDeny ?? settings.aiValidationAutoDeny,
+    updateChannel: patch.updateChannel ?? settings.updateChannel,
     updatedAt: Date.now(),
   });
   persist();

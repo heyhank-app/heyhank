@@ -107,6 +107,7 @@ beforeEach(() => {
     linearAutoTransition: false,
     linearAutoTransitionStateName: "",
     editorTabEnabled: false,
+    updateChannel: "stable",
   });
   mockApi.updateSettings.mockResolvedValue({
     anthropicApiKeyConfigured: true,
@@ -115,6 +116,7 @@ beforeEach(() => {
     linearAutoTransition: false,
     linearAutoTransitionStateName: "",
     editorTabEnabled: false,
+    updateChannel: "stable",
   });
   mockApi.forceCheckForUpdate.mockResolvedValue({
     currentVersion: "0.22.1",
@@ -123,6 +125,7 @@ beforeEach(() => {
     isServiceMode: false,
     updateInProgress: false,
     lastChecked: Date.now(),
+    channel: "stable",
   });
   mockApi.triggerUpdate.mockResolvedValue({
     ok: true,
@@ -171,6 +174,7 @@ describe("SettingsPage", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      updateChannel: "stable",
     });
 
     render(<SettingsPage />);
@@ -391,6 +395,7 @@ describe("SettingsPage", () => {
       isServiceMode: true,
       updateInProgress: false,
       lastChecked: Date.now(),
+      channel: "stable",
     });
 
     render(<SettingsPage />);
@@ -700,6 +705,7 @@ describe("SettingsPage", () => {
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
       editorTabEnabled: false,
+      updateChannel: "stable",
     });
 
     render(<SettingsPage />);
@@ -753,6 +759,7 @@ describe("SettingsPage", () => {
       aiValidationEnabled: true,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      updateChannel: "stable",
     });
 
     render(<SettingsPage />);
@@ -775,6 +782,7 @@ describe("SettingsPage", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      updateChannel: "stable",
     });
 
     render(<SettingsPage />);
@@ -797,6 +805,7 @@ describe("SettingsPage", () => {
       aiValidationEnabled: true,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      updateChannel: "stable",
     });
     mockApi.updateSettings.mockResolvedValue({
       anthropicApiKeyConfigured: true,
@@ -834,6 +843,7 @@ describe("SettingsPage", () => {
       aiValidationEnabled: true,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      updateChannel: "stable",
     });
     mockApi.updateSettings.mockResolvedValue({
       anthropicApiKeyConfigured: true,
@@ -894,5 +904,80 @@ describe("SettingsPage", () => {
 
     const aiValButtons = screen.getAllByRole("button", { name: "AI Validation" });
     expect(aiValButtons.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // ─── Update Channel section tests ──────────────────────────────────
+
+  // The update channel selector renders with Stable selected by default.
+  it("renders update channel selector with Stable selected by default", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    expect(screen.getByText("Stable")).toBeInTheDocument();
+    expect(screen.getByText("Prerelease")).toBeInTheDocument();
+    expect(screen.getByText(/Tracking stable channel/)).toBeInTheDocument();
+  });
+
+  // When settings load with prerelease channel, it shows the prerelease description.
+  it("shows prerelease description when channel is prerelease", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4.6",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
+      updateChannel: "prerelease",
+    });
+
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    expect(screen.getByText(/Tracking prerelease channel/)).toBeInTheDocument();
+  });
+
+  // Clicking Prerelease calls updateSettings and re-checks for updates.
+  it("switches to prerelease channel and re-checks updates", async () => {
+    mockApi.updateSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4.6",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
+      updateChannel: "prerelease",
+    });
+    mockApi.forceCheckForUpdate.mockResolvedValueOnce({
+      currentVersion: "0.66.0",
+      latestVersion: "0.67.0-preview.1",
+      updateAvailable: true,
+      isServiceMode: false,
+      updateInProgress: false,
+      lastChecked: Date.now(),
+      channel: "prerelease",
+    });
+
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    fireEvent.click(screen.getByText("Prerelease"));
+
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({ updateChannel: "prerelease" });
+    });
+    await waitFor(() => {
+      expect(mockApi.forceCheckForUpdate).toHaveBeenCalled();
+    });
+  });
+
+  // Clicking Stable when already on stable is a no-op (doesn't call updateSettings).
+  it("does not call updateSettings when clicking already-selected channel", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    fireEvent.click(screen.getByText("Stable"));
+
+    // Should not have called updateSettings since stable is already selected
+    expect(mockApi.updateSettings).not.toHaveBeenCalled();
   });
 });

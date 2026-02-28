@@ -114,6 +114,22 @@ bun run typecheck
 bun run test
 ```
 
+## Preview / Prerelease
+
+Every push to `main` publishes a preview artifact:
+
+| Artifact | Tag / dist-tag | Example |
+|---|---|---|
+| Docker image (moving) | `preview-main` | `docker.io/stangirard/the-companion:preview-main` |
+| Docker image (immutable) | `preview-<sha>` | `docker.io/stangirard/the-companion:preview-abc1234...` |
+| npm package | `next` | `bunx the-companion@next` |
+
+Preview builds are **not** production-stable. Use `latest` / semver tags for stable releases.
+
+### Tracking prerelease updates in-app
+
+In **Settings > Updates**, switch the update channel to **Prerelease** to receive preview builds. The default channel is **Stable** (semver releases only). Switching channels takes effect immediately on the next update check.
+
 ## Docs
 - Protocol reverse engineering: [`WEBSOCKET_PROTOCOL_REVERSED.md`](WEBSOCKET_PROTOCOL_REVERSED.md)
 - Contributor and architecture guide: [`CLAUDE.md`](CLAUDE.md)

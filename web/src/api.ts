@@ -349,6 +349,7 @@ export interface UpdateInfo {
   isServiceMode: boolean;
   updateInProgress: boolean;
   lastChecked: number;
+  channel: "stable" | "prerelease";
 }
 
 export interface UsageLimits {
@@ -382,6 +383,7 @@ export interface AppSettings {
   aiValidationEnabled: boolean;
   aiValidationAutoApprove: boolean;
   aiValidationAutoDeny: boolean;
+  updateChannel: "stable" | "prerelease";
 }
 
 export interface ArchiveInfo {
@@ -859,6 +861,7 @@ export const api = {
     linearArchiveTransitionStateId?: string;
     linearArchiveTransitionStateName?: string;
     editorTabEnabled?: boolean;
+    updateChannel?: "stable" | "prerelease";
   }) => put<AppSettings>("/settings", data),
   verifyAnthropicKey: (apiKey: string) =>
     post<{ valid: boolean; error?: string }>("/settings/anthropic/verify", { apiKey }),

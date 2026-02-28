@@ -72,6 +72,7 @@ export function registerSystemRoutes(
       isServiceMode: state.isServiceMode,
       updateInProgress: state.updateInProgress,
       lastChecked: state.lastChecked,
+      channel: state.channel,
     });
   });
 
@@ -85,6 +86,7 @@ export function registerSystemRoutes(
       isServiceMode: state.isServiceMode,
       updateInProgress: state.updateInProgress,
       lastChecked: state.lastChecked,
+      channel: state.channel,
     });
   });
 

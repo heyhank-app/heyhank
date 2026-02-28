@@ -30,6 +30,7 @@ function makeUpdateInfo(overrides: Partial<UpdateInfo> = {}): UpdateInfo {
     isServiceMode: false,
     updateInProgress: false,
     lastChecked: Date.now(),
+    channel: "stable",
     ...overrides,
   };
 }

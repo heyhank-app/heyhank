@@ -18,6 +18,7 @@ vi.mock("../update-checker.js", () => ({
     isServiceMode: false,
     checking: false,
     updateInProgress: false,
+    channel: "stable",
   })),
   checkForUpdate: vi.fn(async () => {}),
   isUpdateAvailable: vi.fn(() => false),
@@ -153,6 +154,26 @@ describe("GET /api/sessions/:id/usage-limits", () => {
     expect(json).toEqual({ five_hour: null, seven_day: null, extra_usage: null });
   });
 
+  // When codex rate limits have timestamps in epoch milliseconds (>1e12),
+  // they should pass through without conversion.
+  it("passes through millisecond timestamps from codex rate limits", async () => {
+    wsBridge.getSession.mockReturnValue({ backendType: "codex" } as any);
+    const msTimestamp = 1700000000000; // already in ms
+    wsBridge.getCodexRateLimits.mockReturnValue({
+      primary: { usedPercent: 0.8, windowDurationMins: 300, resetsAt: msTimestamp },
+      secondary: { usedPercent: 0.3, windowDurationMins: 10080, resetsAt: msTimestamp },
+    } as any);
+
+    const res = await app.request("/api/sessions/codex-ms/usage-limits");
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.five_hour.utilization).toBe(0.8);
+    expect(json.five_hour.resets_at).toBe(new Date(msTimestamp).toISOString());
+    expect(json.seven_day.utilization).toBe(0.3);
+    expect(json.seven_day.resets_at).toBe(new Date(msTimestamp).toISOString());
+  });
+
   it("falls back to global usage limits for non-codex sessions", async () => {
     // A claude-type session should use the global getUsageLimits
     wsBridge.getSession.mockReturnValue({ backendType: "claude" } as any);
@@ -200,6 +221,7 @@ describe("GET /api/update-check", () => {
       isServiceMode: false,
       checking: false,
       updateInProgress: false,
+      channel: "stable",
     });
     vi.mocked(isUpdateAvailable).mockReturnValue(false);
 
@@ -210,6 +232,7 @@ describe("GET /api/update-check", () => {
     const json = await res.json();
     expect(json.currentVersion).toBe("1.0.0");
     expect(json.updateAvailable).toBe(false);
+    expect(json.channel).toBe("stable");
   });
 
   it("does NOT call checkForUpdate when lastChecked is recent (not stale)", async () => {
@@ -221,6 +244,7 @@ describe("GET /api/update-check", () => {
       isServiceMode: false,
       checking: false,
       updateInProgress: false,
+      channel: "stable",
     });
     vi.mocked(isUpdateAvailable).mockReturnValue(false);
 
@@ -244,6 +268,7 @@ describe("POST /api/update-check", () => {
       isServiceMode: true,
       checking: false,
       updateInProgress: false,
+      channel: "stable",
     });
     vi.mocked(isUpdateAvailable).mockReturnValue(true);
 
@@ -270,6 +295,7 @@ describe("POST /api/update", () => {
       isServiceMode: false,
       checking: false,
       updateInProgress: false,
+      channel: "stable",
     });
 
     const res = await app.request("/api/update", { method: "POST" });
@@ -287,6 +313,7 @@ describe("POST /api/update", () => {
       isServiceMode: true,
       checking: false,
       updateInProgress: false,
+      channel: "stable",
     });
     vi.mocked(isUpdateAvailable).mockReturnValue(false);
 
@@ -305,6 +332,7 @@ describe("POST /api/update", () => {
       isServiceMode: true,
       checking: false,
       updateInProgress: true,
+      channel: "stable",
     });
     vi.mocked(isUpdateAvailable).mockReturnValue(true);
 
@@ -323,6 +351,7 @@ describe("POST /api/update", () => {
       isServiceMode: true,
       checking: false,
       updateInProgress: false,
+      channel: "stable",
     });
     vi.mocked(isUpdateAvailable).mockReturnValue(true);
 
@@ -333,6 +362,103 @@ describe("POST /api/update", () => {
     expect(json.ok).toBe(true);
     expect(json.message).toMatch(/restart/i);
     expect(setUpdateInProgress).toHaveBeenCalledWith(true);
+  });
+
+  // Exercises the async setTimeout callback inside the update handler.
+  // Mocks Bun.spawn to simulate a successful install + restart.
+  it("runs the install and restart flow inside the deferred callback", async () => {
+    vi.useFakeTimers();
+
+    vi.mocked(getUpdateState).mockReturnValue({
+      currentVersion: "1.0.0",
+      latestVersion: "2.0.0",
+      lastChecked: Date.now(),
+      isServiceMode: true,
+      checking: false,
+      updateInProgress: false,
+      channel: "stable",
+    });
+    vi.mocked(isUpdateAvailable).mockReturnValue(true);
+
+    // Mock Bun.spawn for the install command
+    const mockSpawn = vi.fn()
+      .mockReturnValueOnce({
+        exited: Promise.resolve(0),
+        stdout: new ReadableStream(),
+        stderr: new ReadableStream(),
+      })
+      // Second call is the restart command
+      .mockReturnValueOnce({
+        exited: Promise.resolve(0),
+        stdout: new ReadableStream(),
+        stderr: new ReadableStream(),
+      });
+    // @ts-expect-error -- Bun global mock
+    globalThis.Bun = { spawn: mockSpawn };
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    const res = await app.request("/api/update", { method: "POST" });
+    expect(res.status).toBe(200);
+
+    // Advance past the 100ms setTimeout that starts the install
+    await vi.advanceTimersByTimeAsync(150);
+
+    // The install spawn should have been called
+    expect(mockSpawn).toHaveBeenCalledWith(
+      ["bun", "install", "-g", "the-companion@2.0.0"],
+      expect.anything(),
+    );
+
+    // Advance past the 500ms exit timeout
+    await vi.advanceTimersByTimeAsync(600);
+
+    vi.useRealTimers();
+    exitSpy.mockRestore();
+    // @ts-expect-error -- cleanup Bun global mock
+    delete globalThis.Bun;
+  });
+
+  // When the install command fails, setUpdateInProgress should be reset.
+  it("resets updateInProgress when install fails", async () => {
+    vi.useFakeTimers();
+
+    vi.mocked(getUpdateState).mockReturnValue({
+      currentVersion: "1.0.0",
+      latestVersion: "2.0.0",
+      lastChecked: Date.now(),
+      isServiceMode: true,
+      checking: false,
+      updateInProgress: false,
+      channel: "stable",
+    });
+    vi.mocked(isUpdateAvailable).mockReturnValue(true);
+
+    const stderrStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("install error"));
+        controller.close();
+      },
+    });
+    const mockSpawn = vi.fn().mockReturnValueOnce({
+      exited: Promise.resolve(1),
+      stdout: new ReadableStream(),
+      stderr: stderrStream,
+    });
+    // @ts-expect-error -- Bun global mock
+    globalThis.Bun = { spawn: mockSpawn };
+
+    const res = await app.request("/api/update", { method: "POST" });
+    expect(res.status).toBe(200);
+
+    await vi.advanceTimersByTimeAsync(150);
+
+    // After failed install, setUpdateInProgress should be called with false
+    expect(setUpdateInProgress).toHaveBeenCalledWith(false);
+
+    vi.useRealTimers();
+    // @ts-expect-error -- cleanup Bun global mock
+    delete globalThis.Bun;
   });
 });
 

@@ -43,6 +43,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const setUpdateOverlayActive = useStore((s) => s.setUpdateOverlayActive);
   const setStoreEditorTabEnabled = useStore((s) => s.setEditorTabEnabled);
   const notificationApiAvailable = typeof Notification !== "undefined";
+  const [updateChannel, setUpdateChannel] = useState<"stable" | "prerelease">("stable");
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updatingApp, setUpdatingApp] = useState(false);
   const [updateStatus, setUpdateStatus] = useState("");
@@ -122,6 +123,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
         if (typeof s.aiValidationEnabled === "boolean") setAiValidationEnabled(s.aiValidationEnabled);
         if (typeof s.aiValidationAutoApprove === "boolean") setAiValidationAutoApprove(s.aiValidationAutoApprove);
         if (typeof s.aiValidationAutoDeny === "boolean") setAiValidationAutoDeny(s.aiValidationAutoDeny);
+        if (s.updateChannel === "stable" || s.updateChannel === "prerelease") setUpdateChannel(s.updateChannel);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
@@ -697,10 +699,76 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   <p className="text-xs text-cc-muted">
                     Current version: v{updateInfo.currentVersion}
                     {updateInfo.latestVersion ? ` • Latest: v${updateInfo.latestVersion}` : ""}
+                    {updateInfo.channel === "prerelease" ? " (prerelease)" : ""}
                   </p>
                 ) : (
                   <p className="text-xs text-cc-muted">Version information not loaded yet.</p>
                 )}
+
+                <div>
+                  <span id="update-channel-label" className="block text-sm font-medium mb-1.5">
+                    Update Channel
+                  </span>
+                  <div className="flex gap-1" role="radiogroup" aria-labelledby="update-channel-label">
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={updateChannel === "stable"}
+                      onClick={async () => {
+                        if (updateChannel === "stable") return;
+                        setUpdateChannel("stable");
+                        try {
+                          await api.updateSettings({ updateChannel: "stable" });
+                        } catch {
+                          setUpdateChannel("prerelease");
+                          return;
+                        }
+                        try {
+                          const info = await api.forceCheckForUpdate();
+                          setUpdateInfo(info);
+                        } catch { /* settings saved; swallow check error */ }
+                      }}
+                      className={`px-3 py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+                        updateChannel === "stable"
+                          ? "bg-cc-primary text-white"
+                          : "bg-cc-hover text-cc-muted hover:text-cc-fg hover:bg-cc-active"
+                      }`}
+                    >
+                      Stable
+                    </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={updateChannel === "prerelease"}
+                      onClick={async () => {
+                        if (updateChannel === "prerelease") return;
+                        setUpdateChannel("prerelease");
+                        try {
+                          await api.updateSettings({ updateChannel: "prerelease" });
+                        } catch {
+                          setUpdateChannel("stable");
+                          return;
+                        }
+                        try {
+                          const info = await api.forceCheckForUpdate();
+                          setUpdateInfo(info);
+                        } catch { /* settings saved; swallow check error */ }
+                      }}
+                      className={`px-3 py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+                        updateChannel === "prerelease"
+                          ? "bg-cc-primary text-white"
+                          : "bg-cc-hover text-cc-muted hover:text-cc-fg hover:bg-cc-active"
+                      }`}
+                    >
+                      Prerelease
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-xs text-cc-muted">
+                    {updateChannel === "prerelease"
+                      ? "Tracking prerelease channel. You will receive preview builds from the latest main branch."
+                      : "Tracking stable channel. You will only receive versioned releases."}
+                  </p>
+                </div>
 
                 {updateError && (
                   <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
