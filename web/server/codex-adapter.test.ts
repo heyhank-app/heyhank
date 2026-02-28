@@ -625,6 +625,60 @@ describe("CodexAdapter", () => {
     expect(nestedToolUse).toBeDefined();
   });
 
+  it("backfills nested collabAgentToolCall tool_use with parent on item/completed-only path", async () => {
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+
+    await new Promise((r) => setTimeout(r, 50));
+    stdout.push(JSON.stringify({ id: 1, result: { userAgent: "codex" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Build thread mapping: thr_sub_parent -> collab_parent.
+    stdout.push(JSON.stringify({
+      method: "item/started",
+      params: {
+        threadId: "thr_123",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab_parent",
+          tool: "spawn_agent",
+          status: "inProgress",
+          receiverThreadIds: ["thr_sub_parent"],
+          prompt: "Parent call",
+        },
+      },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Nested collab arrives as completed-only (no prior item/started), which triggers backfill.
+    stdout.push(JSON.stringify({
+      method: "item/completed",
+      params: {
+        threadId: "thr_sub_parent",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab_nested_backfill",
+          tool: "spawn_agent",
+          status: "completed",
+          receiverThreadIds: ["thr_nested_1"],
+          prompt: "Nested completed-only",
+        },
+      },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 60));
+
+    const nestedBackfilledToolUse = messages.find((m) =>
+      m.type === "assistant"
+      && (m as { parent_tool_use_id?: string; message?: { content?: Array<{ type: string; id?: string; name?: string }> } }).parent_tool_use_id === "collab_parent"
+      && (m as { message: { content: Array<{ type: string; id?: string; name?: string }> } }).message.content
+        .some((b) => b.type === "tool_use" && b.name === "Task" && b.id === "collab_nested_backfill")
+    );
+    expect(nestedBackfilledToolUse).toBeDefined();
+  });
+
   it("emits session_init with codex backend type", async () => {
     const messages: BrowserIncomingMessage[] = [];
     const adapter = new CodexAdapter(proc as never, "test-session", {

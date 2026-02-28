@@ -2095,7 +2095,7 @@ export class CodexAdapter {
           codex_status: collab.status,
           sender_thread_id: collab.senderThreadId || null,
           receiver_thread_ids: receiverThreadIds,
-        });
+        }, parentToolUseId);
         const isError = collab.status === "failed";
         const summary = this.summarizeCollabCall(collab);
         this.emitToolResult(item.id, summary, isError);
@@ -2354,10 +2354,15 @@ export class CodexAdapter {
   }
 
   /** Emit tool_use only if item/started was never received for this ID. */
-  private ensureToolUseEmitted(toolUseId: string, toolName: string, input: Record<string, unknown>): void {
+  private ensureToolUseEmitted(
+    toolUseId: string,
+    toolName: string,
+    input: Record<string, unknown>,
+    parentToolUseId: string | null = null,
+  ): void {
     if (!this.emittedToolUseIds.has(toolUseId)) {
       console.log(`[codex-adapter] Backfilling tool_use for ${toolName} (id=${toolUseId}) — item/started was missing`);
-      this.emitToolUseTracked(toolUseId, toolName, input);
+      this.emitToolUseTracked(toolUseId, toolName, input, parentToolUseId);
     }
   }
 
