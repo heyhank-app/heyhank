@@ -46,18 +46,41 @@ export function PromptsPage({ embedded = false }: PromptsPageProps) {
   const totalPrompts = prompts.length;
   const visiblePrompts = filteredPrompts.length;
 
+  /** Group filtered prompts: global first, then by project folder */
+  const groupedPrompts = useMemo(() => {
+    const globalPrompts = filteredPrompts.filter((p) => p.scope === "global");
+    const projectPrompts = filteredPrompts.filter((p) => p.scope === "project");
+
+    // Group project prompts by their folder key (sorted joined paths)
+    const folderGroups = new Map<string, { label: string; prompts: SavedPrompt[] }>();
+    for (const p of projectPrompts) {
+      const paths = p.projectPaths ?? (p.projectPath ? [p.projectPath] : []);
+      const key = paths.length > 0 ? paths.slice().sort().join("\n") : "(no folder)";
+      const label = paths.length > 0
+        ? paths.map((fp) => fp.split("/").pop() || fp).join(", ")
+        : "(no folder)";
+      if (!folderGroups.has(key)) {
+        folderGroups.set(key, { label, prompts: [] });
+      }
+      folderGroups.get(key)!.prompts.push(p);
+    }
+
+    return { globalPrompts, folderGroups };
+  }, [filteredPrompts]);
+
   const loadPrompts = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const items = await api.listPrompts(cwd || undefined);
+      // Fetch all prompts regardless of session cwd
+      const items = await api.listPrompts();
       setPrompts(items);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [cwd]);
+  }, []);
 
   useEffect(() => {
     void loadPrompts();
@@ -260,7 +283,7 @@ export function PromptsPage({ embedded = false }: PromptsPageProps) {
           <span>{visiblePrompts === totalPrompts ? `${totalPrompts} prompt${totalPrompts !== 1 ? "s" : ""}` : `${visiblePrompts} of ${totalPrompts}`}</span>
         </div>
 
-        {/* Prompt list */}
+        {/* Prompt list — grouped by scope */}
         {loading ? (
           <div className="py-12 text-center text-sm text-cc-muted">Loading prompts...</div>
         ) : prompts.length === 0 ? (
@@ -268,44 +291,99 @@ export function PromptsPage({ embedded = false }: PromptsPageProps) {
         ) : filteredPrompts.length === 0 ? (
           <div className="py-12 text-center text-sm text-cc-muted">No prompts match your search.</div>
         ) : (
-          <div className="space-y-1">
-            {filteredPrompts.map((prompt) => (
-              <PromptRow
-                key={prompt.id}
-                prompt={prompt}
-                isEditing={editingId === prompt.id}
-                editName={editName}
-                editContent={editContent}
-                editScope={editScope}
-                editFolders={editFolders}
-                cwd={cwd}
-                onEditNameChange={setEditName}
-                onEditContentChange={setEditContent}
-                onEditScopeChange={(s) => {
-                  setEditScope(s);
-                  if (s === "project" && editFolders.length === 0 && cwd) {
-                    setEditFolders([cwd]);
-                  }
-                }}
-                onEditRemoveFolder={(path) => setEditFolders((f) => f.filter((p) => p !== path))}
-                onEditAddFolder={() => setShowEditFolderPicker(true)}
-                onStartEdit={() => {
-                  setEditingId(prompt.id);
-                  setEditName(prompt.name);
-                  setEditContent(prompt.content);
-                  setEditScope(prompt.scope);
-                  setEditFolders(prompt.projectPaths ?? (prompt.projectPath ? [prompt.projectPath] : []));
-                }}
-                onCancelEdit={() => {
-                  setEditingId(null);
-                  setEditName("");
-                  setEditContent("");
-                  setEditScope("global");
-                  setEditFolders([]);
-                }}
-                onSaveEdit={() => void handleSaveEdit()}
-                onDelete={() => void handleDelete(prompt.id)}
-              />
+          <div className="space-y-4">
+            {/* Global section */}
+            {groupedPrompts.globalPrompts.length > 0 && (
+              <div>
+                <h2 className="text-[11px] uppercase tracking-wider text-cc-muted font-semibold mb-1.5 px-1">Global</h2>
+                <div className="space-y-1">
+                  {groupedPrompts.globalPrompts.map((prompt) => (
+                    <PromptRow
+                      key={prompt.id}
+                      prompt={prompt}
+                      isEditing={editingId === prompt.id}
+                      editName={editName}
+                      editContent={editContent}
+                      editScope={editScope}
+                      editFolders={editFolders}
+                      cwd={cwd}
+                      onEditNameChange={setEditName}
+                      onEditContentChange={setEditContent}
+                      onEditScopeChange={(s) => {
+                        setEditScope(s);
+                        if (s === "project" && editFolders.length === 0 && cwd) {
+                          setEditFolders([cwd]);
+                        }
+                      }}
+                      onEditRemoveFolder={(path) => setEditFolders((f) => f.filter((p) => p !== path))}
+                      onEditAddFolder={() => setShowEditFolderPicker(true)}
+                      onStartEdit={() => {
+                        setEditingId(prompt.id);
+                        setEditName(prompt.name);
+                        setEditContent(prompt.content);
+                        setEditScope(prompt.scope);
+                        setEditFolders(prompt.projectPaths ?? (prompt.projectPath ? [prompt.projectPath] : []));
+                      }}
+                      onCancelEdit={() => {
+                        setEditingId(null);
+                        setEditName("");
+                        setEditContent("");
+                        setEditScope("global");
+                        setEditFolders([]);
+                      }}
+                      onSaveEdit={() => void handleSaveEdit()}
+                      onDelete={() => void handleDelete(prompt.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Project folder sections */}
+            {Array.from(groupedPrompts.folderGroups.entries()).map(([key, group]) => (
+              <div key={key}>
+                <h2 className="text-[11px] uppercase tracking-wider text-cc-muted font-semibold mb-1.5 px-1">{group.label}</h2>
+                <div className="space-y-1">
+                  {group.prompts.map((prompt) => (
+                    <PromptRow
+                      key={prompt.id}
+                      prompt={prompt}
+                      isEditing={editingId === prompt.id}
+                      editName={editName}
+                      editContent={editContent}
+                      editScope={editScope}
+                      editFolders={editFolders}
+                      cwd={cwd}
+                      onEditNameChange={setEditName}
+                      onEditContentChange={setEditContent}
+                      onEditScopeChange={(s) => {
+                        setEditScope(s);
+                        if (s === "project" && editFolders.length === 0 && cwd) {
+                          setEditFolders([cwd]);
+                        }
+                      }}
+                      onEditRemoveFolder={(path) => setEditFolders((f) => f.filter((p) => p !== path))}
+                      onEditAddFolder={() => setShowEditFolderPicker(true)}
+                      onStartEdit={() => {
+                        setEditingId(prompt.id);
+                        setEditName(prompt.name);
+                        setEditContent(prompt.content);
+                        setEditScope(prompt.scope);
+                        setEditFolders(prompt.projectPaths ?? (prompt.projectPath ? [prompt.projectPath] : []));
+                      }}
+                      onCancelEdit={() => {
+                        setEditingId(null);
+                        setEditName("");
+                        setEditContent("");
+                        setEditScope("global");
+                        setEditFolders([]);
+                      }}
+                      onSaveEdit={() => void handleSaveEdit()}
+                      onDelete={() => void handleDelete(prompt.id)}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         )}
@@ -428,14 +506,18 @@ function ScopeBadge({ prompt }: { prompt: SavedPrompt }) {
     return <span className="text-[10px] uppercase tracking-wider text-cc-muted opacity-60">global</span>;
   }
   const paths = prompt.projectPaths ?? (prompt.projectPath ? [prompt.projectPath] : []);
-  const firstDir = paths[0]?.split("/").pop() || paths[0] || "";
-  const extra = paths.length > 1 ? ` +${paths.length - 1}` : "";
+  if (paths.length === 0) return null;
   return (
-    <span
-      className="text-[10px] uppercase tracking-wider text-cc-primary/70"
-      title={paths.join("\n")}
-    >
-      {firstDir}{extra}
+    <span className="inline-flex items-center gap-1 flex-wrap">
+      {paths.map((p) => (
+        <span
+          key={p}
+          className="text-[10px] px-1.5 py-0.5 rounded bg-cc-primary/8 text-cc-primary/70 font-mono-code"
+          title={p}
+        >
+          {p.split("/").pop() || p}
+        </span>
+      ))}
     </span>
   );
 }
