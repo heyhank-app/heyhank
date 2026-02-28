@@ -97,6 +97,7 @@ function resetStore() {
   mockStoreValues.streamingStartedAt = new Map();
   mockStoreValues.streamingOutputTokens = new Map();
   mockStoreValues.sessionStatus = new Map();
+  mockStoreValues.toolProgress = new Map();
   mockStoreValues.chatTabReentryTickBySession = new Map();
   mockStoreValues.sdkSessions = [];
 }
@@ -341,6 +342,71 @@ describe("MessageFeed - lazy resume transcript", () => {
     expect(await screen.findByText("Earlier question")).toBeTruthy();
     expect(await screen.findByText("Earlier answer")).toBeTruthy();
   });
+
+  it("shows inline resume banner for active chats and updates loaded transcript status", async () => {
+    const sid = "test-resume-inline";
+    setStoreMessages(sid, [makeMessage({ id: "u1", role: "user", content: "Continue from here" })]);
+    setSdkSessions([
+      {
+        sessionId: sid,
+        state: "connected",
+        cwd: "/Users/test/repo",
+        createdAt: Date.now(),
+        backendType: "claude",
+        resumeSessionAt: "prior-inline-456",
+        forkSession: true,
+      },
+    ]);
+    getClaudeSessionHistoryMock.mockResolvedValueOnce({
+      sourceFile: "/Users/test/.claude/projects/repo/prior-inline-456.jsonl",
+      nextCursor: 1,
+      hasMore: false,
+      totalMessages: 1,
+      messages: [
+        {
+          id: "resume-prior-inline-456-assistant-a1",
+          role: "assistant",
+          content: "Loaded from previous thread",
+          timestamp: 2,
+        },
+      ],
+    });
+
+    render(<MessageFeed sessionId={sid} />);
+
+    expect(screen.getByText("Forked from existing Claude thread")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /load previous history/i }));
+
+    await waitFor(() => {
+      expect(getClaudeSessionHistoryMock).toHaveBeenCalledWith("prior-inline-456", {
+        cursor: 0,
+        limit: 40,
+      });
+    });
+
+    expect(await screen.findByText("Loaded all available prior transcript")).toBeTruthy();
+  });
+});
+
+describe("MessageFeed - tool progress indicator", () => {
+  it("renders tool progress while tools are running", () => {
+    const sid = "test-tool-progress";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "run checks" })]);
+    const progressBySession = new Map();
+    progressBySession.set(sid, new Map([
+      ["bash-1", { toolName: "Bash", elapsedSeconds: 7 }],
+      ["read-1", { toolName: "Read", elapsedSeconds: 2 }],
+    ]));
+    mockStoreValues.toolProgress = progressBySession;
+
+    render(<MessageFeed sessionId={sid} />);
+
+    expect(screen.getByText("Terminal")).toBeTruthy();
+    expect(screen.getByText("Read File")).toBeTruthy();
+    expect(screen.getByText("7s")).toBeTruthy();
+    expect(screen.getByText("2s")).toBeTruthy();
+  });
 });
 
 // ─── getToolOnlyName behavior (tested via grouping) ──────────────────────────
@@ -458,5 +524,117 @@ describe("MessageFeed - subagent grouping", () => {
     expect(screen.getAllByText("Research the problem").length).toBeGreaterThanOrEqual(1);
     // The agent type badge should be shown
     expect(screen.getByText("researcher")).toBeTruthy();
+  });
+
+  it("renders Codex subagent metadata badges (status + receiver count)", () => {
+    const sid = "test-codex-subagent-meta";
+    setStoreMessages(sid, [
+      makeMessage({
+        id: "a1",
+        role: "assistant",
+        content: "",
+        contentBlocks: [
+          {
+            type: "tool_use",
+            id: "task-cx-1",
+            name: "Task",
+            input: {
+              description: "Investigate auth edge-cases",
+              subagent_type: "spawn_agent",
+              codex_status: "completed",
+              receiver_thread_ids: ["thr_sub_1", "thr_sub_2"],
+            },
+          },
+        ],
+      }),
+      makeMessage({
+        id: "child-1",
+        role: "assistant",
+        content: "Done",
+        parentToolUseId: "task-cx-1",
+      }),
+    ]);
+
+    render(<MessageFeed sessionId={sid} />);
+
+    expect(screen.getByText("completed")).toBeTruthy();
+    expect(screen.getByText("2 agents")).toBeTruthy();
+  });
+
+  it("does not render a receiver badge when receiver list is empty", () => {
+    const sid = "test-codex-empty-receivers";
+    setStoreMessages(sid, [
+      makeMessage({
+        id: "a1",
+        role: "assistant",
+        content: "",
+        contentBlocks: [
+          {
+            type: "tool_use",
+            id: "task-cx-empty",
+            name: "Task",
+            input: {
+              description: "Validate edge case",
+              subagent_type: "spawn_agent",
+              codex_status: "running",
+              receiver_thread_ids: [],
+            },
+          },
+        ],
+      }),
+      makeMessage({
+        id: "child-1",
+        role: "assistant",
+        content: "Working",
+        parentToolUseId: "task-cx-empty",
+      }),
+    ]);
+
+    render(<MessageFeed sessionId={sid} />);
+    expect(screen.queryByText("0 agents")).toBeNull();
+  });
+
+  it("normalizes Codex status labels and shows participant details when expanded", () => {
+    const sid = "test-codex-subagent-details";
+    setStoreMessages(sid, [
+      makeMessage({
+        id: "a1",
+        role: "assistant",
+        content: "",
+        contentBlocks: [
+          {
+            type: "tool_use",
+            id: "task-cx-2",
+            name: "Task",
+            input: {
+              description: "Parallelize lint fixes",
+              subagent_type: "spawn_agent",
+              codex_status: "inProgress",
+              sender_thread_id: "thr_main",
+              receiver_thread_ids: ["thr_sub_1", "thr_sub_2"],
+            },
+          },
+        ],
+      }),
+      makeMessage({
+        id: "child-1",
+        role: "assistant",
+        content: "Working",
+        parentToolUseId: "task-cx-2",
+      }),
+    ]);
+
+    render(<MessageFeed sessionId={sid} />);
+
+    expect(screen.getByText("Codex")).toBeTruthy();
+    expect(screen.getByText("running")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /spawn_agent/i }));
+
+    expect(screen.getByText("2 running")).toBeTruthy();
+    expect(screen.getByText("sender: thr_main")).toBeTruthy();
+    expect(screen.getByText("receivers: 2")).toBeTruthy();
+    expect(screen.getByText("thr_sub_1")).toBeTruthy();
+    expect(screen.getByText("thr_sub_2")).toBeTruthy();
   });
 });

@@ -28,5 +28,9 @@ describe("Playground", () => {
 
     // Dynamic tool permission should be visible inside the integrated ChatView.
     expect(within(realChat).getByText("dynamic:code_interpreter")).toBeTruthy();
+
+    // Subagent playground demo should show Codex-specific metadata presentation.
+    expect(screen.getByText("sender: thr_main")).toBeTruthy();
+    expect(screen.getByText("thr_sub_1")).toBeTruthy();
   });
 });

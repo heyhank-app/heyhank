@@ -689,6 +689,8 @@ export class CliLauncher {
       : `ws://127.0.0.1:${codexListenPort}`;
 
     const args: string[] = ["app-server", "--listen", listenAddr];
+    // Enable Codex multi-agent mode by default (product decision).
+    args.push("--enable", "multi_agent");
     const internetEnabled = options.codexInternetAccess !== false;
     args.push("-c", `tools.webSearch=${internetEnabled ? "true" : "false"}`);
     const codexHome = resolveCompanionCodexSessionHome(
@@ -910,6 +912,8 @@ export class CliLauncher {
     }
 
     const args: string[] = ["app-server"];
+    // Enable Codex multi-agent mode by default (product decision).
+    args.push("--enable", "multi_agent");
     const internetEnabled = options.codexInternetAccess !== false;
     args.push("-c", `tools.webSearch=${internetEnabled ? "true" : "false"}`);
     const codexHome = resolveCompanionCodexSessionHome(

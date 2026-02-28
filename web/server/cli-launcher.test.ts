@@ -401,6 +401,8 @@ describe("launch", () => {
     const [cmdAndArgs, options] = mockSpawn.mock.calls[0];
     expect(cmdAndArgs[0]).toBe("/opt/fake/codex");
     expect(cmdAndArgs).toContain("app-server");
+    expect(cmdAndArgs).toContain("--enable");
+    expect(cmdAndArgs).toContain("multi_agent");
     expect(cmdAndArgs).toContain("-c");
     expect(cmdAndArgs).toContain("tools.webSearch=true");
     expect(options.cwd).toBe("/tmp/project");
@@ -419,6 +421,8 @@ describe("launch", () => {
 
     const [cmdAndArgs] = mockSpawn.mock.calls[0];
     expect(cmdAndArgs).toContain("app-server");
+    expect(cmdAndArgs).toContain("--enable");
+    expect(cmdAndArgs).toContain("multi_agent");
     expect(cmdAndArgs).toContain("-c");
     expect(cmdAndArgs).toContain("tools.webSearch=false");
   });
@@ -450,6 +454,8 @@ describe("launch", () => {
     // The codex script path should be arg 1
     expect(cmdAndArgs[1]).toContain("codex");
     expect(cmdAndArgs).toContain("app-server");
+    expect(cmdAndArgs).toContain("--enable");
+    expect(cmdAndArgs).toContain("multi_agent");
 
     // Cleanup
     rmSync(tmpBinDir, { recursive: true, force: true });
@@ -881,6 +887,8 @@ describe("codex websocket launcher", () => {
     const [codexCmd] = mockSpawn.mock.calls[0];
     expect(codexCmd[0]).toBe("/opt/fake/codex");
     expect(codexCmd).toContain("app-server");
+    expect(codexCmd).toContain("--enable");
+    expect(codexCmd).toContain("multi_agent");
     expect(codexCmd).toContain("--listen");
     expect(codexCmd).toContain("ws://127.0.0.1:4500");
 
@@ -990,6 +998,8 @@ describe("codex websocket launcher", () => {
 
     const [codexCmd] = mockSpawn.mock.calls[0];
     const codexBashCmd = codexCmd[codexCmd.length - 1];
+    expect(codexBashCmd).toContain("--enable");
+    expect(codexBashCmd).toContain("multi_agent");
     expect(codexBashCmd).toContain("--listen");
     expect(codexBashCmd).toContain("ws://0.0.0.0:4502");
 

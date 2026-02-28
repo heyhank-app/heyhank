@@ -386,6 +386,245 @@ describe("CodexAdapter", () => {
     expect(blockStartIdx).toBeLessThan(assistantIdx);
   });
 
+  it("maps collabAgentToolCall to Task-style tool_use for subagent grouping", async () => {
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+
+    await new Promise((r) => setTimeout(r, 50));
+    stdout.push(JSON.stringify({ id: 1, result: { userAgent: "codex" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    stdout.push(JSON.stringify({
+      method: "item/started",
+      params: {
+        threadId: "thr_123",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab_1",
+          tool: "spawn_agent",
+          status: "inProgress",
+          receiverThreadIds: ["thr_sub_1", "thr_sub_2"],
+          prompt: "Investigate auth edge-cases",
+        },
+      },
+    }) + "\n");
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const taskToolUseMsg = messages.find((m) => {
+      if (m.type !== "assistant") return false;
+      const content = (m as { message: { content: Array<{ type: string; name?: string }> } }).message.content;
+      return content.some((b) => b.type === "tool_use" && b.name === "Task");
+    }) as { message: { content: Array<{ type: string; id?: string; name?: string; input?: Record<string, unknown> }> } } | undefined;
+
+    expect(taskToolUseMsg).toBeDefined();
+    const taskBlock = taskToolUseMsg!.message.content.find((b) => b.type === "tool_use" && b.name === "Task");
+    expect(taskBlock?.id).toBe("collab_1");
+    expect(taskBlock?.input?.description).toBe("Investigate auth edge-cases");
+    expect(taskBlock?.input?.subagent_type).toBe("spawn_agent");
+    expect(taskBlock?.input?.codex_status).toBe("inProgress");
+    expect(taskBlock?.input?.receiver_thread_ids).toEqual(["thr_sub_1", "thr_sub_2"]);
+
+    // Started summary should be nested under the collab task
+    const nestedAssistant = messages.find((m) =>
+      m.type === "assistant"
+      && (m as { parent_tool_use_id?: string }).parent_tool_use_id === "collab_1"
+    );
+    expect(nestedAssistant).toBeDefined();
+  });
+
+  it("links subagent thread agentMessage events to collab parent via parent_tool_use_id", async () => {
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+
+    await new Promise((r) => setTimeout(r, 50));
+    stdout.push(JSON.stringify({ id: 1, result: { userAgent: "codex" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Create collab mapping receiver thread -> parent tool id
+    stdout.push(JSON.stringify({
+      method: "item/started",
+      params: {
+        threadId: "thr_123",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab_2",
+          tool: "spawn_agent",
+          status: "inProgress",
+          receiverThreadIds: ["thr_sub_99"],
+          prompt: "Audit auth middleware",
+        },
+      },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Subagent thread emits its own message stream
+    stdout.push(JSON.stringify({
+      method: "item/started",
+      params: { threadId: "thr_sub_99", item: { type: "agentMessage", id: "am_sub_1" } },
+    }) + "\n");
+    stdout.push(JSON.stringify({
+      method: "item/agentMessage/delta",
+      params: { threadId: "thr_sub_99", itemId: "am_sub_1", delta: "Found 3 middleware layers." },
+    }) + "\n");
+    stdout.push(JSON.stringify({
+      method: "item/completed",
+      params: { threadId: "thr_sub_99", item: { type: "agentMessage", id: "am_sub_1" } },
+    }) + "\n");
+
+    await new Promise((r) => setTimeout(r, 80));
+
+    const subagentAssistant = messages.find((m) =>
+      m.type === "assistant"
+      && (m as { message: { id: string }; parent_tool_use_id: string | null }).message.id === "codex-agent-am_sub_1"
+    ) as { parent_tool_use_id: string | null } | undefined;
+
+    expect(subagentAssistant).toBeDefined();
+    expect(subagentAssistant!.parent_tool_use_id).toBe("collab_2");
+  });
+
+  it("handles collabAgentToolCall completion with error result and clears thread mapping", async () => {
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+
+    await new Promise((r) => setTimeout(r, 50));
+    stdout.push(JSON.stringify({ id: 1, result: { userAgent: "codex" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Create mapping for subagent thread.
+    stdout.push(JSON.stringify({
+      method: "item/started",
+      params: {
+        threadId: "thr_123",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab_3",
+          tool: "spawn_agent",
+          status: "inProgress",
+          receiverThreadIds: ["thr_sub_clear"],
+          prompt: "Run deep checks",
+        },
+      },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Completion should emit tool_result (with is_error=true for failed status),
+    // a nested summary assistant message, and clear the thread mapping.
+    stdout.push(JSON.stringify({
+      method: "item/completed",
+      params: {
+        threadId: "thr_123",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab_3",
+          tool: "spawn_agent",
+          status: "failed",
+          receiverThreadIds: ["thr_sub_clear"],
+          senderThreadId: "thr_123",
+        },
+      },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 40));
+
+    // After clearSubagentThreadMappings, subagent thread output should not be parented.
+    stdout.push(JSON.stringify({
+      method: "item/started",
+      params: { threadId: "thr_sub_clear", item: { type: "agentMessage", id: "am_after_clear" } },
+    }) + "\n");
+    stdout.push(JSON.stringify({
+      method: "item/completed",
+      params: { threadId: "thr_sub_clear", item: { type: "agentMessage", id: "am_after_clear" } },
+    }) + "\n");
+
+    await new Promise((r) => setTimeout(r, 80));
+
+    const toolResultMsg = messages.find((m) => {
+      if (m.type !== "assistant") return false;
+      const content = (m as { message: { content: Array<{ type: string; tool_use_id?: string; is_error?: boolean }> } }).message.content;
+      return content.some((b) => b.type === "tool_result" && b.tool_use_id === "collab_3");
+    }) as { message: { content: Array<{ type: string; tool_use_id?: string; is_error?: boolean }> } } | undefined;
+
+    expect(toolResultMsg).toBeDefined();
+    const resultBlock = toolResultMsg!.message.content.find((b) => b.type === "tool_result");
+    expect(resultBlock?.tool_use_id).toBe("collab_3");
+    expect(resultBlock?.is_error).toBe(true);
+
+    const nestedSummary = messages.find((m) =>
+      m.type === "assistant" && (m as { parent_tool_use_id?: string }).parent_tool_use_id === "collab_3"
+    );
+    expect(nestedSummary).toBeDefined();
+
+    const postClearAssistant = messages.find((m) =>
+      m.type === "assistant"
+      && (m as { message: { id: string } }).message.id === "codex-agent-am_after_clear"
+    ) as { parent_tool_use_id: string | null } | undefined;
+    expect(postClearAssistant).toBeDefined();
+    expect(postClearAssistant!.parent_tool_use_id).toBeNull();
+  });
+
+  it("nests collabAgentToolCall tool_use under parent when started from subagent thread", async () => {
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+
+    await new Promise((r) => setTimeout(r, 50));
+    stdout.push(JSON.stringify({ id: 1, result: { userAgent: "codex" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Parent collab creates mapping thr_sub_parent -> collab_parent.
+    stdout.push(JSON.stringify({
+      method: "item/started",
+      params: {
+        threadId: "thr_123",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab_parent",
+          tool: "spawn_agent",
+          status: "inProgress",
+          receiverThreadIds: ["thr_sub_parent"],
+          prompt: "Parent call",
+        },
+      },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Nested collab starts from mapped subagent thread.
+    stdout.push(JSON.stringify({
+      method: "item/started",
+      params: {
+        threadId: "thr_sub_parent",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab_nested",
+          tool: "spawn_agent",
+          status: "inProgress",
+          receiverThreadIds: ["thr_nested_1"],
+          prompt: "Nested call",
+        },
+      },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 60));
+
+    const nestedToolUse = messages.find((m) =>
+      m.type === "assistant"
+      && (m as { parent_tool_use_id?: string; message?: { content?: Array<{ type: string; id?: string; name?: string }> } }).parent_tool_use_id === "collab_parent"
+      && (m as { message: { content: Array<{ type: string; id?: string; name?: string }> } }).message.content
+        .some((b) => b.type === "tool_use" && b.name === "Task" && b.id === "collab_nested")
+    );
+    expect(nestedToolUse).toBeDefined();
+  });
+
   it("emits session_init with codex backend type", async () => {
     const messages: BrowserIncomingMessage[] = [];
     const adapter = new CodexAdapter(proc as never, "test-session", {

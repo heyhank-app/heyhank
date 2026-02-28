@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { PermissionBanner } from "./PermissionBanner.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { ToolBlock, getToolIcon, getToolLabel, getPreview, ToolIcon } from "./ToolBlock.js";
@@ -1368,6 +1368,10 @@ export function Playground() {
               <PlaygroundSubagentGroup
                 description="Search codebase for auth patterns"
                 agentType="Explore"
+                status="completed"
+                senderThreadId="thr_main"
+                receiverThreadIds={["thr_sub_1", "thr_sub_2"]}
+                receiverCount={2}
                 items={MOCK_SUBAGENT_TOOL_ITEMS}
               />
             </Card>
@@ -1910,8 +1914,37 @@ function PlaygroundToolGroup({ toolName, items }: { toolName: string; items: Too
 
 // ─── Inline Subagent Group (mirrors MessageFeed's SubagentContainer) ────────
 
-function PlaygroundSubagentGroup({ description, agentType, items }: { description: string; agentType: string; items: ToolItem[] }) {
+function PlaygroundSubagentGroup({
+  description,
+  agentType,
+  backend = "codex",
+  status,
+  senderThreadId,
+  receiverThreadIds = [],
+  receiverCount,
+  items,
+}: {
+  description: string;
+  agentType: string;
+  backend?: "claude" | "codex";
+  status?: string;
+  senderThreadId?: string;
+  receiverThreadIds?: string[];
+  receiverCount?: number;
+  items: ToolItem[];
+}) {
   const [open, setOpen] = useState(true);
+  const normalizedStatus = useMemo(() => {
+    if (!status) return null;
+    const raw = status.trim().toLowerCase();
+    if (!raw) return null;
+    if (raw === "completed") return { label: "completed", className: "text-green-600 bg-green-500/15", summary: "completed" };
+    if (raw === "failed" || raw === "error" || raw === "errored") return { label: "failed", className: "text-cc-error bg-cc-error/10", summary: "failed" };
+    if (raw === "pending" || raw === "pendinginit" || raw === "pending_init") return { label: "pending", className: "text-amber-700 bg-amber-500/15", summary: "pending" };
+    if (raw === "running" || raw === "inprogress" || raw === "in_progress" || raw === "started") return { label: "running", className: "text-blue-600 bg-blue-500/15", summary: "running" };
+    return { label: status, className: "text-amber-700 bg-amber-500/15", summary: "running" };
+  }, [status]);
+  const statusSummaryCount = receiverCount !== undefined ? receiverCount : items.length;
 
   return (
     <div className="ml-9 border-l-2 border-cc-primary/20 pl-4">
@@ -1932,12 +1965,58 @@ function PlaygroundSubagentGroup({ description, agentType, items }: { descriptio
             {agentType}
           </span>
         )}
+        <span className="text-[10px] text-cc-muted bg-cc-hover rounded-full px-1.5 py-0.5 shrink-0">
+          {backend === "codex" ? "Codex" : "Claude"}
+        </span>
+        {normalizedStatus && (
+          <span className={`text-[10px] rounded-full px-1.5 py-0.5 shrink-0 ${normalizedStatus.className}`}>
+            {normalizedStatus.label}
+          </span>
+        )}
+        {receiverCount !== undefined && (
+          <span className="text-[10px] text-cc-muted bg-cc-hover rounded-full px-1.5 py-0.5 shrink-0">
+            {receiverCount} agent{receiverCount === 1 ? "" : "s"}
+          </span>
+        )}
         <span className="text-[10px] text-cc-muted bg-cc-hover rounded-full px-1.5 py-0.5 tabular-nums shrink-0 ml-auto">
           {items.length}
         </span>
       </button>
       {open && (
         <div className="space-y-3 pb-2">
+          {(normalizedStatus || senderThreadId || receiverThreadIds.length > 0) && (
+            <div className="rounded-lg border border-cc-border bg-cc-card px-2.5 py-2 space-y-1.5">
+              <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                {normalizedStatus && (
+                  <span className={`rounded-full px-1.5 py-0.5 ${normalizedStatus.className}`}>
+                    {statusSummaryCount} {normalizedStatus.summary}
+                  </span>
+                )}
+                {senderThreadId && (
+                  <span className="rounded-full px-1.5 py-0.5 text-cc-muted bg-cc-hover font-mono-code">
+                    sender: {senderThreadId}
+                  </span>
+                )}
+                {receiverThreadIds.length > 0 && (
+                  <span className="rounded-full px-1.5 py-0.5 text-cc-muted bg-cc-hover">
+                    receivers: {receiverThreadIds.length}
+                  </span>
+                )}
+              </div>
+              {receiverThreadIds.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {receiverThreadIds.map((threadId) => (
+                    <span
+                      key={threadId}
+                      className="text-[10px] rounded-full px-1.5 py-0.5 text-cc-muted bg-cc-hover font-mono-code"
+                    >
+                      {threadId}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <PlaygroundToolGroup toolName={items[0]?.name || "Grep"} items={items} />
         </div>
       )}
