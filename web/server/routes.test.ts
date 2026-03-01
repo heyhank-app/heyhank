@@ -565,12 +565,18 @@ describe("POST /api/sessions/create", () => {
     });
 
     expect(res.status).toBe(200);
+    // gitFetch should be called before ensureWorktree to refresh remote refs
+    expect(gitUtils.gitFetch).toHaveBeenCalledWith("/repo");
     // ensureWorktree should be called with forceNew: true
     expect(gitUtils.ensureWorktree).toHaveBeenCalledWith("/repo", "feat-branch", {
       baseBranch: "main",
       createBranch: undefined,
       forceNew: true,
     });
+    // gitFetch must be called before ensureWorktree
+    const fetchOrder = vi.mocked(gitUtils.gitFetch).mock.invocationCallOrder[0];
+    const worktreeOrder = vi.mocked(gitUtils.ensureWorktree).mock.invocationCallOrder[0];
+    expect(fetchOrder).toBeLessThan(worktreeOrder);
     // launcher should receive the worktree path as cwd
     expect(launcher.launch).toHaveBeenCalled();
     const launchOpts = launcher.launch.mock.calls[0][0];
@@ -4111,10 +4117,12 @@ describe("POST /api/sessions/create-stream", () => {
       .filter((e) => e.event === "progress")
       .map((e) => JSON.parse(e.data).step);
 
+    // Should have fetching_git before creating_worktree to refresh remote refs
+    expect(steps).toContain("fetching_git");
     expect(steps).toContain("creating_worktree");
     expect(steps).toContain("launching_cli");
-    // Should NOT have fetch/checkout/pull since it uses worktree
-    expect(steps).not.toContain("fetching_git");
+    // fetching_git must come before creating_worktree
+    expect(steps.indexOf("fetching_git")).toBeLessThan(steps.indexOf("creating_worktree"));
   });
 
   it("emits error event for invalid branch name", async () => {
