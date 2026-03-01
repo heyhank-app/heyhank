@@ -189,28 +189,152 @@ describe("aiEvaluate", () => {
     expect(result.ruleBasedOnly).toBe(false);
   });
 
-  it("returns uncertain on HTTP error", async () => {
+  it("returns actionable reason for 401 Unauthorized (invalid API key)", async () => {
+    // When the Anthropic API returns 401, the reason should indicate an invalid key
+    // so the user knows exactly what to fix in settings.
     updateSettings({ anthropicApiKey: "test-key" });
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: false,
       status: 401,
       statusText: "Unauthorized",
+      text: () => Promise.resolve(JSON.stringify({
+        error: { type: "authentication_error", message: "invalid x-api-key" },
+      })),
     } as Response);
 
     const result = await aiEvaluate("Bash", { command: "ls" });
     expect(result.verdict).toBe("uncertain");
-    expect(result.reason).toContain("failed");
+    expect(result.reason).toContain("Invalid Anthropic API key");
+    expect(result.reason).toContain("invalid x-api-key");
   });
 
-  it("returns uncertain on network error", async () => {
+  it("returns actionable reason for 404 (model not found)", async () => {
+    // When the model is not found, the reason should tell the user which model failed.
+    updateSettings({ anthropicApiKey: "test-key", anthropicModel: "claude-nonexistent" });
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      statusText: "Not Found",
+      text: () => Promise.resolve(JSON.stringify({
+        error: { type: "not_found_error", message: "model: claude-nonexistent" },
+      })),
+    } as Response);
+
+    const result = await aiEvaluate("Bash", { command: "ls" });
+    expect(result.verdict).toBe("uncertain");
+    expect(result.reason).toContain("Model not found");
+    expect(result.reason).toContain("claude-nonexistent");
+  });
+
+  it("returns actionable reason for 429 (rate limited)", async () => {
+    // Rate limit errors should be clearly identified so users know to wait.
     updateSettings({ anthropicApiKey: "test-key" });
 
-    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network error"));
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      statusText: "Too Many Requests",
+      text: () => Promise.resolve(JSON.stringify({
+        error: { type: "rate_limit_error", message: "Rate limit reached" },
+      })),
+    } as Response);
+
+    const result = await aiEvaluate("Bash", { command: "ls" });
+    expect(result.verdict).toBe("uncertain");
+    expect(result.reason).toContain("rate limit");
+  });
+
+  it("returns actionable reason for 500 (server error)", async () => {
+    // Server errors should identify Anthropic's side as the issue.
+    updateSettings({ anthropicApiKey: "test-key" });
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      statusText: "Internal Server Error",
+      text: () => Promise.resolve(""),
+    } as Response);
+
+    const result = await aiEvaluate("Bash", { command: "ls" });
+    expect(result.verdict).toBe("uncertain");
+    expect(result.reason).toContain("Anthropic internal server error");
+  });
+
+  it("returns actionable reason for 529 (overloaded)", async () => {
+    // Overloaded API should be clearly reported.
+    updateSettings({ anthropicApiKey: "test-key" });
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 529,
+      statusText: "Overloaded",
+      text: () => Promise.resolve(JSON.stringify({
+        error: { type: "overloaded_error", message: "Overloaded" },
+      })),
+    } as Response);
+
+    const result = await aiEvaluate("Bash", { command: "ls" });
+    expect(result.verdict).toBe("uncertain");
+    expect(result.reason).toContain("overloaded");
+  });
+
+  it("handles non-JSON error response body gracefully", async () => {
+    // Some error responses may not have JSON bodies (e.g., proxy errors).
+    // The parser should not throw and should fall back to status-based reason.
+    updateSettings({ anthropicApiKey: "test-key" });
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      statusText: "Bad Gateway",
+      text: () => Promise.resolve("<html>Bad Gateway</html>"),
+    } as Response);
+
+    const result = await aiEvaluate("Bash", { command: "ls" });
+    expect(result.verdict).toBe("uncertain");
+    expect(result.reason).toContain("temporarily unavailable");
+  });
+
+  it("handles unknown HTTP status codes with generic service error", async () => {
+    // Unknown status codes should still produce a useful message including the code.
+    updateSettings({ anthropicApiKey: "test-key" });
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 418,
+      statusText: "I'm a teapot",
+      text: () => Promise.resolve(""),
+    } as Response);
+
+    const result = await aiEvaluate("Bash", { command: "ls" });
+    expect(result.verdict).toBe("uncertain");
+    expect(result.reason).toContain("HTTP 418");
+  });
+
+  it("returns specific reason on network error (ECONNREFUSED)", async () => {
+    // Network errors that prevent reaching the API should be clearly identified.
+    updateSettings({ anthropicApiKey: "test-key" });
+
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("fetch failed: ECONNREFUSED"));
+
+    const result = await aiEvaluate("Bash", { command: "ls" });
+    expect(result.verdict).toBe("uncertain");
+    expect(result.reason).toContain("unreachable");
+    expect(result.reason).toContain("ECONNREFUSED");
+  });
+
+  it("returns specific reason on generic network error", async () => {
+    // Other network failures should mention unavailability with the error detail.
+    updateSettings({ anthropicApiKey: "test-key" });
+
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network error: socket hang up"));
 
     const result = await aiEvaluate("Bash", { command: "ls" });
     expect(result.verdict).toBe("uncertain");
     expect(result.reason).toContain("unavailable");
+    expect(result.reason).toContain("socket hang up");
   });
 
   it("returns uncertain on malformed API response", async () => {

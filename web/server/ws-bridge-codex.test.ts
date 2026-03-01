@@ -1215,6 +1215,80 @@ describe("attachCodexAdapterHandlers", () => {
       });
     });
 
+    it("propagates actionable AI service error reason through to browser permission request", async () => {
+      // When aiEvaluate returns an uncertain verdict due to a service failure (e.g., invalid key),
+      // the specific error reason should be attached to the permission request sent to browsers,
+      // allowing users to see why AI analysis failed and take corrective action.
+      enableAiValidation();
+      vi.mocked(aiValidator.validatePermission).mockResolvedValue({
+        verdict: "uncertain",
+        reason: "Invalid Anthropic API key: invalid x-api-key",
+        ruleBasedOnly: false,
+      });
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+      adapter._trigger("onBrowserMessage", makePermissionMsg("Bash", "perm-api-err"));
+
+      await vi.waitFor(() => {
+        expect(session.pendingPermissions.has("perm-api-err")).toBe(true);
+      });
+
+      // The permission stored and broadcast should carry the actionable reason
+      const stored = session.pendingPermissions.get("perm-api-err");
+      expect(stored!.ai_validation).toEqual({
+        verdict: "uncertain",
+        reason: "Invalid Anthropic API key: invalid x-api-key",
+        ruleBasedOnly: false,
+      });
+
+      // Browser should receive the specific reason, not a generic "AI service request failed"
+      expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(session, {
+        type: "permission_request",
+        request: expect.objectContaining({
+          request_id: "perm-api-err",
+          ai_validation: expect.objectContaining({
+            reason: "Invalid Anthropic API key: invalid x-api-key",
+          }),
+        }),
+      });
+
+      // Manual review — no auto-resolution
+      expect(adapter.sendBrowserMessage).not.toHaveBeenCalled();
+    });
+
+    it("logs AI validation errors with session and tool context", async () => {
+      // When AI validation throws, the console.warn should include session ID,
+      // tool name, and request ID for debugging correlation.
+      enableAiValidation();
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.mocked(aiValidator.validatePermission).mockRejectedValue(
+        new Error("Connection refused"),
+      );
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+      adapter._trigger("onBrowserMessage", makePermissionMsg("Bash", "perm-log-test"));
+
+      await vi.waitFor(() => {
+        expect(session.pendingPermissions.has("perm-log-test")).toBe(true);
+      });
+
+      // The console.warn should contain session/tool/request context
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("tool=Bash"),
+        expect.any(Error),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("session=test-session"),
+        expect.any(Error),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("request_id=perm-log-test"),
+        expect.any(Error),
+      );
+
+      warnSpy.mockRestore();
+    });
+
     it("does not auto-deny dangerous verdict when aiValidationAutoDeny is false", async () => {
       // When the verdict is "dangerous" but auto-deny is disabled, the handler
       // should fall through to manual review instead of auto-denying.

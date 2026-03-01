@@ -105,6 +105,45 @@ Rules:
 Be conservative: when in doubt, say "uncertain" rather than "safe".`;
 
 /**
+ * Parse a non-2xx Anthropic response into a concise, actionable reason string.
+ * Never throws — returns a fallback reason on any parsing failure.
+ * Never echoes sensitive data (API keys, full payloads).
+ */
+async function formatHttpErrorReason(res: Response): Promise<string> {
+  const status = res.status;
+
+  // Map well-known HTTP status codes to user-friendly messages
+  const statusMap: Record<number, string> = {
+    401: "Invalid Anthropic API key",
+    403: "Anthropic API key lacks permission",
+    404: "Model not found or endpoint unavailable",
+    429: "Anthropic rate limit exceeded",
+    500: "Anthropic internal server error",
+    502: "Anthropic service temporarily unavailable (bad gateway)",
+    503: "Anthropic service temporarily unavailable",
+    529: "Anthropic API overloaded",
+  };
+
+  // Try to extract a more specific message from the response body
+  let upstreamMessage = "";
+  try {
+    const text = await res.text();
+    if (text) {
+      const body = JSON.parse(text) as { error?: { message?: string; type?: string } };
+      if (body.error?.message) {
+        // Truncate to keep it concise and avoid leaking sensitive details
+        upstreamMessage = body.error.message.slice(0, 120);
+      }
+    }
+  } catch {
+    // Body is not JSON or unreadable — that's fine, use status-based message
+  }
+
+  const baseReason = statusMap[status] || `AI service error (HTTP ${status})`;
+  return upstreamMessage ? `${baseReason}: ${upstreamMessage}` : baseReason;
+}
+
+/**
  * Call the AI model via Anthropic to evaluate a tool call.
  */
 export async function aiEvaluate(
@@ -153,8 +192,9 @@ export async function aiEvaluate(
     });
 
     if (!res.ok) {
-      console.warn(`[ai-validator] Anthropic request failed: ${res.status} ${res.statusText}`);
-      return { verdict: "uncertain", reason: "AI service request failed", ruleBasedOnly: false };
+      const reason = await formatHttpErrorReason(res);
+      console.warn(`[ai-validator] Anthropic request failed: ${res.status} ${res.statusText} — ${reason}`);
+      return { verdict: "uncertain", reason, ruleBasedOnly: false };
     }
 
     const data = (await res.json()) as {
@@ -168,12 +208,17 @@ export async function aiEvaluate(
     return parseAiResponse(raw);
   } catch (err) {
     const isAbort = err instanceof Error && err.name === "AbortError";
+    const errMsg = err instanceof Error ? err.message : String(err);
     console.warn(`[ai-validator] AI evaluation failed:`, isAbort ? "timeout" : err);
-    return {
-      verdict: "uncertain",
-      reason: isAbort ? "AI evaluation timed out" : "AI service unavailable",
-      ruleBasedOnly: false,
-    };
+    let reason: string;
+    if (isAbort) {
+      reason = "AI evaluation timed out";
+    } else if (errMsg.includes("ENOTFOUND") || errMsg.includes("ECONNREFUSED") || errMsg.includes("fetch failed")) {
+      reason = `AI service unreachable: ${errMsg.slice(0, 100)}`;
+    } else {
+      reason = `AI service unavailable: ${errMsg.slice(0, 100)}`;
+    }
+    return { verdict: "uncertain", reason, ruleBasedOnly: false };
   } finally {
     clearTimeout(timer);
   }

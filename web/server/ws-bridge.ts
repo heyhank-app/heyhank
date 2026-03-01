@@ -848,7 +848,7 @@ export class WsBridge {
             return;
           }
         } catch (err) {
-          console.warn("[ws-bridge] AI validation error, falling through to manual:", err);
+          console.warn(`[ws-bridge] AI validation error for tool=${msg.request.tool_name} request_id=${msg.request_id} session=${session.id}, falling through to manual:`, err);
         }
       }
 

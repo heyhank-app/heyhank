@@ -71,7 +71,7 @@ export function attachCodexAdapterHandlers(
       ) {
         // Run AI validation async — don't broadcast yet
         handleCodexAiValidation(session, adapter, perm, deps).catch((err) => {
-          console.warn("[ws-bridge-codex] AI validation error, falling through to manual:", err);
+          console.warn(`[ws-bridge-codex] AI validation error for tool=${perm.tool_name} request_id=${perm.request_id} session=${session.id}, falling through to manual:`, err);
           // On error, fall through to normal flow
           session.pendingPermissions.set(perm.request_id, perm);
           deps.persistSession(session);

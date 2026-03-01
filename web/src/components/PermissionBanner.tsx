@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import { useStore } from "../store.js";
 import { sendToSession } from "../ws.js";
 import type { PermissionRequest } from "../types.js";
-import type { PermissionUpdate } from "../../server/session-types.js";
+import type { PermissionUpdate, AiValidationInfo } from "../../server/session-types.js";
 import { DiffViewer } from "./DiffViewer.js";
 
 /** Human-readable label for a permission suggestion */
@@ -103,19 +103,7 @@ export function PermissionBanner({
 
             {/* AI validation recommendation (shown for "uncertain" verdicts that fall through to manual) */}
             {permission.ai_validation && !isAskUser && (
-              <div className={`mt-2 flex items-center gap-1.5 text-[11px] px-2 py-1.5 rounded-md ${
-                permission.ai_validation.verdict === "safe"
-                  ? "bg-cc-success/10 text-cc-success"
-                  : permission.ai_validation.verdict === "dangerous"
-                    ? "bg-cc-error/10 text-cc-error"
-                    : "bg-cc-warning/10 text-cc-warning"
-              }`}>
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0">
-                  <path d="M8 1a2.5 2.5 0 00-2.5 2.5v.382a8 8 0 00-1.074.646l-.33-.191a2.5 2.5 0 00-3.415.912 2.5 2.5 0 00.916 3.42l.33.19A8 8 0 001.5 9.5v.382A8 8 0 002 10.5l-.33.19a2.5 2.5 0 00-.916 3.42 2.5 2.5 0 003.415.912l.33-.191a8 8 0 001.074.646V16A2.5 2.5 0 008 13.5 2.5 2.5 0 0010.5 16v-.713a8 8 0 001.074-.646l.33.191a2.5 2.5 0 003.415-.912 2.5 2.5 0 00-.916-3.42L14 10.5V9.5l.33-.19a2.5 2.5 0 00.916-3.42 2.5 2.5 0 00-3.415-.912l-.33.191A8 8 0 0010.5 4.882V4.5A2.5 2.5 0 008 2V1z"/>
-                </svg>
-                <span className="font-medium">AI analysis:</span>
-                <span>{permission.ai_validation.reason}</span>
-              </div>
+              <AiValidationBadge validation={permission.ai_validation} />
             )}
 
             {/* Actions - only for non-AskUserQuestion tools */}
@@ -163,6 +151,42 @@ export function PermissionBanner({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Detect if a reason string indicates a service/infrastructure failure rather than a genuine analysis. */
+function isServiceFailure(reason: string): boolean {
+  const failurePatterns = [
+    /^Invalid Anthropic/i,
+    /^Anthropic .*(rate limit|overloaded|unavailable|error|lacks permission)/i,
+    /^AI service/i,
+    /^AI evaluation timed out/i,
+    /^Model not found/i,
+    /^No Anthropic API key/i,
+  ];
+  return failurePatterns.some((p) => p.test(reason));
+}
+
+function AiValidationBadge({ validation }: { validation: AiValidationInfo }) {
+  const isFailure = validation.verdict === "uncertain" && isServiceFailure(validation.reason);
+
+  const colorClass =
+    validation.verdict === "safe"
+      ? "bg-cc-success/10 text-cc-success"
+      : validation.verdict === "dangerous"
+        ? "bg-cc-error/10 text-cc-error"
+        : "bg-cc-warning/10 text-cc-warning";
+
+  const label = isFailure ? "AI analysis unavailable — manual review:" : "AI analysis:";
+
+  return (
+    <div className={`mt-2 flex items-center gap-1.5 text-[11px] px-2 py-1.5 rounded-md ${colorClass}`}>
+      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 shrink-0">
+        <path d="M8 1a2.5 2.5 0 00-2.5 2.5v.382a8 8 0 00-1.074.646l-.33-.191a2.5 2.5 0 00-3.415.912 2.5 2.5 0 00.916 3.42l.33.19A8 8 0 001.5 9.5v.382A8 8 0 002 10.5l-.33.19a2.5 2.5 0 00-.916 3.42 2.5 2.5 0 003.415.912l.33-.191a8 8 0 001.074.646V16A2.5 2.5 0 008 13.5 2.5 2.5 0 0010.5 16v-.713a8 8 0 001.074-.646l.33.191a2.5 2.5 0 003.415-.912 2.5 2.5 0 00-.916-3.42L14 10.5V9.5l.33-.19a2.5 2.5 0 00.916-3.42 2.5 2.5 0 00-3.415-.912l-.33.191A8 8 0 0010.5 4.882V4.5A2.5 2.5 0 008 2V1z"/>
+      </svg>
+      <span className="font-medium">{label}</span>
+      <span>{validation.reason}</span>
     </div>
   );
 }

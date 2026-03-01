@@ -509,6 +509,109 @@ describe("AskUserQuestionDisplay", () => {
   });
 });
 
+// ─── AI Validation Badge ─────────────────────────────────────────────────────
+
+describe("AI validation badge", () => {
+  it("renders 'AI analysis:' label for genuine analysis verdicts", () => {
+    // When AI analysis returns a genuine uncertain verdict (not a service failure),
+    // the badge should show "AI analysis:" to indicate a real analysis was performed.
+    const perm = makePermission({
+      ai_validation: { verdict: "uncertain", reason: "Complex bash pipeline", ruleBasedOnly: false },
+    });
+    render(<PermissionBanner permission={perm} sessionId="s1" />);
+
+    expect(screen.getByText("AI analysis:")).toBeTruthy();
+    expect(screen.getByText("Complex bash pipeline")).toBeTruthy();
+  });
+
+  it("renders 'AI analysis unavailable' label for service failures (invalid key)", () => {
+    // When AI analysis failed due to a service error (like invalid API key),
+    // the badge should clarify that analysis was unavailable and this is manual review.
+    const perm = makePermission({
+      ai_validation: { verdict: "uncertain", reason: "Invalid Anthropic API key: invalid x-api-key", ruleBasedOnly: false },
+    });
+    render(<PermissionBanner permission={perm} sessionId="s1" />);
+
+    expect(screen.getByText(/AI analysis unavailable/)).toBeTruthy();
+    expect(screen.getByText(/Invalid Anthropic API key/)).toBeTruthy();
+  });
+
+  it("renders 'AI analysis unavailable' label for permission failures (403)", () => {
+    // 403 permission errors should also be identified as service failures.
+    const perm = makePermission({
+      ai_validation: { verdict: "uncertain", reason: "Anthropic API key lacks permission", ruleBasedOnly: false },
+    });
+    render(<PermissionBanner permission={perm} sessionId="s1" />);
+
+    expect(screen.getByText(/AI analysis unavailable/)).toBeTruthy();
+    expect(screen.getByText(/lacks permission/)).toBeTruthy();
+  });
+
+  it("renders 'AI analysis unavailable' label for timeout failures", () => {
+    // Timeout errors should also be identified as service failures.
+    const perm = makePermission({
+      ai_validation: { verdict: "uncertain", reason: "AI evaluation timed out", ruleBasedOnly: false },
+    });
+    render(<PermissionBanner permission={perm} sessionId="s1" />);
+
+    expect(screen.getByText(/AI analysis unavailable/)).toBeTruthy();
+    expect(screen.getByText("AI evaluation timed out")).toBeTruthy();
+  });
+
+  it("renders 'AI analysis unavailable' label for unreachable service", () => {
+    // Network errors should be identified as service failures.
+    const perm = makePermission({
+      ai_validation: { verdict: "uncertain", reason: "AI service unreachable: ECONNREFUSED", ruleBasedOnly: false },
+    });
+    render(<PermissionBanner permission={perm} sessionId="s1" />);
+
+    expect(screen.getByText(/AI analysis unavailable/)).toBeTruthy();
+  });
+
+  it("renders 'AI analysis:' for safe verdict", () => {
+    // Safe verdicts should show the normal "AI analysis:" label.
+    const perm = makePermission({
+      ai_validation: { verdict: "safe", reason: "Standard dev command", ruleBasedOnly: false },
+    });
+    render(<PermissionBanner permission={perm} sessionId="s1" />);
+
+    expect(screen.getByText("AI analysis:")).toBeTruthy();
+    expect(screen.getByText("Standard dev command")).toBeTruthy();
+  });
+
+  it("renders 'AI analysis:' for dangerous verdict", () => {
+    // Dangerous verdicts should show the normal "AI analysis:" label.
+    const perm = makePermission({
+      ai_validation: { verdict: "dangerous", reason: "Recursive file deletion", ruleBasedOnly: false },
+    });
+    render(<PermissionBanner permission={perm} sessionId="s1" />);
+
+    expect(screen.getByText("AI analysis:")).toBeTruthy();
+    expect(screen.getByText("Recursive file deletion")).toBeTruthy();
+  });
+
+  it("does not render AI validation badge for AskUserQuestion", () => {
+    // AskUserQuestion tools should never show AI validation badge.
+    const perm = makePermission({
+      tool_name: "AskUserQuestion",
+      input: { question: "Pick one" },
+      ai_validation: { verdict: "safe", reason: "test", ruleBasedOnly: false },
+    });
+    render(<PermissionBanner permission={perm} sessionId="s1" />);
+
+    expect(screen.queryByText("AI analysis:")).toBeNull();
+  });
+
+  it("does not render AI validation badge when ai_validation is absent", () => {
+    // Permissions without AI validation should not show any badge.
+    const perm = makePermission();
+    render(<PermissionBanner permission={perm} sessionId="s1" />);
+
+    expect(screen.queryByText("AI analysis:")).toBeNull();
+    expect(screen.queryByText(/AI analysis unavailable/)).toBeNull();
+  });
+});
+
 // ─── ExitPlanModeDisplay ─────────────────────────────────────────────────────
 
 describe("ExitPlanModeDisplay", () => {
