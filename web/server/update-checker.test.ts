@@ -101,6 +101,50 @@ describe("isNewerVersion (prerelease)", () => {
 });
 
 // ===========================================================================
+// Prerelease update-channel regression tests (THE-216)
+//
+// The preview workflow publishes versions with a patch-core bump so that
+// prerelease builds are always semver-ahead of the current stable line.
+// These tests lock in the intended behavior to prevent regressions.
+// ===========================================================================
+describe("isNewerVersion — prerelease channel regressions (THE-216)", () => {
+  // A same-core prerelease (the old, broken format) must NOT be considered
+  // newer than the stable release it was derived from.
+  it("same-core prerelease is NOT newer than stable (old broken format)", () => {
+    // e.g. stable 0.68.0, preview publishes 0.68.0-preview.20260301120000.abc1234
+    expect(checker.isNewerVersion("0.68.0-preview.20260301120000.abc1234", "0.68.0")).toBe(false);
+  });
+
+  // A patch-bumped prerelease (the fixed format) IS newer than the stable
+  // release it was derived from.
+  it("patch-bumped prerelease IS newer than stable (fixed format)", () => {
+    // e.g. stable 0.68.0, preview publishes 0.68.1-preview.20260301120000.abc1234
+    expect(checker.isNewerVersion("0.68.1-preview.20260301120000.abc1234", "0.68.0")).toBe(true);
+  });
+
+  // Successive preview builds (same core, increasing timestamps) stay
+  // monotonically ordered.
+  it("later timestamp preview is newer than earlier timestamp preview", () => {
+    expect(checker.isNewerVersion(
+      "0.68.1-preview.20260301140000.abc1234",
+      "0.68.1-preview.20260301120000.def5678",
+    )).toBe(true);
+  });
+
+  // After a new stable release that matches or exceeds the preview core,
+  // the old preview is no longer considered newer.
+  it("stable release at preview core supersedes the preview", () => {
+    // When 0.68.1 stable is released, the preview 0.68.1-preview.* is older
+    expect(checker.isNewerVersion("0.68.1-preview.20260301120000.abc1234", "0.68.1")).toBe(false);
+  });
+
+  // A new stable that leapfrogs past the preview core is newer.
+  it("higher stable is newer than older-core preview", () => {
+    expect(checker.isNewerVersion("0.69.0", "0.68.1-preview.20260301120000.abc1234")).toBe(true);
+  });
+});
+
+// ===========================================================================
 // getCurrentVersion
 // ===========================================================================
 describe("getCurrentVersion", () => {

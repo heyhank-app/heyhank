@@ -108,9 +108,40 @@ jobs:
           BASE_VERSION=$(node -p "require('./package.json').version")
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
-          PRE_VERSION="${BASE_VERSION}-preview.${TIMESTAMP}.${SHORT_SHA}"
+          # Bump patch by 1 so the prerelease is semver-ahead of the current
+          # stable release.  Without this, 0.68.0-preview.* < 0.68.0 and the
+          # in-app update checker correctly rejects it (THE-216).
+          NEXT_PATCH=$(node -p "
+            const v = '${BASE_VERSION}'.split('.');
+            v[2] = Number(v[2]) + 1;
+            v.join('.')
+          ")
+          PRE_VERSION="${NEXT_PATCH}-preview.${TIMESTAMP}.${SHORT_SHA}"
           echo "version=${PRE_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Preview version: ${PRE_VERSION}"
+
+      - name: Validate prerelease is semver-ahead of stable
+        working-directory: web
+        run: |
+          BASE_VERSION=$(node -p "require('./package.json').version")
+          PRE_VERSION="${{ steps.version.outputs.version }}"
+          node -e "
+            const semverGt = (a, b) => {
+              const pa = a.split('-')[0].split('.').map(Number);
+              const pb = b.split('-')[0].split('.').map(Number);
+              for (let i = 0; i < 3; i++) {
+                if (pa[i] > pb[i]) return true;
+                if (pa[i] < pb[i]) return false;
+              }
+              // Equal core: stable > prerelease of same core
+              return a.split('-').length === 1 && b.split('-').length > 1;
+            };
+            if (!semverGt('${PRE_VERSION}', '${BASE_VERSION}')) {
+              console.error('FATAL: preview version ${PRE_VERSION} is not semver-greater than stable ${BASE_VERSION}');
+              process.exit(1);
+            }
+            console.log('OK: ${PRE_VERSION} > ${BASE_VERSION}');
+          "
 
       - name: Set prerelease version
         working-directory: web

@@ -124,7 +124,7 @@ Every push to `main` publishes a preview artifact:
 | Docker image (immutable) | `preview-<sha>` | `docker.io/stangirard/the-companion:preview-abc1234...` |
 | npm package | `next` | `bunx the-companion@next` |
 
-Preview builds are **not** production-stable. Use `latest` / semver tags for stable releases.
+Preview builds use a patch-core bump (e.g. `0.68.1-preview.*` when stable is `0.68.0`) so the in-app update checker can detect them as semver-ahead of the current stable release. They are **not** production-stable — use `latest` / semver tags for stable releases.
 
 ### Tracking prerelease updates in-app
 

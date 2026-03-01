@@ -70,4 +70,6 @@ Every push to `main` publishes preview artifacts:
 | Docker image (immutable) | `preview-<sha>` | `docker.io/stangirard/the-companion:preview-abc1234` |
 | npm package | `next` | `bunx the-companion@next` |
 
+Preview builds are published on the `next` dist-tag with a patch-core bump (e.g. `0.68.1-preview.*` when stable is `0.68.0`) so in-app prerelease updates are detected automatically.
+
 In **Settings > Updates**, switch to **Prerelease** channel to receive preview builds.
