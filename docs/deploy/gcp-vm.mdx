@@ -1,0 +1,345 @@
+---
+title: GCP Virtual Machine
+description: Deploy The Companion on a private Google Cloud VM with Tailscale access
+---
+
+# Deploy on a GCP Virtual Machine
+
+This guide walks you through deploying The Companion on a private GCP VM in the `europe-west9` (Paris) region. The VM has no public IP — you'll access it securely through Tailscale, which gives you an HTTPS endpoint without exposing anything to the internet.
+
+By the end, you'll have a dedicated Companion server running at `https://<hostname>.<tailnet>.ts.net/`.
+
+## What you'll set up
+
+| Component | Purpose |
+|---|---|
+| GCP Compute Engine VM | Runs The Companion (no public IP) |
+| IAP tunnel | SSH access to the private VM |
+| Cloud NAT | Outbound internet for package installs |
+| Tailscale | Secure access via your private network |
+
+## Prerequisites
+
+Before you begin, make sure you have:
+
+- **gcloud CLI** installed and authenticated (`gcloud auth login`)
+- An active **GCP project** with billing enabled
+- Permissions for **Compute Engine**, **IAP**, **Network** (Router/NAT), and **Service Usage**
+- A **Tailscale account** with an [auth key](https://login.tailscale.com/admin/settings/keys) ready
+- A **Claude Code** or **Codex** API key for the agent CLI
+
+## 1. Set your variables
+
+Define these once — every command below references them. Adjust the values to match your project and preferences.
+
+```bash
+export PROJECT_ID="your-project-id"
+export ZONE="europe-west9-a"              # Paris
+export REGION="europe-west9"
+export INSTANCE="companion-vm"
+export MACHINE_TYPE="e2-standard-4"       # 4 vCPU, 16 GB RAM
+export IMAGE_FAMILY="ubuntu-2404-lts-amd64"
+export IMAGE_PROJECT="ubuntu-os-cloud"
+export DISK_SIZE="50GB"
+export DISK_TYPE="pd-ssd"
+export NETWORK="default"
+export ROUTER_NAME="nat-router-ew9"
+export NAT_NAME="nat-config-ew9"
+export COMPANION_HOSTNAME="companion"
+export TAILSCALE_AUTH_KEY="tskey-auth-REPLACE_ME"
+```
+
+<Warning>
+Never commit `TAILSCALE_AUTH_KEY` to version control. Revoke and regenerate it after automated provisioning.
+</Warning>
+
+## 2. Create the VM
+
+Spin up an Ubuntu 24.04 instance with no public IP address. All external access goes through IAP (for SSH) and Tailscale (for the web UI).
+
+```bash
+gcloud compute instances create "$INSTANCE" \
+  --project="$PROJECT_ID" \
+  --zone="$ZONE" \
+  --image-family="$IMAGE_FAMILY" \
+  --image-project="$IMAGE_PROJECT" \
+  --machine-type="$MACHINE_TYPE" \
+  --boot-disk-size="$DISK_SIZE" \
+  --boot-disk-type="$DISK_TYPE" \
+  --no-address \
+  --scopes=cloud-platform \
+  --tags=companion
+```
+
+Verify it's running:
+
+```bash
+gcloud compute instances describe "$INSTANCE" \
+  --project="$PROJECT_ID" \
+  --zone="$ZONE" \
+  --format="get(status,networkInterfaces[0].networkIP)"
+```
+
+You should see `RUNNING` and an internal IP like `10.x.x.x`.
+
+## 3. Enable IAP for SSH
+
+Since the VM has no public IP, you'll SSH through Google's Identity-Aware Proxy.
+
+```bash
+gcloud services enable iap.googleapis.com --project="$PROJECT_ID"
+```
+
+Test the connection:
+
+```bash
+gcloud compute ssh "$INSTANCE" \
+  --project="$PROJECT_ID" \
+  --zone="$ZONE" \
+  --tunnel-through-iap
+```
+
+<Tip>
+If you get a `SERVICE_DISABLED` error, wait a minute after enabling the IAP API — it can take a moment to propagate.
+</Tip>
+
+## 4. Set up Cloud NAT
+
+The VM needs outbound internet access to download packages, pull Docker images, and install toolchains. Cloud NAT provides this without assigning a public IP.
+
+Create the router:
+
+```bash
+gcloud compute routers create "$ROUTER_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$NETWORK" \
+  --region="$REGION"
+```
+
+Attach a NAT configuration:
+
+```bash
+gcloud compute routers nats create "$NAT_NAME" \
+  --project="$PROJECT_ID" \
+  --router="$ROUTER_NAME" \
+  --router-region="$REGION" \
+  --nat-all-subnet-ip-ranges \
+  --auto-allocate-nat-external-ips
+```
+
+## 5. Provision the VM
+
+This script installs everything the VM needs: system packages, Docker, Node.js, and the development toolchain. Save it locally as `provision-devbox.sh`.
+
+```bash provision-devbox.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=== Provisioning started ==="
+
+# --- System packages ---
+sudo apt-get update
+sudo apt-get install -y \
+  curl git build-essential libssl-dev libreadline-dev \
+  zlib1g-dev libffi-dev libyaml-dev jq tmux unzip
+
+# --- Docker ---
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker "$USER"
+newgrp docker  # activate group in current session
+
+# --- Node.js 22 ---
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# --- Claude Code CLI ---
+sudo npm install -g @anthropic-ai/claude-code
+
+# --- GitHub CLI ---
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+  | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main' \
+  | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+sudo apt-get update && sudo apt-get install -y gh
+
+# --- Postgres + Redis clients (optional) ---
+sudo apt-get install -y postgresql-client-16 redis-tools
+
+echo "=== Provisioning complete ==="
+```
+
+Run it on the VM:
+
+```bash
+gcloud compute ssh "$INSTANCE" \
+  --project="$PROJECT_ID" \
+  --zone="$ZONE" \
+  --tunnel-through-iap \
+  --command 'bash -s' < ./provision-devbox.sh
+```
+
+## 6. Install Bun and The Companion
+
+SSH into the VM and install The Companion as a global package with a background service:
+
+```bash
+gcloud compute ssh "$INSTANCE" \
+  --project="$PROJECT_ID" \
+  --zone="$ZONE" \
+  --tunnel-through-iap \
+  --command 'bash -lc "
+set -euo pipefail
+
+# Install Bun
+if ! command -v bun >/dev/null 2>&1; then
+  curl -fsSL https://bun.sh/install | bash
+fi
+export PATH=\$HOME/.bun/bin:\$PATH
+
+# Install The Companion globally
+bun install -g the-companion
+
+# Register as a systemd service and start
+the-companion install
+the-companion start
+"'
+```
+
+Verify it's running:
+
+```bash
+gcloud compute ssh "$INSTANCE" \
+  --project="$PROJECT_ID" \
+  --zone="$ZONE" \
+  --tunnel-through-iap \
+  --command 'bash -lc "
+export PATH=\$HOME/.bun/bin:\$PATH
+the-companion status
+"'
+```
+
+## 7. Connect with Tailscale
+
+Tailscale creates a secure mesh network between your devices. Once installed on the VM, The Companion becomes accessible from any device on your tailnet — no port forwarding or firewall rules needed.
+
+```bash
+gcloud compute ssh "$INSTANCE" \
+  --project="$PROJECT_ID" \
+  --zone="$ZONE" \
+  --tunnel-through-iap \
+  --command "bash -lc '
+set -euo pipefail
+
+# Install Tailscale
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# Join your tailnet (auth key passed via env var to avoid process-table exposure)
+export TS_AUTHKEY=\"$TAILSCALE_AUTH_KEY\"
+sudo -E tailscale up \
+  --hostname=\"$COMPANION_HOSTNAME\" \
+  --ssh
+unset TS_AUTHKEY
+
+# Serve The Companion over HTTPS
+sudo tailscale serve --bg 3456
+'"
+```
+
+Once connected, open your browser and navigate to:
+
+```
+https://<hostname>.<tailnet>.ts.net/
+```
+
+Replace `<hostname>` with the value of `COMPANION_HOSTNAME` and `<tailnet>` with your Tailscale network name.
+
+<Tip>
+Run `sudo tailscale status` on the VM to see the full hostname and confirm the node is connected.
+</Tip>
+
+## Day-to-day operations
+
+### Companion commands
+
+| Command | What it does |
+|---|---|
+| `the-companion status` | Check if the service is running |
+| `the-companion logs` | Tail recent logs |
+| `the-companion restart` | Restart the server |
+| `the-companion stop` | Stop the server |
+
+### Tailscale commands
+
+| Command | What it does |
+|---|---|
+| `sudo tailscale status` | Show connection status and IP |
+| `sudo tailscale serve status` | Check the HTTPS proxy configuration |
+| `sudo tailscale serve --https=443 off` | Disable the HTTPS proxy |
+
+### SSH into the VM
+
+```bash
+gcloud compute ssh "$INSTANCE" \
+  --project="$PROJECT_ID" \
+  --zone="$ZONE" \
+  --tunnel-through-iap
+```
+
+## Troubleshooting
+
+### `apt` commands time out
+
+The VM has no public IP, so outbound traffic depends on Cloud NAT. Verify:
+
+- The router and NAT are in the **same region** as the VM
+- The NAT config covers all subnet IP ranges
+
+```bash
+gcloud compute routers nats describe "$NAT_NAME" \
+  --router="$ROUTER_NAME" \
+  --router-region="$REGION" \
+  --project="$PROJECT_ID"
+```
+
+### IAP SSH fails with `SERVICE_DISABLED`
+
+Enable the IAP API and wait a minute for propagation:
+
+```bash
+gcloud services enable iap.googleapis.com --project="$PROJECT_ID"
+```
+
+Also check that your GCP user has the **IAP-Secured Tunnel User** role.
+
+### `bun install` fails with "unzip is required"
+
+The provisioning script installs `unzip`, but if you skipped it:
+
+```bash
+sudo apt-get install -y unzip
+```
+
+### Tailscale node not visible
+
+- Check that the auth key hasn't expired — generate a new one from the [Tailscale admin console](https://login.tailscale.com/admin/settings/keys)
+- Verify the node is connected: `sudo tailscale status`
+- Make sure your local device is also on the same tailnet
+
+### The Companion UI loads but sessions fail
+
+- Confirm the Claude Code CLI is authenticated: SSH in and run `claude` once
+- Check that your API key or subscription is valid
+- Review server logs: `the-companion logs`
+
+## Security considerations
+
+- The VM has **no public IP** — it's only reachable via IAP (SSH) and Tailscale (HTTPS)
+- **Revoke and regenerate** the Tailscale auth key after provisioning
+- Use [Tailscale ACLs](https://tailscale.com/kb/1018/acls) to restrict which devices and users can reach the VM
+- The Companion generates an auth token automatically — see [Authentication](/getting-started/installation#authentication) for details
+- Consider enabling GCP [OS Login](https://cloud.google.com/compute/docs/instances/managing-instance-access) for centralized SSH access control
+- Clear shell history after provisioning to remove any sensitive values: `history -c && history -w`
+
+<Note>
+The provisioning script uses `curl | sh` for Docker, NodeSource, and Tailscale for convenience. For stricter environments, consider using the official APT repositories with GPG signature verification instead. Each provider documents this approach: [Docker APT](https://docs.docker.com/engine/install/ubuntu/), [NodeSource](https://github.com/nodesource/distributions#installation-instructions), [Tailscale](https://tailscale.com/kb/1187/install-ubuntu-2204).
+</Note>
