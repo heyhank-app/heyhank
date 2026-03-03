@@ -1,15 +1,43 @@
 ---
-title: GCP Virtual Machine
-description: Deploy The Companion on a private Google Cloud VM with Tailscale access
+title: Deploy on a Cloud VM
+description: Deploy The Companion on a private cloud VM with Tailscale access
 ---
 
-# Deploy on a GCP Virtual Machine
+# Deploy on a Cloud VM
+
+The Companion runs locally by default, but you can deploy it on a remote server for always-on access, shared team usage, or dedicated development environments.
+
+## Choosing a setup
+
+| Scenario | Recommended approach |
+|---|---|
+| Solo developer, single machine | [Local install](/get-started/installation) with `bunx the-companion` |
+| Always-on server in the cloud | Cloud VM with Tailscale (this guide) |
+| Isolated per-project environments | [Docker sessions](/guides/docker-and-environments) on any host |
+| Team sharing a single instance | Remote deploy with Tailscale ACLs for access control |
+
+<Tip>
+You can combine approaches — for example, deploy on a GCP VM and use Docker sessions within it for per-project isolation.
+</Tip>
+
+## Architecture
+
+Regardless of where you deploy, the architecture stays the same:
+
+1. The Companion server runs on the host (port 3456 by default)
+2. It spawns Claude Code or Codex CLI processes as child subprocesses
+3. Your browser connects to the server over WebSocket
+4. A reverse proxy or tunnel (like Tailscale) provides secure remote access
+
+The server is stateless enough to restart cleanly — sessions persist to disk and CLI processes reconnect automatically. See [Session Recovery](/guides/sessions-and-permissions#session-recovery) for details.
+
+## GCP Virtual Machine
 
 This guide walks you through deploying The Companion on a private GCP VM in the `europe-west9` (Paris) region. The VM has no public IP — you'll access it securely through Tailscale, which gives you an HTTPS endpoint without exposing anything to the internet.
 
 By the end, you'll have a dedicated Companion server running at `https://<hostname>.<tailnet>.ts.net/`.
 
-## What you'll set up
+### What you'll set up
 
 | Component | Purpose |
 |---|---|
@@ -18,9 +46,7 @@ By the end, you'll have a dedicated Companion server running at `https://<hostna
 | Cloud NAT | Outbound internet for package installs |
 | Tailscale | Secure access via your private network |
 
-## Prerequisites
-
-Before you begin, make sure you have:
+### Prerequisites
 
 - **gcloud CLI** installed and authenticated (`gcloud auth login`)
 - An active **GCP project** with billing enabled
@@ -28,9 +54,9 @@ Before you begin, make sure you have:
 - A **Tailscale account** with an [auth key](https://login.tailscale.com/admin/settings/keys) ready
 - A **Claude Code** or **Codex** API key for the agent CLI
 
-## 1. Set your variables
+### 1. Set your variables
 
-Define these once — every command below references them. Adjust the values to match your project and preferences.
+Define these once — every command below references them.
 
 ```bash
 export PROJECT_ID="your-project-id"
@@ -53,9 +79,9 @@ export TAILSCALE_AUTH_KEY="tskey-auth-REPLACE_ME"
 Never commit `TAILSCALE_AUTH_KEY` to version control. Revoke and regenerate it after automated provisioning.
 </Warning>
 
-## 2. Create the VM
+### 2. Create the VM
 
-Spin up an Ubuntu 24.04 instance with no public IP address. All external access goes through IAP (for SSH) and Tailscale (for the web UI).
+Spin up an Ubuntu 24.04 instance with no public IP address.
 
 ```bash
 gcloud compute instances create "$INSTANCE" \
@@ -82,7 +108,7 @@ gcloud compute instances describe "$INSTANCE" \
 
 You should see `RUNNING` and an internal IP like `10.x.x.x`.
 
-## 3. Enable IAP for SSH
+### 3. Enable IAP for SSH
 
 Since the VM has no public IP, you'll SSH through Google's Identity-Aware Proxy.
 
@@ -103,9 +129,9 @@ gcloud compute ssh "$INSTANCE" \
 If you get a `SERVICE_DISABLED` error, wait a minute after enabling the IAP API — it can take a moment to propagate.
 </Tip>
 
-## 4. Set up Cloud NAT
+### 4. Set up Cloud NAT
 
-The VM needs outbound internet access to download packages, pull Docker images, and install toolchains. Cloud NAT provides this without assigning a public IP.
+The VM needs outbound internet access to download packages, pull Docker images, and install toolchains.
 
 Create the router:
 
@@ -127,9 +153,9 @@ gcloud compute routers nats create "$NAT_NAME" \
   --auto-allocate-nat-external-ips
 ```
 
-## 5. Provision the VM
+### 5. Provision the VM
 
-This script installs everything the VM needs: system packages, Docker, Node.js, and the development toolchain. Save it locally as `provision-devbox.sh`.
+This script installs system packages, Docker, Node.js, and the development toolchain. Save it locally as `provision-devbox.sh`.
 
 ```bash provision-devbox.sh
 #!/usr/bin/env bash
@@ -178,7 +204,7 @@ gcloud compute ssh "$INSTANCE" \
   --command 'bash -s' < ./provision-devbox.sh
 ```
 
-## 6. Install Bun and The Companion
+### 6. Install Bun and The Companion
 
 SSH into the VM and install The Companion as a global package with a background service:
 
@@ -218,9 +244,9 @@ the-companion status
 "'
 ```
 
-## 7. Connect with Tailscale
+### 7. Connect with Tailscale
 
-Tailscale creates a secure mesh network between your devices. Once installed on the VM, The Companion becomes accessible from any device on your tailnet — no port forwarding or firewall rules needed.
+Tailscale creates a secure mesh network between your devices.
 
 ```bash
 gcloud compute ssh "$INSTANCE" \
@@ -289,10 +315,7 @@ gcloud compute ssh "$INSTANCE" \
 
 ### `apt` commands time out
 
-The VM has no public IP, so outbound traffic depends on Cloud NAT. Verify:
-
-- The router and NAT are in the **same region** as the VM
-- The NAT config covers all subnet IP ranges
+The VM has no public IP, so outbound traffic depends on Cloud NAT. Verify the router and NAT are in the **same region** as the VM:
 
 ```bash
 gcloud compute routers nats describe "$NAT_NAME" \
@@ -336,7 +359,7 @@ sudo apt-get install -y unzip
 - The VM has **no public IP** — it's only reachable via IAP (SSH) and Tailscale (HTTPS)
 - **Revoke and regenerate** the Tailscale auth key after provisioning
 - Use [Tailscale ACLs](https://tailscale.com/kb/1018/acls) to restrict which devices and users can reach the VM
-- The Companion generates an auth token automatically — see [Authentication](/getting-started/installation#authentication) for details
+- The Companion generates an auth token automatically — see [Authentication](/get-started/installation#authentication) for details
 - Consider enabling GCP [OS Login](https://cloud.google.com/compute/docs/instances/managing-instance-access) for centralized SSH access control
 - Clear shell history after provisioning to remove any sensitive values: `history -c && history -w`
 

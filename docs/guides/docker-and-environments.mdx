@@ -1,0 +1,218 @@
+---
+title: Docker & Environments
+description: Define environment profiles and run sessions in Docker containers
+---
+
+# Docker & Environments
+
+Environment profiles let you define reusable configurations — environment variables, Docker settings, init scripts, and port mappings — that are applied when launching sessions or agents.
+
+Navigate to **Environments** in the sidebar, or access from **Settings > Environments**.
+
+## Create a profile
+
+1. Click **New Environment**
+2. Enter a **name** (e.g., "Production API", "GLM v5 Setup")
+3. Configure the profile using the four tabs below
+4. Click **Save**
+
+### Variables tab
+
+Add key-value environment variables. These are injected into the CLI subprocess when a session starts with this profile.
+
+### Docker tab
+
+Configure a Docker container for isolated sessions. See [Docker sessions](#docker-sessions) below.
+
+### Init Script tab
+
+Write a shell script that runs before the session starts. See [Init scripts](#init-scripts) below.
+
+### Ports tab
+
+Define container ports to expose. See [Port forwarding](#port-forwarding) below.
+
+## Apply a profile
+
+**To a session**: When creating a new session on the Home page, select an environment profile from the **Environment** dropdown.
+
+**To an agent**: In the agent editor, select an environment profile from the **Env Profile** dropdown in the controls row. The profile is applied every time the agent runs.
+
+## Use case: alternative model providers
+
+You can use environment variables to configure alternative model providers. For example, to use GLM v5:
+
+1. Create a new environment profile named "GLM v5"
+2. In the **Variables** tab, set:
+
+| Variable | Value |
+|---|---|
+| `ANTHROPIC_BASE_URL` | `https://your-glm-endpoint.example.com/v1` |
+| `ANTHROPIC_API_KEY` | `your-glm-api-key` |
+| `ANTHROPIC_MODEL` | `glm-v5` |
+
+3. Select this profile when creating sessions or configuring agents
+
+<Tip>
+The exact variables depend on your model provider's compatibility layer. Many providers offer OpenAI- or Anthropic-compatible APIs that accept the same environment variables.
+</Tip>
+
+## Docker sessions
+
+Docker sessions run the agent CLI inside a container, providing an isolated filesystem, pre-installed toolchains, and port forwarding. This is useful for untrusted workloads, reproducible environments, and projects with specific system dependencies.
+
+### Prerequisites
+
+- Docker must be installed and running on your machine
+- The Environments page shows a **Docker** badge (green if available, amber if not detected)
+
+### The container image
+
+The default image (`the-companion:latest`) is based on Ubuntu 24.04 and includes:
+
+| Tool | Version |
+|---|---|
+| Node.js | 22 LTS (via nvm, with pnpm) |
+| Bun | Latest |
+| Deno | Latest |
+| Go | 1.23 |
+| Rust | Latest (via rustup) |
+| Python | System + poetry + uv |
+| Docker CLI | Latest (for nested Docker) |
+| GitHub CLI (gh) | Latest |
+| Claude Code CLI | Latest |
+| Codex CLI | Latest |
+| VS Code Server | code-server |
+
+Plus system tools: git, curl, wget, make, jq, cmake, sqlite3, ffmpeg, imagemagick.
+
+### Set up a Docker environment
+
+1. Go to **Environments** and create a new profile (or edit an existing one)
+2. Open the **Docker** tab
+3. Select a **base image** from the dropdown (e.g., `the-companion:latest`) or enter a custom image name
+4. Click **Pull** to download the image — progress is shown in real time
+
+### Custom Dockerfile
+
+If you need additional dependencies:
+
+1. In the Docker tab, write a custom **Dockerfile**:
+
+```dockerfile
+FROM the-companion:latest
+
+# Add project-specific dependencies
+RUN apt-get update && apt-get install -y postgresql-client
+RUN pip install pandas numpy
+
+WORKDIR /workspace
+CMD ["sleep", "infinity"]
+```
+
+2. Click **Build Image** to build and tag the custom image
+3. The build status (idle, building, success, error) is shown on the profile card
+
+### What happens when a Docker session starts
+
+1. A container is created with an isolated named volume
+2. Your **working directory** is copied into `/workspace` inside the container
+3. **Auth files** are seeded from your host machine:
+   - Claude Code credentials (`~/.claude`)
+   - Codex auth and config
+   - Git identity and GitHub token (SSH remotes are rewritten to HTTPS)
+4. The **init script** runs (if configured)
+5. The CLI subprocess starts inside the container
+
+### Volume mounts
+
+Add volume mounts in the environment profile to share directories between host and container. Volumes are specified as `host_path:container_path` pairs.
+
+### Auth and Git inside containers
+
+The Companion automatically:
+- Copies your Claude Code / Codex credentials into the container
+- Sets up `gh` as the git credential helper for GitHub authentication
+- Copies your git identity (`user.name`, `user.email`)
+- Disables GPG signing (unavailable in containers)
+- Marks `/workspace` as a safe directory
+- Rewrites SSH git remotes to HTTPS (containers lack SSH keys)
+
+<Note>
+Docker sessions and [git worktrees](/guides/git-worktrees) are mutually exclusive. Containers already provide filesystem isolation, so worktrees are not needed.
+</Note>
+
+## Init scripts
+
+The **Init Script** tab in the environment profile editor lets you write a shell script that runs before the session starts. This is useful for installing dependencies, seeding data, or running setup commands.
+
+### How it works
+
+- The script runs via `sh -lc` (login shell)
+- In Docker sessions: runs inside the container as root
+- Timeout: **120 seconds** (configurable via `COMPANION_INIT_SCRIPT_TIMEOUT` env var)
+- If the script fails (non-zero exit code), the session creation is aborted
+
+### Examples
+
+Install project dependencies:
+
+```bash
+cd /workspace
+bun install
+```
+
+Set up a Python environment:
+
+```bash
+cd /workspace
+pip install -r requirements.txt
+python manage.py migrate
+```
+
+Install system packages (Docker sessions only):
+
+```bash
+apt-get update && apt-get install -y redis-tools
+redis-cli ping
+```
+
+Seed a database:
+
+```bash
+cd /workspace
+createdb myapp_dev 2>/dev/null || true
+psql myapp_dev < db/seed.sql
+```
+
+## Port forwarding
+
+Ports defined in the environment profile are automatically mapped to random available host ports when the container starts. This prevents conflicts when running multiple Docker sessions.
+
+The container always exposes port 13337 (VS Code Server). Codex sessions also expose port 4502 for WebSocket.
+
+### Common ports
+
+| Port | Service |
+|---|---|
+| 3000 | Node.js / React dev server |
+| 5432 | PostgreSQL |
+| 6379 | Redis |
+| 8000 | Python / Django |
+| 8080 | General web server |
+
+Ports are mapped with `-p 0:PORT` so the host port is automatically assigned. Check the actual mapped port in the session terminal after the container starts.
+
+## Storage
+
+Profiles are stored as individual JSON files in `~/.companion/envs/`, named by slug (e.g., `glm-v5.json`).
+
+## REST API
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/envs` | List all profiles |
+| `GET` | `/api/envs/:slug` | Get a single profile |
+| `POST` | `/api/envs` | Create a profile |
+| `PUT` | `/api/envs/:slug` | Update a profile |
+| `DELETE` | `/api/envs/:slug` | Delete a profile |

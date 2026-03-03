@@ -15,7 +15,7 @@ A browser-based interface for running multiple [Claude Code](https://docs.anthro
 bunx the-companion
 ```
 
-Open [http://localhost:3456](http://localhost:3456). See the [Installation](/getting-started/installation) guide for more options.
+Open [http://localhost:3456](http://localhost:3456). See the [Installation](/get-started/installation) guide for more options.
 
 ## Subscription and authentication
 
@@ -29,25 +29,25 @@ All model inference happens through your own subscriptions. The Companion bridge
 ## Features
 
 <CardGroup cols={2}>
-  <Card title="Saved Prompts" icon="bookmark" href="/prompts/creating-prompts">
-    Create reusable prompts scoped globally or to specific projects. Insert them in any session with @mentions.
-  </Card>
-  <Card title="Agents" icon="robot" href="/agents/creating-agents">
-    Build reusable agent configurations with custom prompts, triggers (webhook, schedule), and Docker/git support.
-  </Card>
-  <Card title="Environments & Docker" icon="docker" href="/environments/environment-profiles">
-    Define environment profiles with variables, Docker containers, init scripts, and port forwarding.
-  </Card>
-  <Card title="Sessions & Permissions" icon="shield-check" href="/sessions/creating-sessions">
+  <Card title="Sessions & Permissions" icon="shield-check" href="/guides/sessions-and-permissions">
     Run parallel sessions, approve tool calls, and recover work after restarts.
   </Card>
-  <Card title="Git Worktrees" icon="code-branch" href="/git/branches-and-worktrees">
+  <Card title="Docker & Environments" icon="docker" href="/guides/docker-and-environments">
+    Define environment profiles with variables, Docker containers, init scripts, and port forwarding.
+  </Card>
+  <Card title="Git Worktrees" icon="code-branch" href="/guides/git-worktrees">
     Isolate sessions with git worktrees so multiple agents can work on the same repo without conflicts.
   </Card>
-  <Card title="Linear Integration" icon="list-check" href="/integrations/linear">
+  <Card title="Agents" icon="robot" href="/guides/agents">
+    Build reusable agent configurations with custom prompts, triggers (webhook, schedule), and Docker/git support.
+  </Card>
+  <Card title="Saved Prompts" icon="bookmark" href="/guides/saved-prompts">
+    Create reusable prompts scoped globally or to specific projects. Insert them in any session with @mentions.
+  </Card>
+  <Card title="Linear Integration" icon="list-check" href="/guides/linear-integration">
     Search and create Linear issues, link them to sessions, and auto-transition issue status.
   </Card>
-  <Card title="Deploy" icon="cloud" href="/deploy/index">
+  <Card title="Deploy" icon="cloud" href="/deploy/cloud-vm">
     Run The Companion on cloud VMs for always-on access with secure Tailscale networking.
   </Card>
 </CardGroup>

@@ -11,71 +11,34 @@
   "navigation": {
     "groups": [
       {
-        "group": "Getting Started",
+        "group": "Get Started",
         "pages": [
           "index",
-          "getting-started/installation",
-          "getting-started/quickstart",
-          "getting-started/cli-reference"
+          "get-started/installation"
         ]
       },
       {
-        "group": "Saved Prompts",
+        "group": "Guides",
         "pages": [
-          "prompts/creating-prompts",
-          "prompts/using-prompts"
+          "guides/sessions-and-permissions",
+          "guides/docker-and-environments",
+          "guides/git-worktrees",
+          "guides/agents",
+          "guides/saved-prompts",
+          "guides/linear-integration"
         ]
       },
       {
         "group": "Deploy",
         "pages": [
-          "deploy/index",
-          "deploy/gcp-vm"
+          "deploy/cloud-vm"
         ]
       },
       {
-        "group": "Agents",
+        "group": "Reference",
         "pages": [
-          "agents/creating-agents",
-          "agents/triggers",
-          "agents/advanced-config",
-          "agents/import-export"
-        ]
-      },
-      {
-        "group": "Environments & Docker",
-        "pages": [
-          "environments/environment-profiles",
-          "environments/docker-sessions",
-          "environments/init-scripts-ports"
-        ]
-      },
-      {
-        "group": "Sessions & Permissions",
-        "pages": [
-          "sessions/creating-sessions",
-          "sessions/managing-sessions",
-          "sessions/permissions",
-          "sessions/session-recovery"
-        ]
-      },
-      {
-        "group": "Git Workflows",
-        "pages": [
-          "git/branches-and-worktrees"
-        ]
-      },
-      {
-        "group": "Integrations",
-        "pages": [
-          "integrations/linear"
-        ]
-      },
-      {
-        "group": "Troubleshooting",
-        "pages": [
-          "troubleshooting/common-issues",
-          "troubleshooting/recordings"
+          "reference/cli-and-api",
+          "reference/troubleshooting"
         ]
       }
     ]
