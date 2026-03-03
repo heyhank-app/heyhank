@@ -27,6 +27,13 @@
         ]
       },
       {
+        "group": "Deploy",
+        "pages": [
+          "deploy/index",
+          "deploy/gcp-vm"
+        ]
+      },
+      {
         "group": "Agents",
         "pages": [
           "agents/creating-agents",
@@ -62,13 +69,6 @@
         "group": "Integrations",
         "pages": [
           "integrations/linear"
-        ]
-      },
-      {
-        "group": "Deploy",
-        "pages": [
-          "deploy/index",
-          "deploy/gcp-vm"
         ]
       },
       {
