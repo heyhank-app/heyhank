@@ -92,5 +92,6 @@
     "socials": {
       "github": "https://github.com/thevibecompany/the-companion"
     }
-  }
+  },
+  "favicon": "/images/favicon.svg"
 }
