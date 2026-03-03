@@ -192,13 +192,17 @@ describe("SessionEditorPane", () => {
       ],
     });
 
-    // Click an enabled refresh button (appears twice: desktop + mobile).
-    // In CI, one variant can be non-interactive depending on layout timing.
-    const refreshBtns = screen.getAllByLabelText("Refresh file tree");
-    const enabledRefreshBtn = refreshBtns.find((btn) => !btn.hasAttribute("disabled")) ?? refreshBtns[0];
+    // Wait for at least one refresh button to become enabled before clicking.
+    // This avoids a race where the test clicks while initial tree load is still in progress.
+    const enabledRefreshBtn = await waitFor(() => {
+      const refreshBtns = screen.getAllByLabelText("Refresh file tree");
+      const enabled = refreshBtns.find((btn) => !btn.hasAttribute("disabled"));
+      expect(enabled).toBeDefined();
+      return enabled!;
+    });
     fireEvent.click(enabledRefreshBtn);
 
-    await waitFor(() => expect(getFileTreeMock.mock.calls.length).toBeGreaterThanOrEqual(2));
+    // Assert user-visible outcome instead of internal call counts.
     const fileButtons = await screen.findAllByText("b.ts");
     expect(fileButtons.length).toBeGreaterThanOrEqual(1);
   });
