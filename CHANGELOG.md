@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.71.0](https://github.com/The-Vibe-Company/companion/compare/the-companion-v0.70.0...the-companion-v0.71.0) (2026-03-04)
+
+
+### Features
+
+* **sidebar:** add external links to docs, GitHub, and website ([#468](https://github.com/The-Vibe-Company/companion/issues/468)) ([6fe561e](https://github.com/The-Vibe-Company/companion/commit/6fe561e83fbdd90359bee7bf76587256b35d0704))
+* **sidebar:** redesign footer nav from grid to vertical list ([#470](https://github.com/The-Vibe-Company/companion/issues/470)) ([8fdd9f6](https://github.com/The-Vibe-Company/companion/commit/8fdd9f6b1b91e5cb311abfd46ee122358c2cd553))
+
 ## [0.70.0](https://github.com/The-Vibe-Company/companion/compare/the-companion-v0.69.0...the-companion-v0.70.0) (2026-03-03)
 
 
