@@ -29,6 +29,8 @@ import { RecorderManager } from "./recorder.js";
 import { CronScheduler } from "./cron-scheduler.js";
 import { AgentExecutor } from "./agent-executor.js";
 import { migrateCronJobsToAgents } from "./agent-cron-migrator.js";
+import { ChatBot } from "./chat-bot.js";
+import { RelayClient } from "./relay-client.js";
 
 import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
 import { imagePullManager } from "./image-pull-manager.js";
@@ -56,6 +58,22 @@ const prPoller = new PRPoller(wsBridge);
 const recorder = new RecorderManager();
 const cronScheduler = new CronScheduler(launcher, wsBridge);
 const agentExecutor = new AgentExecutor(launcher, wsBridge);
+const chatBot = new ChatBot(agentExecutor, wsBridge);
+const chatEnabled = chatBot.initialize();
+if (chatEnabled) {
+  console.log(`[server] Chat SDK initialized with platforms: ${chatBot.platforms.join(", ")}`);
+}
+
+// ── Cloud relay connection (for receiving webhooks behind a firewall) ────────
+if (process.env.COMPANION_RELAY_URL && process.env.COMPANION_RELAY_SECRET) {
+  const relayClient = new RelayClient(
+    process.env.COMPANION_RELAY_URL,
+    process.env.COMPANION_RELAY_SECRET,
+    chatBot,
+  );
+  relayClient.connect();
+  console.log(`[server] Relay client connecting to ${process.env.COMPANION_RELAY_URL}`);
+}
 
 // ── Restore persisted sessions from disk ────────────────────────────────────
 wsBridge.setStore(sessionStore);
@@ -74,6 +92,12 @@ wsBridge.onCLISessionIdReceived((sessionId, cliSessionId) => {
 // When a Codex adapter is created, attach it to the WsBridge
 launcher.onCodexAdapterCreated((sessionId, adapter) => {
   wsBridge.attachCodexAdapter(sessionId, adapter);
+});
+
+// When a CLI/Codex process exits, mark the corresponding agent execution as completed
+launcher.onSessionExited((sessionId, exitCode) => {
+  agentExecutor.handleSessionExited(sessionId, exitCode);
+  chatBot.cleanupSession(sessionId);
 });
 
 // Start watching PRs when git info is resolved for a session
@@ -126,7 +150,7 @@ if (recorder.isGloballyEnabled()) {
 const app = new Hono();
 
 app.use("/api/*", cors());
-app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor));
+app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor, chatEnabled ? chatBot : undefined));
 
 // Dynamic manifest — embeds auth token in start_url so PWA auto-authenticates
 // on first launch. iOS gives standalone PWAs isolated storage from Safari,

@@ -24,6 +24,7 @@
           "guides/docker-and-environments",
           "guides/git-worktrees",
           "guides/agents",
+          "guides/chat-webhooks",
           "guides/saved-prompts",
           "guides/linear-integration"
         ]

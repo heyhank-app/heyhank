@@ -26,6 +26,7 @@ import { registerSkillRoutes } from "./routes/skills-routes.js";
 import { registerEnvRoutes } from "./routes/env-routes.js";
 import { registerCronRoutes } from "./routes/cron-routes.js";
 import { registerAgentRoutes } from "./routes/agent-routes.js";
+import { registerChatWebhookRoutes, registerChatProtectedRoutes } from "./routes/chat-routes.js";
 import { registerPromptRoutes } from "./routes/prompt-routes.js";
 import { registerSettingsRoutes } from "./routes/settings-routes.js";
 import { registerGitRoutes } from "./routes/git-routes.js";
@@ -58,6 +59,7 @@ export function createRoutes(
   recorder?: import("./recorder.js").RecorderManager,
   cronScheduler?: import("./cron-scheduler.js").CronScheduler,
   agentExecutor?: import("./agent-executor.js").AgentExecutor,
+  chatBot?: import("./chat-bot.js").ChatBot,
 ) {
   const api = new Hono();
 
@@ -133,6 +135,12 @@ export function createRoutes(
     return c.json({ ok: false });
   });
 
+  // ─── Chat SDK webhook routes (exempt from auth middleware) ────────
+  // Platform adapters handle their own signature verification (e.g., Linear HMAC).
+  if (chatBot) {
+    registerChatWebhookRoutes(api, chatBot);
+  }
+
   // ─── Auth middleware (protects all routes below) ───────────────────
 
   api.use("/*", async (c, next) => {
@@ -153,6 +161,11 @@ export function createRoutes(
     }
     return next();
   });
+
+  // ─── Chat platform listing (protected, after auth middleware) ─────
+  if (chatBot) {
+    registerChatProtectedRoutes(api, chatBot);
+  }
 
   // ─── Auth management (protected) ──────────────────────────────────
 

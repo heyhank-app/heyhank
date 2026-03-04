@@ -8,6 +8,7 @@ import type { WsBridge } from "./ws-bridge.js";
 import * as agentStore from "./agent-store.js";
 import * as envManager from "./env-manager.js";
 import * as sessionNames from "./session-names.js";
+import { ExecutionStore } from "./execution-store.js";
 
 /** Max consecutive failures before auto-disabling an agent */
 const MAX_CONSECUTIVE_FAILURES = 5;
@@ -23,6 +24,8 @@ export class AgentExecutor {
   /** In-memory execution history (last N per agent) */
   private executions = new Map<string, AgentExecution[]>();
   private static readonly MAX_EXECUTIONS_PER_AGENT = 50;
+  /** Persistent execution store (JSONL on disk) */
+  private executionStore = new ExecutionStore();
 
   constructor(launcher: CliLauncher, wsBridge: WsBridge) {
     this.launcher = launcher;
@@ -107,7 +110,7 @@ export class AgentExecutor {
   async executeAgent(
     agentId: string,
     input?: string,
-    opts?: { force?: boolean; triggerType?: "manual" | "webhook" | "schedule" },
+    opts?: { force?: boolean; triggerType?: "manual" | "webhook" | "schedule" | "chat" },
   ): Promise<SdkSessionInfo | undefined> {
     const agent = agentStore.getAgent(agentId);
     if (!agent) return;
@@ -146,10 +149,19 @@ export class AgentExecutor {
         cwd = mkdtempSync(join(tmpdir(), `companion-agent-${agent.id}-`));
       }
 
-      // Launch the session via CliLauncher
+      // Launch the session via CliLauncher.
+      // Agents always run with full permissions — no interactive prompts.
+      // For Claude Code this sets --permission-mode bypassPermissions;
+      // for Codex, approvalPolicy is already hardcoded to "never".
+      if (agent.permissionMode && agent.permissionMode !== "bypassPermissions") {
+        console.warn(
+          `[agent-executor] Agent "${agent.name}" has permissionMode="${agent.permissionMode}" ` +
+          `but agent sessions always run with bypassPermissions`,
+        );
+      }
       const sessionInfo = this.launcher.launch({
         model: agent.model,
-        permissionMode: agent.permissionMode,
+        permissionMode: "bypassPermissions",
         cwd,
         env: envVars,
         allowedTools: agent.allowedTools,
@@ -204,7 +216,8 @@ export class AgentExecutor {
         consecutiveFailures: 0,
       });
 
-      execution.success = true;
+      // Execution is now "running" — completedAt/success will be set
+      // when the CLI process exits via handleSessionExited().
       this.addExecution(agentId, execution);
 
       return sessionInfo;
@@ -277,6 +290,33 @@ export class AgentExecutor {
     list.push(execution);
     if (list.length > AgentExecutor.MAX_EXECUTIONS_PER_AGENT) {
       list.splice(0, list.length - AgentExecutor.MAX_EXECUTIONS_PER_AGENT);
+    }
+    // Persist to disk
+    this.executionStore.append(execution);
+  }
+
+  /** Query executions across all agents (for Runs view). */
+  listAllExecutions(opts?: { agentId?: string; triggerType?: string; status?: "running" | "success" | "error"; limit?: number; offset?: number }) {
+    return this.executionStore.list(opts);
+  }
+
+  /** Handle session exit: mark the corresponding execution as completed. */
+  handleSessionExited(sessionId: string, exitCode: number | null): void {
+    for (const [, execs] of this.executions) {
+      const exec = execs.find((e) => e.sessionId === sessionId && !e.completedAt);
+      if (exec) {
+        exec.completedAt = Date.now();
+        exec.success = exitCode === 0 || exitCode === null;
+        if (exitCode && exitCode !== 0) {
+          exec.error = exec.error || `Process exited with code ${exitCode}`;
+        }
+        this.executionStore.update(sessionId, {
+          completedAt: exec.completedAt,
+          success: exec.success,
+          error: exec.error,
+        });
+        break;
+      }
     }
   }
 

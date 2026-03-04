@@ -20,6 +20,10 @@ export interface CodexAttachDeps {
   onCLISessionId: ((sessionId: string, cliSessionId: string) => void) | null;
   onFirstTurnCompleted: ((sessionId: string, firstUserMessage: string) => void) | null;
   autoNamingAttempted: Set<string>;
+  /** Per-session listeners for assistant messages (used by chat relay). */
+  assistantMessageListeners: Map<string, Set<(msg: BrowserIncomingMessage) => void>>;
+  /** Per-session listeners for result messages (used by chat relay). */
+  resultListeners: Map<string, Set<(msg: BrowserIncomingMessage) => void>>;
 }
 
 export function attachCodexAdapterHandlers(
@@ -43,11 +47,22 @@ export function attachCodexAdapterHandlers(
     }
 
     if (msg.type === "assistant") {
-      session.messageHistory.push({ ...msg, timestamp: msg.timestamp || Date.now() });
+      const assistantMsg = { ...msg, timestamp: msg.timestamp || Date.now() };
+      session.messageHistory.push(assistantMsg);
       deps.persistSession(session);
+      // Invoke per-session listeners for chat relay
+      deps.assistantMessageListeners.get(sessionId)?.forEach((cb) => {
+        try { cb(assistantMsg); } catch (err) { console.error("[ws-bridge-codex] Assistant listener error:", err); }
+      });
     } else if (msg.type === "result") {
       session.messageHistory.push(msg);
       deps.persistSession(session);
+      // Invoke per-session listeners for chat relay
+      deps.resultListeners.get(sessionId)?.forEach((cb) => {
+        try {
+          Promise.resolve(cb(msg)).catch((err) => console.error("[ws-bridge-codex] Async result listener error:", err));
+        } catch (err) { console.error("[ws-bridge-codex] Result listener error:", err); }
+      });
     }
 
     if (msg.type === "assistant") {

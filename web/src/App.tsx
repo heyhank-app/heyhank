@@ -27,6 +27,7 @@ const EnvManager = lazy(() => import("./components/EnvManager.js").then((m) => (
 const DockerBuilderPage = lazy(() => import("./components/DockerBuilderPage.js").then((m) => ({ default: m.DockerBuilderPage })));
 const CronManager = lazy(() => import("./components/CronManager.js").then((m) => ({ default: m.CronManager })));
 const AgentsPage = lazy(() => import("./components/AgentsPage.js").then((m) => ({ default: m.AgentsPage })));
+const RunsPage = lazy(() => import("./components/RunsPage.js").then((m) => ({ default: m.RunsPage })));
 const TerminalPage = lazy(() => import("./components/TerminalPage.js").then((m) => ({ default: m.TerminalPage })));
 const ProcessPanel = lazy(() => import("./components/ProcessPanel.js").then((m) => ({ default: m.ProcessPanel })));
 
@@ -71,6 +72,7 @@ export default function App() {
   const isDockerBuilderPage = route.page === "docker-builder";
   const isScheduledPage = route.page === "scheduled";
   const isAgentsPage = route.page === "agents" || route.page === "agent-detail";
+  const isRunsPage = route.page === "runs";
   const isSessionView = route.page === "session" || route.page === "home";
 
   useEffect(() => {
@@ -239,6 +241,12 @@ export default function App() {
           {isAgentsPage && (
             <div className="absolute inset-0">
               <Suspense fallback={<LazyFallback />}><AgentsPage route={route} /></Suspense>
+            </div>
+          )}
+
+          {isRunsPage && (
+            <div className="absolute inset-0">
+              <Suspense fallback={<LazyFallback />}><RunsPage /></Suspense>
             </div>
           )}
 

@@ -13,6 +13,7 @@ export type Route =
   | { page: "scheduled" }
   | { page: "agents" }
   | { page: "agent-detail"; agentId: string }
+  | { page: "runs" }
   | { page: "playground" };
 
 const SESSION_PREFIX = "#/session/";
@@ -41,6 +42,7 @@ export function parseHash(hash: string): Route {
   // #/scheduled redirects to #/agents (cron absorbed into agents)
   if (hash === "#/scheduled") return { page: "agents" };
   if (hash === "#/agents") return { page: "agents" };
+  if (hash === "#/runs") return { page: "runs" };
   if (hash === "#/playground") return { page: "playground" };
 
   if (hash.startsWith(AGENT_PREFIX)) {

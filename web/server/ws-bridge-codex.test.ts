@@ -92,6 +92,8 @@ function createMockDeps(overrides = {}): CodexAttachDeps {
     onCLISessionId: vi.fn(),
     onFirstTurnCompleted: vi.fn(),
     autoNamingAttempted: new Set<string>(),
+    assistantMessageListeners: new Map(),
+    resultListeners: new Map(),
     ...overrides,
   };
 }
@@ -1334,6 +1336,125 @@ describe("attachCodexAdapterHandlers", () => {
           ai_validation: { verdict: "dangerous", reason: "Recursive delete", ruleBasedOnly: true },
         }),
       });
+    });
+  });
+
+  // ── Per-session listeners (chat relay) ──────────────────────────────────
+
+  describe("per-session assistant/result listeners", () => {
+    it("invokes assistantMessageListeners when assistant message arrives", () => {
+      // Chat relay relies on per-session listeners to forward agent responses
+      // to external platforms. The Codex path must invoke these just like the
+      // Claude Code path does.
+      const listener = vi.fn();
+      deps.assistantMessageListeners.set("test-session", new Set([listener]));
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+      const assistantMsg: BrowserIncomingMessage = {
+        type: "assistant",
+        message: {
+          id: "msg-listener",
+          type: "message",
+          role: "assistant",
+          model: "o3-pro",
+          content: [{ type: "text", text: "Hello from Codex" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        },
+        parent_tool_use_id: null,
+        timestamp: 1700000000000,
+      };
+
+      adapter._trigger("onBrowserMessage", assistantMsg);
+
+      expect(listener).toHaveBeenCalledOnce();
+      // The listener should receive the message with timestamp
+      expect(listener.mock.calls[0][0]).toMatchObject({
+        type: "assistant",
+        timestamp: 1700000000000,
+      });
+    });
+
+    it("invokes resultListeners when result message arrives", () => {
+      // Result listeners signal turn completion so chat relay can post
+      // accumulated text back to the platform.
+      const listener = vi.fn();
+      deps.resultListeners.set("test-session", new Set([listener]));
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+      const resultMsg: BrowserIncomingMessage = {
+        type: "result",
+        data: {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: undefined,
+          duration_ms: 100,
+          duration_api_ms: 80,
+          num_turns: 1,
+          total_cost_usd: 0.01,
+          stop_reason: "end_turn",
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+          uuid: "result-listener-1",
+          session_id: "test-session",
+        },
+      };
+
+      adapter._trigger("onBrowserMessage", resultMsg);
+
+      expect(listener).toHaveBeenCalledOnce();
+      expect(listener.mock.calls[0][0]).toMatchObject({ type: "result" });
+    });
+
+    it("does not invoke listeners for a different session", () => {
+      // Listeners registered for "other-session" should not fire when
+      // messages arrive for "test-session".
+      const listener = vi.fn();
+      deps.assistantMessageListeners.set("other-session", new Set([listener]));
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+      adapter._trigger("onBrowserMessage", {
+        type: "assistant",
+        message: {
+          id: "msg-other",
+          type: "message",
+          role: "assistant",
+          model: "o3-pro",
+          content: [{ type: "text", text: "Hello" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        },
+        parent_tool_use_id: null,
+        timestamp: Date.now(),
+      });
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it("does not throw when no listeners are registered", () => {
+      // When no listeners are registered for the session, the handler
+      // should not throw (Map.get returns undefined, optional chaining).
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+      expect(() => {
+        adapter._trigger("onBrowserMessage", {
+          type: "assistant",
+          message: {
+            id: "msg-no-listener",
+            type: "message",
+            role: "assistant",
+            model: "o3-pro",
+            content: [{ type: "text", text: "Hello" }],
+            stop_reason: "end_turn",
+            usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+          },
+          parent_tool_use_id: null,
+          timestamp: Date.now(),
+        });
+      }).not.toThrow();
     });
   });
 });

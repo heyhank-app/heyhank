@@ -48,6 +48,13 @@ interface AgentFormData {
   scheduleEnabled: boolean;
   scheduleExpression: string;
   scheduleRecurring: boolean;
+  // Chat platform triggers
+  chatEnabled: boolean;
+  chatPlatforms: Array<{
+    adapter: "linear" | "github" | "slack" | "discord";
+    mentionPattern: string;
+    autoSubscribe: boolean;
+  }>;
 }
 
 const EMPTY_FORM: AgentFormData = {
@@ -72,6 +79,8 @@ const EMPTY_FORM: AgentFormData = {
   scheduleEnabled: false,
   scheduleExpression: "0 8 * * *",
   scheduleRecurring: true,
+  chatEnabled: false,
+  chatPlatforms: [],
 };
 
 const CRON_PRESETS: { label: string; value: string }[] = [
@@ -262,6 +271,12 @@ export function AgentsPage({ route }: Props) {
       scheduleEnabled: agent.triggers?.schedule?.enabled ?? false,
       scheduleExpression: agent.triggers?.schedule?.expression || "0 8 * * *",
       scheduleRecurring: agent.triggers?.schedule?.recurring ?? true,
+      chatEnabled: agent.triggers?.chat?.enabled ?? false,
+      chatPlatforms: (agent.triggers?.chat?.platforms || []).map((p) => ({
+        adapter: p.adapter,
+        mentionPattern: p.mentionPattern || "",
+        autoSubscribe: p.autoSubscribe ?? true,
+      })),
     });
     setError("");
     setView("edit");
@@ -310,6 +325,16 @@ export function AgentsPage({ route }: Props) {
             enabled: form.scheduleEnabled,
             expression: form.scheduleExpression,
             recurring: form.scheduleRecurring,
+          },
+          chat: {
+            enabled: form.chatEnabled,
+            platforms: form.chatPlatforms
+              .filter((p) => p.adapter)
+              .map((p) => ({
+                adapter: p.adapter,
+                mentionPattern: p.mentionPattern || undefined,
+                autoSubscribe: p.autoSubscribe,
+              })),
           },
         },
       };
@@ -571,6 +596,10 @@ function AgentCard({
       agent.triggers.schedule.expression,
       agent.triggers.schedule.recurring,
     ));
+  }
+  if (agent.triggers?.chat?.enabled) {
+    const platformCount = agent.triggers.chat.platforms?.length ?? 0;
+    triggers.push(platformCount > 0 ? `Chat (${platformCount})` : "Chat");
   }
 
   return (
@@ -1170,6 +1199,17 @@ function AgentEditor({
                 </svg>
                 Schedule
               </button>
+
+              {/* Chat toggle pill */}
+              <button
+                onClick={() => updateField("chatEnabled", !form.chatEnabled)}
+                className={form.chatEnabled ? pillActive : pillDefault}
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
+                  <path d="M1 3.5A1.5 1.5 0 012.5 2h11A1.5 1.5 0 0115 3.5v8a1.5 1.5 0 01-1.5 1.5H9.06l-2.56 2.56A.5.5 0 016 15.207V13H2.5A1.5 1.5 0 011 11.5v-8z" />
+                </svg>
+                Chat
+              </button>
             </div>
 
             {/* Webhook helper */}
@@ -1228,6 +1268,83 @@ function AgentEditor({
                     className="w-full px-3 py-2 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-sm focus:outline-none focus:ring-1 focus:ring-cc-primary"
                   />
                 )}
+              </div>
+            )}
+
+            {/* Chat platform config */}
+            {form.chatEnabled && (
+              <div className="mt-3 space-y-2">
+                <p className="text-[10px] text-cc-muted">
+                  Configure which platforms this agent responds on. Requires platform API keys set as environment variables.
+                </p>
+
+                {form.chatPlatforms.map((platform, idx) => (
+                  <div key={idx} className="flex items-center gap-2 flex-wrap">
+                    <select
+                      value={platform.adapter}
+                      onChange={(e) => {
+                        const updated = [...form.chatPlatforms];
+                        updated[idx] = { ...updated[idx], adapter: e.target.value as "linear" | "github" | "slack" | "discord" };
+                        updateField("chatPlatforms", updated);
+                      }}
+                      className="px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                    >
+                      <option value="linear">Linear</option>
+                      <option value="github">GitHub</option>
+                      <option value="slack">Slack</option>
+                      <option value="discord">Discord</option>
+                    </select>
+                    <input
+                      value={platform.mentionPattern}
+                      onChange={(e) => {
+                        const updated = [...form.chatPlatforms];
+                        updated[idx] = { ...updated[idx], mentionPattern: e.target.value };
+                        updateField("chatPlatforms", updated);
+                      }}
+                      placeholder="Mention pattern (regex, optional)"
+                      className="flex-1 min-w-[120px] px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                    />
+                    <label className="flex items-center gap-1 text-[10px] text-cc-muted cursor-pointer whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        checked={platform.autoSubscribe}
+                        onChange={(e) => {
+                          const updated = [...form.chatPlatforms];
+                          updated[idx] = { ...updated[idx], autoSubscribe: e.target.checked };
+                          updateField("chatPlatforms", updated);
+                        }}
+                      />
+                      Multi-turn
+                    </label>
+                    <button
+                      onClick={() => {
+                        const updated = form.chatPlatforms.filter((_, i) => i !== idx);
+                        updateField("chatPlatforms", updated);
+                      }}
+                      className="text-cc-muted hover:text-red-400 transition-colors cursor-pointer"
+                      title="Remove platform"
+                    >
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                        <path d="M4.646 4.646a.5.5 0 01.708 0L8 7.293l2.646-2.647a.5.5 0 01.708.708L8.707 8l2.647 2.646a.5.5 0 01-.708.708L8 8.707l-2.646 2.647a.5.5 0 01-.708-.708L7.293 8 4.646 5.354a.5.5 0 010-.708z" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+
+                <button
+                  onClick={() => {
+                    updateField("chatPlatforms", [
+                      ...form.chatPlatforms,
+                      { adapter: "linear" as const, mentionPattern: "", autoSubscribe: true },
+                    ]);
+                  }}
+                  className="flex items-center gap-1 text-xs text-cc-primary hover:text-cc-primary/80 cursor-pointer transition-colors"
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                    <path d="M8 2a.5.5 0 01.5.5v5h5a.5.5 0 010 1h-5v5a.5.5 0 01-1 0v-5h-5a.5.5 0 010-1h5v-5A.5.5 0 018 2z" />
+                  </svg>
+                  Add platform
+                </button>
               </div>
             )}
           </section>

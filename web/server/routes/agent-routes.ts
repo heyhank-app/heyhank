@@ -160,6 +160,18 @@ export function registerAgentRoutes(
     return c.json(agentExecutor?.getExecutions(id) ?? []);
   });
 
+  /** List executions across all agents with filtering and pagination (for Runs view). */
+  api.get("/executions", (c) => {
+    const agentId = c.req.query("agentId");
+    const triggerType = c.req.query("triggerType");
+    const rawStatus = c.req.query("status");
+    const status = (rawStatus === "running" || rawStatus === "success" || rawStatus === "error")
+      ? rawStatus : undefined;
+    const limit = Math.min(Math.max(Number(c.req.query("limit")) || 50, 1), 500);
+    const offset = Math.max(Number(c.req.query("offset")) || 0, 0);
+    return c.json(agentExecutor?.listAllExecutions({ agentId, triggerType, status, limit, offset }) ?? { executions: [], total: 0 });
+  });
+
   // ── Import / Export ────────────────────────────────────────────────────
 
   api.post("/agents/import", async (c) => {

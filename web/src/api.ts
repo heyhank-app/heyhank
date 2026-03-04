@@ -575,6 +575,14 @@ export interface AgentInfo {
       expression: string;
       recurring: boolean;
     };
+    chat?: {
+      enabled: boolean;
+      platforms: Array<{
+        adapter: "linear" | "github" | "slack" | "discord";
+        mentionPattern?: string;
+        autoSubscribe: boolean;
+      }>;
+    };
   };
   enabled: boolean;
   createdAt: number;
@@ -589,11 +597,16 @@ export interface AgentInfo {
 export interface AgentExecution {
   sessionId: string;
   agentId: string;
-  triggerType: "manual" | "webhook" | "schedule";
+  triggerType: "manual" | "webhook" | "schedule" | "chat";
   startedAt: number;
   completedAt?: number;
   success?: boolean;
   error?: string;
+}
+
+export interface ExecutionListResult {
+  executions: AgentExecution[];
+  total: number;
 }
 
 /** Portable export format (no internal tracking fields) */
@@ -1088,6 +1101,21 @@ export const api = {
   exportAgent: (id: string) => get<AgentExport>(`/agents/${encodeURIComponent(id)}/export`),
   regenerateAgentWebhookSecret: (id: string) =>
     post<AgentInfo>(`/agents/${encodeURIComponent(id)}/regenerate-secret`),
+
+  // Executions (cross-agent, for Runs view)
+  listExecutions: (opts?: { agentId?: string; triggerType?: string; status?: string; limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.agentId) params.set("agentId", opts.agentId);
+    if (opts?.triggerType) params.set("triggerType", opts.triggerType);
+    if (opts?.status) params.set("status", opts.status);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    if (opts?.offset) params.set("offset", String(opts.offset));
+    const qs = params.toString();
+    return get<ExecutionListResult>(`/executions${qs ? `?${qs}` : ""}`);
+  },
+
+  // Chat platforms
+  listChatPlatforms: () => get<{ platforms: string[] }>("/chat/platforms"),
 
   // Skills
   listSkills: () =>

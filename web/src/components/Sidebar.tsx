@@ -86,6 +86,13 @@ const NAV_ITEMS: NavItem[] = [
     iconPath: "M8 1.5a2.5 2.5 0 00-2.5 2.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5S9.38 1.5 8 1.5zM4 8a4 4 0 00-4 4v1.5a.5.5 0 00.5.5h15a.5.5 0 00.5-.5V12a4 4 0 00-4-4H4z",
   },
   {
+    id: "runs",
+    label: "Runs",
+    hash: "#/runs",
+    viewBox: "0 0 16 16",
+    iconPath: "M8 1a7 7 0 100 14A7 7 0 008 1zm-.75 3.5a.75.75 0 011.5 0v3.19l2.03 2.03a.75.75 0 01-1.06 1.06l-2.25-2.25A.75.75 0 017.25 8V4.5z",
+  },
+  {
     id: "settings",
     label: "Settings",
     hash: "#/settings",
