@@ -11,7 +11,6 @@ import { groupSessionsByProject, type SessionItem as SessionItemType } from "../
 interface NavItem {
   id: string;
   label: string;
-  shortLabel: string;
   hash: string;
   viewBox: string;
   iconPath: string;
@@ -52,7 +51,6 @@ const NAV_ITEMS: NavItem[] = [
   {
     id: "prompts",
     label: "Prompts",
-    shortLabel: "Prompts",
     hash: "#/prompts",
     viewBox: "0 0 16 16",
     iconPath: "M3 2.5A1.5 1.5 0 014.5 1h5.879c.398 0 .779.158 1.06.44l1.621 1.62c.281.282.44.663.44 1.061V13.5A1.5 1.5 0 0112 15H4.5A1.5 1.5 0 013 13.5v-11zM4.5 2a.5.5 0 00-.5.5v11a.5.5 0 00.5.5H12a.5.5 0 00.5-.5V4.121a.5.5 0 00-.146-.353l-1.621-1.621A.5.5 0 0010.379 2H4.5zm1.25 4.25a.75.75 0 01.75-.75h3a.75.75 0 010 1.5h-3a.75.75 0 01-.75-.75zm0 3a.75.75 0 01.75-.75h3.5a.75.75 0 010 1.5H6.5a.75.75 0 01-.75-.75z",
@@ -60,7 +58,6 @@ const NAV_ITEMS: NavItem[] = [
   {
     id: "integrations",
     label: "Integrations",
-    shortLabel: "Integr.",
     hash: "#/integrations",
     activePages: ["integrations", "integration-linear"],
     viewBox: "0 0 16 16",
@@ -69,7 +66,6 @@ const NAV_ITEMS: NavItem[] = [
   {
     id: "terminal",
     label: "Terminal",
-    shortLabel: "Terminal",
     hash: "#/terminal",
     viewBox: "0 0 16 16",
     iconPath: "M2 3a1 1 0 011-1h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3zm2 1.5l3 2.5-3 2.5V4.5zM8.5 10h3v1h-3v-1z",
@@ -77,7 +73,6 @@ const NAV_ITEMS: NavItem[] = [
   {
     id: "environments",
     label: "Environments",
-    shortLabel: "Envs",
     hash: "#/environments",
     viewBox: "0 0 16 16",
     iconPath: "M8 1a2 2 0 012 2v1h2a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h2V3a2 2 0 012-2zm0 1.5a.5.5 0 00-.5.5v1h1V3a.5.5 0 00-.5-.5zM4 5.5a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V6a.5.5 0 00-.5-.5H4z",
@@ -86,7 +81,6 @@ const NAV_ITEMS: NavItem[] = [
   {
     id: "agents",
     label: "Agents",
-    shortLabel: "Agents",
     hash: "#/agents",
     viewBox: "0 0 16 16",
     iconPath: "M8 1.5a2.5 2.5 0 00-2.5 2.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5S9.38 1.5 8 1.5zM4 8a4 4 0 00-4 4v1.5a.5.5 0 00.5.5h15a.5.5 0 00.5-.5V12a4 4 0 00-4-4H4z",
@@ -94,7 +88,6 @@ const NAV_ITEMS: NavItem[] = [
   {
     id: "settings",
     label: "Settings",
-    shortLabel: "Settings",
     hash: "#/settings",
     viewBox: "0 0 20 20",
     iconPath: "M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.53 1.53 0 01-2.29.95c-1.35-.8-2.92.77-2.12 2.12.54.9.07 2.04-.95 2.29-1.56.38-1.56 2.6 0 2.98 1.02.25 1.49 1.39.95 2.29-.8 1.35.77 2.92 2.12 2.12.9-.54 2.04-.07 2.29.95.38 1.56 2.6 1.56 2.98 0 .25-1.02 1.39-1.49 2.29-.95 1.35.8 2.92-.77 2.12-2.12-.54-.9-.07-2.04.95-2.29 1.56-.38 1.56-2.6 0-2.98-1.02-.25-1.49-1.39-.95-2.29.8-1.35-.77-2.92-2.12-2.12-.9.54-2.04.07-2.29-.95zM10 13a3 3 0 100-6 3 3 0 000 6z",
@@ -638,8 +631,8 @@ export function Sidebar() {
       </div>
 
       {/* Footer */}
-      <div className="p-2 pb-safe bg-cc-sidebar-footer">
-        <div className="grid grid-cols-3 gap-1">
+      <div className="px-2 py-1.5 pb-safe bg-cc-sidebar-footer">
+        <nav className="flex flex-col gap-0.5" aria-label="Navigation">
           {NAV_ITEMS.map((item) => {
             const isActive = item.activePages
               ? item.activePages.some((p) => route.page === p)
@@ -658,21 +651,21 @@ export function Sidebar() {
                   }
                 }}
                 title={item.label}
-                className={`flex flex-col items-center justify-center gap-0.5 py-2.5 px-1.5 min-h-[44px] rounded-lg transition-colors cursor-pointer ${
+                className={`flex items-center gap-2.5 px-2.5 py-1.5 min-h-[44px] rounded-md text-[12px] font-medium transition-colors duration-150 cursor-pointer ${
                   isActive
                     ? "bg-cc-active text-cc-fg"
                     : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
                 }`}
               >
-                <svg viewBox={item.viewBox} fill="currentColor" className="w-4 h-4">
+                <svg viewBox={item.viewBox} fill="currentColor" className="w-4 h-4 shrink-0">
                   <path d={item.iconPath} fillRule={item.fillRule} clipRule={item.clipRule} />
                 </svg>
-                <span className="text-[10px] font-medium leading-none">{item.shortLabel}</span>
+                <span>{item.label}</span>
               </button>
             );
           })}
-        </div>
-        <div className="flex items-center justify-center gap-1 mt-1.5 pt-1.5 border-t border-cc-border/30">
+        </nav>
+        <div className="flex items-center gap-1 mt-1.5 pt-1.5 border-t border-cc-border/30 px-1.5">
           {EXTERNAL_LINKS.map((link) => (
             <a
               key={link.label}
@@ -681,7 +674,7 @@ export function Sidebar() {
               rel="noopener noreferrer"
               title={link.label}
               aria-label={`Open ${link.label.toLowerCase()}`}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors"
+              className="w-7 h-7 rounded-md flex items-center justify-center text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors"
             >
               <svg viewBox={link.viewBox} fill="currentColor" className="w-3.5 h-3.5">
                 <path d={link.iconPath} />

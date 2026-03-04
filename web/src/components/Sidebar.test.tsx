@@ -742,15 +742,17 @@ describe("Sidebar", () => {
     expect(screen.queryByText("1h ago")).not.toBeInTheDocument();
   });
 
-  it("footer nav uses a 3x2 grid layout with short labels", () => {
-    const { container } = render(<Sidebar />);
-    // The grid container should exist
-    const gridElement = container.querySelector(".grid.grid-cols-3");
-    expect(gridElement).toBeTruthy();
-    // Short labels should be visible
-    expect(screen.getByText("Envs")).toBeInTheDocument();
-    expect(screen.getByText("Integr.")).toBeInTheDocument();
+  it("footer nav uses a vertical list layout with full labels", () => {
+    // The footer navigation uses a single-column vertical list where each
+    // item is a horizontal row with icon + full label (one line per item).
+    render(<Sidebar />);
+    // Full labels should be visible (not short labels)
+    expect(screen.getByText("Environments")).toBeInTheDocument();
+    expect(screen.getByText("Integrations")).toBeInTheDocument();
     expect(screen.getByText("Agents")).toBeInTheDocument();
+    expect(screen.getByText("Prompts")).toBeInTheDocument();
+    expect(screen.getByText("Terminal")).toBeInTheDocument();
+    expect(screen.getByText("Settings")).toBeInTheDocument();
   });
 
   it("session item has minimum touch target height", () => {
