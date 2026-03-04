@@ -1613,6 +1613,67 @@ describe("Sidebar", () => {
     expect(logo).toBeTruthy();
   });
 
+  // ─── External links in footer ──────────────────────────────────────────────
+
+  it("renders external links for Documentation, GitHub, and Website", () => {
+    // Verifies that all three external icon-only links are rendered in the
+    // sidebar footer with correct href values.
+    render(<Sidebar />);
+
+    const docsLink = screen.getByLabelText("Open documentation");
+    const githubLink = screen.getByLabelText("Open github");
+    const websiteLink = screen.getByLabelText("Open website");
+
+    expect(docsLink).toBeInTheDocument();
+    expect(githubLink).toBeInTheDocument();
+    expect(websiteLink).toBeInTheDocument();
+
+    expect(docsLink).toHaveAttribute("href", "https://docs.thecompanion.sh");
+    expect(githubLink).toHaveAttribute("href", "https://github.com/The-Vibe-Company/companion");
+    expect(websiteLink).toHaveAttribute("href", "https://thecompanion.sh");
+  });
+
+  it("external links open in new tab with secure attributes", () => {
+    // Verifies that all external links use target="_blank" and
+    // rel="noopener noreferrer" to prevent reverse-tabnabbing.
+    render(<Sidebar />);
+
+    const links = [
+      screen.getByLabelText("Open documentation"),
+      screen.getByLabelText("Open github"),
+      screen.getByLabelText("Open website"),
+    ];
+
+    for (const link of links) {
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    }
+  });
+
+  it("external links have title attributes for tooltip accessibility", () => {
+    // Verifies that each external link has a title attribute for tooltips
+    // and screen reader support.
+    render(<Sidebar />);
+
+    expect(screen.getByTitle("Documentation")).toBeInTheDocument();
+    expect(screen.getByTitle("GitHub")).toBeInTheDocument();
+    expect(screen.getByTitle("Website")).toBeInTheDocument();
+  });
+
+  it("external links are rendered as anchor elements (not buttons)", () => {
+    // Verifies that external links use <a> tags for proper semantic HTML,
+    // distinguishing them from internal nav buttons.
+    render(<Sidebar />);
+
+    const docsLink = screen.getByLabelText("Open documentation");
+    const githubLink = screen.getByLabelText("Open github");
+    const websiteLink = screen.getByLabelText("Open website");
+
+    expect(docsLink.tagName).toBe("A");
+    expect(githubLink.tagName).toBe("A");
+    expect(websiteLink.tagName).toBe("A");
+  });
+
   // ─── Delete modal inner click propagation ──────────────────────────────────
 
   it("clicking inside the delete modal does not dismiss it", () => {
