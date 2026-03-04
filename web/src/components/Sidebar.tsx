@@ -82,6 +82,7 @@ const NAV_ITEMS: NavItem[] = [
     id: "agents",
     label: "Agents",
     hash: "#/agents",
+    activePages: ["agents", "agent-detail"],
     viewBox: "0 0 16 16",
     iconPath: "M8 1.5a2.5 2.5 0 00-2.5 2.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5S9.38 1.5 8 1.5zM4 8a4 4 0 00-4 4v1.5a.5.5 0 00.5.5h15a.5.5 0 00.5-.5V12a4 4 0 00-4-4H4z",
   },
@@ -102,6 +103,13 @@ const NAV_ITEMS: NavItem[] = [
     clipRule: "evenodd",
   },
 ];
+
+const NAV_SECTIONS = [
+  { id: "workbench", label: "Workbench", itemIds: ["prompts", "integrations", "terminal"] },
+  { id: "workspace", label: "Workspace", itemIds: ["environments", "agents", "settings"] },
+] as const;
+
+const NAV_ITEMS_BY_ID = new Map(NAV_ITEMS.map((item) => [item.id, item]));
 
 export function Sidebar() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
@@ -638,56 +646,81 @@ export function Sidebar() {
       </div>
 
       {/* Footer */}
-      <div className="px-2 py-1.5 pb-safe bg-cc-sidebar-footer">
-        <nav className="flex flex-col gap-0.5" aria-label="Navigation">
-          {NAV_ITEMS.map((item) => {
-            const isActive = item.activePages
-              ? item.activePages.some((p) => route.page === p)
-              : route.page === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => {
-                  if (item.id !== "terminal") {
-                    useStore.getState().closeTerminal();
-                  }
-                  window.location.hash = item.hash;
-                  // Close sidebar on mobile so the navigated page is visible
-                  if (window.innerWidth < 768) {
-                    useStore.getState().setSidebarOpen(false);
-                  }
-                }}
-                title={item.label}
-                className={`flex items-center gap-2.5 px-2.5 py-1.5 min-h-[44px] rounded-md text-[12px] font-medium transition-colors duration-150 cursor-pointer ${
-                  isActive
-                    ? "bg-cc-active text-cc-fg"
-                    : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
-                }`}
-              >
-                <svg viewBox={item.viewBox} fill="currentColor" className="w-4 h-4 shrink-0">
-                  <path d={item.iconPath} fillRule={item.fillRule} clipRule={item.clipRule} />
-                </svg>
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-        <div className="flex items-center gap-1 mt-1.5 pt-1.5 border-t border-cc-border/30 px-1.5">
-          {EXTERNAL_LINKS.map((link) => (
-            <a
-              key={link.label}
-              href={link.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={link.label}
-              aria-label={`Open ${link.label.toLowerCase()}`}
-              className="w-7 h-7 rounded-md flex items-center justify-center text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors"
-            >
-              <svg viewBox={link.viewBox} fill="currentColor" className="w-3.5 h-3.5">
-                <path d={link.iconPath} />
-              </svg>
-            </a>
+      <div className="px-2 py-1.5 pb-safe bg-cc-sidebar-footer border-t border-cc-border/30">
+        <nav className="flex flex-col gap-1.5" aria-label="Navigation">
+          {NAV_SECTIONS.map((section) => (
+            <section key={section.id} className="rounded-lg border border-cc-border/30 bg-cc-card/20 p-0.5">
+              <h3 className="px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-cc-muted/75">
+                {section.label}
+              </h3>
+              <div className="flex flex-col">
+                {section.itemIds.map((itemId) => {
+                  const item = NAV_ITEMS_BY_ID.get(itemId);
+                  if (!item) return null;
+                  const isActive = item.activePages
+                    ? item.activePages.some((p) => route.page === p)
+                    : route.page === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        if (item.id !== "terminal") {
+                          useStore.getState().closeTerminal();
+                        }
+                        window.location.hash = item.hash;
+                        // Close sidebar on mobile so the navigated page is visible
+                        if (window.innerWidth < 768) {
+                          useStore.getState().setSidebarOpen(false);
+                        }
+                      }}
+                      title={item.label}
+                      aria-current={isActive ? "page" : undefined}
+                      className={`group flex min-h-[44px] md:min-h-[34px] w-full items-center gap-2 rounded-md px-2 py-1 md:py-0.5 text-left transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cc-primary/60 ${
+                        isActive
+                          ? "bg-cc-active text-cc-fg"
+                          : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+                      }`}
+                    >
+                      <span
+                        aria-hidden
+                        className={`h-4 w-0.5 shrink-0 rounded-full transition-colors ${
+                          isActive ? "bg-cc-primary" : "bg-transparent group-hover:bg-cc-border"
+                        }`}
+                      />
+                      <svg viewBox={item.viewBox} fill="currentColor" className="w-3.5 h-3.5 shrink-0">
+                        <path d={item.iconPath} fillRule={item.fillRule} clipRule={item.clipRule} />
+                      </svg>
+                      <span className="min-w-0 flex-1 text-[12px] font-medium leading-tight">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
           ))}
+        </nav>
+        <div className="mt-1.5 rounded-lg border border-cc-border/30 bg-cc-card/20 px-1.5 py-0.5">
+          <div className="flex items-center justify-between">
+            <span className="px-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-cc-muted/75">
+              Resources
+            </span>
+            <div className="flex items-center gap-1">
+              {EXTERNAL_LINKS.map((link) => (
+                <a
+                  key={link.label}
+                  href={link.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={link.label}
+                  aria-label={`Open ${link.label.toLowerCase()}`}
+                  className="w-7 h-7 rounded-md flex items-center justify-center text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors"
+                >
+                  <svg viewBox={link.viewBox} fill="currentColor" className="w-3.5 h-3.5">
+                    <path d={link.iconPath} />
+                  </svg>
+                </a>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
