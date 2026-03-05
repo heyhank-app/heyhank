@@ -9,6 +9,8 @@ vi.mock("../agent-store.js", () => ({
   updateAgent: vi.fn(),
   deleteAgent: vi.fn(() => false),
   regenerateWebhookSecret: vi.fn(() => null),
+  sanitizeAgentForResponse: vi.fn((agent) => agent),
+  stripChatCredentials: vi.fn((agent) => agent),
 }));
 
 import { Hono } from "hono";
@@ -50,20 +52,30 @@ function createMockExecutor() {
   };
 }
 
+/** Build a mock ChatBot with vi.fn() stubs for reload/remove hooks. */
+function createMockChatBot() {
+  return {
+    reloadAgent: vi.fn(async () => {}),
+    removeAgent: vi.fn(async () => {}),
+  };
+}
+
 // ─── Test setup ─────────────────────────────────────────────────────────────
 
 let app: Hono;
 let executor: ReturnType<typeof createMockExecutor>;
+let chatBot: ReturnType<typeof createMockChatBot>;
 
 beforeEach(() => {
   vi.clearAllMocks();
 
   executor = createMockExecutor();
+  chatBot = createMockChatBot();
 
   // Create a Hono app and mount agent routes under /api
   app = new Hono();
   const api = new Hono();
-  registerAgentRoutes(api, executor as any);
+  registerAgentRoutes(api, executor as any, chatBot as any);
   app.route("/api", api);
 });
 
@@ -591,5 +603,134 @@ describe("POST /api/agents/:id/webhook/:secret", () => {
 
     expect(res.status).toBe(200);
     expect(executor.executeAgentManually).toHaveBeenCalledWith("webhook-agent", "plain text input");
+  });
+});
+
+// ─── chatBot reload hooks ───────────────────────────────────────────────────
+// These tests verify that the routes correctly notify the chatBot when agents
+// are created, updated, renamed, deleted, or toggled so the chat runtime
+// stays in sync with the agent store.
+
+describe("chatBot reload hooks", () => {
+  it("POST /agents calls chatBot.reloadAgent with the created agent's ID", async () => {
+    const created = makeAgent({ id: "new-agent", name: "New Agent" });
+    vi.mocked(agentStore.createAgent).mockReturnValue(created);
+
+    const res = await app.request("/api/agents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "New Agent", prompt: "Hello" }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(chatBot.reloadAgent).toHaveBeenCalledWith("new-agent");
+    expect(chatBot.reloadAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it("PUT /agents/:id calls chatBot.reloadAgent with the updated agent's ID", async () => {
+    const updated = makeAgent({ id: "test-agent", name: "Updated Name" });
+    vi.mocked(agentStore.updateAgent).mockReturnValue(updated);
+
+    const res = await app.request("/api/agents/test-agent", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Updated Name" }),
+    });
+
+    expect(res.status).toBe(200);
+    // reloadAgent should be called with the (unchanged) agent ID
+    expect(chatBot.reloadAgent).toHaveBeenCalledWith("test-agent");
+    expect(chatBot.reloadAgent).toHaveBeenCalledTimes(1);
+    // removeAgent should NOT be called when the ID hasn't changed
+    expect(chatBot.removeAgent).not.toHaveBeenCalled();
+  });
+
+  it("PUT /agents/:id with name change calls chatBot.removeAgent(oldId) then chatBot.reloadAgent(newId)", async () => {
+    // When an agent is renamed, its ID changes (derived from the name slug).
+    // The route should remove the old ID from the chatBot and reload the new one.
+    const updated = makeAgent({ id: "renamed-agent", name: "Renamed Agent" });
+    vi.mocked(agentStore.updateAgent).mockReturnValue(updated);
+
+    const res = await app.request("/api/agents/original-agent", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Renamed Agent" }),
+    });
+
+    expect(res.status).toBe(200);
+    // removeAgent should be called with the OLD id since the id changed
+    expect(chatBot.removeAgent).toHaveBeenCalledWith("original-agent");
+    // reloadAgent should be called with the NEW id
+    expect(chatBot.reloadAgent).toHaveBeenCalledWith("renamed-agent");
+  });
+
+  it("DELETE /agents/:id calls chatBot.removeAgent with the agent ID", async () => {
+    vi.mocked(agentStore.deleteAgent).mockReturnValue(true);
+
+    const res = await app.request("/api/agents/doomed-agent", { method: "DELETE" });
+
+    expect(res.status).toBe(200);
+    expect(chatBot.removeAgent).toHaveBeenCalledWith("doomed-agent");
+    expect(chatBot.removeAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it("POST /agents/:id/toggle calls chatBot.reloadAgent with the agent ID", async () => {
+    const agent = makeAgent({ id: "toggle-agent", enabled: true });
+    const toggled = makeAgent({ id: "toggle-agent", enabled: false });
+    vi.mocked(agentStore.getAgent).mockReturnValue(agent);
+    vi.mocked(agentStore.updateAgent).mockReturnValue(toggled);
+
+    const res = await app.request("/api/agents/toggle-agent/toggle", { method: "POST" });
+
+    expect(res.status).toBe(200);
+    expect(chatBot.reloadAgent).toHaveBeenCalledWith("toggle-agent");
+    expect(chatBot.reloadAgent).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── Response sanitization ──────────────────────────────────────────────────
+// These tests verify that API responses pass agents through
+// sanitizeAgentForResponse (to strip sensitive fields) and that the export
+// endpoint uses stripChatCredentials to remove credentials entirely.
+
+describe("response sanitization", () => {
+  it("GET /agents calls sanitizeAgentForResponse for each agent in the list", async () => {
+    const agents = [
+      makeAgent({ id: "agent-1", name: "Agent 1" }),
+      makeAgent({ id: "agent-2", name: "Agent 2" }),
+    ];
+    vi.mocked(agentStore.listAgents).mockReturnValue(agents);
+
+    const res = await app.request("/api/agents");
+
+    expect(res.status).toBe(200);
+    // sanitizeAgentForResponse should be called once per agent in the list
+    expect(agentStore.sanitizeAgentForResponse).toHaveBeenCalledTimes(2);
+    expect(agentStore.sanitizeAgentForResponse).toHaveBeenCalledWith(agents[0]);
+    expect(agentStore.sanitizeAgentForResponse).toHaveBeenCalledWith(agents[1]);
+  });
+
+  it("GET /agents/:id calls sanitizeAgentForResponse on the returned agent", async () => {
+    const agent = makeAgent({ id: "single-agent" });
+    vi.mocked(agentStore.getAgent).mockReturnValue(agent);
+
+    const res = await app.request("/api/agents/single-agent");
+
+    expect(res.status).toBe(200);
+    expect(agentStore.sanitizeAgentForResponse).toHaveBeenCalledTimes(1);
+    expect(agentStore.sanitizeAgentForResponse).toHaveBeenCalledWith(agent);
+  });
+
+  it("GET /agents/:id/export calls stripChatCredentials via the toExport function", async () => {
+    const agent = makeAgent({ id: "export-agent", name: "Export Agent" });
+    vi.mocked(agentStore.getAgent).mockReturnValue(agent);
+
+    const res = await app.request("/api/agents/export-agent/export");
+
+    expect(res.status).toBe(200);
+    // The toExport function internally calls stripChatCredentials before
+    // stripping internal tracking fields, so the mock should have been invoked.
+    expect(agentStore.stripChatCredentials).toHaveBeenCalledTimes(1);
+    expect(agentStore.stripChatCredentials).toHaveBeenCalledWith(agent);
   });
 });

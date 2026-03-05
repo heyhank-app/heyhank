@@ -581,6 +581,23 @@ export interface AgentInfo {
         adapter: "linear" | "github" | "slack" | "discord";
         mentionPattern?: string;
         autoSubscribe: boolean;
+        /** Per-binding credentials (masked in API responses) */
+        credentials?: {
+          // Linear
+          apiKey?: string;
+          clientId?: string;
+          clientSecret?: string;
+          accessToken?: string;
+          // GitHub
+          token?: string;
+          appId?: string;
+          privateKey?: string;
+          installationId?: string;
+          botUserId?: string;
+          // Common
+          webhookSecret?: string;
+          userName?: string;
+        };
       }>;
     };
   };

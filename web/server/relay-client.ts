@@ -15,6 +15,8 @@ interface WebhookRequestMessage {
   type: "webhook_request";
   requestId: string;
   platform: string;
+  /** Optional agent ID for agent-scoped webhook routing */
+  agentId?: string;
   method: string;
   headers: Record<string, string>;
   body: string;
@@ -120,17 +122,22 @@ export class RelayClient {
    * and sending the response back to the relay worker.
    */
   async handleWebhookRequest(msg: WebhookRequestMessage): Promise<void> {
-    const { requestId, platform, method, headers, body } = msg;
+    const { requestId, platform, agentId, method, headers, body } = msg;
 
-    const webhookHandler = this.chatBot.webhooks[platform];
+    // Route to agent-scoped handler if agentId is provided, otherwise use legacy global handler
+    const webhookHandler = agentId
+      ? this.chatBot.getWebhookHandler(agentId, platform)
+      : this.chatBot.webhooks[platform];
+
     if (!webhookHandler) {
-      console.log(`[relay-client] No webhook handler for platform "${platform}", returning 404`);
+      const target = agentId ? `agent "${agentId}" / platform "${platform}"` : `platform "${platform}"`;
+      console.log(`[relay-client] No webhook handler for ${target}, returning 404`);
       this.sendWebhookResponse({
         type: "webhook_response",
         requestId,
         status: 404,
         headers: {},
-        body: `No webhook handler for platform: ${platform}`,
+        body: `No webhook handler for ${target}`,
       });
       return;
     }

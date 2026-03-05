@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
 import type { Hono } from "hono";
 import * as agentStore from "../agent-store.js";
+import { sanitizeAgentForResponse, stripChatCredentials } from "../agent-store.js";
 import type { AgentExecutor } from "../agent-executor.js";
+import type { ChatBot } from "../chat-bot.js";
 import type { AgentConfig, AgentConfigExport } from "../agent-types.js";
 
 /** Fields the user can set when creating/updating an agent */
@@ -22,8 +24,9 @@ function pickEditable(body: Record<string, unknown>): Partial<AgentConfig> {
   return result as Partial<AgentConfig>;
 }
 
-/** Strip internal tracking fields to produce a portable export */
+/** Strip internal tracking fields and chat credentials to produce a portable export */
 function toExport(agent: AgentConfig): AgentConfigExport {
+  const stripped = stripChatCredentials(agent);
   const {
     id: _id,
     createdAt: _ca,
@@ -34,20 +37,21 @@ function toExport(agent: AgentConfig): AgentConfigExport {
     lastSessionId: _ls,
     enabled: _en,
     ...exportable
-  } = agent;
+  } = stripped;
   return exportable;
 }
 
 export function registerAgentRoutes(
   api: Hono,
   agentExecutor?: AgentExecutor,
+  chatBot?: ChatBot,
 ): void {
   // ── CRUD ────────────────────────────────────────────────────────────────
 
   api.get("/agents", (c) => {
     const agents = agentStore.listAgents();
     const enriched = agents.map((a) => ({
-      ...a,
+      ...sanitizeAgentForResponse(a),
       nextRunAt: agentExecutor?.getNextRunTime(a.id)?.getTime() ?? null,
     }));
     return c.json(enriched);
@@ -57,7 +61,7 @@ export function registerAgentRoutes(
     const agent = agentStore.getAgent(c.req.param("id"));
     if (!agent) return c.json({ error: "Agent not found" }, 404);
     return c.json({
-      ...agent,
+      ...sanitizeAgentForResponse(agent),
       nextRunAt: agentExecutor?.getNextRunTime(agent.id)?.getTime() ?? null,
     });
   });
@@ -91,7 +95,9 @@ export function registerAgentRoutes(
       if (agent.enabled && agent.triggers?.schedule?.enabled) {
         agentExecutor?.scheduleAgent(agent);
       }
-      return c.json(agent, 201);
+      // Reload chat runtime if agent has chat trigger with credentials
+      chatBot?.reloadAgent(agent.id).catch((e) => console.error("[agent-routes] Failed to reload chat runtime:", e));
+      return c.json(sanitizeAgentForResponse(agent), 201);
     } catch (e: unknown) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
     }
@@ -105,14 +111,19 @@ export function registerAgentRoutes(
       const agent = agentStore.updateAgent(id, allowed);
       if (!agent) return c.json({ error: "Agent not found" }, 404);
       // Stop old timer (id may differ after a rename)
-      if (agent.id !== id) agentExecutor?.stopAgent(id);
+      if (agent.id !== id) {
+        agentExecutor?.stopAgent(id);
+        chatBot?.removeAgent(id).catch((e) => console.error("[agent-routes] Failed to remove old chat runtime:", e));
+      }
       // Reschedule if enabled
       if (agent.enabled && agent.triggers?.schedule?.enabled) {
         agentExecutor?.scheduleAgent(agent);
       } else {
         agentExecutor?.stopAgent(agent.id);
       }
-      return c.json(agent);
+      // Reload chat runtime for updated agent
+      chatBot?.reloadAgent(agent.id).catch((e) => console.error("[agent-routes] Failed to reload chat runtime:", e));
+      return c.json(sanitizeAgentForResponse(agent));
     } catch (e: unknown) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
     }
@@ -121,6 +132,7 @@ export function registerAgentRoutes(
   api.delete("/agents/:id", (c) => {
     const id = c.req.param("id");
     agentExecutor?.stopAgent(id);
+    chatBot?.removeAgent(id).catch((e) => console.error("[agent-routes] Failed to remove chat runtime:", e));
     const deleted = agentStore.deleteAgent(id);
     if (!deleted) return c.json({ error: "Agent not found" }, 404);
     return c.json({ ok: true });
@@ -138,7 +150,9 @@ export function registerAgentRoutes(
     } else if (updated) {
       agentExecutor?.stopAgent(updated.id);
     }
-    return c.json(updated);
+    // Reload chat runtime (may enable/disable based on new state)
+    if (updated) chatBot?.reloadAgent(updated.id).catch((e) => console.error("[agent-routes] Failed to reload chat runtime:", e));
+    return c.json(updated ? sanitizeAgentForResponse(updated) : updated);
   });
 
   // ── Run (manual trigger) ───────────────────────────────────────────────
@@ -201,7 +215,7 @@ export function registerAgentRoutes(
         triggers: body.triggers,
         enabled: false, // Imported agents start disabled for safety
       });
-      return c.json(agent, 201);
+      return c.json(sanitizeAgentForResponse(agent), 201);
     } catch (e: unknown) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
     }
@@ -219,7 +233,7 @@ export function registerAgentRoutes(
     const id = c.req.param("id");
     const agent = agentStore.regenerateWebhookSecret(id);
     if (!agent) return c.json({ error: "Agent not found" }, 404);
-    return c.json(agent);
+    return c.json(sanitizeAgentForResponse(agent));
   });
 
   // ── Webhook Trigger ────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ import {
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
-import type { AgentConfig, AgentConfigCreateInput } from "./agent-types.js";
+import type { AgentConfig, AgentConfigCreateInput, ChatPlatformBinding } from "./agent-types.js";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -37,6 +37,89 @@ function slugify(name: string): string {
 
 function generateWebhookSecret(): string {
   return randomBytes(24).toString("hex");
+}
+
+// ─── Chat Credential Helpers ────────────────────────────────────────────────
+
+/** Fields in chat platform credentials that are considered secrets */
+const CHAT_SECRET_FIELDS = new Set([
+  "apiKey", "token", "clientSecret", "privateKey", "accessToken", "webhookSecret",
+]);
+
+/** Mask a secret string: show first 4 chars + "****", or just "****" if short */
+function maskSecret(value: string): string {
+  if (value.length <= 4) return "****";
+  return value.substring(0, 4) + "****";
+}
+
+/**
+ * Auto-generate webhookSecret for any chat platform binding that has credentials
+ * but is missing a webhookSecret.
+ */
+function ensureChatWebhookSecrets(
+  platforms: ChatPlatformBinding[] | undefined,
+): ChatPlatformBinding[] | undefined {
+  if (!platforms) return platforms;
+  return platforms.map((p) => {
+    if (p.credentials && !("webhookSecret" in p.credentials && p.credentials.webhookSecret)) {
+      return {
+        ...p,
+        credentials: { ...p.credentials, webhookSecret: generateWebhookSecret() },
+      };
+    }
+    return p;
+  });
+}
+
+/**
+ * Return a copy of the agent with secret credential fields masked.
+ * Safe for API responses — prevents leaking raw secrets to the frontend.
+ */
+export function sanitizeAgentForResponse(agent: AgentConfig): AgentConfig {
+  if (!agent.triggers?.chat?.platforms?.length) return agent;
+
+  const sanitizedPlatforms = agent.triggers.chat.platforms.map((p) => {
+    if (!p.credentials) return p;
+    const sanitized: Record<string, unknown> = { ...p.credentials };
+    for (const key of CHAT_SECRET_FIELDS) {
+      if (key in sanitized && typeof sanitized[key] === "string" && sanitized[key]) {
+        sanitized[key] = maskSecret(sanitized[key] as string);
+      }
+    }
+    return { ...p, credentials: sanitized as typeof p.credentials };
+  });
+
+  return {
+    ...agent,
+    triggers: {
+      ...agent.triggers,
+      chat: {
+        ...agent.triggers.chat,
+        platforms: sanitizedPlatforms,
+      },
+    },
+  };
+}
+
+/**
+ * Return a copy of the agent with credentials stripped entirely from chat platform bindings.
+ * Used for agent exports — exports should never contain secrets.
+ */
+export function stripChatCredentials(agent: AgentConfig): AgentConfig {
+  if (!agent.triggers?.chat?.platforms?.length) return agent;
+
+  const strippedPlatforms = agent.triggers.chat.platforms.map(({ credentials, ...rest }) => rest);
+
+  return {
+    ...agent,
+    triggers: {
+      ...agent.triggers,
+      chat: {
+        ...agent.triggers.chat,
+        platforms: strippedPlatforms,
+      },
+    },
+  };
 }
 
 // ─── CRUD ───────────────────────────────────────────────────────────────────
@@ -89,6 +172,14 @@ export function createAgent(data: AgentConfigCreateInput): AgentConfig {
     triggers.webhook = { ...triggers.webhook, secret: generateWebhookSecret() };
   }
 
+  // Auto-generate webhookSecret for chat platform bindings with credentials
+  if (triggers?.chat?.platforms) {
+    triggers.chat = {
+      ...triggers.chat,
+      platforms: ensureChatWebhookSecrets(triggers.chat.platforms) || [],
+    };
+  }
+
   const now = Date.now();
   const agent: AgentConfig = {
     ...data,
@@ -124,9 +215,33 @@ export function updateAgent(
     throw new Error(`An agent with a similar name already exists ("${newId}")`);
   }
 
+  // Auto-generate webhookSecret for new/updated chat platform bindings with credentials
+  const mergedUpdates = { ...updates };
+  if (mergedUpdates.triggers?.chat?.platforms) {
+    // Deep-merge incoming credentials with existing ones so that masked/omitted
+    // fields from the frontend don't overwrite stored secrets on the server.
+    if (existing.triggers?.chat?.platforms) {
+      mergedUpdates.triggers!.chat!.platforms = mergedUpdates.triggers.chat.platforms.map((platform, i) => {
+        const existingPlatform = existing.triggers?.chat?.platforms?.[i];
+        if (!existingPlatform?.credentials || !platform.credentials) return platform;
+        return {
+          ...platform,
+          credentials: { ...existingPlatform.credentials, ...platform.credentials },
+        };
+      });
+    }
+    mergedUpdates.triggers = {
+      ...mergedUpdates.triggers,
+      chat: {
+        ...mergedUpdates.triggers.chat,
+        platforms: ensureChatWebhookSecrets(mergedUpdates.triggers.chat.platforms) || [],
+      },
+    };
+  }
+
   const agent: AgentConfig = {
     ...existing,
-    ...updates,
+    ...mergedUpdates,
     id: newId,
     name: newName,
     updatedAt: Date.now(),
