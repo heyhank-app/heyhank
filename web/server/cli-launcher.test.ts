@@ -474,6 +474,7 @@ describe("launch", () => {
     expect(info.exitCode).toBe(127);
     expect(mockSpawn).not.toHaveBeenCalled();
   });
+
 });
 
 // ─── state management ────────────────────────────────────────────────────────
