@@ -1,6 +1,15 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 
+// Mock dns/promises for checkFunnelDnsResolves (uses Resolver with public DNS)
+const mockResolve4 = vi.fn();
+vi.mock("node:dns/promises", () => ({
+  Resolver: class {
+    setServers() { /* no-op */ }
+    resolve4(...args: unknown[]) { return mockResolve4(...args); }
+  },
+}));
+
 // ── Mocks ───────────────────────────────────────────────────────────────────
 
 vi.mock("./path-resolver.js", () => ({
@@ -117,6 +126,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   spawnQueue = [];
   _resetForTest();
+  // Default: DNS resolves successfully (override per-test when needed)
+  mockResolve4.mockResolvedValue(["100.64.0.1"]);
 });
 
 afterEach(() => {
@@ -212,6 +223,81 @@ describe("getTailscaleStatus", () => {
     expect(status.installed).toBe(true);
     expect(status.connected).toBe(false);
   });
+
+  it("returns needsOperatorMode=true on Linux when operator is not set", async () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+
+    mockResolveBinary.mockReturnValue("/usr/bin/tailscale");
+    enqueueSpawnSuccess(CONNECTED_STATUS_JSON);
+    enqueueSpawnSuccess(FUNNEL_INACTIVE_JSON);
+    // checkNeedsOperatorMode: `tailscale debug prefs`
+    enqueueSpawnSuccess(JSON.stringify({ OperatorUser: "" }));
+
+    const status = await getTailscaleStatus(3456);
+
+    expect(status.needsOperatorMode).toBe(true);
+
+    Object.defineProperty(process, "platform", { value: origPlatform, configurable: true });
+  });
+
+  it("returns needsOperatorMode=false on Linux when operator IS set", async () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+
+    mockResolveBinary.mockReturnValue("/usr/bin/tailscale");
+    enqueueSpawnSuccess(CONNECTED_STATUS_JSON);
+    enqueueSpawnSuccess(FUNNEL_INACTIVE_JSON);
+    enqueueSpawnSuccess(JSON.stringify({ OperatorUser: "myuser" }));
+
+    const status = await getTailscaleStatus(3456);
+
+    expect(status.needsOperatorMode).toBeUndefined();
+
+    Object.defineProperty(process, "platform", { value: origPlatform, configurable: true });
+  });
+
+  it("does not check operator mode on macOS", async () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+
+    mockResolveBinary.mockReturnValue("/usr/bin/tailscale");
+    enqueueSpawnSuccess(CONNECTED_STATUS_JSON);
+    enqueueSpawnSuccess(FUNNEL_INACTIVE_JSON);
+    // No additional spawn for debug prefs expected
+
+    const status = await getTailscaleStatus(3456);
+
+    expect(status.needsOperatorMode).toBeUndefined();
+
+    Object.defineProperty(process, "platform", { value: origPlatform, configurable: true });
+  });
+
+  it("returns DNS warning when funnel is active but hostname does not resolve", async () => {
+    mockResolveBinary.mockReturnValue("/usr/bin/tailscale");
+    enqueueSpawnSuccess(CONNECTED_STATUS_JSON);
+    enqueueSpawnSuccess(FUNNEL_ACTIVE_JSON);
+    // DNS check fails
+    mockResolve4.mockRejectedValueOnce(new Error("NXDOMAIN"));
+
+    const status = await getTailscaleStatus(3456);
+
+    expect(status.funnelActive).toBe(true);
+    expect(status.warning).toContain("not resolving publicly");
+  });
+
+  it("returns no warning when funnel is active and hostname resolves", async () => {
+    mockResolveBinary.mockReturnValue("/usr/bin/tailscale");
+    enqueueSpawnSuccess(CONNECTED_STATUS_JSON);
+    enqueueSpawnSuccess(FUNNEL_ACTIVE_JSON);
+    // DNS check succeeds
+    mockResolve4.mockResolvedValueOnce(["100.64.0.1"]);
+
+    const status = await getTailscaleStatus(3456);
+
+    expect(status.funnelActive).toBe(true);
+    expect(status.warning).toBeUndefined();
+  });
 });
 
 // ── startFunnel ─────────────────────────────────────────────────────────────
@@ -252,7 +338,11 @@ describe("startFunnel", () => {
     expect(mockUpdateSettings).toHaveBeenCalledWith({ publicUrl: "https://my-machine.tail1234.ts.net" });
   });
 
-  it("returns descriptive error on permission failure", async () => {
+  it("returns needsOperatorMode and clean message on permission failure (Linux)", async () => {
+    // Reactive permission detection is Linux-only to avoid false positives on macOS
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+
     mockResolveBinary.mockReturnValue("/usr/bin/tailscale");
     enqueueSpawnSuccess(CONNECTED_STATUS_JSON);
     // funnel command fails with permission error
@@ -260,9 +350,44 @@ describe("startFunnel", () => {
 
     const result = await startFunnel(3456);
 
-    expect(result.error).toContain("Failed to start Funnel");
-    expect(result.error).toContain("permission");
+    expect(result.error).toBe("Tailscale requires operator mode on Linux to manage Funnel.");
+    expect(result.needsOperatorMode).toBe(true);
     expect(result.funnelActive).toBe(false);
+
+    Object.defineProperty(process, "platform", { value: origPlatform, configurable: true });
+  });
+
+  it("does not set needsOperatorMode on permission failure on macOS", async () => {
+    // On macOS, permission errors are not operator mode related
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+
+    mockResolveBinary.mockReturnValue("/usr/bin/tailscale");
+    enqueueSpawnSuccess(CONNECTED_STATUS_JSON);
+    enqueueSpawnFailure("access denied: permission required");
+
+    const result = await startFunnel(3456);
+
+    expect(result.error).toContain("Failed to start Funnel");
+    expect(result.needsOperatorMode).toBeUndefined();
+    expect(result.funnelActive).toBe(false);
+
+    Object.defineProperty(process, "platform", { value: origPlatform, configurable: true });
+  });
+
+  it("does not check DNS immediately after start (deferred to status polls)", async () => {
+    // DNS check is deferred to getTailscaleStatus() to avoid false warnings
+    // during DNS propagation after first enablement.
+    mockResolveBinary.mockReturnValue("/usr/bin/tailscale");
+    enqueueSpawnSuccess(CONNECTED_STATUS_JSON);
+    enqueueSpawnSuccess(""); // funnel command succeeds
+    enqueueSpawnSuccess(FUNNEL_ACTIVE_JSON);
+
+    const result = await startFunnel(3456);
+
+    expect(result.funnelActive).toBe(true);
+    expect(result.funnelUrl).toBe("https://my-machine.tail1234.ts.net");
+    expect(result.warning).toBeUndefined();
   });
 
   it("constructs URL from DNS name when serve status is empty", async () => {

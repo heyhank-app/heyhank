@@ -32,6 +32,10 @@ export interface TailscaleStatus {
   funnelUrl: string | null;
   /** Error message if the last operation failed */
   error: string | null;
+  /** True when on Linux and Tailscale operator mode is not configured */
+  needsOperatorMode?: boolean;
+  /** Non-blocking warning (e.g. DNS not resolving publicly) */
+  warning?: string;
 }
 
 interface PersistedFunnelState {
@@ -87,6 +91,38 @@ function execAsync(binary: string, args: string[]): Promise<string> {
       }
     });
   });
+}
+
+/**
+ * Check if operator mode is needed but not configured (Linux only).
+ * On macOS the Tailscale GUI app handles permissions, so this is a no-op.
+ */
+async function checkNeedsOperatorMode(binary: string): Promise<boolean> {
+  if (process.platform !== "linux") return false;
+  try {
+    const output = await execAsync(binary, ["debug", "prefs"]);
+    const prefs = JSON.parse(output);
+    return !prefs.OperatorUser;
+  } catch {
+    return false; // Can't determine — assume ok
+  }
+}
+
+/**
+ * Check if a hostname resolves via public DNS (Google 8.8.8.8).
+ * We explicitly use a public resolver to avoid Tailscale's MagicDNS
+ * returning private CGNAT addresses (100.64.x.x) for .ts.net hostnames.
+ */
+async function checkFunnelDnsResolves(hostname: string): Promise<boolean> {
+  try {
+    const { Resolver } = await import("node:dns/promises");
+    const resolver = new Resolver();
+    resolver.setServers(["8.8.8.8"]);
+    const addresses = await resolver.resolve4(hostname);
+    return addresses.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function loadPersistedState(): PersistedFunnelState | null {
@@ -221,6 +257,17 @@ export async function getTailscaleStatus(port: number): Promise<TailscaleStatus>
   }
 
   const { active, funnelUrl } = await parseFunnelStatus(binary, port);
+  const needsOperatorMode = !active ? await checkNeedsOperatorMode(binary) : undefined;
+
+  // If funnel is active, check if the URL actually resolves publicly
+  let warning: string | undefined;
+  if (active && dnsName) {
+    const dnsOk = await checkFunnelDnsResolves(dnsName);
+    if (!dnsOk) {
+      warning = "DNS for this hostname is not resolving publicly. Ensure Funnel is enabled in your Tailscale admin console (admin.tailscale.com \u2192 Access Controls \u2192 nodeAttrs). DNS propagation can take up to 10 minutes on first use.";
+    }
+  }
+
   return {
     installed: true,
     binaryPath: binary,
@@ -229,6 +276,8 @@ export async function getTailscaleStatus(port: number): Promise<TailscaleStatus>
     funnelActive: active,
     funnelUrl,
     error: null,
+    ...(needsOperatorMode && { needsOperatorMode }),
+    ...(warning && { warning }),
   };
 }
 
@@ -251,15 +300,24 @@ export async function startFunnel(port: number): Promise<TailscaleStatus> {
     await execAsync(binary, ["funnel", "--bg", String(port)]);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    // Check for common permission error patterns
-    const hint = message.includes("permission") || message.includes("sudo") || message.includes("access denied")
-      ? " You may need to run `tailscale up --operator=$USER` or use sudo."
-      : "";
-    return { installed: true, binaryPath: binary, connected: true, dnsName, funnelActive: false, funnelUrl: null, error: `Failed to start Funnel: ${message}${hint}` };
+    const isPermissionError = process.platform === "linux" && /permission|sudo|access denied/i.test(message);
+    return {
+      installed: true, binaryPath: binary, connected: true, dnsName,
+      funnelActive: false, funnelUrl: null,
+      error: isPermissionError
+        ? "Tailscale requires operator mode on Linux to manage Funnel."
+        : `Failed to start Funnel: ${message}`,
+      ...(isPermissionError && { needsOperatorMode: true }),
+    };
   }
 
   // Verify it's running and get the URL
   const { active, funnelUrl } = await parseFunnelStatus(binary, port);
+
+  // DNS reachability is NOT checked here — it takes seconds to minutes for
+  // Tailscale to provision public DNS records after first enablement.
+  // The check runs in getTailscaleStatus() on subsequent polls instead.
+
   if (!active || !funnelUrl) {
     // Funnel command succeeded but we can't detect it yet — construct URL from DNS name
     const constructedUrl = dnsName ? `https://${dnsName}` : null;

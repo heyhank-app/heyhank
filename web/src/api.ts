@@ -380,6 +380,8 @@ export interface TailscaleStatus {
   funnelActive: boolean;
   funnelUrl: string | null;
   error: string | null;
+  needsOperatorMode?: boolean;
+  warning?: string;
 }
 
 export interface AppSettings {

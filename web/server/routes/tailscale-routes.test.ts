@@ -92,7 +92,8 @@ describe("POST /tailscale/funnel/start", () => {
     expect(mockStartFunnel).toHaveBeenCalledWith(PORT);
   });
 
-  it("returns 503 when an error occurs", async () => {
+  // Routes now always return 200 — error is in the body
+  it("returns 200 with error in body when an error occurs", async () => {
     mockStartFunnel.mockResolvedValue({
       installed: true,
       binaryPath: "/usr/bin/tailscale",
@@ -106,9 +107,30 @@ describe("POST /tailscale/funnel/start", () => {
     const app = createApp();
     const res = await app.request("/tailscale/funnel/start", { method: "POST" });
 
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.error).toBe("Tailscale is not connected");
+  });
+
+  it("returns 200 with needsOperatorMode on permission error", async () => {
+    mockStartFunnel.mockResolvedValue({
+      installed: true,
+      binaryPath: "/usr/bin/tailscale",
+      connected: true,
+      dnsName: "my-machine.ts.net",
+      funnelActive: false,
+      funnelUrl: null,
+      error: "Tailscale requires operator mode on Linux to manage Funnel.",
+      needsOperatorMode: true,
+    });
+
+    const app = createApp();
+    const res = await app.request("/tailscale/funnel/start", { method: "POST" });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.needsOperatorMode).toBe(true);
+    expect(body.error).toContain("operator mode");
   });
 });
 
@@ -133,7 +155,7 @@ describe("POST /tailscale/funnel/stop", () => {
     expect(mockStopFunnel).toHaveBeenCalledWith(PORT);
   });
 
-  it("returns 503 when an error occurs", async () => {
+  it("returns 200 with error in body when stop fails", async () => {
     mockStopFunnel.mockResolvedValue({
       installed: true,
       binaryPath: "/usr/bin/tailscale",
@@ -147,7 +169,7 @@ describe("POST /tailscale/funnel/stop", () => {
     const app = createApp();
     const res = await app.request("/tailscale/funnel/stop", { method: "POST" });
 
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.error).toContain("Failed to stop Funnel");
   });

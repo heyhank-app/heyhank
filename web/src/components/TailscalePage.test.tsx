@@ -385,6 +385,209 @@ describe("TailscalePage", () => {
     expect(mockSetPublicUrl).not.toHaveBeenCalled();
   });
 
+  // Proactive operator mode warning renders before Enable button
+  it("shows proactive operator mode warning when needsOperatorMode is true", async () => {
+    mockApi.getTailscaleStatus.mockResolvedValue({
+      installed: true,
+      binaryPath: "/usr/bin/tailscale",
+      connected: true,
+      dnsName: "my-machine.ts.net",
+      funnelActive: false,
+      funnelUrl: null,
+      error: null,
+      needsOperatorMode: true,
+    });
+
+    render(<TailscalePage embedded />);
+
+    // Should show proactive warning and the command
+    expect(await screen.findByText(/Setup needed: Tailscale operator mode/)).toBeInTheDocument();
+    expect(screen.getByText("sudo tailscale set --operator=$USER")).toBeInTheDocument();
+
+    // Enable button should still be clickable
+    expect(screen.getByRole("button", { name: /enable https/i })).toBeEnabled();
+  });
+
+  // Structured permission error panel with Retry button
+  it("shows structured permission error panel with Retry on enable failure", async () => {
+    const user = userEvent.setup();
+
+    mockApi.getTailscaleStatus.mockResolvedValue({
+      installed: true,
+      binaryPath: "/usr/bin/tailscale",
+      connected: true,
+      dnsName: "my-machine.ts.net",
+      funnelActive: false,
+      funnelUrl: null,
+      error: null,
+    });
+
+    // startTailscaleFunnel returns operator mode error (200 with error in body)
+    mockApi.startTailscaleFunnel.mockResolvedValue({
+      installed: true,
+      binaryPath: "/usr/bin/tailscale",
+      connected: true,
+      dnsName: "my-machine.ts.net",
+      funnelActive: false,
+      funnelUrl: null,
+      error: "Tailscale requires operator mode on Linux to manage Funnel.",
+      needsOperatorMode: true,
+    });
+
+    render(<TailscalePage embedded />);
+
+    const enableBtn = await screen.findByRole("button", { name: /enable https/i });
+    await user.click(enableBtn);
+
+    // Should show structured amber panel, not generic red error
+    expect(await screen.findByText("Operator mode required")).toBeInTheDocument();
+    expect(screen.getByText("sudo tailscale set --operator=$USER")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
+  // Retry button calls startTailscaleFunnel again
+  it("Retry button calls startTailscaleFunnel again", async () => {
+    const user = userEvent.setup();
+
+    mockApi.getTailscaleStatus.mockResolvedValue({
+      installed: true,
+      binaryPath: "/usr/bin/tailscale",
+      connected: true,
+      dnsName: "my-machine.ts.net",
+      funnelActive: false,
+      funnelUrl: null,
+      error: null,
+    });
+
+    // First call: permission error; second call: success
+    mockApi.startTailscaleFunnel
+      .mockResolvedValueOnce({
+        installed: true, binaryPath: "/usr/bin/tailscale", connected: true,
+        dnsName: "my-machine.ts.net", funnelActive: false, funnelUrl: null,
+        error: "Tailscale requires operator mode on Linux to manage Funnel.",
+        needsOperatorMode: true,
+      })
+      .mockResolvedValueOnce({
+        installed: true, binaryPath: "/usr/bin/tailscale", connected: true,
+        dnsName: "my-machine.ts.net", funnelActive: true,
+        funnelUrl: "https://my-machine.ts.net", error: null,
+      });
+
+    render(<TailscalePage embedded />);
+
+    // Click Enable → permission error
+    const enableBtn = await screen.findByRole("button", { name: /enable https/i });
+    await user.click(enableBtn);
+
+    // Click Retry
+    const retryBtn = await screen.findByRole("button", { name: /retry/i });
+    await user.click(retryBtn);
+
+    await waitFor(() => {
+      expect(mockApi.startTailscaleFunnel).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // publicUrl is not set in store when warning is present
+  it("does not set publicUrl when DNS warning is present", async () => {
+    const user = userEvent.setup();
+
+    mockApi.getTailscaleStatus.mockResolvedValue({
+      installed: true,
+      binaryPath: "/usr/bin/tailscale",
+      connected: true,
+      dnsName: "my-machine.ts.net",
+      funnelActive: false,
+      funnelUrl: null,
+      error: null,
+    });
+
+    mockApi.startTailscaleFunnel.mockResolvedValue({
+      installed: true,
+      binaryPath: "/usr/bin/tailscale",
+      connected: true,
+      dnsName: "my-machine.ts.net",
+      funnelActive: true,
+      funnelUrl: "https://my-machine.ts.net",
+      error: null,
+      warning: "DNS for this hostname is not resolving publicly.",
+    });
+
+    render(<TailscalePage embedded />);
+
+    const enableBtn = await screen.findByRole("button", { name: /enable https/i });
+    await user.click(enableBtn);
+
+    await waitFor(() => {
+      expect(mockApi.startTailscaleFunnel).toHaveBeenCalledTimes(1);
+    });
+
+    // publicUrl should NOT be set when there's a DNS warning
+    expect(mockSetPublicUrl).not.toHaveBeenCalled();
+  });
+
+  // DNS warning shows when funnel is active but hostname doesn't resolve
+  it("shows DNS warning panel when status has a warning", async () => {
+    mockApi.getTailscaleStatus.mockResolvedValue({
+      installed: true,
+      binaryPath: "/usr/bin/tailscale",
+      connected: true,
+      dnsName: "my-machine.ts.net",
+      funnelActive: true,
+      funnelUrl: "https://my-machine.ts.net",
+      error: null,
+      warning: "DNS for this hostname is not resolving publicly.",
+    });
+
+    render(<TailscalePage embedded />);
+
+    expect(await screen.findByText("URL may not be publicly accessible")).toBeInTheDocument();
+    expect(screen.getByText(/DNS for this hostname is not resolving/)).toBeInTheDocument();
+    expect(screen.getByText("Open Tailscale admin console")).toBeInTheDocument();
+  });
+
+  // Generic error still works for non-permission errors
+  it("shows generic red error for non-permission errors", async () => {
+    mockApi.getTailscaleStatus.mockResolvedValue({
+      installed: true,
+      binaryPath: "/usr/bin/tailscale",
+      connected: true,
+      dnsName: "my-machine.ts.net",
+      funnelActive: false,
+      funnelUrl: null,
+      error: "Funnel started but could not determine URL",
+    });
+
+    render(<TailscalePage embedded />);
+
+    const errorEl = await screen.findByText("Funnel started but could not determine URL");
+    // Should be in the generic red error box (not the amber panel)
+    expect(errorEl.closest("div")).toHaveClass("bg-cc-error/10");
+  });
+
+  // Accessibility: no violations on operator mode warning state
+  it("has no accessibility violations with operator mode warning", async () => {
+    const { axe } = await import("vitest-axe");
+
+    mockApi.getTailscaleStatus.mockResolvedValue({
+      installed: true,
+      binaryPath: "/usr/bin/tailscale",
+      connected: true,
+      dnsName: "my-machine.ts.net",
+      funnelActive: false,
+      funnelUrl: null,
+      error: "Tailscale requires operator mode on Linux to manage Funnel.",
+      needsOperatorMode: true,
+    });
+
+    const { container } = render(<TailscalePage embedded />);
+
+    await screen.findByText("Operator mode required");
+
+    const results = await axe(container);
+    expect(results).toHaveNoViolations();
+  });
+
   // Navigation: Integrations button navigates back to integrations hub
   it("Integrations button navigates to integrations page", async () => {
     mockApi.getTailscaleStatus.mockResolvedValue({

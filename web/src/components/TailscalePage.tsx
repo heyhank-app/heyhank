@@ -31,11 +31,11 @@ export function TailscalePage({ embedded = false }: TailscalePageProps) {
     try {
       const result = await api.startTailscaleFunnel();
       setStatus(result);
-      if (result.funnelUrl) {
+      if (result.funnelUrl && !result.error && !result.warning) {
         useStore.getState().setPublicUrl(result.funnelUrl);
       }
     } catch (err: unknown) {
-      // Re-fetch so displayed status stays consistent with backend
+      // Network-level failure — re-fetch to stay consistent
       await refreshStatus();
       setStatus((prev) =>
         prev ? { ...prev, error: err instanceof Error ? err.message : String(err) } : null,
@@ -223,6 +223,21 @@ export function TailscalePage({ embedded = false }: TailscalePageProps) {
                 Tailscale is connected as <span className="font-medium text-cc-fg">{status.dnsName}</span>.
                 Enable Funnel to expose your Companion over HTTPS.
               </p>
+
+              {status.needsOperatorMode && !status.error && (
+                <div className="space-y-2 px-3 py-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                  <p className="text-xs text-amber-500 font-medium">
+                    Setup needed: Tailscale operator mode
+                  </p>
+                  <p className="text-xs text-cc-muted">
+                    On Linux, Tailscale requires operator mode to manage Funnel. Run this command first:
+                  </p>
+                  <div className="px-3 py-2 rounded-lg bg-cc-hover text-xs text-cc-fg font-mono-code">
+                    sudo tailscale set --operator=$USER
+                  </div>
+                </div>
+              )}
+
               <button
                 type="button"
                 onClick={onEnableFunnel}
@@ -278,7 +293,64 @@ export function TailscalePage({ embedded = false }: TailscalePageProps) {
             </div>
           )}
 
-          {status?.error && (
+          {/* Structured permission error panel */}
+          {status?.error && status.needsOperatorMode && (
+            <div className="space-y-3 px-3 py-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+              <p className="text-sm font-medium text-amber-500">
+                Operator mode required
+              </p>
+              <p className="text-xs text-cc-muted">
+                On Linux, Tailscale requires operator mode to manage Funnel without sudo.
+                Run this command once in your terminal:
+              </p>
+              <div className="px-3 py-2 rounded-lg bg-cc-hover text-xs text-cc-fg font-mono-code">
+                sudo tailscale set --operator=$USER
+              </div>
+              <p className="text-xs text-cc-muted">
+                After running the command, click Retry to enable Funnel.
+              </p>
+              <button
+                type="button"
+                onClick={onEnableFunnel}
+                disabled={actionLoading}
+                className={`px-4 py-2.5 min-h-[44px] rounded-lg text-sm font-medium transition-colors ${
+                  actionLoading
+                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                    : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+                }`}
+              >
+                {actionLoading ? "Retrying..." : "Retry"}
+              </button>
+            </div>
+          )}
+
+          {/* DNS / reachability warning (non-blocking — funnel is active) */}
+          {status?.warning && (
+            <div className="space-y-2 px-3 py-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+              <p className="text-sm font-medium text-amber-500">
+                URL may not be publicly accessible
+              </p>
+              <p className="text-xs text-cc-muted">
+                {status.warning}
+              </p>
+              <a
+                href="https://login.tailscale.com/admin/acls"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-cc-primary hover:underline"
+              >
+                Open Tailscale admin console
+                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+              </a>
+            </div>
+          )}
+
+          {/* Generic error (non-permission) */}
+          {status?.error && !status.needsOperatorMode && (
             <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
               {status.error}
             </div>
