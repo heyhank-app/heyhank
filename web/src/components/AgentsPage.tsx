@@ -1435,18 +1435,21 @@ function AgentEditor({
                               create a key, and paste it below.
                             </li>
                             <li>
-                              <strong>Save this agent</strong> &mdash; The webhook URL and secret are auto-generated on save.
+                              <strong>Save this agent</strong> &mdash; The webhook URL is generated on save.
                             </li>
                             <li>
                               <strong>Create a Linear Webhook</strong> &mdash;{" "}
                               In <a href="https://linear.app/settings/api" target="_blank" rel="noopener noreferrer" className="text-cc-primary underline">Linear &rarr; Settings &rarr; API &rarr; Webhooks</a>,
-                              create a webhook with the URL and secret shown below. Enable <em>Comment</em> events (create, update).
+                              create a webhook using the URL shown below. Enable <em>Comment</em> events (create, update).
                               {!publicUrl && (
                                 <span className="block mt-0.5 text-amber-400">
                                   No public URL configured &mdash; the webhook URL below uses your browser address which may not be reachable from Linear.{" "}
                                   <a href="#/settings" className="underline hover:text-amber-300">Configure public URL</a>
                                 </span>
                               )}
+                            </li>
+                            <li>
+                              <strong>Copy the signing secret</strong> &mdash; After creating the webhook in Linear, copy its signing secret and paste it into the Webhook Secret field below.
                             </li>
                             <li>
                               <strong>Test it</strong> &mdash; Mention the bot username in a Linear issue comment.
@@ -1495,12 +1498,17 @@ function AgentEditor({
                         </div>
                         <div className="flex gap-1.5">
                           <input
-                            value={platform.webhookSecret}
-                            readOnly
+                            type="password"
+                            value={isMaskedValue(platform.webhookSecret) ? "" : platform.webhookSecret}
                             aria-label="Linear Webhook Secret"
-                            placeholder="Auto-generated on save"
-                            className="flex-1 px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code focus:outline-none opacity-70"
-                            title="Webhook secret (auto-generated)"
+                            onChange={(e) => {
+                              const updated = [...form.chatPlatforms];
+                              updated[idx] = { ...updated[idx], webhookSecret: e.target.value };
+                              updateField("chatPlatforms", updated);
+                            }}
+                            placeholder={isMaskedValue(platform.webhookSecret) ? "Configured — paste new value to update" : "Paste signing secret from Linear"}
+                            className="flex-1 px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                            title="Webhook signing secret (from Linear)"
                           />
                           <input
                             value={platform.userName}
@@ -1559,12 +1567,17 @@ function AgentEditor({
                         </div>
                         <div className="flex gap-1.5">
                           <input
-                            value={platform.webhookSecret}
-                            readOnly
+                            type="password"
+                            value={isMaskedValue(platform.webhookSecret) ? "" : platform.webhookSecret}
                             aria-label="GitHub Webhook Secret"
-                            placeholder="Auto-generated on save"
-                            className="flex-1 px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code focus:outline-none opacity-70"
-                            title="Webhook secret (auto-generated)"
+                            onChange={(e) => {
+                              const updated = [...form.chatPlatforms];
+                              updated[idx] = { ...updated[idx], webhookSecret: e.target.value };
+                              updateField("chatPlatforms", updated);
+                            }}
+                            placeholder={isMaskedValue(platform.webhookSecret) ? "Configured — paste new value to update" : "Paste webhook secret from GitHub"}
+                            className="flex-1 px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                            title="Webhook signing secret (from GitHub)"
                           />
                           <input
                             value={platform.userName}

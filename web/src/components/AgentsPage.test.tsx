@@ -2476,14 +2476,129 @@ describe("AgentsPage", () => {
     const apiKeyInput = screen.getByLabelText("Linear API Key") as HTMLInputElement;
     expect(apiKeyInput.value).toBe("lin_****");
 
-    // Webhook secret (non-masked, read-only) should show the actual value
+    // Webhook secret should be editable so users can paste their platform's signing secret
     const webhookInput = screen.getByLabelText("Linear Webhook Secret") as HTMLInputElement;
     expect(webhookInput.value).toBe("whs_abc123");
-    expect(webhookInput.readOnly).toBe(true);
+    expect(webhookInput.readOnly).toBeFalsy();
 
     // Bot username should be pre-filled
     const userInput = screen.getByLabelText("Linear Bot Username") as HTMLInputElement;
     expect(userInput.value).toBe("my-bot");
+  });
+
+  it("webhook secret field is editable and updates form state for Linear", async () => {
+    // Linear generates its own signing secret, so users need to paste it
+    // into Companion. The field must be editable, not read-only.
+    const agent = makeAgent({
+      id: "ws-edit",
+      name: "WS Edit Agent",
+      triggers: {
+        webhook: { enabled: false, secret: "" },
+        schedule: { enabled: false, expression: "0 8 * * *", recurring: true },
+        chat: {
+          enabled: true,
+          platforms: [
+            {
+              adapter: "linear",
+              autoSubscribe: true,
+              credentials: {
+                apiKey: "lin_****",
+                webhookSecret: "old_secret",
+                userName: "bot",
+              },
+            },
+          ],
+        },
+      },
+    });
+    mockApi.listAgents.mockResolvedValue([agent]);
+    render(<AgentsPage route={defaultRoute} />);
+
+    await screen.findByText("WS Edit Agent");
+    fireEvent.click(screen.getByTitle("Edit"));
+
+    const webhookInput = screen.getByLabelText("Linear Webhook Secret") as HTMLInputElement;
+    expect(webhookInput.value).toBe("old_secret");
+
+    // Simulate pasting a new signing secret from Linear
+    fireEvent.change(webhookInput, { target: { value: "new_linear_signing_secret" } });
+    expect(webhookInput.value).toBe("new_linear_signing_secret");
+  });
+
+  it("webhook secret field is editable for GitHub platform", async () => {
+    // GitHub also generates its own webhook secret, so the field must be editable.
+    const agent = makeAgent({
+      id: "gh-ws-edit",
+      name: "GH WS Edit Agent",
+      triggers: {
+        webhook: { enabled: false, secret: "" },
+        schedule: { enabled: false, expression: "0 8 * * *", recurring: true },
+        chat: {
+          enabled: true,
+          platforms: [
+            {
+              adapter: "github",
+              autoSubscribe: false,
+              credentials: {
+                token: "ghp_****",
+                webhookSecret: "gh_old_secret",
+                userName: "bot",
+              },
+            },
+          ],
+        },
+      },
+    });
+    mockApi.listAgents.mockResolvedValue([agent]);
+    render(<AgentsPage route={defaultRoute} />);
+
+    await screen.findByText("GH WS Edit Agent");
+    fireEvent.click(screen.getByTitle("Edit"));
+
+    const webhookInput = screen.getByLabelText("GitHub Webhook Secret") as HTMLInputElement;
+    expect(webhookInput.value).toBe("gh_old_secret");
+    expect(webhookInput.readOnly).toBeFalsy();
+
+    fireEvent.change(webhookInput, { target: { value: "new_gh_secret" } });
+    expect(webhookInput.value).toBe("new_gh_secret");
+  });
+
+  it("shows placeholder instead of masked dots for configured webhook secret", async () => {
+    // When the backend returns a masked webhookSecret (e.g. "whs_****"), the input
+    // should render an empty value so the placeholder text is visible instead of
+    // opaque password dots.
+    const agent = makeAgent({
+      id: "masked-ws",
+      name: "Masked WS Agent",
+      triggers: {
+        webhook: { enabled: false, secret: "" },
+        schedule: { enabled: false, expression: "0 8 * * *", recurring: true },
+        chat: {
+          enabled: true,
+          platforms: [
+            {
+              adapter: "linear",
+              autoSubscribe: true,
+              credentials: {
+                apiKey: "lin_****",
+                webhookSecret: "whs_****",
+                userName: "bot",
+              },
+            },
+          ],
+        },
+      },
+    });
+    mockApi.listAgents.mockResolvedValue([agent]);
+    render(<AgentsPage route={defaultRoute} />);
+
+    await screen.findByText("Masked WS Agent");
+    fireEvent.click(screen.getByTitle("Edit"));
+
+    const webhookInput = screen.getByLabelText("Linear Webhook Secret") as HTMLInputElement;
+    // Value should be empty so the placeholder is visible
+    expect(webhookInput.value).toBe("");
+    expect(webhookInput.placeholder).toContain("Configured");
   });
 
   it("webhook URL is displayed for saved agents with credentials", async () => {
