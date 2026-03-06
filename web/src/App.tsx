@@ -154,6 +154,13 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Load publicUrl from settings on mount (used for webhook URL generation)
+  useEffect(() => {
+    api.getSettings().then((s) => {
+      if (s.publicUrl) useStore.getState().setPublicUrl(s.publicUrl);
+    }).catch(() => {});
+  }, []);
+
   // Auth gate: show login page when not authenticated
   if (!isAuthenticated) {
     return <LoginPage />;

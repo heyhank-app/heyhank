@@ -221,8 +221,10 @@ export function updateAgent(
     // Deep-merge incoming credentials with existing ones so that masked/omitted
     // fields from the frontend don't overwrite stored secrets on the server.
     if (existing.triggers?.chat?.platforms) {
-      mergedUpdates.triggers!.chat!.platforms = mergedUpdates.triggers.chat.platforms.map((platform, i) => {
-        const existingPlatform = existing.triggers?.chat?.platforms?.[i];
+      mergedUpdates.triggers!.chat!.platforms = mergedUpdates.triggers.chat.platforms.map((platform) => {
+        const existingPlatform = existing.triggers?.chat?.platforms?.find(
+          (ep) => ep.adapter === platform.adapter,
+        );
         if (!existingPlatform?.credentials || !platform.credentials) return platform;
         return {
           ...platform,

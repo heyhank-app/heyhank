@@ -383,6 +383,7 @@ export interface AppSettings {
   aiValidationEnabled: boolean;
   aiValidationAutoApprove: boolean;
   aiValidationAutoDeny: boolean;
+  publicUrl: string;
   updateChannel: "stable" | "prerelease";
 }
 
@@ -891,6 +892,7 @@ export const api = {
     linearArchiveTransitionStateId?: string;
     linearArchiveTransitionStateName?: string;
     editorTabEnabled?: boolean;
+    publicUrl?: string;
     updateChannel?: "stable" | "prerelease";
   }) => put<AppSettings>("/settings", data),
   verifyAnthropicKey: (apiKey: string) =>

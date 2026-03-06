@@ -129,6 +129,7 @@ interface AppState {
   taskPanelConfig: TaskPanelConfig;
   taskPanelConfigMode: boolean;
   homeResetKey: number;
+  publicUrl: string;
   editorTabEnabled: boolean;
   activeTab: "chat" | "diff" | "terminal" | "processes" | "editor";
   chatTabReentryTickBySession: Map<string, number>;
@@ -145,6 +146,7 @@ interface AppState {
   toggleNotificationSound: () => void;
   setNotificationDesktop: (v: boolean) => void;
   toggleNotificationDesktop: () => void;
+  setPublicUrl: (url: string) => void;
   setSidebarOpen: (v: boolean) => void;
   setTaskPanelOpen: (open: boolean) => void;
   setTaskPanelConfigMode: (open: boolean) => void;
@@ -374,6 +376,7 @@ export const useStore = create<AppState>((set) => ({
   taskPanelConfig: getInitialTaskPanelConfig(),
   taskPanelConfigMode: false,
   homeResetKey: 0,
+  publicUrl: "",
   editorTabEnabled: false,
   activeTab: "chat",
   chatTabReentryTickBySession: new Map(),
@@ -442,6 +445,7 @@ export const useStore = create<AppState>((set) => ({
       localStorage.setItem("cc-notification-desktop", String(next));
       return { notificationDesktop: next };
     }),
+  setPublicUrl: (url) => set({ publicUrl: url }),
   setSidebarOpen: (v) => set({ sidebarOpen: v }),
   setTaskPanelOpen: (open) => set({ taskPanelOpen: open }),
   setTaskPanelConfigMode: (open) => set({ taskPanelConfigMode: open }),

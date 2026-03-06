@@ -1050,4 +1050,64 @@ describe("ensureChatWebhookSecrets", () => {
     // userName should be updated
     expect(creds.userName).toBe("UpdatedBot");
   });
+
+  it("deep-merges credentials by adapter name, not array index", () => {
+    // When platforms are reordered or one is deleted, the merge should match
+    // by adapter identity rather than array position to prevent cross-adapter
+    // credential contamination.
+    const agent = agentStore.createAgent(
+      makeAgentInput({
+        name: "Adapter Match Agent",
+        triggers: {
+          chat: {
+            enabled: true,
+            platforms: [
+              {
+                adapter: "linear" as const,
+                autoSubscribe: true,
+                credentials: {
+                  apiKey: "lin_secret",
+                  webhookSecret: "whs_linear",
+                },
+              },
+              {
+                adapter: "github" as const,
+                autoSubscribe: true,
+                credentials: {
+                  token: "ghp_secret",
+                  webhookSecret: "whs_github",
+                },
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    // Update: remove linear, keep only github (now at index 0)
+    const updated = agentStore.updateAgent("adapter-match-agent", {
+      triggers: {
+        chat: {
+          enabled: true,
+          platforms: [
+            {
+              adapter: "github" as const,
+              autoSubscribe: true,
+              credentials: {
+                userName: "my-bot",
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const creds = updated!.triggers!.chat!.platforms[0].credentials as Record<string, unknown>;
+    // Should match github's existing credentials (not linear's)
+    expect(creds.token).toBe("ghp_secret");
+    expect(creds.webhookSecret).toBe("whs_github");
+    expect(creds.userName).toBe("my-bot");
+    // Should NOT have linear's apiKey
+    expect(creds.apiKey).toBeUndefined();
+  });
 });

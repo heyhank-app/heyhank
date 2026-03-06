@@ -17,6 +17,7 @@ export function registerSettingsRoutes(api: Hono): void {
       aiValidationEnabled: settings.aiValidationEnabled,
       aiValidationAutoApprove: settings.aiValidationAutoApprove,
       aiValidationAutoDeny: settings.aiValidationAutoDeny,
+      publicUrl: settings.publicUrl,
       updateChannel: settings.updateChannel,
     });
   });
@@ -62,6 +63,15 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.aiValidationAutoDeny !== undefined && typeof body.aiValidationAutoDeny !== "boolean") {
       return c.json({ error: "aiValidationAutoDeny must be a boolean" }, 400);
     }
+    if (body.publicUrl !== undefined) {
+      if (typeof body.publicUrl !== "string") {
+        return c.json({ error: "publicUrl must be a string" }, 400);
+      }
+      const trimmed = body.publicUrl.trim().replace(/\/+$/, "");
+      if (trimmed !== "" && !/^https?:\/\/.+/.test(trimmed)) {
+        return c.json({ error: "publicUrl must be a valid http/https URL" }, 400);
+      }
+    }
     if (body.updateChannel !== undefined && body.updateChannel !== "stable" && body.updateChannel !== "prerelease") {
       return c.json({ error: "updateChannel must be 'stable' or 'prerelease'" }, 400);
     }
@@ -73,6 +83,7 @@ export function registerSettingsRoutes(api: Hono): void {
       || body.editorTabEnabled !== undefined
       || body.aiValidationEnabled !== undefined || body.aiValidationAutoApprove !== undefined
       || body.aiValidationAutoDeny !== undefined
+      || body.publicUrl !== undefined
       || body.updateChannel !== undefined;
     if (!hasAnyField) {
       return c.json({ error: "At least one settings field is required" }, 400);
@@ -135,6 +146,10 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.aiValidationAutoDeny === "boolean"
           ? body.aiValidationAutoDeny
           : undefined,
+      publicUrl:
+        typeof body.publicUrl === "string"
+          ? body.publicUrl.trim().replace(/\/+$/, "")
+          : undefined,
       updateChannel:
         body.updateChannel === "stable" || body.updateChannel === "prerelease"
           ? (body.updateChannel as UpdateChannel)
@@ -153,6 +168,7 @@ export function registerSettingsRoutes(api: Hono): void {
       aiValidationEnabled: settings.aiValidationEnabled,
       aiValidationAutoApprove: settings.aiValidationAutoApprove,
       aiValidationAutoDeny: settings.aiValidationAutoDeny,
+      publicUrl: settings.publicUrl,
       updateChannel: settings.updateChannel,
     });
   });
