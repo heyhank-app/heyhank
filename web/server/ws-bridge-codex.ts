@@ -24,6 +24,8 @@ export interface CodexAttachDeps {
   assistantMessageListeners: Map<string, Set<(msg: BrowserIncomingMessage) => void>>;
   /** Per-session listeners for result messages (used by chat relay). */
   resultListeners: Map<string, Set<(msg: BrowserIncomingMessage) => void>>;
+  /** Callback to request auto-relaunch when the backend dies while browsers are connected. */
+  onCLIRelaunchNeeded: ((sessionId: string) => void) | null;
 }
 
 export function attachCodexAdapterHandlers(
@@ -142,6 +144,13 @@ export function attachCodexAdapterHandlers(
     deps.persistSession(session);
     console.log(`[ws-bridge] Codex adapter disconnected for session ${sessionId}`);
     deps.broadcastToBrowsers(session, { type: "cli_disconnected" });
+
+    // Auto-relaunch if browsers are still connected (don't leave users staring
+    // at a dead session when the transport drops mid-conversation).
+    if (session.browserSockets.size > 0 && deps.onCLIRelaunchNeeded) {
+      console.log(`[ws-bridge] Auto-relaunching Codex for session ${sessionId} (${session.browserSockets.size} browser(s) connected)`);
+      deps.onCLIRelaunchNeeded(sessionId);
+    }
   });
 
   if (session.pendingMessages.length > 0) {

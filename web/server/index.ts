@@ -108,17 +108,36 @@ wsBridge.onSessionGitInfoReadyCallback((sessionId, cwd, branch) => {
 
 // Auto-relaunch CLI when a browser connects to a session with no CLI
 const relaunchingSet = new Set<string>();
+const MAX_AUTO_RELAUNCHES = 3;
+const autoRelaunchCounts = new Map<string, number>();
 wsBridge.onCLIRelaunchNeededCallback(async (sessionId) => {
   if (relaunchingSet.has(sessionId)) return;
   const info = launcher.getSession(sessionId);
   if (info?.archived) return;
+
+  const count = autoRelaunchCounts.get(sessionId) ?? 0;
+  if (count >= MAX_AUTO_RELAUNCHES) {
+    console.warn(`[server] Auto-relaunch limit (${MAX_AUTO_RELAUNCHES}) reached for session ${sessionId}, giving up`);
+    wsBridge.broadcastToSession(sessionId, {
+      type: "error",
+      message: "Session keeps crashing. Please relaunch manually.",
+    });
+    return;
+  }
+
   if (info && info.state !== "starting") {
     relaunchingSet.add(sessionId);
-    console.log(`[server] Auto-relaunching CLI for session ${sessionId}`);
+    autoRelaunchCounts.set(sessionId, count + 1);
+    console.log(`[server] Auto-relaunching CLI for session ${sessionId} (attempt ${count + 1}/${MAX_AUTO_RELAUNCHES})`);
     try {
       const result = await launcher.relaunch(sessionId);
       if (!result.ok && result.error) {
         wsBridge.broadcastToSession(sessionId, { type: "error", message: result.error });
+      } else {
+        // Successful relaunch — reset counter so transient failures don't
+        // permanently exhaust the budget.  The counter only accumulates when
+        // the backend keeps dying in rapid succession.
+        autoRelaunchCounts.delete(sessionId);
       }
     } finally {
       setTimeout(() => relaunchingSet.delete(sessionId), 5000);
