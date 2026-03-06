@@ -371,6 +371,17 @@ export interface EditorStartResult {
   message?: string;
 }
 
+/** Keep in sync with web/server/tailscale-manager.ts TailscaleStatus */
+export interface TailscaleStatus {
+  installed: boolean;
+  binaryPath: string | null;
+  connected: boolean;
+  dnsName: string | null;
+  funnelActive: boolean;
+  funnelUrl: string | null;
+  error: string | null;
+}
+
 export interface AppSettings {
   anthropicApiKeyConfigured: boolean;
   anthropicModel: string;
@@ -897,6 +908,12 @@ export const api = {
   }) => put<AppSettings>("/settings", data),
   verifyAnthropicKey: (apiKey: string) =>
     post<{ valid: boolean; error?: string }>("/settings/anthropic/verify", { apiKey }),
+
+  // Tailscale
+  getTailscaleStatus: () => get<TailscaleStatus>("/tailscale/status"),
+  startTailscaleFunnel: () => post<TailscaleStatus>("/tailscale/funnel/start"),
+  stopTailscaleFunnel: () => post<TailscaleStatus>("/tailscale/funnel/stop"),
+
   searchLinearIssues: (query: string, limit = 8) =>
     get<{ issues: LinearIssue[] }>(
       `/linear/issues?query=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(limit))}`,

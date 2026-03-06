@@ -12,6 +12,7 @@ const mockApi = {
   getSettings: vi.fn(),
   getLinearConnection: vi.fn(),
   listAgents: vi.fn(),
+  getTailscaleStatus: vi.fn(),
 };
 
 vi.mock("../api.js", () => ({
@@ -19,6 +20,7 @@ vi.mock("../api.js", () => ({
     getSettings: (...args: unknown[]) => mockApi.getSettings(...args),
     getLinearConnection: (...args: unknown[]) => mockApi.getLinearConnection(...args),
     listAgents: (...args: unknown[]) => mockApi.listAgents(...args),
+    getTailscaleStatus: (...args: unknown[]) => mockApi.getTailscaleStatus(...args),
   },
 }));
 
@@ -53,6 +55,15 @@ beforeEach(() => {
     teamKey: "ENG",
   });
   mockApi.listAgents.mockResolvedValue([]);
+  mockApi.getTailscaleStatus.mockResolvedValue({
+    installed: false,
+    binaryPath: null,
+    connected: false,
+    dnsName: null,
+    funnelActive: false,
+    funnelUrl: null,
+    error: null,
+  });
   window.location.hash = "#/integrations";
 });
 
@@ -251,5 +262,78 @@ describe("IntegrationsPage", () => {
 
     // Chat Platforms heading should not appear
     expect(screen.queryByText("Chat Platforms")).not.toBeInTheDocument();
+  });
+
+  // ------------------------------------------------------------------
+  // Tailscale card (renders status and navigates to settings page)
+  // ------------------------------------------------------------------
+
+  it("renders Tailscale card with 'Checking...' while status loads", async () => {
+    // getTailscaleStatus returns a pending promise that never resolves during this test
+    mockApi.getTailscaleStatus.mockReturnValue(new Promise(() => {}));
+
+    render(<IntegrationsPage />);
+
+    await screen.findByText("Linear");
+
+    // Tailscale card should show "Checking..." while status is loading
+    expect(screen.getByText("Tailscale")).toBeInTheDocument();
+    expect(screen.getByText("Checking...")).toBeInTheDocument();
+  });
+
+  it("renders Tailscale card with funnel active status", async () => {
+    // Tailscale is connected with funnel active
+    mockApi.getTailscaleStatus.mockResolvedValue({
+      installed: true,
+      binaryPath: "/usr/bin/tailscale",
+      connected: true,
+      dnsName: "my-machine.ts.net",
+      funnelActive: true,
+      funnelUrl: "https://my-machine.ts.net",
+      error: null,
+    });
+
+    render(<IntegrationsPage />);
+
+    await screen.findByText("Linear");
+
+    // Should show the funnel URL and the active indicator
+    expect(screen.getByText("https://my-machine.ts.net")).toBeInTheDocument();
+    expect(screen.getByLabelText("Funnel active")).toBeInTheDocument();
+  });
+
+  it("renders Tailscale card with 'Not installed' when tailscale is absent", async () => {
+    // Default mock already returns installed: false — just verify it renders
+    render(<IntegrationsPage />);
+
+    await screen.findByText("Linear");
+
+    // Wait for the Tailscale status to resolve
+    await screen.findByText("Not installed");
+    expect(screen.getByText("HTTPS access in one click")).toBeInTheDocument();
+  });
+
+  it("shows fallback status when getTailscaleStatus fails", async () => {
+    mockApi.getTailscaleStatus.mockRejectedValue(new Error("Network error"));
+
+    render(<IntegrationsPage />);
+
+    await screen.findByText("Linear");
+
+    // Should show "Not installed" (fallback status) instead of staying on "Checking..."
+    await screen.findByText("Not installed");
+  });
+
+  it("navigates to Tailscale settings page when gear button is clicked", async () => {
+    render(<IntegrationsPage />);
+
+    await screen.findByText("Linear");
+
+    const tailscaleSettingsBtn = screen.getByRole("button", { name: "Open Tailscale settings" });
+    fireEvent.click(tailscaleSettingsBtn);
+
+    await waitFor(() => {
+      expect(window.location.hash).toBe("#/integrations/tailscale");
+    });
   });
 });

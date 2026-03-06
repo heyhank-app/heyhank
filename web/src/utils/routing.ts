@@ -6,6 +6,7 @@ export type Route =
   | { page: "settings" }
   | { page: "integrations" }
   | { page: "integration-linear" }
+  | { page: "integration-tailscale" }
   | { page: "prompts" }
   | { page: "terminal" }
   | { page: "environments" }
@@ -35,6 +36,7 @@ export function parseHash(hash: string): Route {
   if (hash === "#/settings") return { page: "settings" };
   if (hash === "#/integrations") return { page: "integrations" };
   if (hash === "#/integrations/linear") return { page: "integration-linear" };
+  if (hash === "#/integrations/tailscale") return { page: "integration-tailscale" };
   if (hash === "#/prompts") return { page: "prompts" };
   if (hash === "#/terminal") return { page: "terminal" };
   if (hash === "#/environments") return { page: "environments" };

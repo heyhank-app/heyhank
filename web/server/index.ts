@@ -34,6 +34,7 @@ import { RelayClient } from "./relay-client.js";
 
 import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
 import { imagePullManager } from "./image-pull-manager.js";
+import { restoreIfNeeded as restoreTailscaleFunnel, cleanup as cleanupTailscaleFunnel } from "./tailscale-manager.js";
 import { isRunningAsService } from "./service.js";
 import { getToken, verifyToken } from "./auth-manager.js";
 import { getCookie } from "hono/cookie";
@@ -150,7 +151,7 @@ if (recorder.isGloballyEnabled()) {
 const app = new Hono();
 
 app.use("/api/*", cors());
-app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor, chatEnabled ? chatBot : undefined));
+app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor, chatEnabled ? chatBot : undefined, port));
 
 // Dynamic manifest — embeds auth token in start_url so PWA auto-authenticates
 // on first launch. iOS gives standalone PWAs isolated storage from Safari,
@@ -313,6 +314,11 @@ agentExecutor.startAll();
 // ── Image pull manager — pre-pull missing Docker images for environments ────
 imagePullManager.initFromEnvironments();
 
+// ── Tailscale Funnel restoration ────────────────────────────────────────────
+restoreTailscaleFunnel(port).catch((err) => {
+  console.warn("[server] Tailscale Funnel restoration failed:", err);
+});
+
 // ── Update checker ──────────────────────────────────────────────────────────
 startPeriodicCheck();
 if (isRunningAsService()) {
@@ -324,6 +330,7 @@ if (isRunningAsService()) {
 function gracefulShutdown() {
   console.log("[server] Persisting container state before shutdown...");
   containerManager.persistState(CONTAINER_STATE_PATH);
+  cleanupTailscaleFunnel(port);
   process.exit(0);
 }
 process.on("SIGTERM", gracefulShutdown);

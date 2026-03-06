@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type AgentInfo } from "../api.js";
+import { api, type AgentInfo, type TailscaleStatus } from "../api.js";
 import { navigateHome, navigateToSession } from "../utils/routing.js";
 import { useStore } from "../store.js";
 import { LinearLogo } from "./LinearLogo.js";
@@ -34,8 +34,15 @@ export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [chatSummary, setChatSummary] = useState<Array<{ platform: string; agentCount: number; configured: number }>>([]);
+  const [tailscaleStatus, setTailscaleStatus] = useState<TailscaleStatus | null>(null);
 
   useEffect(() => {
+    // Load Tailscale status (non-blocking)
+    api.getTailscaleStatus().then(setTailscaleStatus).catch(() => setTailscaleStatus({
+      installed: false, binaryPath: null, connected: false, dnsName: null,
+      funnelActive: false, funnelUrl: null, error: "Could not reach Tailscale status endpoint",
+    }));
+
     // Load Linear integration status
     api.getSettings()
       .then((settings) => {
@@ -133,6 +140,64 @@ export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
               }}
               aria-label="Open Linear settings"
               title="Open Linear settings"
+              className="absolute bottom-0 right-0 sm:bottom-0 sm:right-0 inline-flex h-10 w-10 items-center justify-center rounded-full border border-cc-primary/28 bg-cc-primary/12 text-cc-fg transition-colors hover:border-cc-primary/50 hover:bg-cc-primary/20 focus:outline-none focus:ring-2 focus:ring-cc-primary/35 cursor-pointer"
+            >
+              <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <path d="M9.67 4.53 10 2h4l.33 2.53a7.9 7.9 0 0 1 1.7.7l2.03-1.55 2.83 2.83-1.55 2.03c.28.54.51 1.1.7 1.7L22 10v4l-2.53.33a7.9 7.9 0 0 1-.7 1.7l1.55 2.03-2.83 2.83-2.03-1.55c-.54.28-1.1.51-1.7.7L14 22h-4l-.33-2.53a7.9 7.9 0 0 1-1.7-.7l-2.03 1.55-2.83-2.83 1.55-2.03a7.9 7.9 0 0 1-.7-1.7L2 14v-4l2.53-.33c.19-.6.42-1.16.7-1.7L3.68 5.94 6.5 3.1l2.03 1.55c.54-.28 1.1-.51 1.7-.7Z" />
+                <circle cx="12" cy="12" r="3.2" />
+              </svg>
+            </button>
+          </div>
+        </section>
+
+        {/* Tailscale card */}
+        <section className="group relative mt-6 overflow-hidden rounded-3xl border border-cc-border/80 bg-cc-card p-5 pb-16 sm:p-7 sm:pb-7 transition-all duration-300 hover:border-cc-primary/35 hover:shadow-[0_18px_44px_rgba(0,0,0,0.18)]">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(80%_140%_at_100%_0%,rgba(6,182,212,0.18),transparent_52%)]" />
+          <div className="pointer-events-none absolute inset-0 opacity-30 bg-[linear-gradient(120deg,transparent_0%,rgba(255,255,255,0.04)_35%,transparent_62%)]" />
+          <div className="relative min-w-0">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full border border-cc-border bg-cc-hover/55 px-3 py-1.5 text-xs tracking-wide text-cc-muted">
+                <svg className="h-3.5 w-3.5 text-cc-fg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+                <span>Tailscale</span>
+                {tailscaleStatus?.funnelActive && (
+                  <span
+                    className="inline-block h-1.5 w-1.5 rounded-full bg-cc-success shadow-[0_0_0_3px_rgba(34,197,94,0.15)]"
+                    aria-label="Funnel active"
+                    title="Funnel active"
+                  />
+                )}
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-2.5">
+                <h2 className="text-[clamp(1.45rem,2.6vw,2rem)] font-semibold leading-[1.12] tracking-tight text-cc-fg">
+                  HTTPS access in one click
+                </h2>
+              </div>
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-cc-muted sm:text-[15px]">
+                Use Tailscale Funnel to expose your Companion over HTTPS with automatic TLS certificates.
+              </p>
+              <div className="mt-4 inline-flex max-w-full items-center rounded-lg border border-cc-border/80 bg-black/10 px-3 py-1.5 text-xs text-cc-muted/95">
+                <span className="truncate">
+                  {tailscaleStatus === null
+                    ? "Checking..."
+                    : tailscaleStatus.funnelActive && tailscaleStatus.funnelUrl
+                      ? tailscaleStatus.funnelUrl
+                      : tailscaleStatus.connected
+                        ? tailscaleStatus.dnsName || "Connected"
+                        : tailscaleStatus.installed
+                          ? "Not connected"
+                          : "Not installed"}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                window.location.hash = "#/integrations/tailscale";
+              }}
+              aria-label="Open Tailscale settings"
+              title="Open Tailscale settings"
               className="absolute bottom-0 right-0 sm:bottom-0 sm:right-0 inline-flex h-10 w-10 items-center justify-center rounded-full border border-cc-primary/28 bg-cc-primary/12 text-cc-fg transition-colors hover:border-cc-primary/50 hover:bg-cc-primary/20 focus:outline-none focus:ring-2 focus:ring-cc-primary/35 cursor-pointer"
             >
               <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">

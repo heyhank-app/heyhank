@@ -351,6 +351,16 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   The public URL is used for webhook URLs that external services (Linear, GitHub) send events to.
                   Set this to the externally-reachable address of your Companion instance.
                 </p>
+                <p className="text-xs text-cc-muted">
+                  Tip:{" "}
+                  <a
+                    href="#/integrations/tailscale"
+                    className="text-cc-primary hover:underline"
+                  >
+                    Use the Tailscale integration
+                  </a>{" "}
+                  to get an HTTPS URL automatically.
+                </p>
                 <div>
                   <label className="block text-xs font-medium text-cc-fg mb-1.5" htmlFor="public-url">
                     Public URL
