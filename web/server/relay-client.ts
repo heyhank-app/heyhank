@@ -5,10 +5,18 @@
 //
 // Flow:
 //   Companion --[outbound WS]--> Relay Worker <--[HTTPS webhooks]-- External platforms
-//   Companion receives webhook_request messages, processes them via ChatBot,
+//   Companion receives webhook_request messages, processes them locally,
 //   and sends webhook_response messages back through the same WebSocket.
 
-import type { ChatBot } from "./chat-bot.js";
+type WebhookHandler = (req: Request, opts?: { waitUntil?: (task: Promise<unknown>) => void }) => Promise<Response>;
+
+/** Generic interface for webhook routing in the relay client */
+export interface RelayWebhookRouter {
+  /** Global webhook handlers keyed by platform name */
+  webhooks: Record<string, WebhookHandler>;
+  /** Get a webhook handler for a specific agent + platform combination */
+  getWebhookHandler?: (agentId: string, platform: string) => WebhookHandler | null;
+}
 
 /** Inbound message from the relay worker containing a webhook to process */
 interface WebhookRequestMessage {
@@ -40,17 +48,17 @@ const MAX_RECONNECT_DELAY_MS = 30_000;
 export class RelayClient {
   private relayUrl: string;
   private relaySecret: string;
-  private chatBot: ChatBot;
+  private router: RelayWebhookRouter;
 
   private ws: WebSocket | null = null;
   private reconnectDelay = MIN_RECONNECT_DELAY_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalDisconnect = false;
 
-  constructor(relayUrl: string, relaySecret: string, chatBot: ChatBot) {
+  constructor(relayUrl: string, relaySecret: string, router: RelayWebhookRouter) {
     this.relayUrl = relayUrl;
     this.relaySecret = relaySecret;
-    this.chatBot = chatBot;
+    this.router = router;
   }
 
   /**
@@ -118,16 +126,16 @@ export class RelayClient {
   }
 
   /**
-   * Handle a parsed webhook_request message by forwarding it through ChatBot
+   * Handle a parsed webhook_request message by forwarding it to the webhook router
    * and sending the response back to the relay worker.
    */
   async handleWebhookRequest(msg: WebhookRequestMessage): Promise<void> {
     const { requestId, platform, agentId, method, headers, body } = msg;
 
-    // Route to agent-scoped handler if agentId is provided, otherwise use legacy global handler
+    // Route to agent-scoped handler if agentId is provided, otherwise use global handler
     const webhookHandler = agentId
-      ? this.chatBot.getWebhookHandler(agentId, platform)
-      : this.chatBot.webhooks[platform];
+      ? this.router.getWebhookHandler?.(agentId, platform) ?? null
+      : this.router.webhooks[platform];
 
     if (!webhookHandler) {
       const target = agentId ? `agent "${agentId}" / platform "${platform}"` : `platform "${platform}"`;

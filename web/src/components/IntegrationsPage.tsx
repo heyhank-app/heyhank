@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type AgentInfo, type TailscaleStatus } from "../api.js";
+import { api, type TailscaleStatus } from "../api.js";
 import { navigateHome, navigateToSession } from "../utils/routing.js";
 import { useStore } from "../store.js";
 import { LinearLogo } from "./LinearLogo.js";
@@ -8,32 +8,12 @@ interface IntegrationsPageProps {
   embedded?: boolean;
 }
 
-/** Summarize chat platform bindings across all agents */
-function getChatPlatformSummary(agents: AgentInfo[]): Array<{ platform: string; agentCount: number; configured: number }> {
-  const platforms = new Map<string, { total: number; configured: number }>();
-  for (const agent of agents) {
-    if (!agent.triggers?.chat?.enabled) continue;
-    for (const p of agent.triggers.chat.platforms || []) {
-      const entry = platforms.get(p.adapter) || { total: 0, configured: 0 };
-      entry.total++;
-      if (p.credentials) entry.configured++;
-      platforms.set(p.adapter, entry);
-    }
-  }
-  return Array.from(platforms.entries()).map(([platform, stats]) => ({
-    platform,
-    agentCount: stats.total,
-    configured: stats.configured,
-  }));
-}
-
 export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
   const [linearConfigured, setLinearConfigured] = useState(false);
   const [linearConnected, setLinearConnected] = useState(false);
   const [linearViewerLabel, setLinearViewerLabel] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [chatSummary, setChatSummary] = useState<Array<{ platform: string; agentCount: number; configured: number }>>([]);
   const [tailscaleStatus, setTailscaleStatus] = useState<TailscaleStatus | null>(null);
 
   useEffect(() => {
@@ -57,11 +37,6 @@ export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-
-    // Load agents to build chat platform summary
-    api.listAgents().then((agents) => {
-      setChatSummary(getChatPlatformSummary(agents));
-    }).catch(() => { /* ignore */ });
   }, []);
 
   const linearStatus = loading
@@ -208,44 +183,6 @@ export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
           </div>
         </section>
 
-        {/* Chat Platforms summary */}
-        {chatSummary.length > 0 && (
-          <section className="mt-6 rounded-xl border border-cc-border bg-cc-card p-5">
-            <h2 className="text-sm font-medium text-cc-fg mb-3">Chat Platforms</h2>
-            <p className="text-xs text-cc-muted mb-3">
-              Agent-scoped chat webhook integrations. Configure credentials in the agent editor.
-            </p>
-            <div className="space-y-2">
-              {chatSummary.map((s) => (
-                <div key={s.platform} className="flex items-center justify-between px-3 py-2 rounded-lg bg-cc-hover/50">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-cc-fg capitalize">{s.platform}</span>
-                    <span className="text-[10px] text-cc-muted">
-                      {s.agentCount} agent{s.agentCount !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {s.configured > 0 ? (
-                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-cc-success/15 text-cc-success">
-                        {s.configured} configured
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-cc-muted/15 text-cc-muted">
-                        Using env vars
-                      </span>
-                    )}
-                    <button
-                      onClick={() => { window.location.hash = "#/agents"; }}
-                      className="text-[10px] text-cc-primary hover:text-cc-primary/80 cursor-pointer"
-                    >
-                      Configure
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
       </div>
     </div>
   );

@@ -590,31 +590,6 @@ export interface AgentInfo {
       expression: string;
       recurring: boolean;
     };
-    chat?: {
-      enabled: boolean;
-      platforms: Array<{
-        adapter: "linear" | "github" | "slack" | "discord";
-        mentionPattern?: string;
-        autoSubscribe: boolean;
-        /** Per-binding credentials (masked in API responses) */
-        credentials?: {
-          // Linear
-          apiKey?: string;
-          clientId?: string;
-          clientSecret?: string;
-          accessToken?: string;
-          // GitHub
-          token?: string;
-          appId?: string;
-          privateKey?: string;
-          installationId?: string;
-          botUserId?: string;
-          // Common
-          webhookSecret?: string;
-          userName?: string;
-        };
-      }>;
-    };
     /** Linear Agent Interaction SDK trigger (uses global OAuth app) */
     linear?: {
       enabled: boolean;
@@ -633,7 +608,7 @@ export interface AgentInfo {
 export interface AgentExecution {
   sessionId: string;
   agentId: string;
-  triggerType: "manual" | "webhook" | "schedule" | "chat" | "linear";
+  triggerType: "manual" | "webhook" | "schedule" | "linear";
   startedAt: number;
   completedAt?: number;
   success?: boolean;
@@ -1167,9 +1142,6 @@ export const api = {
     get<{ url: string }>("/linear/oauth/authorize-url"),
   disconnectLinearOAuth: () =>
     post<{ ok: boolean }>("/linear/oauth/disconnect"),
-
-  // Chat platforms
-  listChatPlatforms: () => get<{ platforms: string[] }>("/chat/platforms"),
 
   // Skills
   listSkills: () =>

@@ -29,9 +29,7 @@ import { RecorderManager } from "./recorder.js";
 import { CronScheduler } from "./cron-scheduler.js";
 import { AgentExecutor } from "./agent-executor.js";
 import { migrateCronJobsToAgents } from "./agent-cron-migrator.js";
-import { ChatBot } from "./chat-bot.js";
 import { LinearAgentBridge } from "./linear-agent-bridge.js";
-import { RelayClient } from "./relay-client.js";
 
 import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
 import { imagePullManager } from "./image-pull-manager.js";
@@ -60,22 +58,19 @@ const prPoller = new PRPoller(wsBridge);
 const recorder = new RecorderManager();
 const cronScheduler = new CronScheduler(launcher, wsBridge);
 const agentExecutor = new AgentExecutor(launcher, wsBridge);
-const chatBot = new ChatBot(agentExecutor, wsBridge);
-const chatEnabled = chatBot.initialize();
-if (chatEnabled) {
-  console.log(`[server] Chat SDK initialized with platforms: ${chatBot.platforms.join(", ")}`);
-}
 const linearAgentBridge = new LinearAgentBridge(agentExecutor, wsBridge);
 
 // ── Cloud relay connection (for receiving webhooks behind a firewall) ────────
+// The relay forwards platform webhooks (e.g. GitHub, Slack) to the Companion
+// instance via an outbound WebSocket. Currently no webhook handlers are
+// registered (Chat SDK was removed). The relay is left disabled until handlers
+// are wired up (e.g. LinearAgentBridge or future platform integrations).
 if (process.env.COMPANION_RELAY_URL && process.env.COMPANION_RELAY_SECRET) {
-  const relayClient = new RelayClient(
-    process.env.COMPANION_RELAY_URL,
-    process.env.COMPANION_RELAY_SECRET,
-    chatBot,
+  console.warn(
+    "[server] COMPANION_RELAY_URL is set but no relay webhook handlers are registered. " +
+    "The relay client will not be started. Remove COMPANION_RELAY_URL/COMPANION_RELAY_SECRET " +
+    "or wire up webhook handlers to use relay mode.",
   );
-  relayClient.connect();
-  console.log(`[server] Relay client connecting to ${process.env.COMPANION_RELAY_URL}`);
 }
 
 // ── Restore persisted sessions from disk ────────────────────────────────────
@@ -100,7 +95,6 @@ launcher.onCodexAdapterCreated((sessionId, adapter) => {
 // When a CLI/Codex process exits, mark the corresponding agent execution as completed
 launcher.onSessionExited((sessionId, exitCode) => {
   agentExecutor.handleSessionExited(sessionId, exitCode);
-  chatBot.cleanupSession(sessionId);
 });
 
 // Start watching PRs when git info is resolved for a session
@@ -172,7 +166,7 @@ if (recorder.isGloballyEnabled()) {
 const app = new Hono();
 
 app.use("/api/*", cors());
-app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor, chatEnabled ? chatBot : undefined, linearAgentBridge, port));
+app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor, linearAgentBridge, port));
 
 // Dynamic manifest — embeds auth token in start_url so PWA auto-authenticates
 // on first launch. iOS gives standalone PWAs isolated storage from Safari,

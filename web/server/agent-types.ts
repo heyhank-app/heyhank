@@ -1,62 +1,5 @@
 // ─── Agent Types ─────────────────────────────────────────────────────────────
 
-/** Supported Chat SDK adapter names */
-export type ChatAdapterName = "linear" | "github" | "slack" | "discord";
-
-/** Credentials for the Linear Chat SDK adapter */
-export interface LinearChatCredentials {
-  /** Linear API key (personal) — alternative to OAuth */
-  apiKey?: string;
-  /** OAuth application client ID */
-  clientId?: string;
-  /** OAuth application client secret */
-  clientSecret?: string;
-  /** Pre-obtained OAuth access token */
-  accessToken?: string;
-  /** Webhook signing secret (required) */
-  webhookSecret: string;
-  /** Bot display name on Linear */
-  userName?: string;
-}
-
-/** Credentials for the GitHub Chat SDK adapter (forward-compatible) */
-export interface GithubChatCredentials {
-  /** Personal access token — alternative to App auth */
-  token?: string;
-  /** GitHub App ID */
-  appId?: string;
-  /** GitHub App private key (PEM) */
-  privateKey?: string;
-  /** GitHub App installation ID (single-tenant) */
-  installationId?: string;
-  /** Webhook signing secret (required) */
-  webhookSecret: string;
-  /** Bot display name */
-  userName?: string;
-  /** Bot numeric user ID (auto-detected if omitted) */
-  botUserId?: string;
-}
-
-/** Per-platform credential types keyed by adapter name */
-export interface ChatPlatformCredentials {
-  linear: LinearChatCredentials;
-  github: GithubChatCredentials;
-  slack: Record<string, string>;
-  discord: Record<string, string>;
-}
-
-/** Binding of an agent to a chat platform */
-export interface ChatPlatformBinding {
-  /** Which platform adapter to use */
-  adapter: ChatAdapterName;
-  /** Optional regex to filter which mentions this agent handles */
-  mentionPattern?: string;
-  /** Auto-subscribe to threads for multi-turn conversations */
-  autoSubscribe: boolean;
-  /** Per-binding credentials (stored on disk, redacted in API responses) */
-  credentials?: ChatPlatformCredentials[ChatAdapterName];
-}
-
 export interface McpServerConfigAgent {
   type: "stdio" | "sse" | "http";
   command?: string;
@@ -137,12 +80,6 @@ export interface AgentConfig {
       /** true = recurring cron, false = one-shot */
       recurring: boolean;
     };
-    /** Chat platform trigger config (Chat SDK) */
-    chat?: {
-      enabled: boolean;
-      /** Which platform adapters this agent responds on */
-      platforms: ChatPlatformBinding[];
-    };
     /** Linear Agent Interaction SDK trigger (uses global OAuth app) */
     linear?: {
       enabled: boolean;
@@ -177,7 +114,7 @@ export interface AgentExecution {
   /** The agent ID that triggered this */
   agentId: string;
   /** Trigger type that initiated this execution */
-  triggerType: "manual" | "webhook" | "schedule" | "chat" | "linear";
+  triggerType: "manual" | "webhook" | "schedule" | "linear";
   /** When the execution started */
   startedAt: number;
   /** When the execution completed */

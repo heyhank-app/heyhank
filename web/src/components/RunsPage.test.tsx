@@ -144,7 +144,8 @@ describe("RunsPage", () => {
     const webhookPills = screen.getAllByText("Webhook");
     expect(webhookPills.length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Schedule")).toBeInTheDocument();
-    expect(screen.getByText("Chat")).toBeInTheDocument();
+    // Linear trigger filter pill (added for Linear Agent SDK)
+    expect(screen.getByText("Linear")).toBeInTheDocument();
   });
 
   it("shows status filter pills", async () => {
@@ -164,7 +165,7 @@ describe("RunsPage", () => {
     const exec = makeExecution({
       sessionId: "detail-sess",
       agentId: "agent-1",
-      triggerType: "chat",
+      triggerType: "webhook",
       startedAt: Date.now() - 120000,
     });
     mockApi.listExecutions.mockResolvedValue({ executions: [exec], total: 1 });
@@ -274,6 +275,29 @@ describe("RunsPage", () => {
 
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+
+  it("renders a Linear-triggered execution with correct label and color", async () => {
+    // Verify that executions triggered by the Linear Agent SDK display
+    // the "Linear" label with violet badge styling in the table row
+    const exec = makeExecution({ triggerType: "linear", agentId: "agent-1" });
+    mockApi.listExecutions.mockResolvedValue({ executions: [exec], total: 1 });
+    mockApi.listAgents.mockResolvedValue([makeAgent({ id: "agent-1", name: "Linear Bot" })]);
+
+    render(<RunsPage />);
+
+    await waitFor(() => {
+      // "Linear" appears in both the filter pill and the table row badge
+      const linearElements = screen.getAllByText("Linear");
+      expect(linearElements.length).toBeGreaterThanOrEqual(2);
+    });
+
+    // Find the badge in the table row (inside a <td>) and verify violet styling
+    const tableBadge = screen.getAllByText("Linear").find(
+      (el) => el.closest("td") !== null,
+    );
+    expect(tableBadge).toBeDefined();
+    expect(tableBadge!.className).toContain("bg-violet-500/10");
   });
 
   it("has an agent filter dropdown with aria-label", async () => {

@@ -275,7 +275,7 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
           <div>
             <h1 className="text-xl font-semibold text-cc-fg">Linear Settings</h1>
             <p className="mt-1 text-sm text-cc-muted">
-              Configure Linear search and issue context injection at session start.
+              Connect Linear for issue context injection and agent @mentions via the Agent SDK.
             </p>
           </div>
           <div className="flex items-center gap-2">
