@@ -392,6 +392,7 @@ export interface AppSettings {
   linearAutoTransitionStateName: string;
   linearArchiveTransition: boolean;
   linearArchiveTransitionStateName: string;
+  linearOAuthConfigured: boolean;
   editorTabEnabled: boolean;
   aiValidationEnabled: boolean;
   aiValidationAutoApprove: boolean;
@@ -614,6 +615,10 @@ export interface AgentInfo {
         };
       }>;
     };
+    /** Linear Agent Interaction SDK trigger (uses global OAuth app) */
+    linear?: {
+      enabled: boolean;
+    };
   };
   enabled: boolean;
   createdAt: number;
@@ -628,7 +633,7 @@ export interface AgentInfo {
 export interface AgentExecution {
   sessionId: string;
   agentId: string;
-  triggerType: "manual" | "webhook" | "schedule" | "chat";
+  triggerType: "manual" | "webhook" | "schedule" | "chat" | "linear";
   startedAt: number;
   completedAt?: number;
   success?: boolean;
@@ -904,6 +909,9 @@ export const api = {
     linearArchiveTransition?: boolean;
     linearArchiveTransitionStateId?: string;
     linearArchiveTransitionStateName?: string;
+    linearOAuthClientId?: string;
+    linearOAuthClientSecret?: string;
+    linearOAuthWebhookSecret?: string;
     editorTabEnabled?: boolean;
     publicUrl?: string;
     updateChannel?: "stable" | "prerelease";
@@ -1151,6 +1159,14 @@ export const api = {
     const qs = params.toString();
     return get<ExecutionListResult>(`/executions${qs ? `?${qs}` : ""}`);
   },
+
+  // Linear OAuth (Agent Interaction SDK)
+  getLinearOAuthStatus: () =>
+    get<{ configured: boolean; hasClientId: boolean; hasClientSecret: boolean; hasWebhookSecret: boolean; hasAccessToken: boolean }>("/linear/oauth/status"),
+  getLinearOAuthAuthorizeUrl: () =>
+    get<{ url: string }>("/linear/oauth/authorize-url"),
+  disconnectLinearOAuth: () =>
+    post<{ ok: boolean }>("/linear/oauth/disconnect"),
 
   // Chat platforms
   listChatPlatforms: () => get<{ platforms: string[] }>("/chat/platforms"),

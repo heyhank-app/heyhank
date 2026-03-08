@@ -31,6 +31,19 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
   const [savingAutoTransition, setSavingAutoTransition] = useState(false);
   const [autoTransitionSaved, setAutoTransitionSaved] = useState(false);
 
+  // Linear OAuth Agent App state
+  const [oauthClientId, setOauthClientId] = useState("");
+  const [oauthClientSecret, setOauthClientSecret] = useState("");
+  const [oauthWebhookSecret, setOauthWebhookSecret] = useState("");
+  const [oauthConfigured, setOauthConfigured] = useState(false);
+  const [oauthHasAccessToken, setOauthHasAccessToken] = useState(false);
+  const [savingOauth, setSavingOauth] = useState(false);
+  const [oauthSaved, setOauthSaved] = useState(false);
+  const [oauthError, setOauthError] = useState("");
+
+  // Public URL from store (reactive — used in setup guide)
+  const publicUrl = useStore((s) => s.publicUrl);
+
   // Archive transition state
   const [archiveTransition, setArchiveTransition] = useState(false);
   const [archiveSelectedStateId, setArchiveSelectedStateId] = useState("");
@@ -87,6 +100,7 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
         setSelectedStateName(settings.linearAutoTransitionStateName);
         setArchiveTransition(settings.linearArchiveTransition);
         setArchiveSelectedStateName(settings.linearArchiveTransitionStateName);
+        setOauthConfigured(settings.linearOAuthConfigured);
         if (settings.linearApiKeyConfigured) {
           refreshConnectionStatus().then(() => {
             fetchWorkflowStates().then(() => {
@@ -98,6 +112,26 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
+    // Load OAuth status
+    api.getLinearOAuthStatus().then((s) => {
+      setOauthConfigured(s.configured);
+      setOauthHasAccessToken(s.hasAccessToken);
+    }).catch(() => {});
+
+    // Check for OAuth callback success/error in URL
+    const hash = window.location.hash;
+    if (hash.includes("oauth_success=true")) {
+      setOauthSaved(true);
+      setOauthHasAccessToken(true);
+      setOauthConfigured(true);
+      // Clean up URL
+      window.location.hash = "#/settings/linear";
+      setTimeout(() => setOauthSaved(false), 3000);
+    } else if (hash.includes("oauth_error=")) {
+      const match = hash.match(/oauth_error=([^&]*)/);
+      setOauthError(decodeURIComponent(match?.[1] || "OAuth failed"));
+      window.location.hash = "#/settings/linear";
+    }
   }, []);
 
   // Sync workflowStates when selectedTeamId changes
@@ -602,6 +636,184 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
             </div>
           </div>
         )}
+
+        {/* ── Linear Agent App (OAuth) ── */}
+        <div className="mt-4 bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-cc-fg flex items-center gap-2">
+            <LinearLogo className="w-4 h-4 text-cc-fg" />
+            <span>Linear Agent App</span>
+            {oauthHasAccessToken && (
+              <span className="ml-1 px-2 py-0.5 text-[10px] rounded-full bg-cc-success/10 text-cc-success border border-cc-success/20">
+                Connected
+              </span>
+            )}
+          </h2>
+          <p className="text-xs text-cc-muted">
+            Create a dedicated agent user in Linear that responds to @mentions. This uses Linear's native Agent Interaction SDK for a rich in-app experience with session activities, thoughts, and plans.
+          </p>
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium mb-1.5" htmlFor="oauth-client-id">
+                Client ID
+              </label>
+              <input
+                id="oauth-client-id"
+                type="text"
+                value={oauthClientId}
+                onChange={(e) => setOauthClientId(e.target.value)}
+                placeholder={oauthConfigured ? "Configured — enter new value to update" : "OAuth app client ID"}
+                className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/60"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1.5" htmlFor="oauth-client-secret">
+                Client Secret
+              </label>
+              <input
+                id="oauth-client-secret"
+                type="password"
+                value={oauthClientSecret}
+                onChange={(e) => setOauthClientSecret(e.target.value)}
+                placeholder={oauthConfigured ? "Configured — enter new value to update" : "OAuth app client secret"}
+                className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/60"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1.5" htmlFor="oauth-webhook-secret">
+                Webhook Signing Secret
+              </label>
+              <input
+                id="oauth-webhook-secret"
+                type="password"
+                value={oauthWebhookSecret}
+                onChange={(e) => setOauthWebhookSecret(e.target.value)}
+                placeholder={oauthConfigured ? "Configured — enter new value to update" : "Webhook signing secret from Linear"}
+                className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/60"
+              />
+            </div>
+          </div>
+
+          {oauthError && (
+            <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
+              {oauthError}
+            </div>
+          )}
+
+          {oauthSaved && (
+            <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
+              {oauthHasAccessToken ? "Agent app connected successfully!" : "OAuth credentials saved."}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span className="text-xs text-cc-muted">
+              {oauthHasAccessToken
+                ? "Agent app installed — agents with the Linear trigger will respond to @mentions"
+                : oauthConfigured
+                  ? "Credentials saved — install the app to connect"
+                  : "Not configured"}
+            </span>
+            <div className="flex items-center gap-2">
+              {oauthHasAccessToken && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setSavingOauth(true);
+                    setOauthError("");
+                    try {
+                      await api.disconnectLinearOAuth();
+                      setOauthHasAccessToken(false);
+                      setOauthConfigured(false);
+                    } catch (e: unknown) {
+                      setOauthError(e instanceof Error ? e.message : String(e));
+                    } finally {
+                      setSavingOauth(false);
+                    }
+                  }}
+                  disabled={savingOauth}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    savingOauth
+                      ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                      : "bg-cc-error/10 hover:bg-cc-error/20 text-cc-error cursor-pointer"
+                  }`}
+                >
+                  Disconnect
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={async () => {
+                  setSavingOauth(true);
+                  setOauthError("");
+                  setOauthSaved(false);
+                  try {
+                    // Save credentials first if provided
+                    const patch: Record<string, string> = {};
+                    if (oauthClientId.trim()) patch.linearOAuthClientId = oauthClientId.trim();
+                    if (oauthClientSecret.trim()) patch.linearOAuthClientSecret = oauthClientSecret.trim();
+                    if (oauthWebhookSecret.trim()) patch.linearOAuthWebhookSecret = oauthWebhookSecret.trim();
+                    if (Object.keys(patch).length > 0) {
+                      await api.updateSettings(patch);
+                      setOauthClientId("");
+                      setOauthClientSecret("");
+                      setOauthWebhookSecret("");
+                      setOauthSaved(true);
+                      setTimeout(() => setOauthSaved(false), 1800);
+                    }
+                  } catch (e: unknown) {
+                    setOauthError(e instanceof Error ? e.message : String(e));
+                  } finally {
+                    setSavingOauth(false);
+                  }
+                }}
+                disabled={savingOauth || (!oauthClientId.trim() && !oauthClientSecret.trim() && !oauthWebhookSecret.trim())}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  savingOauth || (!oauthClientId.trim() && !oauthClientSecret.trim() && !oauthWebhookSecret.trim())
+                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                    : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+                }`}
+              >
+                {savingOauth ? "Saving..." : "Save Credentials"}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setOauthError("");
+                  try {
+                    const result = await api.getLinearOAuthAuthorizeUrl();
+                    window.open(result.url, "_self");
+                  } catch (e: unknown) {
+                    setOauthError(e instanceof Error ? e.message : String(e));
+                  }
+                }}
+                disabled={!oauthConfigured || savingOauth}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  !oauthConfigured || savingOauth
+                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                    : "bg-violet-600 hover:bg-violet-700 text-white cursor-pointer"
+                }`}
+              >
+                Install to Workspace
+              </button>
+            </div>
+          </div>
+
+          {/* Setup instructions */}
+          <details className="text-xs text-cc-muted">
+            <summary className="cursor-pointer hover:text-cc-fg transition-colors">Setup guide</summary>
+            <ol className="mt-2 ml-4 space-y-1 list-decimal">
+              <li>Go to <a href="https://linear.app/settings/api" target="_blank" rel="noopener noreferrer" className="text-cc-primary underline">Linear &rarr; Settings &rarr; API &rarr; OAuth Applications</a> and create a new app.</li>
+              <li>Enable <strong>Webhooks</strong> and subscribe to <strong>Agent session events</strong>.</li>
+              <li>Add the scope <code className="px-1 py-0.5 rounded bg-cc-hover">app:mentionable</code>.</li>
+              <li>Set the <strong>Redirect URI</strong> to: <code className="px-1 py-0.5 rounded bg-cc-hover text-[10px]">{`${publicUrl || window.location.origin}/api/linear/oauth/callback`}</code></li>
+              <li>Set the <strong>Webhook URL</strong> to: <code className="px-1 py-0.5 rounded bg-cc-hover text-[10px]">{`${publicUrl || window.location.origin}/api/linear/agent-webhook`}</code></li>
+              <li>Copy the Client ID, Client Secret, and Webhook Signing Secret into the fields above.</li>
+              <li>Click <strong>Install to Workspace</strong> to create the agent user.</li>
+              <li>Enable the <strong>Linear Agent</strong> trigger on an agent in the <a href="#/agents" className="text-cc-primary underline">Agents</a> page.</li>
+            </ol>
+          </details>
+        </div>
 
         <section className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="bg-cc-card border border-cc-border rounded-xl p-4">

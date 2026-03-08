@@ -143,6 +143,10 @@ export interface AgentConfig {
       /** Which platform adapters this agent responds on */
       platforms: ChatPlatformBinding[];
     };
+    /** Linear Agent Interaction SDK trigger (uses global OAuth app) */
+    linear?: {
+      enabled: boolean;
+    };
   };
 
   // ── Tracking ──
@@ -173,7 +177,7 @@ export interface AgentExecution {
   /** The agent ID that triggered this */
   agentId: string;
   /** Trigger type that initiated this execution */
-  triggerType: "manual" | "webhook" | "schedule" | "chat";
+  triggerType: "manual" | "webhook" | "schedule" | "chat" | "linear";
   /** When the execution started */
   startedAt: number;
   /** When the execution completed */

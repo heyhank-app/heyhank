@@ -30,6 +30,7 @@ import { CronScheduler } from "./cron-scheduler.js";
 import { AgentExecutor } from "./agent-executor.js";
 import { migrateCronJobsToAgents } from "./agent-cron-migrator.js";
 import { ChatBot } from "./chat-bot.js";
+import { LinearAgentBridge } from "./linear-agent-bridge.js";
 import { RelayClient } from "./relay-client.js";
 
 import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
@@ -64,6 +65,7 @@ const chatEnabled = chatBot.initialize();
 if (chatEnabled) {
   console.log(`[server] Chat SDK initialized with platforms: ${chatBot.platforms.join(", ")}`);
 }
+const linearAgentBridge = new LinearAgentBridge(agentExecutor, wsBridge);
 
 // ── Cloud relay connection (for receiving webhooks behind a firewall) ────────
 if (process.env.COMPANION_RELAY_URL && process.env.COMPANION_RELAY_SECRET) {
@@ -170,7 +172,7 @@ if (recorder.isGloballyEnabled()) {
 const app = new Hono();
 
 app.use("/api/*", cors());
-app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor, chatEnabled ? chatBot : undefined, port));
+app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor, chatEnabled ? chatBot : undefined, linearAgentBridge, port));
 
 // Dynamic manifest — embeds auth token in start_url so PWA auto-authenticates
 // on first launch. iOS gives standalone PWAs isolated storage from Safari,

@@ -50,6 +50,8 @@ interface AgentFormData {
   scheduleEnabled: boolean;
   scheduleExpression: string;
   scheduleRecurring: boolean;
+  // Linear Agent SDK trigger
+  linearEnabled: boolean;
   // Chat platform triggers
   chatEnabled: boolean;
   chatPlatforms: Array<{
@@ -90,6 +92,7 @@ const EMPTY_FORM: AgentFormData = {
   scheduleEnabled: false,
   scheduleExpression: "0 8 * * *",
   scheduleRecurring: true,
+  linearEnabled: false,
   chatEnabled: false,
   chatPlatforms: [],
 };
@@ -230,7 +233,13 @@ export function AgentsPage({ route }: Props) {
   const [runInputAgent, setRunInputAgent] = useState<AgentInfo | null>(null);
   const [runInput, setRunInput] = useState("");
   const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null);
+  const [linearOAuthConfigured, setLinearOAuthConfigured] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Check if Linear OAuth is configured (for Agent SDK trigger visibility)
+  useEffect(() => {
+    api.getLinearOAuthStatus().then((s) => setLinearOAuthConfigured(s.configured)).catch(() => {});
+  }, []);
 
   // Load agents
   const loadAgents = useCallback(async () => {
@@ -293,6 +302,7 @@ export function AgentsPage({ route }: Props) {
       scheduleEnabled: agent.triggers?.schedule?.enabled ?? false,
       scheduleExpression: agent.triggers?.schedule?.expression || "0 8 * * *",
       scheduleRecurring: agent.triggers?.schedule?.recurring ?? true,
+      linearEnabled: agent.triggers?.linear?.enabled ?? false,
       chatEnabled: agent.triggers?.chat?.enabled ?? false,
       chatPlatforms: (agent.triggers?.chat?.platforms || []).map((p) => ({
         adapter: p.adapter,
@@ -356,6 +366,7 @@ export function AgentsPage({ route }: Props) {
             expression: form.scheduleExpression,
             recurring: form.scheduleRecurring,
           },
+          linear: { enabled: form.linearEnabled },
           chat: {
             enabled: form.chatEnabled,
             platforms: form.chatPlatforms
@@ -505,6 +516,7 @@ export function AgentsPage({ route }: Props) {
       saving={saving}
       onSave={handleSave}
       onCancel={cancelEdit}
+      linearOAuthConfigured={linearOAuthConfigured}
     />;
   }
 
@@ -659,6 +671,7 @@ function AgentCard({
       agent.triggers.schedule.recurring,
     ));
   }
+  if (agent.triggers?.linear?.enabled) triggers.push("Linear Agent");
   if (agent.triggers?.chat?.enabled) {
     const platformCount = agent.triggers.chat.platforms?.length ?? 0;
     triggers.push(platformCount > 0 ? `Chat (${platformCount})` : "Chat");
@@ -794,6 +807,7 @@ function AgentEditor({
   saving,
   onSave,
   onCancel,
+  linearOAuthConfigured,
 }: {
   form: AgentFormData;
   setForm: (f: AgentFormData | ((prev: AgentFormData) => AgentFormData)) => void;
@@ -803,6 +817,7 @@ function AgentEditor({
   saving: boolean;
   onSave: () => void;
   onCancel: () => void;
+  linearOAuthConfigured: boolean;
 }) {
   const models = getModelsForBackend(form.backendType);
   const modes = getAgentModesForBackend(form.backendType);
@@ -1281,6 +1296,19 @@ function AgentEditor({
                 Schedule
               </button>
 
+              {/* Linear Agent SDK toggle pill (only shown when OAuth is configured) */}
+              {linearOAuthConfigured && (
+                <button
+                  onClick={() => updateField("linearEnabled", !form.linearEnabled)}
+                  className={form.linearEnabled ? pillActive : pillDefault}
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
+                    <path d="M3 1a1 1 0 00-1 1v12a1 1 0 001 1h10a1 1 0 001-1V2a1 1 0 00-1-1H3zm1 2h8v2H4V3zm0 4h5v2H4V7zm0 4h8v2H4v-2z" />
+                  </svg>
+                  Linear Agent
+                </button>
+              )}
+
               {/* Chat toggle pill */}
               <button
                 onClick={() => updateField("chatEnabled", !form.chatEnabled)}
@@ -1297,6 +1325,14 @@ function AgentEditor({
             {form.webhookEnabled && (
               <p className="text-[10px] text-cc-muted mt-2">
                 A unique URL will be generated after saving. POST to it with <code className="px-1 py-0.5 rounded bg-cc-hover">{`{"input": "..."}`}</code>.
+              </p>
+            )}
+
+            {/* Linear Agent helper */}
+            {form.linearEnabled && (
+              <p className="text-[10px] text-cc-muted mt-2">
+                This agent will respond to @mentions in Linear via the Agent Interaction SDK. Configure the OAuth app in{" "}
+                <a href="#/settings/linear" className="text-cc-primary underline">Linear Settings</a>.
               </p>
             )}
 

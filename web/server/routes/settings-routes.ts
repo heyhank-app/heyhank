@@ -13,6 +13,7 @@ export function registerSettingsRoutes(api: Hono): void {
       linearAutoTransitionStateName: settings.linearAutoTransitionStateName,
       linearArchiveTransition: settings.linearArchiveTransition,
       linearArchiveTransitionStateName: settings.linearArchiveTransitionStateName,
+      linearOAuthConfigured: !!(settings.linearOAuthClientId.trim() && settings.linearOAuthClientSecret.trim() && settings.linearOAuthAccessToken.trim()),
       editorTabEnabled: settings.editorTabEnabled,
       aiValidationEnabled: settings.aiValidationEnabled,
       aiValidationAutoApprove: settings.aiValidationAutoApprove,
@@ -75,11 +76,22 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.updateChannel !== undefined && body.updateChannel !== "stable" && body.updateChannel !== "prerelease") {
       return c.json({ error: "updateChannel must be 'stable' or 'prerelease'" }, 400);
     }
+    if (body.linearOAuthClientId !== undefined && typeof body.linearOAuthClientId !== "string") {
+      return c.json({ error: "linearOAuthClientId must be a string" }, 400);
+    }
+    if (body.linearOAuthClientSecret !== undefined && typeof body.linearOAuthClientSecret !== "string") {
+      return c.json({ error: "linearOAuthClientSecret must be a string" }, 400);
+    }
+    if (body.linearOAuthWebhookSecret !== undefined && typeof body.linearOAuthWebhookSecret !== "string") {
+      return c.json({ error: "linearOAuthWebhookSecret must be a string" }, 400);
+    }
     const hasAnyField = body.anthropicApiKey !== undefined || body.anthropicModel !== undefined
       || body.linearApiKey !== undefined || body.linearAutoTransition !== undefined
       || body.linearAutoTransitionStateId !== undefined || body.linearAutoTransitionStateName !== undefined
       || body.linearArchiveTransition !== undefined || body.linearArchiveTransitionStateId !== undefined
       || body.linearArchiveTransitionStateName !== undefined
+      || body.linearOAuthClientId !== undefined || body.linearOAuthClientSecret !== undefined
+      || body.linearOAuthWebhookSecret !== undefined
       || body.editorTabEnabled !== undefined
       || body.aiValidationEnabled !== undefined || body.aiValidationAutoApprove !== undefined
       || body.aiValidationAutoDeny !== undefined
@@ -130,6 +142,18 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.linearArchiveTransitionStateName === "string"
           ? body.linearArchiveTransitionStateName.trim()
           : undefined,
+      linearOAuthClientId:
+        typeof body.linearOAuthClientId === "string"
+          ? body.linearOAuthClientId.trim()
+          : undefined,
+      linearOAuthClientSecret:
+        typeof body.linearOAuthClientSecret === "string"
+          ? body.linearOAuthClientSecret.trim()
+          : undefined,
+      linearOAuthWebhookSecret:
+        typeof body.linearOAuthWebhookSecret === "string"
+          ? body.linearOAuthWebhookSecret.trim()
+          : undefined,
       editorTabEnabled:
         typeof body.editorTabEnabled === "boolean"
           ? body.editorTabEnabled
@@ -164,6 +188,7 @@ export function registerSettingsRoutes(api: Hono): void {
       linearAutoTransitionStateName: settings.linearAutoTransitionStateName,
       linearArchiveTransition: settings.linearArchiveTransition,
       linearArchiveTransitionStateName: settings.linearArchiveTransitionStateName,
+      linearOAuthConfigured: !!(settings.linearOAuthClientId.trim() && settings.linearOAuthClientSecret.trim() && settings.linearOAuthAccessToken.trim()),
       editorTabEnabled: settings.editorTabEnabled,
       aiValidationEnabled: settings.aiValidationEnabled,
       aiValidationAutoApprove: settings.aiValidationAutoApprove,
