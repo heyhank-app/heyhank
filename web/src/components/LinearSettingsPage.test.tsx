@@ -51,6 +51,7 @@ beforeEach(() => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateName: "",
     linearOAuthConfigured: false,
+    linearOAuthCredentialsSaved: false,
   });
   mockApi.getLinearOAuthStatus.mockResolvedValue({ configured: false, hasClientId: false, hasClientSecret: false, hasWebhookSecret: false, hasAccessToken: false });
   mockApi.updateSettings.mockResolvedValue({
@@ -291,6 +292,7 @@ describe("LinearSettingsPage — OAuth Agent App section", () => {
       linearArchiveTransition: false,
       linearArchiveTransitionStateName: "",
       linearOAuthConfigured: true,
+      linearOAuthCredentialsSaved: true,
     });
 
     render(<LinearSettingsPage />);
@@ -317,6 +319,7 @@ describe("LinearSettingsPage — OAuth Agent App section", () => {
       linearArchiveTransition: false,
       linearArchiveTransitionStateName: "",
       linearOAuthConfigured: true,
+      linearOAuthCredentialsSaved: true,
     });
     mockApi.getLinearOAuthAuthorizeUrl.mockResolvedValue({
       url: "https://linear.app/oauth/authorize?client_id=test",
@@ -365,6 +368,7 @@ describe("LinearSettingsPage — OAuth Agent App section", () => {
       linearArchiveTransition: false,
       linearArchiveTransitionStateName: "",
       linearOAuthConfigured: true,
+      linearOAuthCredentialsSaved: true,
     });
 
     render(<LinearSettingsPage />);
@@ -419,6 +423,7 @@ describe("LinearSettingsPage — OAuth Agent App section", () => {
       linearArchiveTransition: false,
       linearArchiveTransitionStateName: "",
       linearOAuthConfigured: true,
+      linearOAuthCredentialsSaved: true,
     });
 
     render(<LinearSettingsPage />);
@@ -472,6 +477,7 @@ describe("LinearSettingsPage — OAuth Agent App section", () => {
       linearArchiveTransition: false,
       linearArchiveTransitionStateName: "",
       linearOAuthConfigured: true,
+      linearOAuthCredentialsSaved: true,
     });
     mockApi.getLinearOAuthAuthorizeUrl.mockRejectedValueOnce(new Error("Not configured"));
 
@@ -520,6 +526,38 @@ describe("LinearSettingsPage — OAuth Agent App section", () => {
     expect(await screen.findByText("access_denied")).toBeInTheDocument();
 
     window.location.hash = originalHash;
+  });
+
+  it("refreshes configured state after saving credentials", async () => {
+    // After saving credentials, the UI should refresh OAuth status so
+    // placeholders show "Configured" instead of the initial empty state.
+    mockApi.updateSettings.mockResolvedValue({
+      anthropicApiKeyConfigured: false,
+      anthropicModel: "claude-sonnet-4.6",
+      linearApiKeyConfigured: true,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      linearArchiveTransition: false,
+      linearArchiveTransitionStateName: "",
+    });
+    mockApi.getLinearOAuthStatus
+      .mockResolvedValueOnce({ configured: false, hasClientId: false, hasClientSecret: false, hasWebhookSecret: false, hasAccessToken: false })
+      .mockResolvedValueOnce({ configured: false, hasClientId: true, hasClientSecret: true, hasWebhookSecret: true, hasAccessToken: false });
+
+    render(<LinearSettingsPage />);
+    await screen.findByText("Linear Agent App");
+
+    // Fill in all three credential fields
+    fireEvent.change(screen.getByLabelText("Client ID"), { target: { value: "my-id" } });
+    fireEvent.change(screen.getByLabelText("Client Secret"), { target: { value: "my-secret" } });
+    fireEvent.change(screen.getByLabelText("Webhook Signing Secret"), { target: { value: "wh-secret" } });
+
+    // Click save
+    fireEvent.click(screen.getByRole("button", { name: "Save Credentials" }));
+    await waitFor(() => expect(mockApi.updateSettings).toHaveBeenCalled());
+
+    // After save, getLinearOAuthStatus should have been called again to refresh state
+    await waitFor(() => expect(mockApi.getLinearOAuthStatus).toHaveBeenCalledTimes(2));
   });
 
   it("disables Install to Workspace when credentials are not persisted on server", async () => {

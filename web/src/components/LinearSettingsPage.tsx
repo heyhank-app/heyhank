@@ -100,7 +100,7 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
         setSelectedStateName(settings.linearAutoTransitionStateName);
         setArchiveTransition(settings.linearArchiveTransition);
         setArchiveSelectedStateName(settings.linearArchiveTransitionStateName);
-        setOauthConfigured(settings.linearOAuthConfigured);
+        setOauthConfigured(settings.linearOAuthConfigured || settings.linearOAuthCredentialsSaved);
         if (settings.linearApiKeyConfigured) {
           refreshConnectionStatus().then(() => {
             fetchWorkflowStates().then(() => {
@@ -755,6 +755,10 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
                     if (oauthWebhookSecret.trim()) patch.linearOAuthWebhookSecret = oauthWebhookSecret.trim();
                     if (Object.keys(patch).length > 0) {
                       await api.updateSettings(patch);
+                      // Refresh OAuth status so placeholders update correctly
+                      const status = await api.getLinearOAuthStatus();
+                      setOauthConfigured(status.hasClientId || status.hasClientSecret);
+                      setOauthHasAccessToken(status.hasAccessToken);
                       setOauthClientId("");
                       setOauthClientSecret("");
                       setOauthWebhookSecret("");

@@ -393,6 +393,7 @@ export interface AppSettings {
   linearArchiveTransition: boolean;
   linearArchiveTransitionStateName: string;
   linearOAuthConfigured: boolean;
+  linearOAuthCredentialsSaved: boolean;
   editorTabEnabled: boolean;
   aiValidationEnabled: boolean;
   aiValidationAutoApprove: boolean;
