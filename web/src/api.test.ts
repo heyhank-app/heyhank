@@ -299,7 +299,7 @@ describe("updateEnv", () => {
 // ===========================================================================
 describe("settings", () => {
   it("sends GET to /api/settings", async () => {
-    const settings = { anthropicApiKeyConfigured: true, anthropicModel: "claude-sonnet-4.6", linearApiKeyConfigured: false };
+    const settings = { anthropicApiKeyConfigured: true, anthropicModel: "claude-sonnet-4-6", linearApiKeyConfigured: false };
     mockFetch.mockResolvedValueOnce(mockResponse(settings));
 
     const result = await api.getSettings();
@@ -310,7 +310,7 @@ describe("settings", () => {
   });
 
   it("sends PUT to /api/settings", async () => {
-    const settings = { anthropicApiKeyConfigured: true, anthropicModel: "claude-sonnet-4.6", linearApiKeyConfigured: true };
+    const settings = { anthropicApiKeyConfigured: true, anthropicModel: "claude-sonnet-4-6", linearApiKeyConfigured: true };
     mockFetch.mockResolvedValueOnce(mockResponse(settings));
 
     await api.updateSettings({ anthropicApiKey: "sk-ant-key", linearApiKey: "lin_api_123" });

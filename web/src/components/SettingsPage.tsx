@@ -24,7 +24,7 @@ type CategoryId = (typeof CATEGORIES)[number]["id"];
 
 export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [anthropicApiKey, setAnthropicApiKey] = useState("");
-  const [anthropicModel, setAnthropicModel] = useState("claude-sonnet-4.6");
+  const [anthropicModel, setAnthropicModel] = useState("claude-sonnet-4-6");
   const [editorTabEnabled, setEditorTabEnabled] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -119,7 +119,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
       .getSettings()
       .then((s) => {
         setConfigured(s.anthropicApiKeyConfigured);
-        setAnthropicModel(s.anthropicModel || "claude-sonnet-4.6");
+        setAnthropicModel(s.anthropicModel || "claude-sonnet-4-6");
         setEditorTabEnabled(s.editorTabEnabled);
         setStoreEditorTabEnabled(s.editorTabEnabled);
         if (typeof s.aiValidationEnabled === "boolean") setAiValidationEnabled(s.aiValidationEnabled);
@@ -146,7 +146,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
     try {
       const nextKey = anthropicApiKey.trim();
       const payload: { anthropicApiKey?: string; anthropicModel: string; editorTabEnabled: boolean } = {
-        anthropicModel: anthropicModel.trim() || "claude-sonnet-4.6",
+        anthropicModel: anthropicModel.trim() || "claude-sonnet-4-6",
         editorTabEnabled,
       };
       if (nextKey) {
@@ -620,7 +620,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     type="text"
                     value={anthropicModel}
                     onChange={(e) => setAnthropicModel(e.target.value)}
-                    placeholder="claude-sonnet-4.6"
+                    placeholder="claude-sonnet-4-6"
                     className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
                   />
                 </div>

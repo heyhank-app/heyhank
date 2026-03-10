@@ -22,7 +22,7 @@ vi.stubGlobal("fetch", mockFetch);
 function makeSettings(overrides: Partial<CompanionSettings> = {}): CompanionSettings {
   return {
     anthropicApiKey: "",
-    anthropicModel: "claude-sonnet-4.6",
+    anthropicModel: "claude-sonnet-4-6",
     linearApiKey: "",
     linearAutoTransition: false,
     linearAutoTransitionStateId: "",

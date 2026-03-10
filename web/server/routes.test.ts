@@ -67,10 +67,10 @@ vi.mock("./session-names.js", () => ({
 }));
 
 vi.mock("./settings-manager.js", () => ({
-  DEFAULT_ANTHROPIC_MODEL: "claude-sonnet-4.6",
+  DEFAULT_ANTHROPIC_MODEL: "claude-sonnet-4-6",
   getSettings: vi.fn(() => ({
     anthropicApiKey: "",
-    anthropicModel: "claude-sonnet-4.6",
+    anthropicModel: "claude-sonnet-4-6",
     linearApiKey: "",
     linearAutoTransition: false,
     linearAutoTransitionStateId: "",
@@ -93,7 +93,7 @@ vi.mock("./settings-manager.js", () => ({
   })),
   updateSettings: vi.fn((patch) => ({
     anthropicApiKey: patch.anthropicApiKey ?? "",
-    anthropicModel: patch.anthropicModel ?? "claude-sonnet-4.6",
+    anthropicModel: patch.anthropicModel ?? "claude-sonnet-4-6",
     linearApiKey: patch.linearApiKey ?? "",
     linearAutoTransition: patch.linearAutoTransition ?? false,
     linearAutoTransitionStateId: patch.linearAutoTransitionStateId ?? "",
@@ -1593,7 +1593,7 @@ describe("POST /api/sessions/:id/archive — Linear transition", () => {
     mockGetLinearIssue.mockReturnValue(linkedIssue);
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_test_key",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -1635,7 +1635,7 @@ describe("POST /api/sessions/:id/archive — Linear transition", () => {
     mockGetLinearIssue.mockReturnValue(linkedIssue);
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_test_key",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -1670,7 +1670,7 @@ describe("POST /api/sessions/:id/archive — Linear transition", () => {
     mockTransitionLinearIssue.mockResolvedValue({ ok: false, error: "Linear API error" });
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_test_key",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -1753,7 +1753,7 @@ describe("GET /api/sessions/:id/archive-info", () => {
     });
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_test_key",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2125,7 +2125,7 @@ describe("GET /api/settings", () => {
   it("returns settings status without exposing the key", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "or-secret",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2153,7 +2153,7 @@ describe("GET /api/settings", () => {
     const json = await res.json();
     expect(json).toEqual({
       anthropicApiKeyConfigured: true,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
       linearConnectionCount: 0,
       linearAutoTransition: false,
@@ -2224,7 +2224,7 @@ describe("GET /api/settings", () => {
   it("includes publicUrl in response when configured", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2258,7 +2258,7 @@ describe("PUT /api/settings", () => {
   it("updates settings", async () => {
     vi.mocked(settingsManager.updateSettings).mockReturnValue({
       anthropicApiKey: "new-key",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2309,7 +2309,7 @@ describe("PUT /api/settings", () => {
     const json = await res.json();
     expect(json).toEqual({
       anthropicApiKeyConfigured: true,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
       linearConnectionCount: 0,
       linearAutoTransition: false,
@@ -2330,7 +2330,7 @@ describe("PUT /api/settings", () => {
   it("trims key and falls back to default model for blank value", async () => {
     vi.mocked(settingsManager.updateSettings).mockReturnValue({
       anthropicApiKey: "trimmed-key",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_trimmed",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2361,7 +2361,7 @@ describe("PUT /api/settings", () => {
     expect(res.status).toBe(200);
     expect(settingsManager.updateSettings).toHaveBeenCalledWith({
       anthropicApiKey: "trimmed-key",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_trimmed",
       linearAutoTransition: undefined,
       linearAutoTransitionStateId: undefined,
@@ -2479,7 +2479,7 @@ describe("PUT /api/settings", () => {
   it("accepts and saves publicUrl string", async () => {
     vi.mocked(settingsManager.updateSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2654,7 +2654,7 @@ describe("GET /api/linear/issues", () => {
   it("returns 400 when linear key is not configured", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2686,7 +2686,7 @@ describe("GET /api/linear/issues", () => {
   it("proxies Linear issue search results with branchName", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2771,7 +2771,7 @@ describe("GET /api/linear/issues", () => {
     // items before currently started ones.
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2863,7 +2863,7 @@ describe("GET /api/linear/issues", () => {
     // the response maps it to an empty string so the frontend can generate a slug
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2920,7 +2920,7 @@ describe("GET /api/linear/connection", () => {
   it("returns 400 when linear key is not configured", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2952,7 +2952,7 @@ describe("GET /api/linear/connection", () => {
   it("returns viewer/team info when connection works", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -3006,7 +3006,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
   it("skips when auto-transition is disabled", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "state-123",
@@ -3042,7 +3042,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
   it("skips when no target state is configured", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: true,
       linearAutoTransitionStateId: "",
@@ -3077,7 +3077,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
   it("returns 400 when linear key is not configured", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: true,
       linearAutoTransitionStateId: "state-123",
@@ -3114,7 +3114,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
   it("transitions issue to configured state", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: true,
       linearAutoTransitionStateId: "state-doing",
@@ -3185,7 +3185,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
   it("returns 502 when issue update fails", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: true,
       linearAutoTransitionStateId: "state-doing",
@@ -3235,7 +3235,7 @@ describe("GET /api/linear/projects", () => {
   it("returns 400 when linear key is not configured", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -3267,7 +3267,7 @@ describe("GET /api/linear/projects", () => {
   it("returns project list from Linear API", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -3329,7 +3329,7 @@ describe("GET /api/linear/project-issues", () => {
   it("returns 400 when linear key is not configured", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -3361,7 +3361,7 @@ describe("GET /api/linear/project-issues", () => {
   it("returns recent non-done issues for a project", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -3438,7 +3438,7 @@ describe("GET /api/linear/project-issues", () => {
     // UI issue lists should present queued/backlog work first, followed by started work.
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",

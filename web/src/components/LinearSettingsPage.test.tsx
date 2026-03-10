@@ -85,7 +85,7 @@ beforeEach(() => {
 
   mockApi.updateSettings.mockResolvedValue({
     anthropicApiKeyConfigured: false,
-    anthropicModel: "claude-sonnet-4.6",
+    anthropicModel: "claude-sonnet-4-6",
     linearApiKeyConfigured: true,
     linearAutoTransition: false,
     linearAutoTransitionStateName: "",
