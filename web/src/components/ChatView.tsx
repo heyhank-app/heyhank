@@ -10,6 +10,7 @@ import { AiValidationBadge } from "./AiValidationBadge.js";
 export function ChatView({ sessionId }: { sessionId: string }) {
   const sessionPerms = useStore((s) => s.pendingPermissions.get(sessionId));
   const aiResolved = useStore((s) => s.aiResolvedPermissions.get(sessionId));
+  const clearAiResolvedPermissions = useStore((s) => s.clearAiResolvedPermissions);
   const connStatus = useStore(
     (s) => s.connectionStatus.get(sessionId) ?? "disconnected"
   );
@@ -49,12 +50,13 @@ export function ChatView({ sessionId }: { sessionId: string }) {
       {/* Message feed */}
       <MessageFeed sessionId={sessionId} />
 
-      {/* AI auto-resolved notifications */}
+      {/* AI auto-resolved notification (most recent only) */}
       {aiResolved && aiResolved.length > 0 && (
         <div className="shrink-0 border-t border-cc-border bg-cc-card">
-          {aiResolved.slice(-5).map((entry, i) => (
-            <AiValidationBadge key={`${entry.request.request_id}-${i}`} entry={entry} />
-          ))}
+          <AiValidationBadge
+            entry={aiResolved[aiResolved.length - 1]}
+            onDismiss={() => clearAiResolvedPermissions(sessionId)}
+          />
         </div>
       )}
 

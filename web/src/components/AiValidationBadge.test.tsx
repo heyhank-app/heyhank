@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { AiValidationBadge } from "./AiValidationBadge.js";
 import type { PermissionRequest } from "../types.js";
@@ -69,6 +69,36 @@ describe("AiValidationBadge", () => {
   it("passes accessibility scan", async () => {
     const { axe } = await import("vitest-axe");
     const { container } = render(<AiValidationBadge entry={mockEntry()} />);
+    const results = await axe(container);
+    expect(results).toHaveNoViolations();
+  });
+
+  it("renders dismiss button when onDismiss is provided", () => {
+    const onDismiss = vi.fn();
+    render(<AiValidationBadge entry={mockEntry()} onDismiss={onDismiss} />);
+    const btn = screen.getByRole("button", { name: /dismiss/i });
+    expect(btn).toBeInTheDocument();
+  });
+
+  it("calls onDismiss when dismiss button is clicked", () => {
+    const onDismiss = vi.fn();
+    render(<AiValidationBadge entry={mockEntry()} onDismiss={onDismiss} />);
+    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it("does not render dismiss button when onDismiss is omitted", () => {
+    // Verifies the dismiss button is optional and not shown by default
+    render(<AiValidationBadge entry={mockEntry()} />);
+    expect(screen.queryByRole("button", { name: /dismiss/i })).not.toBeInTheDocument();
+  });
+
+  it("passes accessibility scan with dismiss button", async () => {
+    // Ensures the dismiss button meets accessibility standards (has aria-label, etc.)
+    const { axe } = await import("vitest-axe");
+    const { container } = render(
+      <AiValidationBadge entry={mockEntry()} onDismiss={() => {}} />
+    );
     const results = await axe(container);
     expect(results).toHaveNoViolations();
   });

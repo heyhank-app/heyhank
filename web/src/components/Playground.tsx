@@ -937,8 +937,8 @@ export function Playground() {
             <Card label="Per-session toggle (enabled)">
               <PlaygroundAiValidationToggle enabled={true} />
             </Card>
-            <Card label="Auto-resolved badges">
-              <div className="border border-cc-border rounded-xl overflow-hidden bg-cc-card divide-y divide-cc-border">
+            <Card label="Auto-resolved badge (with dismiss)">
+              <div className="border border-cc-border rounded-xl overflow-hidden bg-cc-card">
                 <AiValidationBadge
                   entry={{
                     request: mockPermission({
@@ -949,7 +949,12 @@ export function Playground() {
                     reason: "Read is a read-only tool",
                     timestamp: Date.now(),
                   }}
+                  onDismiss={() => alert("Dismissed!")}
                 />
+              </div>
+            </Card>
+            <Card label="Auto-resolved badge (denied, with dismiss)">
+              <div className="border border-cc-border rounded-xl overflow-hidden bg-cc-card">
                 <AiValidationBadge
                   entry={{
                     request: mockPermission({
@@ -960,7 +965,12 @@ export function Playground() {
                     reason: "Recursive delete of root directory",
                     timestamp: Date.now(),
                   }}
+                  onDismiss={() => alert("Dismissed!")}
                 />
+              </div>
+            </Card>
+            <Card label="Auto-resolved badge (no dismiss)">
+              <div className="border border-cc-border rounded-xl overflow-hidden bg-cc-card">
                 <AiValidationBadge
                   entry={{
                     request: mockPermission({

@@ -7,10 +7,11 @@ interface AiValidationBadgeProps {
     reason: string;
     timestamp: number;
   };
+  onDismiss?: () => void;
 }
 
 /** Compact inline notification for AI auto-resolved permissions. */
-export function AiValidationBadge({ entry }: AiValidationBadgeProps) {
+export function AiValidationBadge({ entry, onDismiss }: AiValidationBadgeProps) {
   const { request, behavior, reason } = entry;
   const isAllow = behavior === "allow";
 
@@ -35,7 +36,7 @@ export function AiValidationBadge({ entry }: AiValidationBadgeProps) {
       <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 shrink-0 opacity-70">
         <path fillRule="evenodd" d="M8 1.246l.542.228c1.926.812 3.732.95 5.408.435l.61-.187v6.528a5.75 5.75 0 01-2.863 4.973L8 15.5l-3.697-2.277A5.75 5.75 0 011.44 8.25V1.722l.61.187c1.676.515 3.482.377 5.408-.435L8 1.246z" clipRule="evenodd" />
       </svg>
-      <span>
+      <span className="flex-1">
         AI auto-{isAllow ? "approved" : "denied"}:
         {" "}
         <span className="font-mono-code opacity-80">{toolDesc}</span>
@@ -43,6 +44,17 @@ export function AiValidationBadge({ entry }: AiValidationBadgeProps) {
           <span className="text-cc-muted ml-1">({reason})</span>
         )}
       </span>
+      {onDismiss && (
+        <button
+          onClick={onDismiss}
+          className="opacity-50 hover:opacity-100 transition-opacity cursor-pointer flex-shrink-0"
+          aria-label="Dismiss notification"
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+            <path d="M4.646 4.646a.5.5 0 01.708 0L8 7.293l2.646-2.647a.5.5 0 01.708.708L8.707 8l2.647 2.646a.5.5 0 01-.708.708L8 8.707l-2.646 2.647a.5.5 0 01-.708-.708L7.293 8 4.646 5.354a.5.5 0 010-.708z" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
