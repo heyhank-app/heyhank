@@ -47,7 +47,6 @@ import { DEFAULT_PORT_DEV, DEFAULT_PORT_PROD } from "./constants.js";
 
 const defaultPort = process.env.NODE_ENV === "production" ? DEFAULT_PORT_PROD : DEFAULT_PORT_DEV;
 const port = Number(process.env.PORT) || defaultPort;
-const idleTimeoutSeconds = Number(process.env.COMPANION_IDLE_TIMEOUT_SECONDS || "120");
 const sessionStore = new SessionStore(process.env.COMPANION_SESSION_DIR);
 const wsBridge = new WsBridge();
 const launcher = new CliLauncher(port);
@@ -111,6 +110,22 @@ wsBridge.onCLIRelaunchNeededCallback(async (sessionId) => {
   const info = launcher.getSession(sessionId);
   if (info?.archived) return;
 
+  // Add to set BEFORE the grace period to block concurrent browser connections
+  relaunchingSet.add(sessionId);
+
+  // Grace period: CLI does normal code-1000 WS reconnection cycles (~30s).
+  // Wait 10s, then check if CLI reconnected or process is still alive.
+  await new Promise(r => setTimeout(r, 10000));
+  if (wsBridge.isCliConnected(sessionId)) { relaunchingSet.delete(sessionId); return; }
+  const freshInfo = launcher.getSession(sessionId);
+  if (freshInfo && (freshInfo.state === "connected" || freshInfo.state === "running")) {
+    relaunchingSet.delete(sessionId); return;
+  }
+  // PID liveness check — session state/WS can be stale, but signal 0 is definitive
+  if (freshInfo?.pid) {
+    try { process.kill(freshInfo.pid, 0); relaunchingSet.delete(sessionId); return; } catch {}
+  }
+
   const count = autoRelaunchCounts.get(sessionId) ?? 0;
   if (count >= MAX_AUTO_RELAUNCHES) {
     console.warn(`[server] Auto-relaunch limit (${MAX_AUTO_RELAUNCHES}) reached for session ${sessionId}, giving up`);
@@ -118,11 +133,11 @@ wsBridge.onCLIRelaunchNeededCallback(async (sessionId) => {
       type: "error",
       message: "Session keeps crashing. Please relaunch manually.",
     });
+    relaunchingSet.delete(sessionId);
     return;
   }
 
-  if (info && info.state !== "starting") {
-    relaunchingSet.add(sessionId);
+  if (freshInfo && freshInfo.state !== "starting") {
     autoRelaunchCounts.set(sessionId, count + 1);
     console.log(`[server] Auto-relaunching CLI for session ${sessionId} (attempt ${count + 1}/${MAX_AUTO_RELAUNCHES})`);
     try {
@@ -130,15 +145,22 @@ wsBridge.onCLIRelaunchNeededCallback(async (sessionId) => {
       if (!result.ok && result.error) {
         wsBridge.broadcastToSession(sessionId, { type: "error", message: result.error });
       } else {
-        // Successful relaunch — reset counter so transient failures don't
-        // permanently exhaust the budget.  The counter only accumulates when
-        // the backend keeps dying in rapid succession.
         autoRelaunchCounts.delete(sessionId);
       }
     } finally {
       setTimeout(() => relaunchingSet.delete(sessionId), 5000);
     }
+  } else {
+    relaunchingSet.delete(sessionId);
   }
+});
+
+// Kill CLI when idle with no browsers for 20 minutes
+wsBridge.onIdleKillCallback(async (sessionId) => {
+  const info = launcher.getSession(sessionId);
+  if (!info || info.archived) return;
+  console.log(`[server] Idle-killing CLI for session ${sessionId} (no browsers, no activity)`);
+  await launcher.kill(sessionId);
 });
 
 // Auto-generate session title after first turn completes
@@ -216,7 +238,7 @@ if (process.env.NODE_ENV === "production") {
 
 const server = Bun.serve<SocketData>({
   port,
-  idleTimeout: idleTimeoutSeconds,
+  idleTimeout: 0, // Disable top-level idle timeout — it kills idle browser WebSockets (code 1006)
   async fetch(req, server) {
     const url = new URL(req.url);
 
@@ -270,6 +292,8 @@ const server = Bun.serve<SocketData>({
     return app.fetch(req, server);
   },
   websocket: {
+    idleTimeout: 0,
+    sendPings: false, // Disable Bun ping timeout that kills CLI connections (code 1006)
     open(ws: ServerWebSocket<SocketData>) {
       const data = ws.data;
       if (data.kind === "cli") {
@@ -291,7 +315,8 @@ const server = Bun.serve<SocketData>({
         terminalManager.handleBrowserMessage(ws, msg);
       }
     },
-    close(ws: ServerWebSocket<SocketData>) {
+    close(ws: ServerWebSocket<SocketData>, code?: number, reason?: string) {
+      console.log("[ws-close]", ws.data.kind, "code=" + code);
       const data = ws.data;
       if (data.kind === "cli") {
         wsBridge.handleCLIClose(ws);
@@ -340,6 +365,24 @@ if (isRunningAsService()) {
   setServiceMode(true);
   console.log("[server] Running as background service (auto-update available)");
 }
+
+// ── Memory diagnostics ───────────────────────────────────────────────────────
+const MEMORY_LOG_INTERVAL_MS = 5 * 60_000; // every 5 minutes
+setInterval(() => {
+  const mem = process.memoryUsage();
+  const mb = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
+  const sessionStats = wsBridge.getSessionMemoryStats();
+  const totalHistory = sessionStats.reduce((sum, s) => sum + s.historyLen, 0);
+  const topSessions = sessionStats
+    .sort((a, b) => b.historyLen - a.historyLen)
+    .slice(0, 3)
+    .map((s) => `${s.id.slice(0, 8)}(h=${s.historyLen},b=${s.browsers})`)
+    .join(", ");
+  console.log(
+    `[mem] rss=${mb(mem.rss)}MB heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB ` +
+    `ext=${mb(mem.external)}MB | ${sessionStats.length} sessions, ${totalHistory} history msgs | top: ${topSessions || "none"}`,
+  );
+}, MEMORY_LOG_INTERVAL_MS);
 
 // ── Graceful shutdown — persist container state ──────────────────────────────
 function gracefulShutdown() {

@@ -50,6 +50,11 @@ export interface Session {
   lastAckSeq: number;
   processedClientMessageIds: string[];
   processedClientMessageIdSet: Set<string>;
+  /** Rolling set of recent CLI message hashes for deduplication on WS reconnect */
+  recentCLIMessageHashes: string[];
+  recentCLIMessageHashSet: Set<string>;
+  /** Timestamp of last non-keepalive CLI message (for idle detection) */
+  lastCliActivityTs: number;
 }
 
 export type GitSessionKey =

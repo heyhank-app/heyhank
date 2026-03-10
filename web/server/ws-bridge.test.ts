@@ -1,5 +1,21 @@
 import { vi } from "vitest";
 
+// Stub Bun global for vitest (runs under Node, not Bun).
+// Bun.hash is used for CLI message deduplication in ws-bridge.ts.
+// A simple string hash is sufficient for test determinism.
+if (typeof globalThis.Bun === "undefined") {
+  (globalThis as any).Bun = {
+    hash(input: string | Uint8Array): number {
+      const s = typeof input === "string" ? input : new TextDecoder().decode(input);
+      let h = 0;
+      for (let i = 0; i < s.length; i++) {
+        h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+      }
+      return h >>> 0; // unsigned 32-bit
+    },
+  };
+}
+
 const mockExecSync = vi.hoisted(() => vi.fn());
 vi.mock("node:child_process", () => ({ execSync: mockExecSync }));
 vi.mock("node:crypto", () => ({ randomUUID: () => "test-uuid" }));
@@ -692,6 +708,7 @@ describe("CLI handlers", () => {
   });
 
   it("handleCLIClose: nulls cliSocket and broadcasts cli_disconnected", () => {
+    vi.useFakeTimers();
     const cli = makeCliSocket("s1");
     const browser = makeBrowserSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
@@ -704,11 +721,16 @@ describe("CLI handlers", () => {
     expect(session.cliSocket).toBeNull();
     expect(bridge.isCliConnected("s1")).toBe(false);
 
+    // Advance past disconnect debounce (15s)
+    vi.advanceTimersByTime(16_000);
+
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
     expect(calls).toContainEqual(expect.objectContaining({ type: "cli_disconnected" }));
+    vi.useRealTimers();
   });
 
   it("handleCLIClose: cancels pending permissions", () => {
+    vi.useFakeTimers();
     const cli = makeCliSocket("s1");
     const browser = makeBrowserSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
@@ -730,6 +752,9 @@ describe("CLI handlers", () => {
 
     bridge.handleCLIClose(cli);
 
+    // Advance past disconnect debounce (15s)
+    vi.advanceTimersByTime(16_000);
+
     const session = bridge.getSession("s1")!;
     expect(session.pendingPermissions.size).toBe(0);
 
@@ -737,6 +762,84 @@ describe("CLI handlers", () => {
     const cancelMsg = calls.find((c: any) => c.type === "permission_cancelled");
     expect(cancelMsg).toBeDefined();
     expect(cancelMsg.request_id).toBe("req-1");
+    vi.useRealTimers();
+  });
+
+  it("handleCLIClose: ignores stale socket close (new WS opened before old closed)", () => {
+    const cli1 = makeCliSocket("s1");
+    const cli2 = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+
+    bridge.handleCLIOpen(cli1, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+
+    // CLI reconnects — new socket opens before old one closes
+    bridge.handleCLIOpen(cli2, "s1");
+    browser.send.mockClear();
+
+    // Stale close event fires from cli1
+    bridge.handleCLIClose(cli1);
+
+    // cliSocket should still be cli2, not null
+    const session = bridge.getSession("s1")!;
+    expect(session.cliSocket).toBe(cli2);
+    expect(bridge.isCliConnected("s1")).toBe(true);
+
+    // No cli_disconnected should be broadcast
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    expect(calls.find((c: any) => c.type === "cli_disconnected")).toBeUndefined();
+  });
+
+  it("handleCLIClose: debounces disconnect notification", () => {
+    vi.useFakeTimers();
+    const cli = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+
+    bridge.handleCLIClose(cli);
+
+    // Immediately after close: no cli_disconnected broadcast yet
+    const immediateCalls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    expect(immediateCalls.find((c: any) => c.type === "cli_disconnected")).toBeUndefined();
+
+    // After debounce period: cli_disconnected should be broadcast
+    vi.advanceTimersByTime(16_000);
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    expect(calls).toContainEqual(expect.objectContaining({ type: "cli_disconnected" }));
+
+    vi.useRealTimers();
+  });
+
+  it("handleCLIClose: debounce cancelled by reconnect", () => {
+    vi.useFakeTimers();
+    const cli1 = makeCliSocket("s1");
+    const cli2 = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+
+    bridge.handleCLIOpen(cli1, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+
+    // CLI disconnects
+    bridge.handleCLIClose(cli1);
+
+    // CLI reconnects within debounce window
+    vi.advanceTimersByTime(5_000);
+    bridge.handleCLIOpen(cli2, "s1");
+    browser.send.mockClear();
+
+    // Debounce timer fires — should NOT broadcast disconnect
+    vi.advanceTimersByTime(16_000);
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    expect(calls.find((c: any) => c.type === "cli_disconnected")).toBeUndefined();
+    expect(bridge.isCliConnected("s1")).toBe(true);
+
+    vi.useRealTimers();
   });
 });
 
@@ -3475,5 +3578,100 @@ describe("sendToCLI error path", () => {
     );
 
     spy.mockRestore();
+  });
+});
+
+// ─── CLI message deduplication (Bun.hash-based) ─────────────────────────────
+
+describe("CLI message deduplication", () => {
+  function setupSession() {
+    const cli = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleCLIMessage(cli, makeInitMsg());
+    browser.send.mockClear();
+    return { cli, browser };
+  }
+
+  it("filters duplicate assistant messages (same content replayed on reconnect)", () => {
+    const { cli, browser } = setupSession();
+    const msg = JSON.stringify({ type: "assistant", message: { content: "hello world" } });
+
+    // First send — should forward to browser
+    bridge.handleCLIMessage(cli, msg);
+    expect(browser.send).toHaveBeenCalledTimes(1);
+
+    // Same message again (simulates CLI replay on WS reconnect) — should be filtered
+    browser.send.mockClear();
+    bridge.handleCLIMessage(cli, msg);
+    expect(browser.send).not.toHaveBeenCalled();
+  });
+
+  it("forwards non-duplicate assistant messages normally", () => {
+    const { cli, browser } = setupSession();
+    const msg1 = JSON.stringify({ type: "assistant", message: { content: "first" } });
+    const msg2 = JSON.stringify({ type: "assistant", message: { content: "second" } });
+
+    bridge.handleCLIMessage(cli, msg1);
+    bridge.handleCLIMessage(cli, msg2);
+
+    expect(browser.send).toHaveBeenCalledTimes(2);
+  });
+
+  it("evicts oldest hashes when window is exceeded", () => {
+    const { cli, browser } = setupSession();
+
+    // Send CLI_DEDUP_WINDOW + 1 unique messages to push the first one out
+    const WINDOW = 2000; // matches WsBridge.CLI_DEDUP_WINDOW
+    for (let i = 0; i <= WINDOW; i++) {
+      bridge.handleCLIMessage(
+        cli,
+        JSON.stringify({ type: "assistant", message: { content: `msg-${i}` } }),
+      );
+    }
+
+    // The first message's hash should have been evicted — resending it should work
+    browser.send.mockClear();
+    const firstMsg = JSON.stringify({ type: "assistant", message: { content: "msg-0" } });
+    bridge.handleCLIMessage(cli, firstMsg);
+    expect(browser.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("deduplicates stream_event messages with the same uuid on reconnect replay", () => {
+    const { cli, browser } = setupSession();
+    const uuid = "cc6aeb12-1aad-4126-8ad2-03bad206e9fe";
+    const msg = JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "thinking_delta", text: "thinking..." } },
+      parent_tool_use_id: null,
+      uuid,
+      session_id: "test-cli-session",
+    });
+
+    // First send — should forward to browser
+    bridge.handleCLIMessage(cli, msg);
+    expect(browser.send).toHaveBeenCalledTimes(1);
+
+    // Same uuid again (simulates CLI replay on WS reconnect) — should be filtered
+    browser.send.mockClear();
+    bridge.handleCLIMessage(cli, msg);
+    expect(browser.send).not.toHaveBeenCalled();
+  });
+
+  it("forwards stream_event messages without uuid (no dedup possible)", () => {
+    const { cli, browser } = setupSession();
+    // stream_event without uuid — cannot dedup, must forward
+    const msg = JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "hi" } },
+      parent_tool_use_id: null,
+    });
+
+    bridge.handleCLIMessage(cli, msg);
+    bridge.handleCLIMessage(cli, msg);
+
+    // Both should be forwarded — no uuid means no dedup
+    expect(browser.send).toHaveBeenCalledTimes(2);
   });
 });

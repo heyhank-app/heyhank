@@ -62,6 +62,9 @@ function createMockSession(overrides = {}): Session {
     lastAckSeq: 0,
     processedClientMessageIds: [],
     processedClientMessageIdSet: new Set(),
+    recentCLIMessageHashes: [],
+    recentCLIMessageHashSet: new Set(),
+    lastCliActivityTs: Date.now(),
     ...overrides,
   } as Session;
 }
