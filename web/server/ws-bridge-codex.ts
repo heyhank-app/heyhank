@@ -36,11 +36,27 @@ export function attachCodexAdapterHandlers(
 ): void {
   adapter.onBrowserMessage((msg) => {
     if (msg.type === "session_init") {
-      session.state = { ...session.state, ...msg.session, backend_type: "codex" };
+      // Preserve pre-populated commands/skills when adapter sends empty arrays
+      // (Codex does not provide its own commands/skills)
+      const { slash_commands, skills, ...rest } = msg.session;
+      session.state = {
+        ...session.state,
+        ...rest,
+        ...(slash_commands?.length ? { slash_commands } : {}),
+        ...(skills?.length ? { skills } : {}),
+        backend_type: "codex",
+      };
       deps.refreshGitInfo(session, { notifyPoller: true });
       deps.persistSession(session);
     } else if (msg.type === "session_update") {
-      session.state = { ...session.state, ...msg.session, backend_type: "codex" };
+      const { slash_commands, skills, ...rest } = msg.session;
+      session.state = {
+        ...session.state,
+        ...rest,
+        ...(slash_commands?.length ? { slash_commands } : {}),
+        ...(skills?.length ? { skills } : {}),
+        backend_type: "codex",
+      };
       deps.refreshGitInfo(session, { notifyPoller: true });
       deps.persistSession(session);
     } else if (msg.type === "status_change") {

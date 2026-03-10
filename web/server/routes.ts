@@ -28,6 +28,7 @@ import { registerCronRoutes } from "./routes/cron-routes.js";
 import { registerAgentRoutes } from "./routes/agent-routes.js";
 import { registerLinearAgentWebhookRoute, registerLinearAgentProtectedRoutes } from "./routes/linear-agent-routes.js";
 import { registerPromptRoutes } from "./routes/prompt-routes.js";
+import { discoverCommandsAndSkills } from "./commands-discovery.js";
 import { registerSettingsRoutes } from "./routes/settings-routes.js";
 import { registerTailscaleRoutes } from "./routes/tailscale-routes.js";
 import { registerGitRoutes } from "./routes/git-routes.js";
@@ -467,6 +468,11 @@ export function createRoutes(
         wsBridge.injectSystemPrompt(session.sessionId, linearSystemPrompt);
       }
 
+      // Pre-populate slash commands and skills from filesystem so the slash
+      // menu works before system.init arrives from the CLI
+      const discovered = await discoverCommandsAndSkills(cwd).catch(() => ({ slash_commands: [] as string[], skills: [] as string[] }));
+      wsBridge.prePopulateCommands(session.sessionId, discovered.slash_commands, discovered.skills);
+
       return c.json(session);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -853,6 +859,11 @@ export function createRoutes(
         if (linearSystemPrompt && backend === "claude") {
           wsBridge.injectSystemPrompt(session.sessionId, linearSystemPrompt);
         }
+
+        // Pre-populate slash commands and skills from filesystem so the slash
+        // menu works before system.init arrives from the CLI
+        const discovered = await discoverCommandsAndSkills(cwd).catch(() => ({ slash_commands: [] as string[], skills: [] as string[] }));
+        wsBridge.prePopulateCommands(session.sessionId, discovered.slash_commands, discovered.skills);
 
         await emitProgress(stream, "launching_cli", "Session started", "done");
 

@@ -294,7 +294,9 @@ function createMockBridge() {
     getAllSessions: vi.fn(() => []),
     getCodexRateLimits: vi.fn(() => null),
     markContainerized: vi.fn(),
+    prePopulateCommands: vi.fn(),
     broadcastNameUpdate: vi.fn(),
+    injectSystemPrompt: vi.fn(),
   } as any;
 }
 

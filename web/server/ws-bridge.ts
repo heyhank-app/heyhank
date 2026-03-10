@@ -143,6 +143,28 @@ export class WsBridge {
     session.state.cwd = hostCwd;
   }
 
+  /**
+   * Pre-populate slash_commands and skills on a session so they are
+   * available to browsers immediately (before system.init from the CLI).
+   * If system.init arrives later, it overwrites these with the CLI's
+   * authoritative list (see handleSystemMessage).
+   */
+  prePopulateCommands(sessionId: string, slashCommands: string[], skills: string[]): void {
+    const session = this.getOrCreateSession(sessionId);
+    let changed = false;
+    if (session.state.slash_commands.length === 0 && slashCommands.length > 0) {
+      session.state.slash_commands = slashCommands;
+      changed = true;
+    }
+    if (session.state.skills.length === 0 && skills.length > 0) {
+      session.state.skills = skills;
+      changed = true;
+    }
+    if (changed && session.browserSockets.size > 0) {
+      this.broadcastToBrowsers(session, { type: "session_init", session: session.state });
+    }
+  }
+
   /** Push a message to all connected browsers for a session (public, for PRPoller etc.). */
   broadcastToSession(sessionId: string, msg: BrowserIncomingMessage): void {
     const session = this.sessions.get(sessionId);

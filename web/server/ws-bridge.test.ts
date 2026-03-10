@@ -179,6 +179,129 @@ describe("Session management", () => {
   });
 });
 
+// ─── prePopulateCommands ─────────────────────────────────────────────────────
+
+describe("prePopulateCommands", () => {
+  it("populates empty session state with commands and skills", () => {
+    // When a session has no commands/skills yet, prePopulateCommands should
+    // set them so the slash menu works before system.init arrives.
+    bridge.prePopulateCommands("s1", ["commit", "review-pr"], ["my-skill"]);
+    const session = bridge.getSession("s1")!;
+    expect(session.state.slash_commands).toEqual(["commit", "review-pr"]);
+    expect(session.state.skills).toEqual(["my-skill"]);
+  });
+
+  it("does not overwrite existing commands if already set", () => {
+    // If system.init already arrived and set commands, prePopulateCommands
+    // should not clobber them (guard against race condition).
+    const session = bridge.getOrCreateSession("s1");
+    session.state.slash_commands = ["existing-cmd"];
+    session.state.skills = ["existing-skill"];
+
+    bridge.prePopulateCommands("s1", ["new-cmd"], ["new-skill"]);
+
+    expect(session.state.slash_commands).toEqual(["existing-cmd"]);
+    expect(session.state.skills).toEqual(["existing-skill"]);
+  });
+
+  it("partially populates when only one field is empty", () => {
+    // If commands are already set but skills are empty, only skills
+    // should be populated.
+    const session = bridge.getOrCreateSession("s1");
+    session.state.slash_commands = ["existing-cmd"];
+    session.state.skills = [];
+
+    bridge.prePopulateCommands("s1", ["new-cmd"], ["new-skill"]);
+
+    expect(session.state.slash_commands).toEqual(["existing-cmd"]);
+    expect(session.state.skills).toEqual(["new-skill"]);
+  });
+
+  it("does nothing when provided arrays are empty", () => {
+    // Empty discovery results should not replace the (also empty) defaults.
+    bridge.prePopulateCommands("s1", [], []);
+    const session = bridge.getSession("s1")!;
+    expect(session.state.slash_commands).toEqual([]);
+    expect(session.state.skills).toEqual([]);
+  });
+
+  it("pre-populated data appears in session_init broadcast to browsers", () => {
+    // When a browser connects after prePopulateCommands, the session_init
+    // message should include the pre-populated commands/skills.
+    bridge.prePopulateCommands("s1", ["deploy"], ["prd"]);
+
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+
+    // The session_init message sent to the browser should contain the pre-populated data
+    expect(browser.send).toHaveBeenCalled();
+    const sentData = JSON.parse(browser.send.mock.calls[0][0]);
+    expect(sentData.type).toBe("session_init");
+    expect(sentData.session.slash_commands).toEqual(["deploy"]);
+    expect(sentData.session.skills).toEqual(["prd"]);
+  });
+
+  it("broadcasts session_init to already-connected browsers when state changes", () => {
+    // If a browser is already connected when prePopulateCommands runs
+    // (e.g. discovery resolved after browser connected), the browser should
+    // receive a session_init with the updated commands/skills.
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+
+    bridge.prePopulateCommands("s1", ["deploy"], ["prd"]);
+
+    expect(browser.send).toHaveBeenCalledTimes(1);
+    const sentData = JSON.parse(browser.send.mock.calls[0][0]);
+    expect(sentData.type).toBe("session_init");
+    expect(sentData.session.slash_commands).toEqual(["deploy"]);
+    expect(sentData.session.skills).toEqual(["prd"]);
+  });
+
+  it("does not broadcast when no browsers are connected", () => {
+    // When no browsers are subscribed, prePopulateCommands should not
+    // attempt to broadcast (no-op beyond state mutation).
+    bridge.prePopulateCommands("s1", ["deploy"], ["prd"]);
+    const session = bridge.getSession("s1")!;
+    // State should still be updated
+    expect(session.state.slash_commands).toEqual(["deploy"]);
+    expect(session.state.skills).toEqual(["prd"]);
+    // No browser sockets to verify send wasn't called -- just ensure no throw
+  });
+
+  it("does not broadcast when state did not change", () => {
+    // When provided arrays are empty, no state change occurs and no
+    // broadcast should be sent even if browsers are connected.
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+
+    bridge.prePopulateCommands("s1", [], []);
+
+    expect(browser.send).not.toHaveBeenCalled();
+  });
+
+  it("system.init overwrites pre-populated data with authoritative list", () => {
+    // After prePopulateCommands, when CLI sends system.init, the CLI's
+    // authoritative list should replace the pre-populated data.
+    bridge.prePopulateCommands("s1", ["pre-cmd"], ["pre-skill"]);
+
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleCLIMessage(
+      cli,
+      makeInitMsg({
+        slash_commands: ["cli-cmd-1", "cli-cmd-2"],
+        skills: ["cli-skill"],
+      }),
+    );
+
+    const session = bridge.getSession("s1")!;
+    expect(session.state.slash_commands).toEqual(["cli-cmd-1", "cli-cmd-2"]);
+    expect(session.state.skills).toEqual(["cli-skill"]);
+  });
+});
+
 // ─── CLI handlers ────────────────────────────────────────────────────────────
 
 describe("CLI handlers", () => {
