@@ -156,6 +156,8 @@ export interface LaunchOptions {
   resumeSessionAt?: string;
   /** Fork a new Claude session when resuming from prior context. */
   forkSession?: boolean;
+  /** Optional system prompt to inject into Codex sessions (e.g. Linear context). */
+  systemPrompt?: string;
 }
 
 /**
@@ -826,6 +828,7 @@ export class CliLauncher {
       threadId: info.cliSessionId,
       sandbox: options.codexSandbox,
       recorder: this.recorder ?? undefined,
+      systemPrompt: options.systemPrompt,
       killProcess: async () => {
         try {
           proxyProc.kill("SIGTERM");
@@ -1026,6 +1029,7 @@ export class CliLauncher {
       threadId: info.cliSessionId,
       sandbox: options.codexSandbox,
       recorder: this.recorder ?? undefined,
+      systemPrompt: options.systemPrompt,
     });
 
     // Handle init errors — mark session as exited so UI shows failure.

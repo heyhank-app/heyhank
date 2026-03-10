@@ -536,6 +536,22 @@ export class WsBridge {
     this.routeBrowserMessage(session, { type: "mcp_set_servers", servers });
   }
 
+  /** Send an initialize control request with context appended to the system prompt.
+   *  Must be called before the first user message. If CLI isn't connected yet,
+   *  the message is queued and sent when CLI connects (before any queued user messages). */
+  injectSystemPrompt(sessionId: string, appendSystemPrompt: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      console.error(`[ws-bridge] Cannot inject system prompt: session ${sessionId} not found`);
+      return;
+    }
+    sendControlRequest(
+      session,
+      { subtype: "initialize", appendSystemPrompt },
+      this.sendToCLI.bind(this),
+    );
+  }
+
   handleBrowserClose(ws: ServerWebSocket<SocketData>) {
     const sessionId = (ws.data as BrowserSocketData).sessionId;
     const session = this.sessions.get(sessionId);

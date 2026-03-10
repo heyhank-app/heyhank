@@ -35,6 +35,7 @@ import { registerSystemRoutes } from "./routes/system-routes.js";
 import { registerLinearRoutes, transitionLinearIssue, fetchLinearTeamStates } from "./routes/linear-routes.js";
 import { registerLinearConnectionRoutes } from "./routes/linear-connection-routes.js";
 import { getConnection, listConnections, resolveApiKey } from "./linear-connections.js";
+import { buildLinearSystemPrompt } from "./linear-prompt-builder.js";
 import { getSettings } from "./settings-manager.js";
 import { discoverClaudeSessions } from "./claude-session-discovery.js";
 import { getClaudeSessionHistoryPage } from "./claude-session-history.js";
@@ -211,10 +212,12 @@ export function createRoutes(
       }
 
       // Inject LINEAR_API_KEY if a Linear connection is specified
+      let linearSystemPrompt: string | undefined;
       if (body.linearConnectionId) {
         const conn = getConnection(body.linearConnectionId);
         if (conn?.apiKey) {
           envVars = { ...envVars, LINEAR_API_KEY: conn.apiKey };
+          linearSystemPrompt = buildLinearSystemPrompt(conn, body.linearIssue);
         }
       }
 
@@ -437,6 +440,7 @@ export function createRoutes(
         containerCwd: containerInfo?.containerCwd,
         resumeSessionAt,
         forkSession,
+        systemPrompt: backend === "codex" ? linearSystemPrompt : undefined,
       });
 
       // Re-track container with real session ID and mark session as containerized
@@ -456,6 +460,11 @@ export function createRoutes(
           worktreePath: worktreeInfo.worktreePath,
           createdAt: Date.now(),
         });
+      }
+
+      // Inject Linear context into the CLI's system prompt (must happen before first user message)
+      if (linearSystemPrompt && backend === "claude") {
+        wsBridge.injectSystemPrompt(session.sessionId, linearSystemPrompt);
       }
 
       return c.json(session);
@@ -508,10 +517,12 @@ export function createRoutes(
         }
 
         // Inject LINEAR_API_KEY if a Linear connection is specified
+        let linearSystemPrompt: string | undefined;
         if (body.linearConnectionId) {
           const conn = getConnection(body.linearConnectionId);
           if (conn?.apiKey) {
             envVars = { ...envVars, LINEAR_API_KEY: conn.apiKey };
+            linearSystemPrompt = buildLinearSystemPrompt(conn, body.linearIssue);
           }
         }
 
@@ -817,6 +828,7 @@ export function createRoutes(
           containerCwd: containerInfo?.containerCwd,
           resumeSessionAt,
           forkSession,
+          systemPrompt: backend === "codex" ? linearSystemPrompt : undefined,
         });
 
         // Re-track container and mark session as containerized
@@ -835,6 +847,11 @@ export function createRoutes(
             worktreePath: worktreeInfo.worktreePath,
             createdAt: Date.now(),
           });
+        }
+
+        // Inject Linear context into the CLI's system prompt (must happen before first user message)
+        if (linearSystemPrompt && backend === "claude") {
+          wsBridge.injectSystemPrompt(session.sessionId, linearSystemPrompt);
         }
 
         await emitProgress(stream, "launching_cli", "Session started", "done");

@@ -631,6 +631,13 @@ export function HomePage() {
           resumeSessionAt: effectiveResumeSessionAt,
           forkSession: effectiveForkSession,
           linearConnectionId: selectedLinearIssue ? (selectedLinearConnectionId || undefined) : undefined,
+          linearIssue: selectedLinearIssue ? {
+            identifier: selectedLinearIssue.identifier,
+            title: selectedLinearIssue.title,
+            stateName: selectedLinearIssue.stateName,
+            teamName: selectedLinearIssue.teamName,
+            url: selectedLinearIssue.url,
+          } : undefined,
         },
         (progress) => {
           useStore.getState().addCreationProgress(progress);

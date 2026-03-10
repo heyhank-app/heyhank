@@ -175,6 +175,8 @@ export interface CodexAdapterOptions {
   recorder?: RecorderManager;
   /** Callback to kill the underlying process/connection on disconnect. */
   killProcess?: () => Promise<void> | void;
+  /** Optional system prompt injected into thread/start as instructions (e.g. Linear context). */
+  systemPrompt?: string;
 }
 
 // ─── Stdio JSON-RPC Transport ────────────────────────────────────────────────
@@ -776,6 +778,7 @@ export class CodexAdapter {
               cwd: this.getExecutionCwd(),
               approvalPolicy: this.mapApprovalPolicy(this.currentPermissionMode),
               sandbox: this.options.sandbox || this.mapSandboxPolicy(this.currentPermissionMode),
+              ...(this.options.systemPrompt ? { instructions: this.options.systemPrompt } : {}),
             }) as { thread: { id: string } };
             this.threadId = threadResult.thread.id;
           }
