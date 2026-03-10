@@ -161,10 +161,43 @@ describe("CreateIssueModal", () => {
         projectId: "proj-1",
         assigneeId: "viewer-123",
         stateId: "state-backlog",
+        connectionId: undefined,
       });
     });
 
     expect(onCreated).toHaveBeenCalledWith(sampleCreatedIssue.issue);
+  });
+
+  it("threads connectionId through all API calls when provided", async () => {
+    // Verifies that when a connectionId is passed, it's forwarded to getLinearStates,
+    // getLinearConnection, and createLinearIssue so the correct Linear workspace is used.
+    const connId = "conn-abc-123";
+    const onCreated = vi.fn();
+    render(
+      <CreateIssueModal
+        connectionId={connId}
+        onCreated={onCreated}
+        onClose={vi.fn()}
+      />,
+    );
+
+    // Wait for teams to load — connectionId should be passed to both fetch calls
+    await waitFor(() => {
+      expect(screen.getByLabelText("Title *")).toBeInTheDocument();
+    });
+
+    expect(mockGetLinearStates).toHaveBeenCalledWith(connId);
+    expect(mockGetLinearConnection).toHaveBeenCalledWith(connId);
+
+    // Fill and submit the form
+    fireEvent.change(screen.getByLabelText("Title *"), { target: { value: "Multi-conn issue" } });
+    fireEvent.click(screen.getByText("Create Issue"));
+
+    await waitFor(() => {
+      expect(mockCreateLinearIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ connectionId: connId }),
+      );
+    });
   });
 
   it("shows error message when creation fails", async () => {

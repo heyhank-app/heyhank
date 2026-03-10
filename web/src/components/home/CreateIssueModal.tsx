@@ -5,13 +5,15 @@ import { api, type LinearIssue, type LinearTeamStates } from "../../api.js";
 interface CreateIssueModalProps {
   /** Pre-selected project ID from the linearMapping, if available */
   defaultProjectId?: string;
+  /** Which Linear connection to use (for multi-connection support) */
+  connectionId?: string;
   /** Called on successful creation with the new issue */
   onCreated: (issue: LinearIssue) => void;
   /** Called when the modal is closed without creating */
   onClose: () => void;
 }
 
-export function CreateIssueModal({ defaultProjectId, onCreated, onClose }: CreateIssueModalProps) {
+export function CreateIssueModal({ defaultProjectId, connectionId, onCreated, onClose }: CreateIssueModalProps) {
   // Form fields
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -33,8 +35,8 @@ export function CreateIssueModal({ defaultProjectId, onCreated, onClose }: Creat
   useEffect(() => {
     let active = true;
     Promise.all([
-      api.getLinearStates(),
-      api.getLinearConnection(),
+      api.getLinearStates(connectionId),
+      api.getLinearConnection(connectionId),
     ]).then(([statesRes, connRes]) => {
       if (!active) return;
       setTeams(statesRes.teams);
@@ -48,7 +50,7 @@ export function CreateIssueModal({ defaultProjectId, onCreated, onClose }: Creat
       if (active) setLoading(false);
     });
     return () => { active = false; };
-  }, []);
+  }, [connectionId]);
 
   // Derive backlog state ID when team changes
   useEffect(() => {
@@ -74,6 +76,7 @@ export function CreateIssueModal({ defaultProjectId, onCreated, onClose }: Creat
         projectId: defaultProjectId || undefined,
         assigneeId: assignToSelf && viewerId ? viewerId : undefined,
         stateId: backlogStateId || undefined,
+        connectionId,
       });
       onCreated(result.issue);
     } catch (e: unknown) {

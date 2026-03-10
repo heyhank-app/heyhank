@@ -675,6 +675,7 @@ export function LinearSection({
       {showCreateIssueModal && (
         <CreateIssueModal
           defaultProjectId={linearMapping?.projectId}
+          connectionId={selectedConnectionId ?? undefined}
           onCreated={handleIssueCreated}
           onClose={() => setShowCreateIssueModal(false)}
         />
