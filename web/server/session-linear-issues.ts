@@ -24,6 +24,8 @@ export interface StoredLinearIssue {
   teamId: string;
   assigneeName?: string;
   updatedAt?: string;
+  /** Which Linear connection this issue belongs to (for multi-connection support) */
+  connectionId?: string;
 }
 
 // ─── Paths ───────────────────────────────────────────────────────────────────

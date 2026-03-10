@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { api, type LinearIssue, type LinearProject, type LinearProjectMapping, type GitRepoInfo } from "../../api.js";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { api, type LinearIssue, type LinearProject, type LinearProjectMapping, type GitRepoInfo, type LinearConnectionSummary } from "../../api.js";
 import { resolveLinearBranch } from "../../utils/linear-branch.js";
 import { LinearLogo } from "../LinearLogo.js";
 import { CreateIssueModal } from "./CreateIssueModal.js";
@@ -12,6 +12,8 @@ interface LinearSectionProps {
   onIssueSelect: (issue: LinearIssue | null) => void;
   /** Called when a Linear issue selection sets a new branch (for session creation) */
   onBranchFromIssue: (branch: string, isNew: boolean) => void;
+  /** Called when a Linear connection is selected (or auto-selected) */
+  onConnectionSelect: (connectionId: string | null) => void;
 }
 
 export function LinearSection({
@@ -21,7 +23,13 @@ export function LinearSection({
   selectedLinearIssue,
   onIssueSelect,
   onBranchFromIssue,
+  onConnectionSelect,
 }: LinearSectionProps) {
+  // Linear connection selector state
+  const [connections, setConnections] = useState<LinearConnectionSummary[]>([]);
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+  const [connectionsLoaded, setConnectionsLoaded] = useState(false);
+
   // Linear issue search state
   const [linearQuery, setLinearQuery] = useState("");
   const [linearIssues, setLinearIssues] = useState<LinearIssue[]>([]);
@@ -58,6 +66,72 @@ export function LinearSection({
     return () => document.removeEventListener("pointerdown", handleClick);
   }, []);
 
+  // Fetch Linear connections on mount (when configured)
+  useEffect(() => {
+    if (!linearConfigured) {
+      setConnections([]);
+      setSelectedConnectionId(null);
+      setConnectionsLoaded(false);
+      onConnectionSelect(null);
+      return;
+    }
+
+    let active = true;
+    api.listLinearConnections()
+      .then(({ connections: conns }) => {
+        if (!active) return;
+        setConnections(conns);
+        setConnectionsLoaded(true);
+        if (conns.length > 0) {
+          // Auto-select first connection
+          setSelectedConnectionId(conns[0].id);
+          onConnectionSelect(conns[0].id);
+        } else {
+          setSelectedConnectionId(null);
+          onConnectionSelect(null);
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        setConnectionsLoaded(true);
+      });
+
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linearConfigured]);
+
+  // Handle connection change: clear state and re-fetch
+  const handleConnectionChange = useCallback((connectionId: string) => {
+    setSelectedConnectionId(connectionId);
+    onConnectionSelect(connectionId);
+    // Clear selected issue since it belongs to a different workspace
+    onIssueSelect(null);
+    // Clear current search results
+    setLinearIssues([]);
+    setLinearQuery("");
+    setLinearSearchError("");
+    setGlobalSearchResults([]);
+    setProjectSearchQuery("");
+    // Clear available projects so they're re-fetched for the new connection
+    setAvailableProjects([]);
+    // Re-fetch project issues if a mapping exists
+    if (linearMapping) {
+      setRecentIssuesLoading(true);
+      setRecentIssuesError("");
+      api.getLinearProjectIssues(linearMapping.projectId, 10, connectionId)
+        .then(({ issues }) => {
+          setRecentIssues(issues);
+        })
+        .catch((e: unknown) => {
+          setRecentIssuesError(e instanceof Error ? e.message : String(e));
+        })
+        .finally(() => {
+          setRecentIssuesLoading(false);
+        });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linearMapping, onConnectionSelect, onIssueSelect]);
+
   // When gitRepoInfo changes, check for Linear project mapping and fetch recent issues
   useEffect(() => {
     if (!gitRepoInfo || !linearConfigured) {
@@ -76,7 +150,7 @@ export function LinearSection({
         if (!active) return;
         setLinearMapping(mapping);
         if (mapping) {
-          const { issues } = await api.getLinearProjectIssues(mapping.projectId, 10);
+          const { issues } = await api.getLinearProjectIssues(mapping.projectId, 10, selectedConnectionId ?? undefined);
           if (!active) return;
           setRecentIssues(issues);
         } else {
@@ -91,7 +165,7 @@ export function LinearSection({
     })();
 
     return () => { active = false; };
-  }, [gitRepoInfo, linearConfigured]);
+  }, [gitRepoInfo, linearConfigured, selectedConnectionId]);
 
   // Linear issue search effect
   useEffect(() => {
@@ -108,7 +182,7 @@ export function LinearSection({
     setLinearSearching(true);
     setLinearSearchError("");
     const timer = setTimeout(() => {
-      api.searchLinearIssues(query, 8).then((res) => {
+      api.searchLinearIssues(query, 8, selectedConnectionId ?? undefined).then((res) => {
         if (!active) return;
         setLinearIssues(res.issues);
       }).catch((e: unknown) => {
@@ -125,7 +199,7 @@ export function LinearSection({
       active = false;
       clearTimeout(timer);
     };
-  }, [linearConfigured, linearQuery]);
+  }, [linearConfigured, linearQuery, selectedConnectionId]);
 
   // Global search effect — triggers when "Search all projects" is enabled and projectSearchQuery has 2+ chars
   useEffect(() => {
@@ -144,7 +218,7 @@ export function LinearSection({
     let active = true;
     setGlobalSearching(true);
     const timer = setTimeout(() => {
-      api.searchLinearIssues(query, 10).then((res) => {
+      api.searchLinearIssues(query, 10, selectedConnectionId ?? undefined).then((res) => {
         if (!active) return;
         setGlobalSearchResults(res.issues);
       }).catch(() => {
@@ -160,7 +234,7 @@ export function LinearSection({
       active = false;
       clearTimeout(timer);
     };
-  }, [linearConfigured, searchAllProjects, projectSearchQuery]);
+  }, [linearConfigured, searchAllProjects, projectSearchQuery, selectedConnectionId]);
 
   function handleSelectLinearIssue(issue: LinearIssue, closeDropdown = false) {
     onIssueSelect(issue);
@@ -191,7 +265,7 @@ export function LinearSection({
       setShowAttachProjectDropdown(false);
       setRecentIssuesLoading(true);
       setRecentIssuesError("");
-      const { issues } = await api.getLinearProjectIssues(project.id, 10);
+      const { issues } = await api.getLinearProjectIssues(project.id, 10, selectedConnectionId ?? undefined);
       setRecentIssues(issues);
     } catch (e: unknown) {
       setRecentIssuesError(e instanceof Error ? e.message : String(e));
@@ -221,7 +295,7 @@ export function LinearSection({
     setShowAttachProjectDropdown(true);
     if (availableProjects.length === 0) {
       setProjectsLoading(true);
-      api.listLinearProjects()
+      api.listLinearProjects(selectedConnectionId ?? undefined)
         .then(({ projects }) => setAvailableProjects(projects))
         .catch(() => {})
         .finally(() => setProjectsLoading(false));
@@ -234,7 +308,7 @@ export function LinearSection({
     // Refresh the recent issues list if a project is attached
     if (linearMapping) {
       setRecentIssuesLoading(true);
-      api.getLinearProjectIssues(linearMapping.projectId, 10)
+      api.getLinearProjectIssues(linearMapping.projectId, 10, selectedConnectionId ?? undefined)
         .then(({ issues }) => setRecentIssues(issues))
         .catch(() => {})
         .finally(() => setRecentIssuesLoading(false));
@@ -248,6 +322,22 @@ export function LinearSection({
       <div className="relative rounded-[12px] border border-cc-border bg-cc-card/90 px-2.5 py-2">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[11px] uppercase tracking-wide text-cc-muted">Context</span>
+
+          {/* Connection picker — only shown when multiple connections exist */}
+          {connectionsLoaded && connections.length > 1 && (
+            <select
+              value={selectedConnectionId ?? ""}
+              onChange={(e) => handleConnectionChange(e.target.value)}
+              className="px-1.5 py-1 rounded-md text-[11px] bg-cc-input-bg border border-cc-border text-cc-fg focus:outline-none focus:border-cc-primary/60 cursor-pointer max-w-[140px] truncate"
+              title="Select Linear workspace"
+            >
+              {connections.map((conn) => (
+                <option key={conn.id} value={conn.id}>
+                  {conn.workspaceName || conn.name}
+                </option>
+              ))}
+            </select>
+          )}
 
           {/* When a project is attached, show project badge */}
           {linearMapping ? (

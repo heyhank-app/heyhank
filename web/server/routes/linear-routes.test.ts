@@ -47,6 +47,18 @@ vi.mock("../linear-project-manager.js", () => ({
   removeMapping: vi.fn(() => false),
 }));
 
+// ─── Mock linear-connections ────────────────────────────────────────────────
+// resolveApiKey returns the test key by default; tests set it to null for "no key" scenarios.
+const mockResolveApiKey = vi.fn<() => { apiKey: string; connectionId: string } | null>(
+  () => ({ apiKey: "lin_api_test_key", connectionId: "test-conn" }),
+);
+const mockGetConnection = vi.fn(() => null);
+
+vi.mock("../linear-connections.js", () => ({
+  resolveApiKey: (...args: unknown[]) => mockResolveApiKey(),
+  getConnection: (...args: unknown[]) => mockGetConnection(),
+}));
+
 // ─── Imports (after mocks are declared) ─────────────────────────────────────
 import { Hono } from "hono";
 import { getSettings } from "../settings-manager.js";
@@ -77,6 +89,10 @@ beforeEach(() => {
   mockSettings.linearAutoTransition = false;
   mockSettings.linearAutoTransitionStateId = "";
   mockSettings.linearAutoTransitionStateName = "";
+
+  // Reset linear-connections mock to return the test key by default
+  mockResolveApiKey.mockReturnValue({ apiKey: "lin_api_test_key", connectionId: "test-conn" });
+  mockGetConnection.mockReturnValue(null);
 
   // Restore global fetch to prevent leaks between tests
   globalThis.fetch = originalFetch;
@@ -150,10 +166,11 @@ describe("GET /api/linear/issues", () => {
 
   it("returns 400 when Linear API key is not configured", async () => {
     mockSettings.linearApiKey = "";
+    mockResolveApiKey.mockReturnValue(null);
     const res = await app.request("/api/linear/issues?query=test");
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/not configured/i);
+    expect(json.error).toMatch(/no linear connection configured/i);
   });
 
   it("searches Linear and returns mapped issues, filtering out completed/canceled (covers lines 87-108)", async () => {
@@ -276,10 +293,11 @@ describe("GET /api/linear/issues", () => {
 describe("GET /api/linear/connection", () => {
   it("returns 400 when API key is empty (covers lines 113-116)", async () => {
     mockSettings.linearApiKey = "";
+    mockResolveApiKey.mockReturnValue(null);
     const res = await app.request("/api/linear/connection");
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/not configured/i);
+    expect(json.error).toMatch(/no linear connection configured/i);
   });
 
   it("returns connection info with viewer and team (covers lines 118-120, 124-128)", async () => {
@@ -467,6 +485,7 @@ describe("GET /api/sessions/:id/linear-issue", () => {
     };
     vi.mocked(sessionLinearIssues.getLinearIssue).mockReturnValue(stored);
     mockSettings.linearApiKey = "";
+    mockResolveApiKey.mockReturnValue(null);
 
     const res = await app.request("/api/sessions/sess-1/linear-issue?refresh=true");
     expect(res.status).toBe(200);
@@ -647,6 +666,7 @@ describe("POST /api/linear/issues/:issueId/comments", () => {
 
   it("returns 400 when Linear API key is not configured (covers lines 324-328)", async () => {
     mockSettings.linearApiKey = "";
+    mockResolveApiKey.mockReturnValue(null);
     const res = await app.request("/api/linear/issues/issue-1/comments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -654,7 +674,7 @@ describe("POST /api/linear/issues/:issueId/comments", () => {
     });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/not configured/i);
+    expect(json.error).toMatch(/no linear connection configured/i);
   });
 
   it("creates a comment and returns it (covers lines 330-388)", async () => {
@@ -685,8 +705,8 @@ describe("POST /api/linear/issues/:issueId/comments", () => {
     expect(json.comment.userName).toBe("Test User");
     expect(json.comment.userAvatarUrl).toBeNull();
 
-    // Should invalidate cache for the issue
-    expect(linearCache.invalidate).toHaveBeenCalledWith("issue:issue-1");
+    // Should invalidate cache for the issue with connectionId prefix
+    expect(linearCache.invalidate).toHaveBeenCalledWith("test-conn:issue:issue-1");
   });
 
   it("returns 502 when Linear returns GraphQL errors (covers lines 366-369)", async () => {
@@ -759,10 +779,11 @@ describe("POST /api/linear/issues/:issueId/comments", () => {
 describe("GET /api/linear/states", () => {
   it("returns 400 when API key is empty", async () => {
     mockSettings.linearApiKey = "";
+    mockResolveApiKey.mockReturnValue(null);
     const res = await app.request("/api/linear/states");
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/not configured/i);
+    expect(json.error).toMatch(/no linear connection configured/i);
   });
 
   it("returns mapped team states (covers lines 455-467)", async () => {
@@ -859,10 +880,11 @@ describe("GET /api/linear/project-issues", () => {
 
   it("returns 400 when API key is not configured", async () => {
     mockSettings.linearApiKey = "";
+    mockResolveApiKey.mockReturnValue(null);
     const res = await app.request("/api/linear/project-issues?projectId=proj-1");
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/not configured/i);
+    expect(json.error).toMatch(/no linear connection configured/i);
   });
 
   it("returns mapped project issues, filtering done and sorting by state (covers lines 580-628)", async () => {
@@ -1099,12 +1121,13 @@ describe("DELETE /api/linear/project-mappings", () => {
 describe("POST /api/linear/issues/:id/transition", () => {
   it("returns 400 when API key is not configured (covers line 670+)", async () => {
     mockSettings.linearApiKey = "";
+    mockResolveApiKey.mockReturnValue(null);
     const res = await app.request("/api/linear/issues/issue-1/transition", {
       method: "POST",
     });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/not configured/i);
+    expect(json.error).toMatch(/no linear connection configured/i);
   });
 
   it("returns skipped when auto-transition is disabled", async () => {
@@ -1163,8 +1186,8 @@ describe("POST /api/linear/issues/:id/transition", () => {
     expect(json.issue.stateName).toBe("In Progress");
     expect(json.issue.stateType).toBe("started");
 
-    // Cache should be invalidated
-    expect(linearCache.invalidate).toHaveBeenCalledWith("issue:issue-1");
+    // Cache should be invalidated with connection prefix
+    expect(linearCache.invalidate).toHaveBeenCalledWith("test-conn:issue:issue-1");
   });
 
   it("returns 502 when Linear returns GraphQL errors", async () => {
@@ -1249,10 +1272,11 @@ describe("POST /api/linear/issues/:id/transition", () => {
 describe("GET /api/linear/projects", () => {
   it("returns 400 when API key is not configured", async () => {
     mockSettings.linearApiKey = "";
+    mockResolveApiKey.mockReturnValue(null);
     const res = await app.request("/api/linear/projects");
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/not configured/i);
+    expect(json.error).toMatch(/no linear connection configured/i);
   });
 
   it("returns mapped projects", async () => {
@@ -1418,6 +1442,7 @@ describe("transitionLinearIssue helper", () => {
       stateName: "Backlog",
       stateType: "backlog",
     });
+    // Cache invalidation uses no prefix when connectionId is not passed
     expect(linearCache.invalidate).toHaveBeenCalledWith("issue:issue-1");
   });
 

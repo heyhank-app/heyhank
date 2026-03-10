@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { api, type LinearWorkflowState, type LinearTeamStates } from "../api.js";
+import { useEffect, useState, useCallback } from "react";
+import { api, type LinearWorkflowState, type LinearTeamStates, type LinearConnectionSummary } from "../api.js";
 import { navigateHome, navigateToSession } from "../utils/routing.js";
 import { useStore } from "../store.js";
 import { LinearLogo } from "./LinearLogo.js";
@@ -8,30 +8,57 @@ interface LinearSettingsPageProps {
   embedded?: boolean;
 }
 
+/**
+ * Per-connection editing state: tracks the UI for editing auto-transition
+ * and archive-transition settings on an individual connection.
+ */
+interface ConnectionEditState {
+  /** Which connection is being edited (expanded) */
+  connectionId: string;
+  /** Teams fetched from the Linear API for this connection */
+  teams: LinearTeamStates[];
+  loadingStates: boolean;
+
+  // Auto-transition
+  autoTransition: boolean;
+  autoTransitionTeamId: string;
+  autoTransitionStateId: string;
+  autoTransitionStateName: string;
+  autoTransitionWorkflowStates: LinearWorkflowState[];
+
+  // Archive transition
+  archiveTransition: boolean;
+  archiveTransitionTeamId: string;
+  archiveTransitionStateId: string;
+  archiveTransitionStateName: string;
+  archiveTransitionWorkflowStates: LinearWorkflowState[];
+
+  saving: boolean;
+  saved: boolean;
+  error: string;
+}
+
 export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps) {
-  const [linearApiKey, setLinearApiKey] = useState("");
-  const [configured, setConfigured] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [viewerLabel, setViewerLabel] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [checkingConnection, setCheckingConnection] = useState(false);
-  const [error, setError] = useState("");
-  const [saved, setSaved] = useState(false);
-  const [connectionNote, setConnectionNote] = useState("");
+  // ─── Connection list state ──────────────────────────────────────────
+  const [connections, setConnections] = useState<LinearConnectionSummary[]>([]);
+  const [loadingConnections, setLoadingConnections] = useState(true);
+  const [connectionsError, setConnectionsError] = useState("");
 
-  // Auto-transition state
-  const [autoTransition, setAutoTransition] = useState(false);
-  const [selectedStateId, setSelectedStateId] = useState("");
-  const [selectedStateName, setSelectedStateName] = useState("");
-  const [teams, setTeams] = useState<LinearTeamStates[]>([]);
-  const [selectedTeamId, setSelectedTeamId] = useState("");
-  const [workflowStates, setWorkflowStates] = useState<LinearWorkflowState[]>([]);
-  const [loadingStates, setLoadingStates] = useState(false);
-  const [savingAutoTransition, setSavingAutoTransition] = useState(false);
-  const [autoTransitionSaved, setAutoTransitionSaved] = useState(false);
+  // ─── Add connection form state ──────────────────────────────────────
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newApiKey, setNewApiKey] = useState("");
+  const [addingConnection, setAddingConnection] = useState(false);
+  const [addError, setAddError] = useState("");
 
-  // Linear OAuth Agent App state
+  // ─── Per-connection edit state (null = none expanded) ───────────────
+  const [editState, setEditState] = useState<ConnectionEditState | null>(null);
+
+  // ─── Verify / delete in-progress tracking ──────────────────────────
+  const [verifyingId, setVerifyingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // ─── Linear OAuth Agent App state (unchanged from original) ────────
   const [oauthClientId, setOauthClientId] = useState("");
   const [oauthClientSecret, setOauthClientSecret] = useState("");
   const [oauthWebhookSecret, setOauthWebhookSecret] = useState("");
@@ -41,77 +68,24 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
   const [oauthSaved, setOauthSaved] = useState(false);
   const [oauthError, setOauthError] = useState("");
 
-  // Public URL from store (reactive — used in setup guide)
+  // Public URL from store (reactive -- used in setup guide)
   const publicUrl = useStore((s) => s.publicUrl);
 
-  // Archive transition state
-  const [archiveTransition, setArchiveTransition] = useState(false);
-  const [archiveSelectedStateId, setArchiveSelectedStateId] = useState("");
-  const [archiveSelectedStateName, setArchiveSelectedStateName] = useState("");
-  const [archiveSelectedTeamId, setArchiveSelectedTeamId] = useState("");
-  const [archiveWorkflowStates, setArchiveWorkflowStates] = useState<LinearWorkflowState[]>([]);
-  const [savingArchiveTransition, setSavingArchiveTransition] = useState(false);
-  const [archiveTransitionSaved, setArchiveTransitionSaved] = useState(false);
-
-  async function refreshConnectionStatus() {
-    setCheckingConnection(true);
-    setError("");
-    setConnectionNote("");
+  // ─── Load connections ──────────────────────────────────────────────
+  const loadConnections = useCallback(async () => {
     try {
-      const info = await api.getLinearConnection();
-      setConnected(info.connected);
-      const label = info.viewerName || info.viewerEmail || "Connected account";
-      const team = info.teamName ? ` \u2022 ${info.teamName}` : "";
-      setViewerLabel(`${label}${team}`);
-      setConnectionNote("Linear connection verified.");
+      const result = await api.listLinearConnections();
+      setConnections(result.connections);
     } catch (e: unknown) {
-      setConnected(false);
-      setViewerLabel("");
-      setConnectionNote("");
-      setError(e instanceof Error ? e.message : String(e));
+      setConnectionsError(e instanceof Error ? e.message : String(e));
     } finally {
-      setCheckingConnection(false);
+      setLoadingConnections(false);
     }
-  }
-
-  async function fetchWorkflowStates() {
-    setLoadingStates(true);
-    try {
-      const result = await api.getLinearStates();
-      setTeams(result.teams);
-      // Default to first team if none selected
-      const firstTeam = result.teams[0];
-      if (firstTeam && !selectedTeamId) {
-        setSelectedTeamId(firstTeam.id);
-        setWorkflowStates(firstTeam.states);
-      }
-    } catch {
-      // Non-critical — states dropdown just won't populate
-    } finally {
-      setLoadingStates(false);
-    }
-  }
+  }, []);
 
   useEffect(() => {
-    api.getSettings()
-      .then((settings) => {
-        setConfigured(settings.linearApiKeyConfigured);
-        setAutoTransition(settings.linearAutoTransition);
-        setSelectedStateName(settings.linearAutoTransitionStateName);
-        setArchiveTransition(settings.linearArchiveTransition);
-        setArchiveSelectedStateName(settings.linearArchiveTransitionStateName);
-        setOauthConfigured(settings.linearOAuthConfigured || settings.linearOAuthCredentialsSaved);
-        if (settings.linearApiKeyConfigured) {
-          refreshConnectionStatus().then(() => {
-            fetchWorkflowStates().then(() => {
-              // Once states are loaded, sync selectedStateId from the saved name
-              // This is done inside the effect chain because we need the states list
-            }).catch(() => {});
-          }).catch(() => {});
-        }
-      })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
+    loadConnections();
+
     // Load OAuth status
     api.getLinearOAuthStatus().then((s) => {
       setOauthConfigured(s.configured);
@@ -132,141 +106,189 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
       setOauthError(decodeURIComponent(match?.[1] || "OAuth failed"));
       window.location.hash = "#/settings/linear";
     }
-  }, []);
+  }, [loadConnections]);
 
-  // Sync workflowStates when selectedTeamId changes
-  useEffect(() => {
-    const team = teams.find((t) => t.id === selectedTeamId);
-    if (team) {
-      setWorkflowStates(team.states);
-    }
-  }, [teams, selectedTeamId]);
-
-  // Sync selectedStateId when workflowStates or selectedStateName changes
-  useEffect(() => {
-    if (workflowStates.length > 0 && selectedStateName) {
-      const match = workflowStates.find((s) => s.name === selectedStateName);
-      if (match) {
-        setSelectedStateId(match.id);
-      }
-    }
-  }, [workflowStates, selectedStateName]);
-
-  // Sync archive team states when archiveSelectedTeamId changes
-  useEffect(() => {
-    const team = teams.find((t) => t.id === archiveSelectedTeamId);
-    if (team) {
-      setArchiveWorkflowStates(team.states);
-    }
-  }, [teams, archiveSelectedTeamId]);
-
-  // Initialize archiveSelectedTeamId when teams load
-  useEffect(() => {
-    if (teams.length > 0 && !archiveSelectedTeamId) {
-      setArchiveSelectedTeamId(teams[0].id);
-    }
-  }, [teams, archiveSelectedTeamId]);
-
-  // Sync archiveSelectedStateId when archiveWorkflowStates or archiveSelectedStateName changes
-  useEffect(() => {
-    if (archiveWorkflowStates.length > 0 && archiveSelectedStateName) {
-      const match = archiveWorkflowStates.find((s) => s.name === archiveSelectedStateName);
-      if (match) {
-        setArchiveSelectedStateId(match.id);
-      }
-    }
-  }, [archiveWorkflowStates, archiveSelectedStateName]);
-
-  async function onSave(e: React.FormEvent) {
+  // ─── Add connection ────────────────────────────────────────────────
+  async function onAddConnection(e: React.FormEvent) {
     e.preventDefault();
-    const trimmed = linearApiKey.trim();
-    if (!trimmed) {
-      setError("Please enter a Linear API key.");
+    const trimmedName = newName.trim();
+    const trimmedKey = newApiKey.trim();
+    if (!trimmedName || !trimmedKey) {
+      setAddError("Name and API key are required.");
       return;
     }
 
-    setSaving(true);
-    setError("");
-    setSaved(false);
-    setConnectionNote("");
+    setAddingConnection(true);
+    setAddError("");
     try {
-      const settings = await api.updateSettings({ linearApiKey: trimmed });
-      setConfigured(settings.linearApiKeyConfigured);
-      setLinearApiKey("");
-      setSaved(true);
-      await refreshConnectionStatus();
-      await fetchWorkflowStates();
-      setTimeout(() => setSaved(false), 1800);
+      const result = await api.createLinearConnection({ name: trimmedName, apiKey: trimmedKey });
+      if (result.error) {
+        setAddError(result.error);
+      } else {
+        setNewName("");
+        setNewApiKey("");
+        setShowAddForm(false);
+        await loadConnections();
+      }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setAddError(e instanceof Error ? e.message : String(e));
     } finally {
-      setSaving(false);
+      setAddingConnection(false);
     }
   }
 
-  async function onDisconnect() {
-    setSaving(true);
-    setError("");
-    setSaved(false);
-    setConnectionNote("");
+  // ─── Verify a connection ──────────────────────────────────────────
+  async function onVerify(id: string) {
+    setVerifyingId(id);
     try {
-      const settings = await api.updateSettings({ linearApiKey: "" });
-      setConfigured(settings.linearApiKeyConfigured);
-      setConnected(false);
-      setViewerLabel("");
-      setLinearApiKey("");
-      setTeams([]);
-      setSelectedTeamId("");
-      setWorkflowStates([]);
-      setAutoTransition(false);
-      setSelectedStateId("");
-      setSelectedStateName("");
-      setArchiveTransition(false);
-      setArchiveSelectedStateId("");
-      setArchiveSelectedStateName("");
-      setConnectionNote("Linear disconnected.");
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      await api.verifyLinearConnection(id);
+      await loadConnections();
+    } catch {
+      // Reload to reflect any state changes
+      await loadConnections();
     } finally {
-      setSaving(false);
+      setVerifyingId(null);
     }
   }
 
-  async function onSaveAutoTransition() {
-    setSavingAutoTransition(true);
-    setAutoTransitionSaved(false);
+  // ─── Delete a connection ──────────────────────────────────────────
+  async function onDelete(id: string) {
+    setDeletingId(id);
     try {
-      await api.updateSettings({
-        linearAutoTransition: autoTransition,
-        linearAutoTransitionStateId: selectedStateId,
-        linearAutoTransitionStateName: selectedStateName,
+      await api.deleteLinearConnection(id);
+      if (editState?.connectionId === id) {
+        setEditState(null);
+      }
+      await loadConnections();
+    } catch {
+      await loadConnections();
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  // ─── Open edit panel for a connection ─────────────────────────────
+  async function onEdit(conn: LinearConnectionSummary) {
+    if (editState?.connectionId === conn.id) {
+      // Toggle off
+      setEditState(null);
+      return;
+    }
+
+    const newEditState: ConnectionEditState = {
+      connectionId: conn.id,
+      teams: [],
+      loadingStates: true,
+      autoTransition: conn.autoTransition,
+      autoTransitionTeamId: "",
+      autoTransitionStateId: conn.autoTransitionStateId,
+      autoTransitionStateName: conn.autoTransitionStateName,
+      autoTransitionWorkflowStates: [],
+      archiveTransition: conn.archiveTransition,
+      archiveTransitionTeamId: "",
+      archiveTransitionStateId: conn.archiveTransitionStateId,
+      archiveTransitionStateName: conn.archiveTransitionStateName,
+      archiveTransitionWorkflowStates: [],
+      saving: false,
+      saved: false,
+      error: "",
+    };
+    setEditState(newEditState);
+
+    // Fetch workflow states for this connection
+    try {
+      const result = await api.getLinearStates(conn.id);
+      const teams = result.teams;
+      const firstTeam = teams[0];
+
+      // Figure out auto-transition team and states
+      let autoTeamId = "";
+      let autoStates: LinearWorkflowState[] = [];
+      let autoStateId = conn.autoTransitionStateId;
+      if (conn.autoTransitionStateName && teams.length > 0) {
+        // Try to find the team that contains the saved state
+        for (const team of teams) {
+          const match = team.states.find((s) => s.name === conn.autoTransitionStateName);
+          if (match) {
+            autoTeamId = team.id;
+            autoStates = team.states;
+            autoStateId = match.id;
+            break;
+          }
+        }
+      }
+      if (!autoTeamId && firstTeam) {
+        autoTeamId = firstTeam.id;
+        autoStates = firstTeam.states;
+      }
+
+      // Figure out archive-transition team and states
+      let archiveTeamId = "";
+      let archiveStates: LinearWorkflowState[] = [];
+      let archiveStateId = conn.archiveTransitionStateId;
+      if (conn.archiveTransitionStateName && teams.length > 0) {
+        for (const team of teams) {
+          const match = team.states.find((s) => s.name === conn.archiveTransitionStateName);
+          if (match) {
+            archiveTeamId = team.id;
+            archiveStates = team.states;
+            archiveStateId = match.id;
+            break;
+          }
+        }
+      }
+      if (!archiveTeamId && firstTeam) {
+        archiveTeamId = firstTeam.id;
+        archiveStates = firstTeam.states;
+      }
+
+      setEditState((prev) => prev && prev.connectionId === conn.id ? {
+        ...prev,
+        teams,
+        loadingStates: false,
+        autoTransitionTeamId: autoTeamId,
+        autoTransitionStateId: autoStateId,
+        autoTransitionWorkflowStates: autoStates,
+        archiveTransitionTeamId: archiveTeamId,
+        archiveTransitionStateId: archiveStateId,
+        archiveTransitionWorkflowStates: archiveStates,
+      } : prev);
+    } catch {
+      setEditState((prev) => prev && prev.connectionId === conn.id ? {
+        ...prev,
+        loadingStates: false,
+      } : prev);
+    }
+  }
+
+  // ─── Save connection settings (auto-transition + archive) ─────────
+  async function onSaveConnectionSettings() {
+    if (!editState) return;
+    setEditState((prev) => prev ? { ...prev, saving: true, saved: false, error: "" } : prev);
+    try {
+      await api.updateLinearConnection(editState.connectionId, {
+        autoTransition: editState.autoTransition,
+        autoTransitionStateId: editState.autoTransitionStateId,
+        autoTransitionStateName: editState.autoTransitionStateName,
+        archiveTransition: editState.archiveTransition,
+        archiveTransitionStateId: editState.archiveTransitionStateId,
+        archiveTransitionStateName: editState.archiveTransitionStateName,
       });
-      setAutoTransitionSaved(true);
-      setTimeout(() => setAutoTransitionSaved(false), 1800);
+      setEditState((prev) => prev ? { ...prev, saving: false, saved: true } : prev);
+      setTimeout(() => setEditState((prev) => prev ? { ...prev, saved: false } : prev), 1800);
+      await loadConnections();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSavingAutoTransition(false);
+      setEditState((prev) => prev ? {
+        ...prev,
+        saving: false,
+        error: e instanceof Error ? e.message : String(e),
+      } : prev);
     }
   }
 
-  async function onSaveArchiveTransition() {
-    setSavingArchiveTransition(true);
-    setArchiveTransitionSaved(false);
-    try {
-      await api.updateSettings({
-        linearArchiveTransition: archiveTransition,
-        linearArchiveTransitionStateId: archiveSelectedStateId,
-        linearArchiveTransitionStateName: archiveSelectedStateName,
-      });
-      setArchiveTransitionSaved(true);
-      setTimeout(() => setArchiveTransitionSaved(false), 1800);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSavingArchiveTransition(false);
-    }
-  }
+  // ─── Derived counts ───────────────────────────────────────────────
+  const connectedCount = connections.filter((c) => c.connected).length;
+  const hasAnyConnection = connections.length > 0;
 
   return (
     <div className={`${embedded ? "h-full" : "h-[100dvh]"} bg-cc-bg text-cc-fg font-sans-ui antialiased overflow-y-auto`}>
@@ -305,6 +327,7 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
           </div>
         </div>
 
+        {/* ── Hero banner ── */}
         <section className="relative overflow-hidden bg-cc-card border border-cc-border rounded-xl p-4 sm:p-6 mb-4">
           <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_top_right,rgba(124,58,237,0.1),transparent_45%)]" />
           <div className="relative flex items-start justify-between gap-4 flex-wrap">
@@ -327,315 +350,428 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
             </div>
             <div className="shrink-0 rounded-xl border border-cc-border bg-cc-bg px-3 py-2 text-right min-w-[170px]">
               <p className="text-[11px] text-cc-muted uppercase tracking-wide">Status</p>
-              <p className={`mt-1 text-sm font-medium ${connected ? "text-cc-success" : configured ? "text-amber-500" : "text-cc-muted"}`}>
-                {connected ? "Connected" : configured ? "Needs verification" : "Not connected"}
+              <p className={`mt-1 text-sm font-medium ${connectedCount > 0 ? "text-cc-success" : "text-cc-muted"}`}>
+                {connectedCount > 0
+                  ? `${connectedCount} connected`
+                  : "Not connected"}
               </p>
-              <p className="mt-0.5 text-[11px] text-cc-muted truncate">{viewerLabel || "No workspace linked yet"}</p>
+              <p className="mt-0.5 text-[11px] text-cc-muted truncate">
+                {hasAnyConnection
+                  ? `${connections.length} connection${connections.length !== 1 ? "s" : ""} configured`
+                  : "No connections yet"}
+              </p>
             </div>
           </div>
         </section>
 
-        <form onSubmit={onSave} className="bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-cc-fg flex items-center gap-2">
-            <LinearLogo className="w-4 h-4 text-cc-fg" />
-            <span>Linear Credentials</span>
-          </h2>
-          <div>
-            <label className="block text-sm font-medium mb-1.5" htmlFor="linear-key">
-              Linear API Key
-            </label>
-            <input
-              id="linear-key"
-              type="password"
-              value={linearApiKey}
-              onChange={(e) => setLinearApiKey(e.target.value)}
-              placeholder={configured ? "Configured. Enter a new key to replace." : "lin_api_..."}
-              className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/60"
-            />
-            <p className="mt-1.5 text-xs text-cc-muted">
-              Used to search Linear issues from the home page and inject issue context at session start.
-            </p>
+        {/* ── Connections section ── */}
+        <div className="bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-cc-fg flex items-center gap-2">
+              <LinearLogo className="w-4 h-4 text-cc-fg" />
+              <span>Linear Connections</span>
+            </h2>
+            <button
+              type="button"
+              onClick={() => {
+                setShowAddForm(!showAddForm);
+                setAddError("");
+              }}
+              className="px-3 py-2 rounded-lg text-sm font-medium transition-colors bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+            >
+              {showAddForm ? "Cancel" : "Add Connection"}
+            </button>
           </div>
 
-          {error && (
+          {connectionsError && (
             <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
-              {error}
+              {connectionsError}
             </div>
           )}
 
-          {connectionNote && (
-            <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
-              {connectionNote}
-            </div>
-          )}
-
-          {saved && (
-            <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
-              Integration saved.
-            </div>
-          )}
-
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <span className="text-xs text-cc-muted">
-              {loading ? "Loading..." : configured ? "Linear key configured" : "Linear key not configured"}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onDisconnect}
-                disabled={saving || loading || !configured}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  saving || loading || !configured
-                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                    : "bg-cc-error/10 hover:bg-cc-error/20 text-cc-error cursor-pointer"
-                }`}
-              >
-                Disconnect
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  refreshConnectionStatus().catch(() => {});
-                }}
-                disabled={checkingConnection || loading || !configured}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  checkingConnection || loading || !configured
-                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                    : "bg-cc-hover hover:bg-cc-active text-cc-fg cursor-pointer"
-                }`}
-              >
-                {checkingConnection ? "Checking..." : "Verify"}
-              </button>
-              <button
-                type="submit"
-                disabled={saving || loading}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  saving || loading
-                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                    : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
-                }`}
-              >
-                {saving ? "Saving..." : "Save"}
-              </button>
-            </div>
-          </div>
-        </form>
-
-        {connected && (
-          <div className="mt-4 bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-4">
-            <h2 className="text-sm font-semibold text-cc-fg">Auto-transition</h2>
-            <p className="text-xs text-cc-muted">
-              Automatically move the linked issue to a chosen status when starting a session.
-            </p>
-
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                role="switch"
-                aria-checked={autoTransition}
-                onClick={() => setAutoTransition(!autoTransition)}
-                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-                  autoTransition ? "bg-cc-primary" : "bg-cc-hover"
-                }`}
-              >
-                <span
-                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                    autoTransition ? "translate-x-4" : "translate-x-0"
-                  }`}
+          {/* ── Add connection form ── */}
+          {showAddForm && (
+            <form onSubmit={onAddConnection} className="border border-cc-border rounded-lg p-4 space-y-3 bg-cc-bg">
+              <div>
+                <label className="block text-sm font-medium mb-1.5" htmlFor="new-conn-name">
+                  Connection Name
+                </label>
+                <input
+                  id="new-conn-name"
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder='e.g. "Work", "Personal"'
+                  className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/60"
                 />
-              </button>
-              <span className="text-sm text-cc-fg">
-                {autoTransition ? "Enabled" : "Disabled"}
-              </span>
-            </div>
-
-            {autoTransition && teams.length > 1 && (
+              </div>
               <div>
-                <label className="block text-sm font-medium mb-1.5" htmlFor="transition-team">
-                  Team
+                <label className="block text-sm font-medium mb-1.5" htmlFor="new-conn-key">
+                  API Key
                 </label>
-                <select
-                  id="transition-team"
-                  value={selectedTeamId}
-                  onChange={(e) => {
-                    setSelectedTeamId(e.target.value);
-                    setSelectedStateId("");
-                    setSelectedStateName("");
-                  }}
-                  className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg focus:outline-none focus:border-cc-primary/60"
-                >
-                  {teams.map((team) => (
-                    <option key={team.id} value={team.id}>
-                      {team.name} ({team.key})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {autoTransition && (
-              <div>
-                <label className="block text-sm font-medium mb-1.5" htmlFor="transition-state">
-                  Target status
-                </label>
-                {loadingStates ? (
-                  <p className="text-xs text-cc-muted">Loading workflow states...</p>
-                ) : workflowStates.length === 0 ? (
-                  <p className="text-xs text-cc-muted">No workflow states found.</p>
-                ) : (
-                  <select
-                    id="transition-state"
-                    value={selectedStateId}
-                    onChange={(e) => {
-                      const state = workflowStates.find((s) => s.id === e.target.value);
-                      setSelectedStateId(e.target.value);
-                      setSelectedStateName(state?.name || "");
-                    }}
-                    className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg focus:outline-none focus:border-cc-primary/60"
-                  >
-                    <option value="">Select a status...</option>
-                    {workflowStates.map((state) => (
-                      <option key={state.id} value={state.id}>
-                        {state.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            )}
-
-            {autoTransitionSaved && (
-              <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
-                Auto-transition settings saved.
-              </div>
-            )}
-
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={onSaveAutoTransition}
-                disabled={savingAutoTransition || (autoTransition && !selectedStateId)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  savingAutoTransition || (autoTransition && !selectedStateId)
-                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                    : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
-                }`}
-              >
-                {savingAutoTransition ? "Saving..." : "Save"}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Archive transition settings — only when connected */}
-        {connected && teams.length > 0 && (
-          <div className="mt-4 bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-4">
-            <h2 className="text-sm font-semibold text-cc-fg">On session archive</h2>
-            <p className="text-xs text-cc-muted">
-              When archiving a session linked to a Linear issue that is not done, optionally move it to a chosen status.
-            </p>
-
-            {/* Toggle */}
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                role="switch"
-                aria-checked={archiveTransition}
-                onClick={() => setArchiveTransition(!archiveTransition)}
-                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-                  archiveTransition ? "bg-cc-primary" : "bg-cc-hover"
-                }`}
-              >
-                <span
-                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                    archiveTransition ? "translate-x-4" : "translate-x-0"
-                  }`}
+                <input
+                  id="new-conn-key"
+                  type="password"
+                  value={newApiKey}
+                  onChange={(e) => setNewApiKey(e.target.value)}
+                  placeholder="lin_api_..."
+                  className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/60"
                 />
-              </button>
-              <span className="text-sm text-cc-fg">
-                {archiveTransition ? "Enabled" : "Disabled"}
-              </span>
-            </div>
+                <p className="mt-1.5 text-xs text-cc-muted">
+                  The key is verified automatically when saved.
+                </p>
+              </div>
 
-            {/* Team selector — only when multiple teams */}
-            {archiveTransition && teams.length > 1 && (
-              <div>
-                <label className="block text-sm font-medium mb-1.5" htmlFor="archive-transition-team">
-                  Team
-                </label>
-                <select
-                  id="archive-transition-team"
-                  value={archiveSelectedTeamId}
-                  onChange={(e) => {
-                    setArchiveSelectedTeamId(e.target.value);
-                    setArchiveSelectedStateId("");
-                    setArchiveSelectedStateName("");
-                  }}
-                  className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg focus:outline-none focus:border-cc-primary/60"
+              {addError && (
+                <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
+                  {addError}
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={addingConnection || !newName.trim() || !newApiKey.trim()}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    addingConnection || !newName.trim() || !newApiKey.trim()
+                      ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                      : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+                  }`}
                 >
-                  {teams.map((team) => (
-                    <option key={team.id} value={team.id}>
-                      {team.name} ({team.key})
-                    </option>
-                  ))}
-                </select>
+                  {addingConnection ? "Saving..." : "Save"}
+                </button>
               </div>
-            )}
+            </form>
+          )}
 
-            {/* State selector */}
-            {archiveTransition && (
-              <div>
-                <label className="block text-sm font-medium mb-1.5" htmlFor="archive-transition-state">
-                  Target status
-                </label>
-                {loadingStates ? (
-                  <p className="text-xs text-cc-muted">Loading workflow states...</p>
-                ) : archiveWorkflowStates.length === 0 ? (
-                  <p className="text-xs text-cc-muted">No workflow states found.</p>
-                ) : (
-                  <select
-                    id="archive-transition-state"
-                    value={archiveSelectedStateId}
-                    onChange={(e) => {
-                      const state = archiveWorkflowStates.find((s) => s.id === e.target.value);
-                      setArchiveSelectedStateId(e.target.value);
-                      setArchiveSelectedStateName(state?.name || "");
-                    }}
-                    className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg focus:outline-none focus:border-cc-primary/60"
-                  >
-                    <option value="">Select a status...</option>
-                    {archiveWorkflowStates.map((state) => (
-                      <option key={state.id} value={state.id}>
-                        {state.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            )}
-
-            {archiveTransitionSaved && (
-              <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
-                Archive transition settings saved.
-              </div>
-            )}
-
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={onSaveArchiveTransition}
-                disabled={savingArchiveTransition || (archiveTransition && !archiveSelectedStateId)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  savingArchiveTransition || (archiveTransition && !archiveSelectedStateId)
-                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                    : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
-                }`}
-              >
-                {savingArchiveTransition ? "Saving..." : "Save"}
-              </button>
+          {/* ── Connection list ── */}
+          {loadingConnections ? (
+            <p className="text-sm text-cc-muted">Loading connections...</p>
+          ) : connections.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-sm text-cc-muted">No Linear connections yet.</p>
+              <p className="mt-1 text-xs text-cc-muted">
+                Add your first connection to search and attach Linear issues to sessions.
+              </p>
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="space-y-3">
+              {connections.map((conn) => (
+                <div key={conn.id} className="border border-cc-border rounded-lg overflow-hidden">
+                  {/* Connection card header */}
+                  <div className="p-4 flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium text-cc-fg">{conn.name}</span>
+                        <span
+                          className={`px-2 py-0.5 text-[10px] rounded-full border ${
+                            conn.connected
+                              ? "bg-cc-success/10 text-cc-success border-cc-success/20"
+                              : "bg-cc-error/10 text-cc-error border-cc-error/20"
+                          }`}
+                        >
+                          {conn.connected ? "Connected" : "Not connected"}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-cc-muted truncate">
+                        {conn.workspaceName && conn.viewerName
+                          ? `${conn.viewerName} -- ${conn.workspaceName}`
+                          : conn.workspaceName || conn.viewerName || "Unverified"}
+                        {" "}&middot; Key ending in ...{conn.apiKeyLast4}
+                      </p>
+                      {/* Show active settings summary */}
+                      {(conn.autoTransition || conn.archiveTransition) && (
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {conn.autoTransition && conn.autoTransitionStateName && (
+                            <span className="px-2 py-0.5 text-[10px] rounded-md bg-cc-hover text-cc-muted">
+                              Auto-transition: {conn.autoTransitionStateName}
+                            </span>
+                          )}
+                          {conn.archiveTransition && conn.archiveTransitionStateName && (
+                            <span className="px-2 py-0.5 text-[10px] rounded-md bg-cc-hover text-cc-muted">
+                              On archive: {conn.archiveTransitionStateName}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => onEdit(conn)}
+                        disabled={!conn.connected}
+                        className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          !conn.connected
+                            ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                            : editState?.connectionId === conn.id
+                              ? "bg-cc-active text-cc-fg cursor-pointer"
+                              : "bg-cc-hover hover:bg-cc-active text-cc-fg cursor-pointer"
+                        }`}
+                      >
+                        {editState?.connectionId === conn.id ? "Close" : "Edit"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onVerify(conn.id)}
+                        disabled={verifyingId === conn.id}
+                        className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          verifyingId === conn.id
+                            ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                            : "bg-cc-hover hover:bg-cc-active text-cc-fg cursor-pointer"
+                        }`}
+                      >
+                        {verifyingId === conn.id ? "Checking..." : "Verify"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDelete(conn.id)}
+                        disabled={deletingId === conn.id}
+                        className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          deletingId === conn.id
+                            ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                            : "bg-cc-error/10 hover:bg-cc-error/20 text-cc-error cursor-pointer"
+                        }`}
+                      >
+                        {deletingId === conn.id ? "Deleting..." : "Delete"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Expanded edit panel for per-connection settings */}
+                  {editState?.connectionId === conn.id && (
+                    <div className="border-t border-cc-border p-4 space-y-5 bg-cc-bg/50">
+                      {/* Auto-transition settings */}
+                      <div className="space-y-3">
+                        <h3 className="text-sm font-semibold text-cc-fg">Auto-transition</h3>
+                        <p className="text-xs text-cc-muted">
+                          Automatically move the linked issue to a chosen status when starting a session.
+                        </p>
+
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={editState.autoTransition}
+                            onClick={() =>
+                              setEditState((prev) => prev ? { ...prev, autoTransition: !prev.autoTransition } : prev)
+                            }
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                              editState.autoTransition ? "bg-cc-primary" : "bg-cc-hover"
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+                                editState.autoTransition ? "translate-x-4" : "translate-x-0"
+                              }`}
+                            />
+                          </button>
+                          <span className="text-sm text-cc-fg">
+                            {editState.autoTransition ? "Enabled" : "Disabled"}
+                          </span>
+                        </div>
+
+                        {editState.autoTransition && editState.teams.length > 1 && (
+                          <div>
+                            <label className="block text-sm font-medium mb-1.5" htmlFor={`auto-team-${conn.id}`}>
+                              Team
+                            </label>
+                            <select
+                              id={`auto-team-${conn.id}`}
+                              value={editState.autoTransitionTeamId}
+                              onChange={(e) => {
+                                const teamId = e.target.value;
+                                const team = editState.teams.find((t) => t.id === teamId);
+                                setEditState((prev) => prev ? {
+                                  ...prev,
+                                  autoTransitionTeamId: teamId,
+                                  autoTransitionWorkflowStates: team?.states || [],
+                                  autoTransitionStateId: "",
+                                  autoTransitionStateName: "",
+                                } : prev);
+                              }}
+                              className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg focus:outline-none focus:border-cc-primary/60"
+                            >
+                              {editState.teams.map((team) => (
+                                <option key={team.id} value={team.id}>
+                                  {team.name} ({team.key})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {editState.autoTransition && (
+                          <div>
+                            <label className="block text-sm font-medium mb-1.5" htmlFor={`auto-state-${conn.id}`}>
+                              Target status
+                            </label>
+                            {editState.loadingStates ? (
+                              <p className="text-xs text-cc-muted">Loading workflow states...</p>
+                            ) : editState.autoTransitionWorkflowStates.length === 0 ? (
+                              <p className="text-xs text-cc-muted">No workflow states found.</p>
+                            ) : (
+                              <select
+                                id={`auto-state-${conn.id}`}
+                                value={editState.autoTransitionStateId}
+                                onChange={(e) => {
+                                  const state = editState.autoTransitionWorkflowStates.find((s) => s.id === e.target.value);
+                                  setEditState((prev) => prev ? {
+                                    ...prev,
+                                    autoTransitionStateId: e.target.value,
+                                    autoTransitionStateName: state?.name || "",
+                                  } : prev);
+                                }}
+                                className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg focus:outline-none focus:border-cc-primary/60"
+                              >
+                                <option value="">Select a status...</option>
+                                {editState.autoTransitionWorkflowStates.map((state) => (
+                                  <option key={state.id} value={state.id}>
+                                    {state.name}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Divider between auto-transition and archive-transition */}
+                      <div className="border-t border-cc-border" />
+
+                      {/* Archive transition settings */}
+                      <div className="space-y-3">
+                        <h3 className="text-sm font-semibold text-cc-fg">On session archive</h3>
+                        <p className="text-xs text-cc-muted">
+                          When archiving a session linked to a Linear issue that is not done, optionally move it to a chosen status.
+                        </p>
+
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={editState.archiveTransition}
+                            onClick={() =>
+                              setEditState((prev) => prev ? { ...prev, archiveTransition: !prev.archiveTransition } : prev)
+                            }
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                              editState.archiveTransition ? "bg-cc-primary" : "bg-cc-hover"
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+                                editState.archiveTransition ? "translate-x-4" : "translate-x-0"
+                              }`}
+                            />
+                          </button>
+                          <span className="text-sm text-cc-fg">
+                            {editState.archiveTransition ? "Enabled" : "Disabled"}
+                          </span>
+                        </div>
+
+                        {editState.archiveTransition && editState.teams.length > 1 && (
+                          <div>
+                            <label className="block text-sm font-medium mb-1.5" htmlFor={`archive-team-${conn.id}`}>
+                              Team
+                            </label>
+                            <select
+                              id={`archive-team-${conn.id}`}
+                              value={editState.archiveTransitionTeamId}
+                              onChange={(e) => {
+                                const teamId = e.target.value;
+                                const team = editState.teams.find((t) => t.id === teamId);
+                                setEditState((prev) => prev ? {
+                                  ...prev,
+                                  archiveTransitionTeamId: teamId,
+                                  archiveTransitionWorkflowStates: team?.states || [],
+                                  archiveTransitionStateId: "",
+                                  archiveTransitionStateName: "",
+                                } : prev);
+                              }}
+                              className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg focus:outline-none focus:border-cc-primary/60"
+                            >
+                              {editState.teams.map((team) => (
+                                <option key={team.id} value={team.id}>
+                                  {team.name} ({team.key})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {editState.archiveTransition && (
+                          <div>
+                            <label className="block text-sm font-medium mb-1.5" htmlFor={`archive-state-${conn.id}`}>
+                              Target status
+                            </label>
+                            {editState.loadingStates ? (
+                              <p className="text-xs text-cc-muted">Loading workflow states...</p>
+                            ) : editState.archiveTransitionWorkflowStates.length === 0 ? (
+                              <p className="text-xs text-cc-muted">No workflow states found.</p>
+                            ) : (
+                              <select
+                                id={`archive-state-${conn.id}`}
+                                value={editState.archiveTransitionStateId}
+                                onChange={(e) => {
+                                  const state = editState.archiveTransitionWorkflowStates.find((s) => s.id === e.target.value);
+                                  setEditState((prev) => prev ? {
+                                    ...prev,
+                                    archiveTransitionStateId: e.target.value,
+                                    archiveTransitionStateName: state?.name || "",
+                                  } : prev);
+                                }}
+                                className="w-full px-3 py-2.5 text-sm bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg focus:outline-none focus:border-cc-primary/60"
+                              >
+                                <option value="">Select a status...</option>
+                                {editState.archiveTransitionWorkflowStates.map((state) => (
+                                  <option key={state.id} value={state.id}>
+                                    {state.name}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Save button and feedback */}
+                      {editState.error && (
+                        <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
+                          {editState.error}
+                        </div>
+                      )}
+
+                      {editState.saved && (
+                        <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
+                          Connection settings saved.
+                        </div>
+                      )}
+
+                      {(() => {
+                        const saveDisabled = editState.saving || (editState.autoTransition && !editState.autoTransitionStateId) || (editState.archiveTransition && !editState.archiveTransitionStateId);
+                        return (
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={onSaveConnectionSettings}
+                              disabled={saveDisabled}
+                              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                saveDisabled
+                                  ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                                  : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+                              }`}
+                            >
+                              {editState.saving ? "Saving..." : "Save Settings"}
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* ── Linear Agent App (OAuth) ── */}
         <div className="mt-4 bg-cc-card border border-cc-border rounded-xl p-4 sm:p-5 space-y-4">

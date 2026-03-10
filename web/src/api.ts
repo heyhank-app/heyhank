@@ -225,6 +225,7 @@ export interface CreateSessionOpts {
   container?: ContainerCreateOpts;
   resumeSessionAt?: string;
   forkSession?: boolean;
+  linearConnectionId?: string;
 }
 
 export interface BackendInfo {
@@ -388,6 +389,7 @@ export interface AppSettings {
   anthropicApiKeyConfigured: boolean;
   anthropicModel: string;
   linearApiKeyConfigured: boolean;
+  linearConnectionCount: number;
   linearAutoTransition: boolean;
   linearAutoTransitionStateName: string;
   linearArchiveTransition: boolean;
@@ -400,6 +402,23 @@ export interface AppSettings {
   aiValidationAutoDeny: boolean;
   publicUrl: string;
   updateChannel: "stable" | "prerelease";
+}
+
+export interface LinearConnectionSummary {
+  id: string;
+  name: string;
+  apiKeyLast4: string;
+  workspaceName: string;
+  workspaceId: string;
+  viewerName: string;
+  viewerEmail: string;
+  connected: boolean;
+  autoTransition: boolean;
+  autoTransitionStateId: string;
+  autoTransitionStateName: string;
+  archiveTransition: boolean;
+  archiveTransitionStateId: string;
+  archiveTransitionStateName: string;
 }
 
 export interface ArchiveInfo {
@@ -445,6 +464,7 @@ export interface LinearIssue {
   teamId: string;
   assigneeName?: string;
   updatedAt?: string;
+  connectionId?: string;
 }
 
 export interface LinearConnectionInfo {
@@ -493,6 +513,7 @@ export interface CreateLinearIssueInput {
   projectId?: string;
   assigneeId?: string;
   stateId?: string;
+  connectionId?: string;
 }
 
 export interface GitHubPRInfo {
@@ -900,21 +921,42 @@ export const api = {
   startTailscaleFunnel: () => post<TailscaleStatus>("/tailscale/funnel/start"),
   stopTailscaleFunnel: () => post<TailscaleStatus>("/tailscale/funnel/stop"),
 
-  searchLinearIssues: (query: string, limit = 8) =>
-    get<{ issues: LinearIssue[] }>(
-      `/linear/issues?query=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(limit))}`,
+  // Linear connections CRUD
+  listLinearConnections: () =>
+    get<{ connections: LinearConnectionSummary[] }>("/linear/connections"),
+  createLinearConnection: (data: { name: string; apiKey: string }) =>
+    post<{ connection: LinearConnectionSummary; verified: boolean; error?: string }>(
+      "/linear/connections",
+      data,
     ),
-  getLinearConnection: () => get<LinearConnectionInfo>("/linear/connection"),
-  getLinearStates: () => get<{ teams: LinearTeamStates[] }>("/linear/states"),
-  transitionLinearIssue: (issueId: string) =>
-    post<{ ok: boolean; skipped: boolean }>(
-      `/linear/issues/${encodeURIComponent(issueId)}/transition`,
+  updateLinearConnection: (id: string, data: Record<string, unknown>) =>
+    put<{ connection: LinearConnectionSummary }>(`/linear/connections/${encodeURIComponent(id)}`, data),
+  deleteLinearConnection: (id: string) =>
+    del<{ ok: boolean }>(`/linear/connections/${encodeURIComponent(id)}`),
+  verifyLinearConnection: (id: string) =>
+    post<{ connection: LinearConnectionSummary; verified: boolean; error?: string }>(
+      `/linear/connections/${encodeURIComponent(id)}/verify`,
       {},
     ),
-  listLinearProjects: () => get<{ projects: LinearProject[] }>("/linear/projects"),
-  getLinearProjectIssues: (projectId: string, limit = 15) =>
+
+  searchLinearIssues: (query: string, limit = 8, connectionId?: string) =>
     get<{ issues: LinearIssue[] }>(
-      `/linear/project-issues?projectId=${encodeURIComponent(projectId)}&limit=${encodeURIComponent(String(limit))}`,
+      `/linear/issues?query=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(limit))}${connectionId ? `&connectionId=${encodeURIComponent(connectionId)}` : ""}`,
+    ),
+  getLinearConnection: (connectionId?: string) =>
+    get<LinearConnectionInfo>(`/linear/connection${connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : ""}`),
+  getLinearStates: (connectionId?: string) =>
+    get<{ teams: LinearTeamStates[] }>(`/linear/states${connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : ""}`),
+  transitionLinearIssue: (issueId: string, connectionId?: string) =>
+    post<{ ok: boolean; skipped: boolean }>(
+      `/linear/issues/${encodeURIComponent(issueId)}/transition${connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : ""}`,
+      {},
+    ),
+  listLinearProjects: (connectionId?: string) =>
+    get<{ projects: LinearProject[] }>(`/linear/projects${connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : ""}`),
+  getLinearProjectIssues: (projectId: string, limit = 15, connectionId?: string) =>
+    get<{ issues: LinearIssue[] }>(
+      `/linear/project-issues?projectId=${encodeURIComponent(projectId)}&limit=${encodeURIComponent(String(limit))}${connectionId ? `&connectionId=${encodeURIComponent(connectionId)}` : ""}`,
     ),
   getLinearProjectMapping: (repoRoot: string) =>
     get<{ mapping: LinearProjectMapping | null }>(
@@ -929,8 +971,11 @@ export const api = {
     del<{ ok: boolean }>("/linear/project-mappings", { repoRoot }),
 
   // Linear issue <-> session association
-  linkLinearIssue: (sessionId: string, issue: LinearIssue) =>
-    put<{ ok: boolean }>(`/sessions/${encodeURIComponent(sessionId)}/linear-issue`, issue),
+  linkLinearIssue: (sessionId: string, issue: LinearIssue, connectionId?: string) =>
+    put<{ ok: boolean }>(`/sessions/${encodeURIComponent(sessionId)}/linear-issue`, {
+      ...issue,
+      ...(connectionId !== undefined ? { connectionId } : {}),
+    }),
   unlinkLinearIssue: (sessionId: string) =>
     del<{ ok: boolean }>(`/sessions/${encodeURIComponent(sessionId)}/linear-issue`),
   getLinkedLinearIssue: (sessionId: string, refresh = false) =>
@@ -939,10 +984,10 @@ export const api = {
     ),
   createLinearIssue: (input: CreateLinearIssueInput) =>
     post<{ ok: boolean; issue: LinearIssue }>("/linear/issues", input),
-  addLinearComment: (issueId: string, body: string) =>
+  addLinearComment: (issueId: string, body: string, connectionId?: string) =>
     post<{ ok: boolean; comment: LinearComment }>(
       `/linear/issues/${encodeURIComponent(issueId)}/comments`,
-      { body },
+      { body, connectionId },
     ),
 
   // Git operations

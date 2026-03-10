@@ -110,6 +110,7 @@ export function HomePage() {
   const [dynamicModels, setDynamicModels] = useState<ModelOption[] | null>(null);
   const [linearConfigured, setLinearConfigured] = useState(false);
   const [selectedLinearIssue, setSelectedLinearIssue] = useState<LinearIssue | null>(null);
+  const [selectedLinearConnectionId, setSelectedLinearConnectionId] = useState<string | null>(null);
 
   const MODELS = dynamicModels || getModelsForBackend(backend);
   const MODES = getModesForBackend(backend);
@@ -629,6 +630,7 @@ export function HomePage() {
           codexInternetAccess: backend === "codex" ? true : undefined,
           resumeSessionAt: effectiveResumeSessionAt,
           forkSession: effectiveForkSession,
+          linearConnectionId: selectedLinearIssue ? (selectedLinearConnectionId || undefined) : undefined,
         },
         (progress) => {
           useStore.getState().addCreationProgress(progress);
@@ -699,11 +701,11 @@ export function HomePage() {
 
       // Auto-link Linear issue if one was selected
       if (selectedLinearIssue) {
-        api.linkLinearIssue(sessionId, selectedLinearIssue)
+        api.linkLinearIssue(sessionId, selectedLinearIssue, selectedLinearConnectionId || undefined)
           .then(() => useStore.getState().setLinkedLinearIssue(sessionId, selectedLinearIssue))
           .catch(() => { /* fire-and-forget: linking is best-effort */ });
         // Fire-and-forget: transition Linear issue to configured status
-        api.transitionLinearIssue(selectedLinearIssue.id).catch(() => {
+        api.transitionLinearIssue(selectedLinearIssue.id, selectedLinearConnectionId || undefined).catch(() => {
           /* fire-and-forget: status transition is best-effort */
         });
       }
@@ -1366,6 +1368,7 @@ export function HomePage() {
             selectedLinearIssue={selectedLinearIssue}
             onIssueSelect={handleIssueSelect}
             onBranchFromIssue={handleBranchFromIssue}
+            onConnectionSelect={setSelectedLinearConnectionId}
           />
         </div>
 

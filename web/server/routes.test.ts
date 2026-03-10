@@ -155,6 +155,20 @@ vi.mock("./linear-project-manager.js", () => ({
   _resetForTest: vi.fn(),
 }));
 
+// Mock linear-connections to isolate from the file-based connection store.
+// resolveApiKey returns a valid key by default; tests that need "no key"
+// override it to return null.
+vi.mock("./linear-connections.js", () => ({
+  listConnections: vi.fn(() => []),
+  getConnection: vi.fn(() => null),
+  getDefaultConnection: vi.fn(() => null),
+  createConnection: vi.fn(),
+  updateConnection: vi.fn(),
+  deleteConnection: vi.fn(),
+  resolveApiKey: vi.fn(() => ({ apiKey: "lin_api_123", connectionId: "test-conn" })),
+  _resetForTest: vi.fn(),
+}));
+
 const mockDiscoverClaudeSessions = vi.hoisted(() => vi.fn(
   (_options?: { limit?: number }) =>
     [] as Array<{
@@ -251,6 +265,7 @@ import * as gitUtils from "./git-utils.js";
 import * as sessionNames from "./session-names.js";
 import * as settingsManager from "./settings-manager.js";
 import * as linearProjectManager from "./linear-project-manager.js";
+import { resolveApiKey } from "./linear-connections.js";
 import { containerManager } from "./container-manager.js";
 
 // ─── Mock factories ──────────────────────────────────────────────────────────
@@ -309,6 +324,8 @@ let terminalManager: { getInfo: ReturnType<typeof vi.fn>; spawn: ReturnType<type
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Re-establish default return value for resolveApiKey after clearAllMocks
+  vi.mocked(resolveApiKey).mockReturnValue({ apiKey: "lin_api_123", connectionId: "test-conn" });
   mockDiscoverClaudeSessions.mockReturnValue([]);
   mockGetClaudeSessionHistoryPage.mockReturnValue(null);
   mockUpdateCheckerState.currentVersion = "0.22.1";
@@ -1603,9 +1620,9 @@ describe("POST /api/sessions/:id/archive — Linear transition", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.ok).toBe(true);
-    // Should have resolved backlog state from team states
-    expect(mockFetchLinearTeamStates).toHaveBeenCalledWith("lin_test_key");
-    expect(mockTransitionLinearIssue).toHaveBeenCalledWith("issue-1", "state-backlog", "lin_test_key");
+    // Should have resolved backlog state from team states (uses resolveApiKey)
+    expect(mockFetchLinearTeamStates).toHaveBeenCalledWith("lin_api_123");
+    expect(mockTransitionLinearIssue).toHaveBeenCalledWith("issue-1", "state-backlog", "lin_api_123", "test-conn");
     expect(json.linearTransition).toBeDefined();
     expect(json.linearTransition.ok).toBe(true);
     // Session should still be archived
@@ -1643,7 +1660,7 @@ describe("POST /api/sessions/:id/archive — Linear transition", () => {
       body: JSON.stringify({ linearTransition: "configured" }),
     });
     expect(res.status).toBe(200);
-    expect(mockTransitionLinearIssue).toHaveBeenCalledWith("issue-1", "state-custom", "lin_test_key");
+    expect(mockTransitionLinearIssue).toHaveBeenCalledWith("issue-1", "state-custom", "lin_api_123", "test-conn");
   });
 
   it("archives successfully even when transition fails", async () => {
@@ -2136,6 +2153,7 @@ describe("GET /api/settings", () => {
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4.6",
       linearApiKeyConfigured: false,
+      linearConnectionCount: 0,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
     linearArchiveTransition: false,
@@ -2184,6 +2202,7 @@ describe("GET /api/settings", () => {
       anthropicApiKeyConfigured: false,
       anthropicModel: "openai/gpt-4o-mini",
       linearApiKeyConfigured: true,
+      linearConnectionCount: 0,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
     linearArchiveTransition: false,
@@ -2290,6 +2309,7 @@ describe("PUT /api/settings", () => {
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4.6",
       linearApiKeyConfigured: false,
+      linearConnectionCount: 0,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
     linearArchiveTransition: false,
@@ -2653,11 +2673,12 @@ describe("GET /api/linear/issues", () => {
       updateChannel: "stable",
       updatedAt: 0,
     });
+    vi.mocked(resolveApiKey).mockReturnValue(null);
 
     const res = await app.request("/api/linear/issues?query=auth", { method: "GET" });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json).toEqual({ error: "Linear API key is not configured" });
+    expect(json).toEqual({ error: "No Linear connection configured" });
   });
 
   it("proxies Linear issue search results with branchName", async () => {
@@ -2918,11 +2939,12 @@ describe("GET /api/linear/connection", () => {
       updateChannel: "stable",
       updatedAt: 0,
     });
+    vi.mocked(resolveApiKey).mockReturnValue(null);
 
     const res = await app.request("/api/linear/connection", { method: "GET" });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json).toEqual({ error: "Linear API key is not configured" });
+    expect(json).toEqual({ error: "No Linear connection configured" });
   });
 
   it("returns viewer/team info when connection works", async () => {
@@ -3074,6 +3096,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       updateChannel: "stable",
       updatedAt: 0,
     });
+    vi.mocked(resolveApiKey).mockReturnValue(null);
 
     const res = await app.request("/api/linear/issues/issue-123/transition", {
       method: "POST",
@@ -3082,7 +3105,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
     });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json).toEqual({ error: "Linear API key is not configured" });
+    expect(json).toEqual({ error: "No Linear connection configured" });
   });
 
   // Happy path: uses configured stateId to update the issue directly
@@ -3231,11 +3254,12 @@ describe("GET /api/linear/projects", () => {
       updateChannel: "stable",
       updatedAt: 0,
     });
+    vi.mocked(resolveApiKey).mockReturnValue(null);
 
     const res = await app.request("/api/linear/projects", { method: "GET" });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json).toEqual({ error: "Linear API key is not configured" });
+    expect(json).toEqual({ error: "No Linear connection configured" });
   });
 
   it("returns project list from Linear API", async () => {
@@ -3324,11 +3348,12 @@ describe("GET /api/linear/project-issues", () => {
       updateChannel: "stable",
       updatedAt: 0,
     });
+    vi.mocked(resolveApiKey).mockReturnValue(null);
 
     const res = await app.request("/api/linear/project-issues?projectId=p1", { method: "GET" });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json).toEqual({ error: "Linear API key is not configured" });
+    expect(json).toEqual({ error: "No Linear connection configured" });
   });
 
   it("returns recent non-done issues for a project", async () => {
