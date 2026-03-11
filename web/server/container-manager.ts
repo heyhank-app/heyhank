@@ -13,11 +13,17 @@ import { tmpdir } from "node:os";
 // Types
 // ---------------------------------------------------------------------------
 
+export interface ContainerPortSpec {
+  port: number;
+  /** Host IP to bind to (default: 0.0.0.0). Use "127.0.0.1" for localhost-only. */
+  hostIp?: string;
+}
+
 export interface ContainerConfig {
   /** Docker image to use (e.g. "the-companion:latest", "node:22-slim") */
   image: string;
-  /** Container ports to expose (e.g. [3000, 8080]) */
-  ports: number[];
+  /** Container ports to expose (e.g. [3000, 8080] or [{ port: 6080, hostIp: "127.0.0.1" }]) */
+  ports: (number | ContainerPortSpec)[];
   /** Extra volume mounts in "host:container[:opts]" format */
   volumes?: string[];
   /** Extra env vars to inject into the container */
@@ -140,7 +146,8 @@ export class ContainerManager {
     const homedir = process.env.HOME || process.env.USERPROFILE || "/root";
 
     // Validate port numbers
-    for (const port of config.ports) {
+    for (const portSpec of config.ports) {
+      const port = typeof portSpec === "number" ? portSpec : portSpec.port;
       if (!Number.isInteger(port) || port < 1 || port > 65535) {
         throw new Error(`Invalid port number: ${port} (must be 1-65535)`);
       }
@@ -181,9 +188,11 @@ export class ContainerManager {
       args.push("-v", `${gitconfigPath}:/companion-host-gitconfig:ro`);
     }
 
-    // Port mappings: -p 0:{containerPort}
-    for (const port of config.ports) {
-      args.push("-p", `0:${port}`);
+    // Port mappings: -p [hostIp:]0:{containerPort}
+    for (const portSpec of config.ports) {
+      const port = typeof portSpec === "number" ? portSpec : portSpec.port;
+      const hostIp = typeof portSpec === "number" ? undefined : portSpec.hostIp;
+      args.push("-p", hostIp ? `${hostIp}:0:${port}` : `0:${port}`);
     }
 
     // Extra volumes
@@ -497,14 +506,15 @@ export class ContainerManager {
   }
 
   /** Parse `docker port` output to get host port mappings. */
-  private resolvePortMappings(containerId: string, ports: number[]): PortMapping[] {
+  private resolvePortMappings(containerId: string, ports: (number | ContainerPortSpec)[]): PortMapping[] {
     const mappings: PortMapping[] = [];
-    for (const containerPort of ports) {
+    for (const portSpec of ports) {
+      const containerPort = typeof portSpec === "number" ? portSpec : portSpec.port;
       try {
         const raw = exec(
           `docker port ${shellEscape(containerId)} ${containerPort}`,
         );
-        // Output like "0.0.0.0:49152" or "[::]:49152"
+        // Output like "0.0.0.0:49152" or "127.0.0.1:49152" or "[::]:49152"
         const match = raw.match(/:(\d+)$/m);
         if (match) {
           mappings.push({

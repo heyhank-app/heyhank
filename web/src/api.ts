@@ -379,6 +379,13 @@ export interface EditorStartResult {
   message?: string;
 }
 
+export interface BrowserStartResult {
+  available: boolean;
+  mode: "host" | "container";
+  url?: string;
+  message?: string;
+}
+
 /** Keep in sync with web/server/tailscale-manager.ts TailscaleStatus */
 export interface TailscaleStatus {
   installed: boolean;
@@ -1061,6 +1068,18 @@ export const api = {
   startEditor: (sessionId: string) =>
     post<EditorStartResult>(
       `/sessions/${encodeURIComponent(sessionId)}/editor/start`,
+    ),
+
+  // Browser preview
+  startBrowser: (sessionId: string, url?: string) =>
+    post<BrowserStartResult>(
+      `/sessions/${encodeURIComponent(sessionId)}/browser/start`,
+      url ? { url } : undefined,
+    ),
+  navigateBrowser: (sessionId: string, url: string) =>
+    post<{ ok?: boolean; error?: string }>(
+      `/sessions/${encodeURIComponent(sessionId)}/browser/navigate`,
+      { url },
     ),
 
   // Editor filesystem

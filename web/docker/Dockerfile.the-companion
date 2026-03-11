@@ -92,6 +92,19 @@ RUN curl -fsSL https://code-server.dev/install.sh -o /tmp/install-code-server.sh
     && sh /tmp/install-code-server.sh \
     && rm /tmp/install-code-server.sh
 
+# ── Layer 14: Browser preview (Xvfb + Chromium + noVNC) ──────────────────────
+# Provides a virtual display so agents and users can preview web apps running
+# inside the container. noVNC streams the display over WebSocket (port 6080).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xvfb x11vnc fluxbox \
+    chromium fonts-liberation fonts-noto-color-emoji \
+    libnss3 libatk-bridge2.0-0 libdrm2 libxcomposite1 \
+    libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 \
+    libasound2t64 \
+    novnc websockify procps xdotool \
+    && rm -rf /var/lib/apt/lists/*
+RUN ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html
+
 # ── Workspace ─────────────────────────────────────────────────────────────────
 WORKDIR /workspace
 
