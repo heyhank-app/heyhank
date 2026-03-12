@@ -1222,3 +1222,38 @@ describe("getStartingSessions", () => {
     expect(launcher.getStartingSessions()).toEqual([]);
   });
 });
+
+// ─── isCmdScript platform guard ───────────────────────────────────────────────
+
+describe("isCmdScript platform guard", () => {
+  const originalPlatform = process.platform;
+
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+  });
+
+  it("wraps .cmd binary with cmd.exe /c on win32", () => {
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    mockResolveBinary.mockReturnValue("C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd");
+
+    launcher.launch({ cwd: "/tmp" });
+
+    const [cmdAndArgs] = mockSpawn.mock.calls[0];
+    // On Windows, .cmd files should be spawned via cmd.exe /c
+    expect(cmdAndArgs[0]).toBe("cmd.exe");
+    expect(cmdAndArgs[1]).toBe("/c");
+    expect(cmdAndArgs[2]).toBe("C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd");
+  });
+
+  it("does not wrap .cmd binary with cmd.exe on non-Windows", () => {
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+    mockResolveBinary.mockReturnValue("/usr/local/bin/claude.cmd");
+
+    launcher.launch({ cwd: "/tmp" });
+
+    const [cmdAndArgs] = mockSpawn.mock.calls[0];
+    // On non-Windows, .cmd files should be spawned directly (no cmd.exe wrapping)
+    expect(cmdAndArgs[0]).toBe("/usr/local/bin/claude.cmd");
+    expect(cmdAndArgs[0]).not.toBe("cmd.exe");
+  });
+});

@@ -310,6 +310,7 @@ describe("getEnrichedPath", () => {
     const originalPlatform = process.platform;
 
     beforeEach(() => {
+      _resetPathCache(); // ensure no cross-contamination from non-Windows tests
       Object.defineProperty(process, "platform", { value: "win32", configurable: true });
     });
 
@@ -431,25 +432,45 @@ describe("resolveBinary", () => {
       expect(resolveBinary("D:\\nonexistent\\claude.cmd")).toBeNull();
     });
 
-    it("falls back to 'where' when 'which' fails on Windows", () => {
+    it("prefers 'where' over 'which' on Windows when both succeed", () => {
       _resetPathCache();
       mockExecSync.mockImplementation((cmd: string) => {
         if (typeof cmd === "string" && cmd.includes("-lic")) {
           return "___PATH_START___/usr/bin___PATH_END___\n";
         }
-        // 'which' fails on Windows CMD
-        if (typeof cmd === "string" && cmd.startsWith("which")) {
-          throw new Error("not found");
-        }
-        // 'where' succeeds
+        // 'where' succeeds with a native Win32 path
         if (typeof cmd === "string" && cmd.startsWith("where")) {
           return "C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd\r\nC:\\Users\\me\\AppData\\Roaming\\npm\\claude\r\n";
+        }
+        // 'which' also succeeds but returns a POSIX-style path (Git Bash)
+        if (typeof cmd === "string" && cmd.startsWith("which")) {
+          return "/c/Users/me/AppData/Roaming/npm/claude";
         }
         throw new Error("not found");
       });
 
-      // Should prefer .cmd result from 'where' output
+      // Should return the 'where' result (native Win32 path), not the 'which' POSIX path
       expect(resolveBinary("claude")).toBe("C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd");
+    });
+
+    it("falls back to 'which' when 'where' fails on Windows", () => {
+      _resetPathCache();
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (typeof cmd === "string" && cmd.includes("-lic")) {
+          return "___PATH_START___/usr/bin___PATH_END___\n";
+        }
+        // 'where' fails
+        if (typeof cmd === "string" && cmd.startsWith("where")) {
+          throw new Error("not found");
+        }
+        // 'which' succeeds (Git Bash fallback)
+        if (typeof cmd === "string" && cmd.startsWith("which")) {
+          return "/c/Users/me/AppData/Roaming/npm/claude";
+        }
+        throw new Error("not found");
+      });
+
+      expect(resolveBinary("claude")).toBe("/c/Users/me/AppData/Roaming/npm/claude");
     });
 
     it("prefers .cmd result from 'where' output with multiple lines", () => {

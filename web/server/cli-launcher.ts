@@ -548,7 +548,7 @@ export class CliLauncher {
       // Host-based spawn (original behavior)
       // On Windows, .cmd/.bat files cannot be spawned directly by Bun.spawn;
       // they must be invoked via cmd.exe /c.
-      const isCmdScript = binary.endsWith(".cmd") || binary.endsWith(".bat");
+      const isCmdScript = process.platform === "win32" && (binary.endsWith(".cmd") || binary.endsWith(".bat"));
       spawnCmd = isCmdScript ? ["cmd.exe", "/c", binary, ...args] : [binary, ...args];
       spawnEnv = {
         ...process.env,
@@ -762,7 +762,7 @@ export class CliLauncher {
         spawnCmd = [siblingNode, codexScript, ...args];
       } else {
         // On Windows, .cmd/.bat files cannot be spawned directly by Bun.spawn
-        const isCmdScript = binary.endsWith(".cmd") || binary.endsWith(".bat");
+        const isCmdScript = process.platform === "win32" && (binary.endsWith(".cmd") || binary.endsWith(".bat"));
         spawnCmd = isCmdScript ? ["cmd.exe", "/c", binary, ...args] : [binary, ...args];
       }
 
@@ -992,7 +992,7 @@ export class CliLauncher {
         spawnCmd = [siblingNode, codexScript, ...args];
       } else {
         // On Windows, .cmd/.bat files cannot be spawned directly by Bun.spawn
-        const isCmdScript = binary.endsWith(".cmd") || binary.endsWith(".bat");
+        const isCmdScript = process.platform === "win32" && (binary.endsWith(".cmd") || binary.endsWith(".bat"));
         spawnCmd = isCmdScript ? ["cmd.exe", "/c", binary, ...args] : [binary, ...args];
       }
 
