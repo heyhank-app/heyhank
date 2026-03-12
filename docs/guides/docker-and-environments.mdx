@@ -130,6 +130,16 @@ Add volume mounts in the environment profile to share directories between host a
 
 ### Auth and Git inside containers
 
+<Warning>
+Docker sessions require the `CLAUDE_CODE_OAUTH_TOKEN` environment variable to authenticate with Claude Code inside the container. To generate your token, run:
+
+```bash
+claude setup-token
+```
+
+This will output a token you can set in your environment profile's **Variables** tab, or export in your shell before starting the Companion.
+</Warning>
+
 The Companion automatically:
 - Copies your Claude Code / Codex credentials into the container
 - Sets up `gh` as the git credential helper for GitHub authentication
