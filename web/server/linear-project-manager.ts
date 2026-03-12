@@ -5,7 +5,7 @@ import {
   existsSync,
 } from "node:fs";
 import { join, dirname } from "node:path";
-import { homedir } from "node:os";
+import { COMPANION_HOME } from "./paths.js";
 
 export interface LinearProjectMapping {
   /** Normalized git repo root path (the key) */
@@ -20,7 +20,7 @@ export interface LinearProjectMapping {
   updatedAt: number;
 }
 
-const DEFAULT_PATH = join(homedir(), ".companion", "linear-projects.json");
+const DEFAULT_PATH = join(COMPANION_HOME, "linear-projects.json");
 
 let loaded = false;
 let filePath = DEFAULT_PATH;

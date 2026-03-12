@@ -1,9 +1,9 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { COMPANION_HOME } from "./paths.js";
 
 export const DEFAULT_COMPANION_CODEX_HOME = join(
-  homedir(),
-  ".companion",
+  COMPANION_HOME,
   "codex-home",
 );
 

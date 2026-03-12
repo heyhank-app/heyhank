@@ -463,18 +463,26 @@ export class CliLauncher {
       ? `ws://${containerSdkHost}:${this.port}/ws/cli/${sessionId}`
       : `ws://localhost:${this.port}/ws/cli/${sessionId}`;
 
-    // Claude Code rejects bypassPermissions when running with root/sudo. Most
-    // container images run as root by default, so downgrade to acceptEdits unless
-    // explicitly forced.
+    // Claude Code rejects bypassPermissions when running with root/sudo.
+    // Container sessions are downgraded by default; host sessions are only
+    // downgraded when this server itself runs as root.
     let effectivePermissionMode = options.permissionMode;
-    if (
+    const isRootProcess = typeof process.getuid === "function" && process.getuid() === 0;
+    const shouldDowngradeContainerBypass =
       isContainerized
       && options.permissionMode === "bypassPermissions"
-      && process.env.COMPANION_FORCE_BYPASS_IN_CONTAINER !== "1"
-    ) {
+      && process.env.COMPANION_FORCE_BYPASS_IN_CONTAINER !== "1";
+    const shouldDowngradeRootBypass =
+      !isContainerized
+      && isRootProcess
+      && options.permissionMode === "bypassPermissions"
+      && process.env.COMPANION_FORCE_BYPASS_AS_ROOT !== "1";
+
+    if (shouldDowngradeContainerBypass || shouldDowngradeRootBypass) {
+      const scope = isContainerized ? "container" : "root";
       console.warn(
-        `[cli-launcher] Session ${sessionId}: downgrading container permission mode ` +
-        `from bypassPermissions to acceptEdits (set COMPANION_FORCE_BYPASS_IN_CONTAINER=1 to force bypass).`,
+        `[cli-launcher] Session ${sessionId}: downgrading ${scope} permission mode ` +
+        `from bypassPermissions to acceptEdits.`,
       );
       effectivePermissionMode = "acceptEdits";
       info.permissionMode = "acceptEdits";

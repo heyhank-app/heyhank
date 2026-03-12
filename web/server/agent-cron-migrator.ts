@@ -1,12 +1,11 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import * as agentStore from "./agent-store.js";
 import type { CronJob } from "./cron-types.js";
+import { COMPANION_HOME } from "./paths.js";
 
-const COMPANION_DIR = join(homedir(), ".companion");
-const CRON_DIR = join(COMPANION_DIR, "cron");
-const MIGRATION_FLAG = join(COMPANION_DIR, ".cron-migrated");
+const CRON_DIR = join(COMPANION_HOME, "cron");
+const MIGRATION_FLAG = join(COMPANION_HOME, ".cron-migrated");
 
 /**
  * One-time migration: convert existing cron jobs into agents with schedule triggers.

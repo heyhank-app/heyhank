@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { homedir } from "node:os";
+import { COMPANION_HOME } from "./paths.js";
 
 export type PromptScope = "global" | "project";
 
@@ -22,11 +22,10 @@ export interface PromptUpdateFields {
   projectPaths?: string[];
 }
 
-const COMPANION_DIR = join(homedir(), ".companion");
-const PROMPTS_FILE = join(COMPANION_DIR, "prompts.json");
+const PROMPTS_FILE = join(COMPANION_HOME, "prompts.json");
 
 function ensureDir(): void {
-  mkdirSync(COMPANION_DIR, { recursive: true });
+  mkdirSync(COMPANION_HOME, { recursive: true });
 }
 
 function normalizePath(path: string): string {

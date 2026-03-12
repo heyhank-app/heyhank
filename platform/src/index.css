@@ -1,0 +1,166 @@
+@import "tailwindcss";
+
+/* ─── Design System Tokens ────────────────────────────────────────────────────
+ * Matches the Companion web/ design language: --color-cc-* naming.
+ * Dark-first theme with coral primary accent.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+@theme {
+  --color-cc-bg: #0c0c0c;
+  --color-cc-fg: #faf9f5;
+  --color-cc-card: #141413;
+  --color-cc-primary: #d97757;
+  --color-cc-primary-hover: #e08b6b;
+  --color-cc-border: rgba(222, 220, 209, 0.12);
+  --color-cc-border-hover: rgba(222, 220, 209, 0.20);
+  --color-cc-muted: #a8a29e;
+  --color-cc-muted-fg: #78716c;
+  --color-cc-sidebar: #111110;
+  --color-cc-input-bg: #1a1a19;
+  --color-cc-hover: rgba(222, 220, 209, 0.06);
+  --color-cc-active: rgba(222, 220, 209, 0.10);
+  --color-cc-success: #48bb78;
+  --color-cc-error: #fc8181;
+  --color-cc-warning: #f6e05e;
+  --color-cc-separator: rgba(222, 220, 209, 0.08);
+  --color-cc-accent-glow: rgba(217, 119, 87, 0.15);
+
+  --font-display: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo,
+    Consolas, monospace;
+  --font-body: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+/* ─── Animations ──────────────────────────────────────────────────────────── */
+
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-fade-slide-up {
+  animation: fadeSlideUp 0.4s ease-out both;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out both;
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.animate-blink {
+  animation: blink 1s step-end infinite;
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Staggered delays for list items */
+.delay-1 { animation-delay: 0.05s; }
+.delay-2 { animation-delay: 0.10s; }
+.delay-3 { animation-delay: 0.15s; }
+.delay-4 { animation-delay: 0.20s; }
+.delay-5 { animation-delay: 0.25s; }
+
+/* ─── Glow Effects ────────────────────────────────────────────────────────── */
+
+.glow-primary {
+  box-shadow: 0 0 20px rgba(217, 119, 87, 0.15),
+    0 0 40px rgba(217, 119, 87, 0.05);
+}
+
+.glow-primary-hover:hover {
+  box-shadow: 0 0 30px rgba(217, 119, 87, 0.25),
+    0 0 60px rgba(217, 119, 87, 0.1);
+}
+
+/* ─── Grain Texture ───────────────────────────────────────────────────────── */
+
+.grain::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+
+/* ─── Scrollbar ───────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-cc-muted-fg);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-cc-muted);
+}
+
+/* ─── Base ────────────────────────────────────────────────────────────────── */
+
+@layer base {
+  html {
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-cc-primary);
+    outline-offset: 2px;
+  }
+
+  button, [role="button"], a, input, textarea, select {
+    touch-action: manipulation;
+  }
+}
+
+/* ─── Reduced Motion ──────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

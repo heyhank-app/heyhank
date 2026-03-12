@@ -10,11 +10,11 @@ import { homedir } from "node:os";
 import { execSync } from "node:child_process";
 import { DEFAULT_PORT_PROD } from "./constants.js";
 import { getServicePath } from "./path-resolver.js";
+import { COMPANION_HOME } from "./paths.js";
 
 // ─── Shared Constants ───────────────────────────────────────────────────────────
 
-const COMPANION_DIR = join(homedir(), ".companion");
-const LOG_DIR = join(COMPANION_DIR, "logs");
+const LOG_DIR = join(COMPANION_HOME, "logs");
 const STDOUT_LOG = join(LOG_DIR, "companion.log");
 const STDERR_LOG = join(LOG_DIR, "companion.error.log");
 

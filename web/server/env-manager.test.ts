@@ -246,6 +246,229 @@ describe("updateEnv", () => {
 });
 
 // ===========================================================================
+// getEffectiveImage
+// ===========================================================================
+describe("getEffectiveImage", () => {
+  it("returns null when the env does not exist", () => {
+    // Non-existent slug should return null without throwing
+    const result = envManager.getEffectiveImage("nonexistent");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when env has neither imageTag nor baseImage", () => {
+    // An env created without any docker options has no image fields
+    envManager.createEnv("Plain Env");
+    const result = envManager.getEffectiveImage("plain-env");
+    expect(result).toBeNull();
+  });
+
+  it("returns baseImage when only baseImage is set", () => {
+    // baseImage acts as the fallback when no custom image has been built
+    envManager.createEnv("Base Only", {}, { baseImage: "ubuntu:22.04" });
+    const result = envManager.getEffectiveImage("base-only");
+    expect(result).toBe("ubuntu:22.04");
+  });
+
+  it("returns imageTag when only imageTag is set", () => {
+    // imageTag is set after a successful docker build; here we simulate
+    // that by creating an env then updating it with an imageTag
+    envManager.createEnv("Tagged Only");
+    envManager.updateEnv("tagged-only", { imageTag: "companion-env-tagged:latest" });
+
+    const result = envManager.getEffectiveImage("tagged-only");
+    expect(result).toBe("companion-env-tagged:latest");
+  });
+
+  it("returns imageTag over baseImage when both are set (imageTag takes priority)", () => {
+    // The function documents priority: imageTag > baseImage > null.
+    // When both are present, imageTag should win.
+    envManager.createEnv("Both Images", {}, { baseImage: "ubuntu:22.04" });
+    envManager.updateEnv("both-images", { imageTag: "companion-env-both:v2" });
+
+    const result = envManager.getEffectiveImage("both-images");
+    expect(result).toBe("companion-env-both:v2");
+  });
+});
+
+// ===========================================================================
+// updateBuildStatus
+// ===========================================================================
+describe("updateBuildStatus", () => {
+  it("returns null for a non-existent slug", () => {
+    // Should gracefully return null rather than throwing
+    const result = envManager.updateBuildStatus("ghost", "building");
+    expect(result).toBeNull();
+  });
+
+  it("sets buildStatus to 'building'", () => {
+    envManager.createEnv("Build Test");
+    const result = envManager.updateBuildStatus("build-test", "building");
+
+    expect(result).not.toBeNull();
+    expect(result!.buildStatus).toBe("building");
+  });
+
+  it("sets buildStatus to 'error' with an error message via opts", () => {
+    // When a build fails, both status and error message should be recorded
+    envManager.createEnv("Error Test");
+    const result = envManager.updateBuildStatus("error-test", "error", {
+      error: "Dockerfile syntax error on line 5",
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.buildStatus).toBe("error");
+    expect(result!.buildError).toBe("Dockerfile syntax error on line 5");
+  });
+
+  it("sets imageTag via opts when provided", () => {
+    // After a build completes, the imageTag is stored so it can be used later
+    envManager.createEnv("Tag Test");
+    const result = envManager.updateBuildStatus("tag-test", "building", {
+      imageTag: "companion-env-tag:latest",
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.imageTag).toBe("companion-env-tag:latest");
+  });
+
+  it("clears buildError and sets lastBuiltAt on 'success' status", () => {
+    // Simulate a failed build followed by a successful one.
+    // The success status should clear the previous error and record the build timestamp.
+    envManager.createEnv("Success Flow");
+    envManager.updateBuildStatus("success-flow", "error", {
+      error: "previous failure",
+    });
+
+    const before = Date.now();
+    const result = envManager.updateBuildStatus("success-flow", "success");
+    const after = Date.now();
+
+    expect(result).not.toBeNull();
+    expect(result!.buildStatus).toBe("success");
+    expect(result!.buildError).toBeUndefined();
+    expect(result!.lastBuiltAt).toBeGreaterThanOrEqual(before);
+    expect(result!.lastBuiltAt).toBeLessThanOrEqual(after);
+  });
+
+  it("persists updated build status to disk", () => {
+    // Verify that the status change is actually written to the JSON file on disk
+    envManager.createEnv("Persist Check");
+    envManager.updateBuildStatus("persist-check", "building");
+
+    const raw = readFileSync(join(envsDir(), "persist-check.json"), "utf-8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.buildStatus).toBe("building");
+  });
+
+  it("advances updatedAt timestamp", async () => {
+    envManager.createEnv("Timestamp Check");
+    const original = envManager.getEnv("timestamp-check")!;
+    const originalUpdatedAt = original.updatedAt;
+
+    // Small delay to ensure Date.now() advances
+    await new Promise((r) => setTimeout(r, 10));
+
+    const result = envManager.updateBuildStatus("timestamp-check", "building");
+    expect(result).not.toBeNull();
+    expect(result!.updatedAt).toBeGreaterThan(originalUpdatedAt);
+  });
+});
+
+// ===========================================================================
+// createEnv with docker options
+// ===========================================================================
+describe("createEnv with docker options", () => {
+  it("stores dockerfile content when provided", () => {
+    const dockerfile = "FROM node:20\nRUN npm install";
+    const env = envManager.createEnv("Docker App", {}, { dockerfile });
+
+    expect(env.dockerfile).toBe(dockerfile);
+  });
+
+  it("stores baseImage when provided", () => {
+    const env = envManager.createEnv("Based App", {}, { baseImage: "python:3.12" });
+
+    expect(env.baseImage).toBe("python:3.12");
+  });
+
+  it("stores ports array when provided", () => {
+    const env = envManager.createEnv("Port App", {}, { ports: [3000, 8080] });
+
+    expect(env.ports).toEqual([3000, 8080]);
+  });
+
+  it("stores volumes array when provided", () => {
+    const volumes = ["/host/data:/container/data:ro", "/tmp:/tmp"];
+    const env = envManager.createEnv("Volume App", {}, { volumes });
+
+    expect(env.volumes).toEqual(volumes);
+  });
+
+  it("stores initScript when provided", () => {
+    const initScript = "#!/bin/bash\napt-get update && apt-get install -y curl";
+    const env = envManager.createEnv("Init App", {}, { initScript });
+
+    expect(env.initScript).toBe(initScript);
+  });
+
+  it("stores all docker options together", () => {
+    // All docker options can be provided simultaneously
+    const docker = {
+      dockerfile: "FROM alpine\nRUN apk add git",
+      baseImage: "alpine:latest",
+      ports: [443, 8443],
+      volumes: ["/data:/data"],
+      initScript: "echo hello",
+    };
+    const env = envManager.createEnv("Full Docker", { API_KEY: "secret" }, docker);
+
+    expect(env.name).toBe("Full Docker");
+    expect(env.variables).toEqual({ API_KEY: "secret" });
+    expect(env.dockerfile).toBe(docker.dockerfile);
+    expect(env.baseImage).toBe(docker.baseImage);
+    expect(env.ports).toEqual(docker.ports);
+    expect(env.volumes).toEqual(docker.volumes);
+    expect(env.initScript).toBe(docker.initScript);
+  });
+
+  it("persists docker options to disk as JSON", () => {
+    envManager.createEnv("Disk Docker", {}, {
+      dockerfile: "FROM busybox",
+      ports: [9090],
+    });
+
+    const raw = readFileSync(join(envsDir(), "disk-docker.json"), "utf-8");
+    const parsed = JSON.parse(raw);
+    expect(parsed.dockerfile).toBe("FROM busybox");
+    expect(parsed.ports).toEqual([9090]);
+  });
+
+  it("does not set docker fields when docker param is omitted", () => {
+    // Ensures that creating an env without the docker param leaves
+    // all docker-related fields undefined
+    const env = envManager.createEnv("No Docker");
+
+    expect(env.dockerfile).toBeUndefined();
+    expect(env.baseImage).toBeUndefined();
+    expect(env.imageTag).toBeUndefined();
+    expect(env.ports).toBeUndefined();
+    expect(env.volumes).toBeUndefined();
+    expect(env.initScript).toBeUndefined();
+  });
+
+  it("does not set docker fields when docker param is an empty object", () => {
+    // An empty docker object should not create any docker fields
+    const env = envManager.createEnv("Empty Docker", {}, {});
+
+    expect(env.dockerfile).toBeUndefined();
+    expect(env.baseImage).toBeUndefined();
+    expect(env.ports).toBeUndefined();
+    expect(env.volumes).toBeUndefined();
+    expect(env.initScript).toBeUndefined();
+  });
+});
+
+// ===========================================================================
 // deleteEnv
 // ===========================================================================
 describe("deleteEnv", () => {

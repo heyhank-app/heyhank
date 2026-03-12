@@ -7,13 +7,12 @@ import {
   existsSync,
 } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import type { CronJob, CronJobCreateInput } from "./cron-types.js";
+import { COMPANION_HOME } from "./paths.js";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
-const COMPANION_DIR = join(homedir(), ".companion");
-const CRON_DIR = join(COMPANION_DIR, "cron");
+const CRON_DIR = join(COMPANION_HOME, "cron");
 
 function ensureDir(): void {
   mkdirSync(CRON_DIR, { recursive: true });

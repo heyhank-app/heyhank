@@ -215,12 +215,18 @@ describe("launch", () => {
   });
 
   it("passes --permission-mode when provided", () => {
-    launcher.launch({ permissionMode: "bypassPermissions", cwd: "/tmp" });
+    // Allow bypassPermissions through even when tests run as root
+    process.env.COMPANION_FORCE_BYPASS_AS_ROOT = "1";
+    try {
+      launcher.launch({ permissionMode: "bypassPermissions", cwd: "/tmp" });
 
-    const [cmdAndArgs] = mockSpawn.mock.calls[0];
-    const modeIdx = cmdAndArgs.indexOf("--permission-mode");
-    expect(modeIdx).toBeGreaterThan(-1);
-    expect(cmdAndArgs[modeIdx + 1]).toBe("bypassPermissions");
+      const [cmdAndArgs] = mockSpawn.mock.calls[0];
+      const modeIdx = cmdAndArgs.indexOf("--permission-mode");
+      expect(modeIdx).toBeGreaterThan(-1);
+      expect(cmdAndArgs[modeIdx + 1]).toBe("bypassPermissions");
+    } finally {
+      delete process.env.COMPANION_FORCE_BYPASS_AS_ROOT;
+    }
   });
 
   it("downgrades bypassPermissions to acceptEdits for containerized Claude sessions", () => {
@@ -237,6 +243,31 @@ describe("launch", () => {
     expect(bashCmd).toContain("--permission-mode");
     expect(bashCmd).toContain("acceptEdits");
     expect(bashCmd).not.toContain("bypassPermissions");
+  });
+
+  it("downgrades bypassPermissions to acceptEdits when host launcher runs as root", () => {
+    const originalGetuid = process.getuid;
+    Object.defineProperty(process, "getuid", {
+      value: () => 0,
+      configurable: true,
+    });
+
+    try {
+      launcher.launch({
+        cwd: "/tmp/project",
+        permissionMode: "bypassPermissions",
+      });
+
+      const [cmdAndArgs] = mockSpawn.mock.calls[0];
+      const modeIdx = cmdAndArgs.indexOf("--permission-mode");
+      expect(modeIdx).toBeGreaterThan(-1);
+      expect(cmdAndArgs[modeIdx + 1]).toBe("acceptEdits");
+    } finally {
+      Object.defineProperty(process, "getuid", {
+        value: originalGetuid,
+        configurable: true,
+      });
+    }
   });
 
   it("uses COMPANION_CONTAINER_SDK_HOST for containerized sdk-url when set", () => {

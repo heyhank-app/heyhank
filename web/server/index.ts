@@ -19,7 +19,7 @@ import { SessionStore } from "./session-store.js";
 import { WorktreeTracker } from "./worktree-tracker.js";
 import { containerManager } from "./container-manager.js";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { COMPANION_HOME } from "./paths.js";
 import { TerminalManager } from "./terminal-manager.js";
 import { generateSessionTitle } from "./auto-namer.js";
 import * as sessionNames from "./session-names.js";
@@ -29,6 +29,7 @@ import { RecorderManager } from "./recorder.js";
 import { CronScheduler } from "./cron-scheduler.js";
 import { AgentExecutor } from "./agent-executor.js";
 import { migrateCronJobsToAgents } from "./agent-cron-migrator.js";
+import { authenticateManagedWebSocket } from "./ws-auth.js";
 import { LinearAgentBridge } from "./linear-agent-bridge.js";
 import { NoVncProxy } from "./novnc-proxy.js";
 
@@ -48,11 +49,12 @@ import { DEFAULT_PORT_DEV, DEFAULT_PORT_PROD } from "./constants.js";
 
 const defaultPort = process.env.NODE_ENV === "production" ? DEFAULT_PORT_PROD : DEFAULT_PORT_DEV;
 const port = Number(process.env.PORT) || defaultPort;
+const host = process.env.HOST || "0.0.0.0";
 const sessionStore = new SessionStore(process.env.COMPANION_SESSION_DIR);
 const wsBridge = new WsBridge();
 const launcher = new CliLauncher(port);
 const worktreeTracker = new WorktreeTracker();
-const CONTAINER_STATE_PATH = join(homedir(), ".companion", "containers.json");
+const CONTAINER_STATE_PATH = join(COMPANION_HOME, "containers.json");
 const terminalManager = new TerminalManager();
 const noVncProxy = new NoVncProxy();
 const prPoller = new PRPoller(wsBridge);
@@ -189,6 +191,30 @@ if (recorder.isGloballyEnabled()) {
 
 const app = new Hono();
 
+// ── Health endpoint — always unauthenticated (used by Fly.io + control plane) ─
+const startTime = Date.now();
+app.get("/health", (c) => {
+  return c.json({
+    ok: true,
+    uptime: Math.floor((Date.now() - startTime) / 1000),
+    sessions: launcher.listSessions().length,
+  });
+});
+
+// ── Managed auth middleware — only active when COMPANION_AUTH_ENABLED=1 ────
+const hasManagedAuthSecret = Boolean(process.env.COMPANION_AUTH_SECRET?.trim());
+const managedAuthEnabled =
+  process.env.COMPANION_AUTH_ENABLED === "1" ||
+  (hasManagedAuthSecret && process.env.COMPANION_AUTH_ENABLED !== "0");
+
+if (managedAuthEnabled) {
+  const { managedAuth } = await import("./middleware/managed-auth.js");
+  app.use("/*", managedAuth);
+  console.log("[server] Managed auth enabled");
+} else {
+  console.log("[server] Managed auth disabled");
+}
+
 app.use("/api/*", cors());
 app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor, linearAgentBridge, port));
 
@@ -239,6 +265,7 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const server = Bun.serve<SocketData>({
+  hostname: host,
   port,
   idleTimeout: 0, // Disable top-level idle timeout — it kills idle browser WebSockets (code 1006)
   async fetch(req, server) {
@@ -263,9 +290,16 @@ const server = Bun.serve<SocketData>({
     // ── Browser WebSocket — connects to a specific session ─────────────
     const browserMatch = url.pathname.match(/^\/ws\/browser\/([a-f0-9-]+)$/);
     if (browserMatch) {
-      const wsToken = url.searchParams.get("token");
-      if (!isLocalhost && !verifyToken(wsToken)) {
-        return new Response("Unauthorized", { status: 401 });
+      if (managedAuthEnabled) {
+        const auth = await authenticateManagedWebSocket(req);
+        if (!auth.ok) {
+          return new Response(auth.body || "Unauthorized", { status: auth.status });
+        }
+      } else {
+        const wsToken = url.searchParams.get("token");
+        if (!isLocalhost && !verifyToken(wsToken)) {
+          return new Response("Unauthorized", { status: 401 });
+        }
       }
       const sessionId = browserMatch[1];
       const upgraded = server.upgrade(req, {
@@ -278,9 +312,16 @@ const server = Bun.serve<SocketData>({
     // ── Terminal WebSocket — embedded terminal PTY connection ─────────
     const termMatch = url.pathname.match(/^\/ws\/terminal\/([a-f0-9-]+)$/);
     if (termMatch) {
-      const wsToken = url.searchParams.get("token");
-      if (!isLocalhost && !verifyToken(wsToken)) {
-        return new Response("Unauthorized", { status: 401 });
+      if (managedAuthEnabled) {
+        const auth = await authenticateManagedWebSocket(req);
+        if (!auth.ok) {
+          return new Response(auth.body || "Unauthorized", { status: auth.status });
+        }
+      } else {
+        const wsToken = url.searchParams.get("token");
+        if (!isLocalhost && !verifyToken(wsToken)) {
+          return new Response("Unauthorized", { status: 401 });
+        }
       }
       const terminalId = termMatch[1];
       const upgraded = server.upgrade(req, {
@@ -293,9 +334,16 @@ const server = Bun.serve<SocketData>({
     // ── noVNC WebSocket — proxies VNC data to container's websockify ────
     const novncMatch = url.pathname.match(/^\/ws\/novnc\/([a-f0-9-]+)$/);
     if (novncMatch) {
-      const wsToken = url.searchParams.get("token");
-      if (!isLocalhost && !verifyToken(wsToken)) {
-        return new Response("Unauthorized", { status: 401 });
+      if (managedAuthEnabled) {
+        const auth = await authenticateManagedWebSocket(req);
+        if (!auth.ok) {
+          return new Response(auth.body || "Unauthorized", { status: auth.status });
+        }
+      } else {
+        const wsToken = url.searchParams.get("token");
+        if (!isLocalhost && !verifyToken(wsToken)) {
+          return new Response("Unauthorized", { status: 401 });
+        }
       }
       const sessionId = novncMatch[1];
       const upgraded = server.upgrade(req, {
@@ -353,7 +401,7 @@ const server = Bun.serve<SocketData>({
 });
 
 const authToken = getToken();
-console.log(`Server running on http://localhost:${server.port}`);
+console.log(`Server running on http://${host}:${server.port}`);
 console.log();
 console.log(`  Auth token: ${authToken}`);
 if (process.env.COMPANION_AUTH_TOKEN) {

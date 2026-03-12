@@ -5,7 +5,7 @@ import {
   existsSync,
 } from "node:fs";
 import { join, dirname } from "node:path";
-import { homedir } from "node:os";
+import { COMPANION_HOME } from "./paths.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ export interface StoredLinearIssue {
 
 // ─── Paths ───────────────────────────────────────────────────────────────────
 
-const DEFAULT_PATH = join(homedir(), ".companion", "session-linear-issues.json");
+const DEFAULT_PATH = join(COMPANION_HOME, "session-linear-issues.json");
 
 // ─── Store ───────────────────────────────────────────────────────────────────
 

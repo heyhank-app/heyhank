@@ -1,0 +1,82 @@
+name: Docker Server Image
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag override (default: latest)"
+        required: false
+        default: "latest"
+      npm_version:
+        description: "the-companion npm version (default: latest)"
+        required: false
+        default: "latest"
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: stangirard/the-companion-server
+  DEFAULT_BASE_IMAGE: docker.io/stangirard/the-companion:latest
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compute tags and build args
+        id: prep
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_NPM_VERSION: ${{ github.event.inputs.npm_version }}
+          VAR_BASE_IMAGE: ${{ vars.THE_COMPANION_BASE_IMAGE }}
+        run: |
+          set -euo pipefail
+
+          BASE_IMAGE="${VAR_BASE_IMAGE:-}"
+          if [ -z "$BASE_IMAGE" ]; then
+            BASE_IMAGE="${DEFAULT_BASE_IMAGE}"
+          fi
+          echo "base_image=$BASE_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "companion_source=npm" >> "$GITHUB_OUTPUT"
+
+          if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
+            RAW_TAG="${RELEASE_TAG}"
+            VERSION_TAG="${RAW_TAG#the-companion-v}"
+            echo "npm_version=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
+            echo "image_tags=${REGISTRY}/${IMAGE_NAME}:${VERSION_TAG},${REGISTRY}/${IMAGE_NAME}:latest" >> "$GITHUB_OUTPUT"
+          else
+            MANUAL_TAG="${INPUT_TAG:-latest}"
+            NPM_VERSION="${INPUT_NPM_VERSION:-latest}"
+            echo "npm_version=${NPM_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "image_tags=${REGISTRY}/${IMAGE_NAME}:${MANUAL_TAG}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build & push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: platform/docker/Dockerfile.fly-managed
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            BASE_IMAGE=${{ steps.prep.outputs.base_image }}
+            COMPANION_SOURCE=${{ steps.prep.outputs.companion_source }}
+            COMPANION_NPM_VERSION=${{ steps.prep.outputs.npm_version }}
+          tags: ${{ steps.prep.outputs.image_tags }}

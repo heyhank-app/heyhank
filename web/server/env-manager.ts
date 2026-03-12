@@ -7,7 +7,7 @@ import {
   existsSync,
 } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { COMPANION_HOME } from "./paths.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -54,8 +54,7 @@ export interface EnvUpdateFields {
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
-const COMPANION_DIR = join(homedir(), ".companion");
-const ENVS_DIR = join(COMPANION_DIR, "envs");
+const ENVS_DIR = join(COMPANION_HOME, "envs");
 
 function ensureDir(): void {
   mkdirSync(ENVS_DIR, { recursive: true });
