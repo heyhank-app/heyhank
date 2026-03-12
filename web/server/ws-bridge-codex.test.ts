@@ -134,7 +134,7 @@ describe("attachCodexAdapterHandlers", () => {
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
-      aiValidationAutoDeny: true,
+      aiValidationAutoDeny: false,
       publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,

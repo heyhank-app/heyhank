@@ -54,12 +54,12 @@ afterEach(() => {
 
 describe("getEffectiveAiValidation", () => {
   it("returns global defaults when session fields are undefined", () => {
-    // Global defaults: enabled=false, autoApprove=true, autoDeny=true
+    // Global defaults: enabled=false, autoApprove=true, autoDeny=false
     const session = makeSessionState();
     const result = getEffectiveAiValidation(session);
     expect(result.enabled).toBe(false);
     expect(result.autoApprove).toBe(true);
-    expect(result.autoDeny).toBe(true);
+    expect(result.autoDeny).toBe(false);
     expect(result.anthropicApiKey).toBe("");
   });
 
@@ -72,7 +72,7 @@ describe("getEffectiveAiValidation", () => {
     const result = getEffectiveAiValidation(session);
     expect(result.enabled).toBe(false);
     expect(result.autoApprove).toBe(true);
-    expect(result.autoDeny).toBe(true);
+    expect(result.autoDeny).toBe(false);
   });
 
   it("session override wins over global when session fields are set", () => {

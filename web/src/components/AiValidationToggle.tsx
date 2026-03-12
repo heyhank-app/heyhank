@@ -18,7 +18,7 @@ export function AiValidationToggle({ sessionId }: AiValidationToggleProps) {
 
   const enabled = session?.aiValidationEnabled ?? false;
   const autoApprove = session?.aiValidationAutoApprove ?? true;
-  const autoDeny = session?.aiValidationAutoDeny ?? true;
+  const autoDeny = session?.aiValidationAutoDeny ?? false;
 
   // Close dropdown on outside click
   useEffect(() => {

@@ -38,7 +38,7 @@ beforeEach(() => {
   mockSession = {
     aiValidationEnabled: false,
     aiValidationAutoApprove: true,
-    aiValidationAutoDeny: true,
+    aiValidationAutoDeny: false,
   };
   mockSendSetAiValidation.mockClear();
   mockSetSessionAiValidation.mockClear();

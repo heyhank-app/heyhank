@@ -38,7 +38,7 @@ function makeSettings(overrides: Partial<CompanionSettings> = {}): CompanionSett
     editorTabEnabled: false,
     aiValidationEnabled: false,
     aiValidationAutoApprove: true,
-    aiValidationAutoDeny: true,
+    aiValidationAutoDeny: false,
     publicUrl: "",
     updateChannel: "stable",
     updatedAt: 0,
