@@ -4204,4 +4204,131 @@ describe("CodexAdapter RPC timeout error surfacing", () => {
     const errorMsg = (errors[errors.length - 1] as { message: string }).message;
     expect(errorMsg).toContain("not responding");
   });
+
+  it("triggers disconnectCb on turn/start RPC timeout to enable auto-relaunch", async () => {
+    // When turn/start times out, the adapter should fire the disconnect callback
+    // so the ws-bridge can trigger the auto-relaunch chain.
+    let notifHandler: ((m: string, p: Record<string, unknown>) => void) | null = null;
+    let reqHandler: ((m: string, id: number, p: Record<string, unknown>) => void) | null = null;
+
+    const transport: ICodexTransport = {
+      call: vi.fn(async (method: string) => {
+        if (method === "initialize") return { userAgent: "codex" };
+        if (method === "thread/start" || method === "thread/create") return { thread: { id: "thr_1" } };
+        if (method === "account/rateLimits/read") return {};
+        if (method === "turn/start") {
+          throw new Error("RPC timeout: turn/start did not respond within 120000ms");
+        }
+        return {};
+      }),
+      notify: vi.fn(async () => {}),
+      respond: vi.fn(async () => {}),
+      onNotification: vi.fn((h) => { notifHandler = h; }),
+      onRequest: vi.fn((h) => { reqHandler = h; }),
+      onRawIncoming: vi.fn(),
+      onRawOutgoing: vi.fn(),
+      isConnected: vi.fn(() => true),
+    };
+
+    const disconnectCb = vi.fn();
+    const adapter = new CodexAdapter(transport, "timeout-disconnect-test", { model: "o4-mini", cwd: "/tmp" });
+    adapter.onBrowserMessage(() => {});
+    adapter.onDisconnect(disconnectCb);
+
+    // Wait for init
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Send a user message — turn/start will timeout
+    adapter.sendBrowserMessage({ type: "user_message", content: "hello" });
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(disconnectCb).toHaveBeenCalledOnce();
+  });
+
+  it("triggers disconnectCb on turn/start Transport closed error", async () => {
+    // When turn/start fails with "Transport closed", the adapter should also
+    // fire the disconnect callback for auto-relaunch.
+    let notifHandler: ((m: string, p: Record<string, unknown>) => void) | null = null;
+    let reqHandler: ((m: string, id: number, p: Record<string, unknown>) => void) | null = null;
+
+    const transport: ICodexTransport = {
+      call: vi.fn(async (method: string) => {
+        if (method === "initialize") return { userAgent: "codex" };
+        if (method === "thread/start" || method === "thread/create") return { thread: { id: "thr_1" } };
+        if (method === "account/rateLimits/read") return {};
+        if (method === "turn/start") {
+          throw new Error("Transport closed");
+        }
+        return {};
+      }),
+      notify: vi.fn(async () => {}),
+      respond: vi.fn(async () => {}),
+      onNotification: vi.fn((h) => { notifHandler = h; }),
+      onRequest: vi.fn((h) => { reqHandler = h; }),
+      onRawIncoming: vi.fn(),
+      onRawOutgoing: vi.fn(),
+      isConnected: vi.fn(() => true),
+    };
+
+    const disconnectCb = vi.fn();
+    const adapter = new CodexAdapter(transport, "transport-closed-test", { model: "o4-mini", cwd: "/tmp" });
+    adapter.onBrowserMessage(() => {});
+    adapter.onDisconnect(disconnectCb);
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    adapter.sendBrowserMessage({ type: "user_message", content: "hello" });
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(disconnectCb).toHaveBeenCalledOnce();
+  });
+
+  it("triggers disconnectCb on turn/interrupt RPC timeout", async () => {
+    // When turn/interrupt times out, the adapter should fire the disconnect
+    // callback to trigger auto-relaunch of the stuck Codex session.
+    let notifHandler: ((m: string, p: Record<string, unknown>) => void) | null = null;
+    let reqHandler: ((m: string, id: number, p: Record<string, unknown>) => void) | null = null;
+
+    const transport: ICodexTransport = {
+      call: vi.fn(async (method: string) => {
+        if (method === "initialize") return { userAgent: "codex" };
+        if (method === "thread/start" || method === "thread/create") return { thread: { id: "thr_1" } };
+        if (method === "account/rateLimits/read") return {};
+        if (method === "turn/start") return { turn: { id: "turn_1" } };
+        if (method === "turn/interrupt") {
+          throw new Error("RPC timeout: turn/interrupt did not respond within 15000ms");
+        }
+        return {};
+      }),
+      notify: vi.fn(async () => {}),
+      respond: vi.fn(async () => {}),
+      onNotification: vi.fn((h) => { notifHandler = h; }),
+      onRequest: vi.fn((h) => { reqHandler = h; }),
+      onRawIncoming: vi.fn(),
+      onRawOutgoing: vi.fn(),
+      isConnected: vi.fn(() => true),
+    };
+
+    const disconnectCb = vi.fn();
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(transport, "interrupt-timeout-test", { model: "o4-mini", cwd: "/tmp" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+    adapter.onDisconnect(disconnectCb);
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Start a turn so currentTurnId is set
+    adapter.sendBrowserMessage({ type: "user_message", content: "hello" });
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Now interrupt — this should timeout
+    adapter.sendBrowserMessage({ type: "interrupt" } as any);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(disconnectCb).toHaveBeenCalledOnce();
+    const errors = messages.filter((m) => m.type === "error");
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    const errorMsg = (errors[errors.length - 1] as { message: string }).message;
+    expect(errorMsg).toContain("not responding to interrupt");
+  });
 });

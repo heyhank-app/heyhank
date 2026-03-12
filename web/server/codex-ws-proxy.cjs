@@ -9,7 +9,8 @@ const readline = require("node:readline");
 const WebSocket = require("ws");
 
 const url = process.argv[2];
-const timeoutMs = Number(process.argv[3] || "10000");
+const timeoutMs = Number(process.argv[3] || "30000");
+const pongTimeoutArg = process.argv[4];
 
 if (!url) {
   process.stderr.write("[codex-ws-proxy] Missing URL argument\n");
@@ -35,7 +36,7 @@ let reconnectAttempt = 0;
 // Heartbeat — detect zombie WebSocket connections where the TCP socket is open
 // but the remote Codex process has stopped responding.
 const PING_INTERVAL_MS = 30000;
-const PONG_TIMEOUT_MS = 10000;
+const PONG_TIMEOUT_MS = pongTimeoutArg ? Number(pongTimeoutArg) : 30000;
 let pingTimer = null;
 let pongTimer = null;
 

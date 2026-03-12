@@ -539,6 +539,14 @@ export class CodexAdapter {
    * event to this method so the adapter can clean up and fire disconnectCb.
    */
   handleTransportClose(): void {
+    this.cleanupAndDisconnect();
+  }
+
+  /**
+   * Clear pending timers, mark disconnected, and fire the disconnect callback.
+   * Shared by handleTransportClose, RPC timeout paths, and process exit handlers.
+   */
+  private cleanupAndDisconnect(): void {
     this.connected = false;
     for (const pending of this.pendingDynamicToolCalls.values()) {
       clearTimeout(pending.timeout);
@@ -911,9 +919,11 @@ export class CodexAdapter {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       if (errMsg.startsWith("RPC timeout")) {
-        this.emit({ type: "error", message: "Codex is not responding. Try relaunching the session." });
+        this.emit({ type: "error", message: "Codex is not responding. Relaunching session..." });
+        this.cleanupAndDisconnect();
       } else if (errMsg === "Transport closed") {
-        this.emit({ type: "error", message: "Connection to Codex lost. Try relaunching the session." });
+        this.emit({ type: "error", message: "Connection to Codex lost. Relaunching session..." });
+        this.cleanupAndDisconnect();
       } else {
         this.emit({ type: "error", message: `Failed to start turn: ${err}` });
       }
@@ -1019,7 +1029,8 @@ export class CodexAdapter {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       if (errMsg.startsWith("RPC timeout")) {
-        this.emit({ type: "error", message: "Codex is not responding to interrupt. Try relaunching the session." });
+        this.emit({ type: "error", message: "Codex is not responding to interrupt. Relaunching session..." });
+        this.cleanupAndDisconnect();
       } else {
         console.warn("[codex-adapter] Interrupt failed:", err);
       }

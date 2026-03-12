@@ -159,6 +159,8 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.COMPANION_CODEX_TRANSPORT;
+  delete process.env.COMPANION_CODEX_WS_CONNECT_TIMEOUT_MS;
+  delete process.env.COMPANION_CODEX_PONG_TIMEOUT_MS;
   rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -897,13 +899,41 @@ describe("codex websocket launcher", () => {
     expect(proxyCmd[0]).toBe("node");
     expect(proxyCmd[1]).toContain("codex-ws-proxy.cjs");
     expect(proxyCmd[2]).toBe("ws://127.0.0.1:4500");
-    expect(proxyCmd[3]).toBe("10000");
+    // Default connect timeout (30s) and pong timeout (30s) passed to proxy
+    expect(proxyCmd[3]).toBe("30000");
+    expect(proxyCmd[4]).toBe("30000");
     expect(proxyOpts.stdin).toBe("pipe");
     expect(proxyOpts.stdout).toBe("pipe");
     expect(proxyOpts.stderr).toBe("pipe");
 
     expect(onAdapter).toHaveBeenCalledTimes(1);
     expect(onAdapter.mock.calls[0][0]).toBe("test-session-id");
+  });
+
+  it("passes custom connect and pong timeouts from env vars to the ws proxy", async () => {
+    // When COMPANION_CODEX_WS_CONNECT_TIMEOUT_MS and COMPANION_CODEX_PONG_TIMEOUT_MS
+    // are set, those values should be forwarded as argv[3] and argv[4] to the proxy.
+    process.env.COMPANION_CODEX_TRANSPORT = "ws";
+    process.env.COMPANION_CODEX_WS_CONNECT_TIMEOUT_MS = "60000";
+    process.env.COMPANION_CODEX_PONG_TIMEOUT_MS = "45000";
+    mockResolveBinary.mockReturnValue("/opt/fake/codex");
+
+    const codexProc = createMockProc(5001);
+    const { proc: proxyProc } = createPendingCodexWsProxyProc(5002);
+    mockSpawn.mockReturnValueOnce(codexProc).mockReturnValueOnce(proxyProc);
+
+    launcher.onCodexAdapterCreated(vi.fn());
+    launcher.launch({
+      backendType: "codex",
+      cwd: "/tmp/project",
+      codexSandbox: "workspace-write",
+    });
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const [proxyCmd] = mockSpawn.mock.calls[1];
+    expect(proxyCmd[3]).toBe("60000");
+    expect(proxyCmd[4]).toBe("45000");
   });
 
   it("relaunch kills the old codex process and ws proxy before spawning replacements", async () => {
