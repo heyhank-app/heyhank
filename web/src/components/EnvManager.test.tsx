@@ -4,46 +4,35 @@
  *
  * EnvManager manages environment profiles with CRUD operations. It supports two
  * rendering modes: "embedded" (full-page) and modal (portal). Each environment
- * has variables, optional Docker config, ports, and init scripts.
+ * has a name and key-value variables.
  *
  * Coverage targets:
  * - Render test and axe accessibility scan
  * - Embedded vs modal rendering modes
  * - Loading, empty, and populated list states
- * - Create flow: form display, tab switching, variable editor, create/cancel
+ * - Create flow: form display, variable editor, create/cancel
  * - Edit flow: open, modify, save, cancel
  * - Delete flow
- * - Docker tab: base image selection, pull states, dockerfile template, build
- * - Ports tab: add/remove ports
- * - Init script tab
  * - Error handling on API failures
- * - EnvRow display (variable counts, ports, init script badges)
+ * - EnvRow display (variable counts)
  * - VarEditor: add/remove rows
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ─── API Mocks ─────────────────────────────────────────────────
 const mockListEnvs = vi.fn();
-const mockGetContainerStatus = vi.fn();
-const mockGetContainerImages = vi.fn();
 const mockUpdateEnv = vi.fn();
 const mockCreateEnv = vi.fn();
 const mockDeleteEnv = vi.fn();
-const mockGetImageStatus = vi.fn();
-const mockPullImage = vi.fn();
 
 vi.mock("../api.js", () => ({
   api: {
     listEnvs: (...args: unknown[]) => mockListEnvs(...args),
-    getContainerStatus: (...args: unknown[]) => mockGetContainerStatus(...args),
-    getContainerImages: (...args: unknown[]) => mockGetContainerImages(...args),
     updateEnv: (...args: unknown[]) => mockUpdateEnv(...args),
     createEnv: (...args: unknown[]) => mockCreateEnv(...args),
     deleteEnv: (...args: unknown[]) => mockDeleteEnv(...args),
-    getImageStatus: (...args: unknown[]) => mockGetImageStatus(...args),
-    pullImage: (...args: unknown[]) => mockPullImage(...args),
   },
 }));
 
@@ -51,7 +40,7 @@ import { EnvManager } from "./EnvManager.js";
 
 // ─── Helpers ───────────────────────────────────────────────────
 
-/** A basic environment fixture with no docker/ports/init */
+/** A basic environment fixture with name and variables */
 function makeEnv(overrides: Record<string, unknown> = {}) {
   return {
     name: "Production",
@@ -67,15 +56,11 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Default: one env, Docker available
+  // Default: one env
   mockListEnvs.mockResolvedValue([makeEnv()]);
-  mockGetContainerStatus.mockResolvedValue({ available: true, version: "27.5.1" });
-  mockGetContainerImages.mockResolvedValue(["the-companion:latest", "node:20"]);
   mockUpdateEnv.mockResolvedValue({});
   mockCreateEnv.mockResolvedValue({});
   mockDeleteEnv.mockResolvedValue({});
-  mockGetImageStatus.mockResolvedValue({ image: "", status: "ready", progress: [] });
-  mockPullImage.mockResolvedValue({ ok: true, state: { image: "", status: "pulling", progress: [] } });
 });
 
 // ─── Render & Accessibility ────────────────────────────────────
@@ -129,63 +114,10 @@ describe("EnvManager embedded mode", () => {
     expect(screen.getByText("1 environment")).toBeInTheDocument();
   });
 
-  it("displays Docker badge when Docker is available", async () => {
-    render(<EnvManager embedded />);
-    await screen.findByText("Docker");
-  });
-
-  it("displays No Docker badge when Docker is unavailable", async () => {
-    mockGetContainerStatus.mockResolvedValue({ available: false });
-    render(<EnvManager embedded />);
-    await screen.findByText("No Docker");
-  });
-
-  it("does not render Docker badge while Docker status is unknown (null)", async () => {
-    // Make the container status hang so dockerAvailable stays null
-    mockGetContainerStatus.mockReturnValue(new Promise(() => {}));
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-    expect(screen.queryByText("Docker")).not.toBeInTheDocument();
-    expect(screen.queryByText("No Docker")).not.toBeInTheDocument();
-  });
-
   it("shows singular text for 1 variable", async () => {
     mockListEnvs.mockResolvedValue([makeEnv({ variables: { ONLY: "one" } })]);
     render(<EnvManager embedded />);
     await screen.findByText("1 variable");
-  });
-
-  it("shows ports and init script badges in EnvRow", async () => {
-    mockListEnvs.mockResolvedValue([
-      makeEnv({ ports: [3000, 8080], initScript: "npm install" }),
-    ]);
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-    // Should include port count and init script indicator
-    expect(screen.getByText(/2 ports/)).toBeInTheDocument();
-    expect(screen.getByText(/init script/)).toBeInTheDocument();
-  });
-
-  it("shows singular port text for 1 port", async () => {
-    mockListEnvs.mockResolvedValue([makeEnv({ ports: [3000] })]);
-    render(<EnvManager embedded />);
-    await screen.findByText(/1 port/);
-  });
-
-  it("shows imageTag badge on EnvRow when imageTag is present", async () => {
-    mockListEnvs.mockResolvedValue([
-      makeEnv({ imageTag: "my-org/my-env:v2" }),
-    ]);
-    render(<EnvManager embedded />);
-    await screen.findByText("my-env");
-  });
-
-  it("shows baseImage badge on EnvRow when baseImage is set but imageTag is not", async () => {
-    mockListEnvs.mockResolvedValue([
-      makeEnv({ baseImage: "node:20" }),
-    ]);
-    render(<EnvManager embedded />);
-    await screen.findByText("node:20");
   });
 });
 
@@ -234,12 +166,6 @@ describe("EnvManager modal mode", () => {
     expect(screen.getByText("NODE_ENV")).toBeInTheDocument();
     expect(screen.getByText("production")).toBeInTheDocument();
   });
-
-  it("shows imageTag badge in modal env list", async () => {
-    mockListEnvs.mockResolvedValue([makeEnv({ imageTag: "registry/img:tag" })]);
-    render(<EnvManager onClose={vi.fn()} />);
-    await screen.findByText("img");
-  });
 });
 
 // ─── Create Environment Flow ───────────────────────────────────
@@ -280,7 +206,6 @@ describe("EnvManager create flow (embedded)", () => {
       expect(mockCreateEnv).toHaveBeenCalledWith(
         "staging",
         { DB_HOST: "localhost" },
-        expect.objectContaining({}),
       );
     });
   });
@@ -380,35 +305,8 @@ describe("EnvManager create flow (modal)", () => {
     fireEvent.keyDown(nameInput, { key: "Enter" });
 
     await waitFor(() => {
-      expect(mockCreateEnv).toHaveBeenCalledWith("modal-env", {}, expect.anything());
+      expect(mockCreateEnv).toHaveBeenCalledWith("modal-env", {});
     });
-  });
-});
-
-// ─── Tab Switching ─────────────────────────────────────────────
-
-describe("EnvManager tab switching", () => {
-  it("switches between variables, docker, ports, init tabs in create form", async () => {
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-
-    fireEvent.click(screen.getByRole("button", { name: /new environment/i }));
-
-    // Variables tab is active by default, should show variable inputs
-    expect(screen.getAllByPlaceholderText("KEY").length).toBeGreaterThan(0);
-
-    // Switch to docker tab
-    fireEvent.click(screen.getByRole("button", { name: "docker" }));
-    expect(screen.getByText("Base Image")).toBeInTheDocument();
-
-    // Switch to ports tab
-    fireEvent.click(screen.getByRole("button", { name: "ports" }));
-    expect(screen.getByText("Ports to expose in the container")).toBeInTheDocument();
-
-    // Switch to init tab
-    fireEvent.click(screen.getByRole("button", { name: "init" }));
-    expect(screen.getByText("Init Script")).toBeInTheDocument();
-    expect(screen.getByText(/This shell script runs as root/)).toBeInTheDocument();
   });
 });
 
@@ -593,259 +491,6 @@ describe("EnvManager delete flow", () => {
   });
 });
 
-// ─── Docker Tab ────────────────────────────────────────────────
-
-describe("EnvManager docker tab", () => {
-  it("shows base image select with available images in create form", async () => {
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-
-    fireEvent.click(screen.getByRole("button", { name: /new environment/i }));
-    fireEvent.click(screen.getByRole("button", { name: "docker" }));
-
-    // Should show the select with options
-    const select = screen.getByRole("combobox") as HTMLSelectElement;
-    expect(select).toBeInTheDocument();
-
-    // Options: None, the-companion:latest, node:20
-    const options = within(select).getAllByRole("option");
-    expect(options.length).toBe(3);
-    expect(options[0]).toHaveTextContent("None (local execution)");
-    expect(options[1]).toHaveTextContent("the-companion:latest");
-    expect(options[2]).toHaveTextContent("node:20");
-  });
-
-  it("shows Use template button when no dockerfile is set", async () => {
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-
-    fireEvent.click(screen.getByRole("button", { name: /new environment/i }));
-    fireEvent.click(screen.getByRole("button", { name: "docker" }));
-
-    expect(screen.getByText("Use template")).toBeInTheDocument();
-  });
-
-  it("fills dockerfile with template when Use template is clicked", async () => {
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-
-    fireEvent.click(screen.getByRole("button", { name: /new environment/i }));
-    fireEvent.click(screen.getByRole("button", { name: "docker" }));
-
-    fireEvent.click(screen.getByText("Use template"));
-
-    const textarea = screen.getByPlaceholderText("# Custom Dockerfile content...") as HTMLTextAreaElement;
-    expect(textarea.value).toContain("FROM the-companion:latest");
-  });
-
-  it("shows image pull status badges", async () => {
-    // Set up an env with a base image and mock various pull statuses
-    mockListEnvs.mockResolvedValue([makeEnv({ baseImage: "node:20" })]);
-    mockGetImageStatus.mockResolvedValue({ image: "node:20", status: "idle", progress: [] });
-
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-
-    // Edit the env to see docker controls
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    // The base image should be shown. Since status is "idle", we should see "Not downloaded"
-    await waitFor(() => {
-      expect(screen.getByText("Not downloaded")).toBeInTheDocument();
-    });
-  });
-
-  it("shows Ready badge when image status is ready", async () => {
-    mockListEnvs.mockResolvedValue([makeEnv({ baseImage: "node:20" })]);
-    mockGetImageStatus.mockResolvedValue({ image: "node:20", status: "ready", progress: [] });
-
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Ready")).toBeInTheDocument();
-    });
-  });
-
-  it("shows Pull failed badge when image status is error", async () => {
-    mockListEnvs.mockResolvedValue([makeEnv({ baseImage: "node:20" })]);
-    mockGetImageStatus.mockResolvedValue({ image: "node:20", status: "error", progress: [], error: "not found" });
-
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Pull failed")).toBeInTheDocument();
-    });
-  });
-
-  it("triggers pull when Pull button is clicked", async () => {
-    mockListEnvs.mockResolvedValue([makeEnv({ baseImage: "node:20" })]);
-    mockGetImageStatus.mockResolvedValue({ image: "node:20", status: "idle", progress: [] });
-
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Pull")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText("Pull"));
-
-    await waitFor(() => {
-      expect(mockPullImage).toHaveBeenCalledWith("node:20");
-    });
-  });
-
-  it("shows Update text when image is already ready", async () => {
-    mockListEnvs.mockResolvedValue([makeEnv({ baseImage: "node:20" })]);
-    mockGetImageStatus.mockResolvedValue({ image: "node:20", status: "ready", progress: [] });
-
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Update")).toBeInTheDocument();
-    });
-  });
-
-  it("refreshes image status when base image is changed in select", async () => {
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    // Change base image via select
-    const selects = screen.getAllByRole("combobox");
-    const baseImageSelect = selects[0] as HTMLSelectElement;
-    fireEvent.change(baseImageSelect, { target: { value: "node:20" } });
-
-    await waitFor(() => {
-      expect(mockGetImageStatus).toHaveBeenCalledWith("node:20");
-    });
-  });
-
-  it("creates environment with docker options", async () => {
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-
-    fireEvent.click(screen.getByRole("button", { name: /new environment/i }));
-
-    const nameInput = screen.getByPlaceholderText("Environment name (e.g. production)");
-    fireEvent.change(nameInput, { target: { value: "docker-env" } });
-
-    // Switch to docker tab and set base image
-    fireEvent.click(screen.getByRole("button", { name: "docker" }));
-    const select = screen.getByRole("combobox") as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "the-companion:latest" } });
-
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
-
-    await waitFor(() => {
-      expect(mockCreateEnv).toHaveBeenCalledWith(
-        "docker-env",
-        {},
-        expect.objectContaining({ baseImage: "the-companion:latest" }),
-      );
-    });
-  });
-});
-
-// ─── Ports Tab ─────────────────────────────────────────────────
-
-describe("EnvManager ports tab", () => {
-  it("allows adding and removing ports in create form", async () => {
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-
-    fireEvent.click(screen.getByRole("button", { name: /new environment/i }));
-    fireEvent.click(screen.getByRole("button", { name: "ports" }));
-
-    // Initially no port inputs, only the "Add port" button
-    expect(screen.getByText("+ Add port")).toBeInTheDocument();
-
-    // Add a port
-    fireEvent.click(screen.getByText("+ Add port"));
-    const portInput = screen.getByDisplayValue("3000") as HTMLInputElement;
-    expect(portInput).toBeInTheDocument();
-
-    // Change port value
-    fireEvent.change(portInput, { target: { value: "8080" } });
-    expect((screen.getByDisplayValue("8080") as HTMLInputElement).value).toBe("8080");
-
-    // Add another port
-    fireEvent.click(screen.getByText("+ Add port"));
-    const portInputs = screen.getAllByRole("spinbutton");
-    expect(portInputs.length).toBe(2);
-  });
-
-  it("creates env with ports", async () => {
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-
-    fireEvent.click(screen.getByRole("button", { name: /new environment/i }));
-
-    const nameInput = screen.getByPlaceholderText("Environment name (e.g. production)");
-    fireEvent.change(nameInput, { target: { value: "ports-env" } });
-
-    fireEvent.click(screen.getByRole("button", { name: "ports" }));
-    fireEvent.click(screen.getByText("+ Add port"));
-
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
-
-    await waitFor(() => {
-      expect(mockCreateEnv).toHaveBeenCalledWith(
-        "ports-env",
-        {},
-        expect.objectContaining({ ports: [3000] }),
-      );
-    });
-  });
-});
-
-// ─── Init Script Tab ───────────────────────────────────────────
-
-describe("EnvManager init script tab", () => {
-  it("renders init script textarea with helper text", async () => {
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-
-    fireEvent.click(screen.getByRole("button", { name: /new environment/i }));
-    fireEvent.click(screen.getByRole("button", { name: "init" }));
-
-    expect(screen.getByText("Init Script")).toBeInTheDocument();
-    expect(screen.getByText(/This shell script runs as root/)).toBeInTheDocument();
-    expect(screen.getByText(/Timeout: 120s/)).toBeInTheDocument();
-  });
-
-  it("creates env with init script", async () => {
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-
-    fireEvent.click(screen.getByRole("button", { name: /new environment/i }));
-
-    const nameInput = screen.getByPlaceholderText("Environment name (e.g. production)");
-    fireEvent.change(nameInput, { target: { value: "init-env" } });
-
-    fireEvent.click(screen.getByRole("button", { name: "init" }));
-    const textarea = screen.getByPlaceholderText(/Runs inside the container/);
-    fireEvent.change(textarea, { target: { value: "npm install" } });
-
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
-
-    await waitFor(() => {
-      expect(mockCreateEnv).toHaveBeenCalledWith(
-        "init-env",
-        {},
-        expect.objectContaining({ initScript: "npm install" }),
-      );
-    });
-  });
-});
-
 // ─── VarEditor ─────────────────────────────────────────────────
 
 describe("EnvManager VarEditor", () => {
@@ -928,62 +573,8 @@ describe("EnvManager VarEditor", () => {
       expect(mockCreateEnv).toHaveBeenCalledWith(
         "filter-test",
         { VALID: "yes" },
-        expect.anything(),
       );
     });
-  });
-});
-
-// ─── Docker Builder link (build moved to Docker Builder page) ──
-
-describe("EnvManager Docker Builder link", () => {
-  it("shows 'Open Docker Builder' link in embedded header", async () => {
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-    // The header should contain a link to the Docker Builder page
-    const link = screen.getByText("Open Docker Builder");
-    expect(link).toBeInTheDocument();
-    expect(link.closest("a")).toHaveAttribute("href", "#/docker-builder");
-  });
-
-  it("shows Docker Builder link in docker tab when dockerfile is present", async () => {
-    mockListEnvs.mockResolvedValue([
-      makeEnv({ dockerfile: "FROM node:20\nRUN npm install" }),
-    ]);
-
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    // The docker section should show a link to the Docker Builder
-    await waitFor(() => {
-      const builderLink = screen.getByText("Docker Builder");
-      expect(builderLink.closest("a")).toHaveAttribute("href", "#/docker-builder");
-    });
-  });
-
-  it("does not show Build Image button (build moved to Docker Builder)", async () => {
-    mockListEnvs.mockResolvedValue([
-      makeEnv({ dockerfile: "FROM node:20\nRUN npm install" }),
-    ]);
-
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    // Build Image button should not exist in EnvManager anymore
-    expect(screen.queryByText("Build Image")).not.toBeInTheDocument();
-  });
-});
-
-// ─── Docker unavailable ────────────────────────────────────────
-
-describe("EnvManager when Docker is unavailable", () => {
-  it("handles getContainerStatus failure gracefully", async () => {
-    mockGetContainerStatus.mockRejectedValue(new Error("network error"));
-    render(<EnvManager embedded />);
-    await screen.findByText("No Docker");
   });
 });
 
@@ -1000,41 +591,6 @@ describe("EnvManager with multiple environments", () => {
     await screen.findByText("Dev");
     expect(screen.getByText("Prod")).toBeInTheDocument();
     expect(screen.getByText("2 environments")).toBeInTheDocument();
-  });
-});
-
-// ─── Existing env edit (Docker controls, preserving from original test) ─
-
-describe("EnvManager existing env edit — Docker baseImage update", () => {
-  it("shows Docker controls and persists baseImage update", async () => {
-    mockListEnvs.mockResolvedValue([
-      {
-        name: "Companion",
-        slug: "companion",
-        variables: { CLAUDE_CODE_OAUTH_TOKEN: "tok" },
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      },
-    ]);
-    render(<EnvManager embedded />);
-
-    await screen.findByText("Companion");
-    // In embedded mode, Edit is an icon button with aria-label
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    // Docker controls are visible in existing env edit mode.
-    const baseImageSelect = screen.getAllByRole("combobox")[0] as HTMLSelectElement;
-    expect(baseImageSelect.value).toBe("");
-    fireEvent.change(baseImageSelect, { target: { value: "the-companion:latest" } });
-
-    fireEvent.click(screen.getByText("Save"));
-
-    await waitFor(() => {
-      expect(mockUpdateEnv).toHaveBeenCalledWith(
-        "companion",
-        expect.objectContaining({ baseImage: "the-companion:latest" }),
-      );
-    });
   });
 });
 
@@ -1080,53 +636,6 @@ describe("EnvManager save edit with cleared name", () => {
         "production",
         expect.objectContaining({ name: undefined }),
       );
-    });
-  });
-});
-
-// ─── Pulling state and polling behavior ────────────────────────
-
-describe("EnvManager image pulling state", () => {
-  it("shows Pulling badge and disables pull button when image is pulling", async () => {
-    mockListEnvs.mockResolvedValue([makeEnv({ baseImage: "node:20" })]);
-    mockGetImageStatus.mockResolvedValue({
-      image: "node:20",
-      status: "pulling",
-      progress: ["Downloading layer 1/5"],
-    });
-
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    await waitFor(() => {
-      // Should show "Pulling..." text for both the badge and the disabled button
-      const pullingTexts = screen.getAllByText("Pulling...");
-      expect(pullingTexts.length).toBeGreaterThanOrEqual(1);
-    });
-  });
-});
-
-// ─── Edit existing env with imageTag ───────────────────────────
-
-describe("EnvManager edit env with imageTag", () => {
-  it("uses imageTag for status checks when present on env", async () => {
-    mockListEnvs.mockResolvedValue([
-      makeEnv({ imageTag: "env-production:v1", baseImage: "node:20" }),
-    ]);
-    mockGetImageStatus.mockResolvedValue({
-      image: "env-production:v1",
-      status: "ready",
-      progress: [],
-    });
-
-    render(<EnvManager embedded />);
-    await screen.findByText("Production");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    // The effective image should be imageTag, not baseImage
-    await waitFor(() => {
-      expect(mockGetImageStatus).toHaveBeenCalledWith("env-production:v1");
     });
   });
 });

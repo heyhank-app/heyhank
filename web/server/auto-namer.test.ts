@@ -34,6 +34,7 @@ beforeEach(() => {
     aiValidationAutoDeny: false,
     publicUrl: "",
     updateChannel: "stable",
+    dockerAutoUpdate: false,
     updatedAt: 0,
   });
 });
@@ -74,6 +75,7 @@ describe("generateSessionTitle", () => {
       aiValidationAutoDeny: false,
       publicUrl: "",
       updateChannel: "stable",
+      dockerAutoUpdate: false,
       updatedAt: 0,
     });
 
@@ -121,6 +123,7 @@ describe("generateSessionTitle", () => {
       aiValidationAutoDeny: false,
       publicUrl: "",
       updateChannel: "stable",
+      dockerAutoUpdate: false,
       updatedAt: 0,
     });
     mockFetch.mockResolvedValueOnce({
@@ -197,6 +200,7 @@ describe("generateSessionTitle", () => {
       aiValidationAutoDeny: false,
       publicUrl: "",
       updateChannel: "stable",
+      dockerAutoUpdate: false,
       updatedAt: 0,
     });
     mockFetch.mockResolvedValueOnce({

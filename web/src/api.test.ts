@@ -760,26 +760,83 @@ describe("environment API", () => {
     expect(opts.method).toBe("DELETE");
   });
 
-  it("buildEnvImage sends POST to /api/envs/:slug/build", async () => {
-    const data = { ok: true, imageTag: "my-env:latest" };
-    mockFetch.mockResolvedValueOnce(mockResponse(data));
+  it("listSandboxes sends GET to /api/sandboxes", async () => {
+    const sandboxes = [{ name: "Dev", slug: "dev", createdAt: 1, updatedAt: 1 }];
+    mockFetch.mockResolvedValueOnce(mockResponse(sandboxes));
 
-    const result = await api.buildEnvImage("my-env");
+    const result = await api.listSandboxes();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sandboxes");
+    expect(result).toEqual(sandboxes);
+  });
+
+  it("getSandbox sends GET to /api/sandboxes/:slug", async () => {
+    const sandbox = { name: "Dev", slug: "dev", createdAt: 1, updatedAt: 1 };
+    mockFetch.mockResolvedValueOnce(mockResponse(sandbox));
+
+    const result = await api.getSandbox("dev");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sandboxes/dev");
+    expect(result).toEqual(sandbox);
+  });
+
+  it("createSandbox sends POST to /api/sandboxes with name and options", async () => {
+    const sandbox = { name: "My Sandbox", slug: "my-sandbox", dockerfile: "FROM node:20", createdAt: 1, updatedAt: 1 };
+    mockFetch.mockResolvedValueOnce(mockResponse(sandbox));
+
+    const result = await api.createSandbox("My Sandbox", { dockerfile: "FROM node:20" });
 
     const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/envs/my-env/build");
+    expect(url).toBe("/api/sandboxes");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({ name: "My Sandbox", dockerfile: "FROM node:20" });
+    expect(result).toEqual(sandbox);
+  });
+
+  it("updateSandbox sends PUT to /api/sandboxes/:slug", async () => {
+    const sandbox = { name: "Renamed", slug: "renamed", createdAt: 1, updatedAt: 2 };
+    mockFetch.mockResolvedValueOnce(mockResponse(sandbox));
+
+    await api.updateSandbox("my-sandbox", { name: "Renamed" });
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sandboxes/my-sandbox");
+    expect(opts.method).toBe("PUT");
+    expect(JSON.parse(opts.body)).toEqual({ name: "Renamed" });
+  });
+
+  it("deleteSandbox sends DELETE to /api/sandboxes/:slug", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.deleteSandbox("old-sandbox");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sandboxes/old-sandbox");
+    expect(opts.method).toBe("DELETE");
+  });
+
+  it("buildSandboxImage sends POST to /api/sandboxes/:slug/build", async () => {
+    const data = { success: true, imageTag: "companion-sandbox-my-sandbox:latest" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.buildSandboxImage("my-sandbox");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sandboxes/my-sandbox/build");
     expect(opts.method).toBe("POST");
     expect(result).toEqual(data);
   });
 
-  it("getEnvBuildStatus sends GET to /api/envs/:slug/build-status", async () => {
-    const data = { buildStatus: "success", lastBuiltAt: 1234, imageTag: "my-env:latest" };
+  it("getSandboxBuildStatus sends GET to /api/sandboxes/:slug/build-status", async () => {
+    const data = { buildStatus: "success", lastBuiltAt: 1234, imageTag: "companion-sandbox-my-sandbox:latest" };
     mockFetch.mockResolvedValueOnce(mockResponse(data));
 
-    const result = await api.getEnvBuildStatus("my-env");
+    const result = await api.getSandboxBuildStatus("my-sandbox");
 
     const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/envs/my-env/build-status");
+    expect(url).toBe("/api/sandboxes/my-sandbox/build-status");
     expect(result).toEqual(data);
   });
 
@@ -806,27 +863,16 @@ describe("environment API", () => {
     expect(result).toEqual(data);
   });
 
-  it("createEnv includes docker options when provided", async () => {
-    const envData = { name: "Docker", slug: "docker", variables: {}, createdAt: 1, updatedAt: 1 };
+  it("createEnv sends name and variables only", async () => {
+    const envData = { name: "My Env", slug: "my-env", variables: { KEY: "val" }, createdAt: 1, updatedAt: 1 };
     mockFetch.mockResolvedValueOnce(mockResponse(envData));
 
-    await api.createEnv("Docker", { KEY: "val" }, {
-      dockerfile: "FROM node:20",
-      baseImage: "node:20",
-      ports: [3000],
-      volumes: ["/data"],
-      initScript: "npm install",
-    });
+    await api.createEnv("My Env", { KEY: "val" });
 
     const [, opts] = mockFetch.mock.calls[0];
     expect(JSON.parse(opts.body)).toEqual({
-      name: "Docker",
+      name: "My Env",
       variables: { KEY: "val" },
-      dockerfile: "FROM node:20",
-      baseImage: "node:20",
-      ports: [3000],
-      volumes: ["/data"],
-      initScript: "npm install",
     });
   });
 });

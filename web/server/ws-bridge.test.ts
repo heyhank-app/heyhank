@@ -54,10 +54,31 @@ beforeEach(() => {
   bridge = new WsBridge();
   bridge.setStore(store);
   mockExecSync.mockReset();
+  // Suppress console output to prevent Vitest EnvironmentTeardownError.
+  // ws-bridge.ts and session-store.ts log via console.log/warn/error;
+  // when the Vitest worker tears down while a console relay RPC is still
+  // in-flight, it causes "Closing rpc while onUserConsoleLog was pending".
+  vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
+  // Cancel pending debounce timers from SessionStore before removing
+  // the temp directory. Without this, debounced writes fire after rmSync
+  // and produce console.error calls that race with Vitest worker teardown.
+  store.dispose();
   rmSync(tempDir, { recursive: true, force: true });
+  vi.restoreAllMocks();
+});
+
+// Re-suppress console after the last test to prevent "Closing rpc while
+// onUserConsoleLog was pending" during Vitest worker teardown.
+afterAll(() => {
+  const noop = () => {};
+  console.log = noop;
+  console.warn = noop;
+  console.error = noop;
 });
 
 // ─── Helper: build a system.init NDJSON string ────────────────────────────────

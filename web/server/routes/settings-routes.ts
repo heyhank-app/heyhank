@@ -24,6 +24,7 @@ export function registerSettingsRoutes(api: Hono): void {
       aiValidationAutoDeny: settings.aiValidationAutoDeny,
       publicUrl: settings.publicUrl,
       updateChannel: settings.updateChannel,
+      dockerAutoUpdate: settings.dockerAutoUpdate,
     });
   });
 
@@ -89,6 +90,9 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.linearOAuthWebhookSecret !== undefined && typeof body.linearOAuthWebhookSecret !== "string") {
       return c.json({ error: "linearOAuthWebhookSecret must be a string" }, 400);
     }
+    if (body.dockerAutoUpdate !== undefined && typeof body.dockerAutoUpdate !== "boolean") {
+      return c.json({ error: "dockerAutoUpdate must be a boolean" }, 400);
+    }
     const hasAnyField = body.anthropicApiKey !== undefined || body.anthropicModel !== undefined
       || body.linearApiKey !== undefined || body.linearAutoTransition !== undefined
       || body.linearAutoTransitionStateId !== undefined || body.linearAutoTransitionStateName !== undefined
@@ -100,7 +104,8 @@ export function registerSettingsRoutes(api: Hono): void {
       || body.aiValidationEnabled !== undefined || body.aiValidationAutoApprove !== undefined
       || body.aiValidationAutoDeny !== undefined
       || body.publicUrl !== undefined
-      || body.updateChannel !== undefined;
+      || body.updateChannel !== undefined
+      || body.dockerAutoUpdate !== undefined;
     if (!hasAnyField) {
       return c.json({ error: "At least one settings field is required" }, 400);
     }
@@ -182,6 +187,10 @@ export function registerSettingsRoutes(api: Hono): void {
         body.updateChannel === "stable" || body.updateChannel === "prerelease"
           ? (body.updateChannel as UpdateChannel)
           : undefined,
+      dockerAutoUpdate:
+        typeof body.dockerAutoUpdate === "boolean"
+          ? body.dockerAutoUpdate
+          : undefined,
     });
 
     const connectionsAfterUpdate = listConnections();
@@ -202,6 +211,7 @@ export function registerSettingsRoutes(api: Hono): void {
       aiValidationAutoDeny: settings.aiValidationAutoDeny,
       publicUrl: settings.publicUrl,
       updateChannel: settings.updateChannel,
+      dockerAutoUpdate: settings.dockerAutoUpdate,
     });
   });
 

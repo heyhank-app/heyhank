@@ -7,7 +7,6 @@ vi.mock("../env-manager.js", () => ({
   createEnv: vi.fn(),
   updateEnv: vi.fn(),
   deleteEnv: vi.fn(() => false),
-  updateBuildStatus: vi.fn(),
 }));
 
 // ─── Mock container-manager ────────────────────────────────────────────────
@@ -148,11 +147,10 @@ describe("POST /api/envs", () => {
 
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual(created);
-    // Verify createEnv was called with the correct arguments
+    // Verify createEnv was called with the correct arguments (name + variables only)
     expect(envManager.createEnv).toHaveBeenCalledWith(
       "Test Env",
       { FOO: "bar" },
-      expect.objectContaining({}),
     );
   });
 
@@ -246,126 +244,6 @@ describe("DELETE /api/envs/:slug", () => {
     vi.mocked(envManager.deleteEnv).mockReturnValue(false);
 
     const res = await app.request("/api/envs/missing", { method: "DELETE" });
-
-    expect(res.status).toBe(404);
-    const json = await res.json();
-    expect(json.error).toMatch(/not found/i);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// POST /api/envs/:slug/build
-// ═══════════════════════════════════════════════════════════════════════════
-
-describe("POST /api/envs/:slug/build", () => {
-  it("builds the environment image successfully", async () => {
-    const env = makeEnv({ dockerfile: "FROM node:20" });
-    vi.mocked(envManager.getEnv).mockReturnValue(env as any);
-    vi.mocked(containerManager.checkDocker).mockReturnValue(true);
-    vi.mocked(containerManager.buildImageStreaming).mockResolvedValue({
-      success: true,
-      log: "Build complete",
-    });
-
-    const res = await app.request("/api/envs/test-env/build", { method: "POST" });
-
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.success).toBe(true);
-    expect(json.imageTag).toBe("companion-env-test-env:latest");
-    // Verify build status was set to "building" then "success"
-    expect(envManager.updateBuildStatus).toHaveBeenCalledWith("test-env", "building");
-    expect(envManager.updateBuildStatus).toHaveBeenCalledWith(
-      "test-env",
-      "success",
-      expect.objectContaining({ imageTag: "companion-env-test-env:latest" }),
-    );
-  });
-
-  it("returns 404 when the environment does not exist", async () => {
-    vi.mocked(envManager.getEnv).mockReturnValue(null as any);
-
-    const res = await app.request("/api/envs/missing/build", { method: "POST" });
-
-    expect(res.status).toBe(404);
-    const json = await res.json();
-    expect(json.error).toMatch(/not found/i);
-  });
-
-  it("returns 400 when no Dockerfile is configured", async () => {
-    // An environment without a dockerfile field should be rejected
-    const env = makeEnv({ dockerfile: undefined });
-    vi.mocked(envManager.getEnv).mockReturnValue(env as any);
-
-    const res = await app.request("/api/envs/test-env/build", { method: "POST" });
-
-    expect(res.status).toBe(400);
-    const json = await res.json();
-    expect(json.error).toMatch(/no dockerfile/i);
-  });
-
-  it("returns 503 when Docker is not available", async () => {
-    const env = makeEnv({ dockerfile: "FROM node:20" });
-    vi.mocked(envManager.getEnv).mockReturnValue(env as any);
-    vi.mocked(containerManager.checkDocker).mockReturnValue(false);
-
-    const res = await app.request("/api/envs/test-env/build", { method: "POST" });
-
-    expect(res.status).toBe(503);
-    const json = await res.json();
-    expect(json.error).toMatch(/docker/i);
-  });
-
-  it("returns 500 when buildImageStreaming throws", async () => {
-    const env = makeEnv({ dockerfile: "FROM node:20" });
-    vi.mocked(envManager.getEnv).mockReturnValue(env as any);
-    vi.mocked(containerManager.checkDocker).mockReturnValue(true);
-    vi.mocked(containerManager.buildImageStreaming).mockRejectedValue(
-      new Error("Docker daemon crashed"),
-    );
-
-    const res = await app.request("/api/envs/test-env/build", { method: "POST" });
-
-    expect(res.status).toBe(500);
-    const json = await res.json();
-    expect(json.success).toBe(false);
-    expect(json.error).toBe("Docker daemon crashed");
-    // Build status should be updated to error
-    expect(envManager.updateBuildStatus).toHaveBeenCalledWith(
-      "test-env",
-      "error",
-      expect.objectContaining({ error: "Docker daemon crashed" }),
-    );
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// GET /api/envs/:slug/build-status
-// ═══════════════════════════════════════════════════════════════════════════
-
-describe("GET /api/envs/:slug/build-status", () => {
-  it("returns the build status for an existing environment", async () => {
-    const env = makeEnv({
-      buildStatus: "success",
-      buildError: undefined,
-      lastBuiltAt: 9999,
-      imageTag: "companion-env-test-env:latest",
-    });
-    vi.mocked(envManager.getEnv).mockReturnValue(env as any);
-
-    const res = await app.request("/api/envs/test-env/build-status");
-
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.buildStatus).toBe("success");
-    expect(json.imageTag).toBe("companion-env-test-env:latest");
-    expect(json.lastBuiltAt).toBe(9999);
-  });
-
-  it("returns 404 when the environment does not exist", async () => {
-    vi.mocked(envManager.getEnv).mockReturnValue(null as any);
-
-    const res = await app.request("/api/envs/missing/build-status");
 
     expect(res.status).toBe(404);
     const json = await res.json();

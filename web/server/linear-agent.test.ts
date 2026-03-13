@@ -41,6 +41,7 @@ function makeSettings(overrides: Partial<CompanionSettings> = {}): CompanionSett
     aiValidationAutoDeny: false,
     publicUrl: "",
     updateChannel: "stable",
+    dockerAutoUpdate: false,
     updatedAt: 0,
     ...overrides,
   };

@@ -1,9 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { api, type CompanionEnv, type ImagePullState } from "../api.js";
+import { api, type CompanionSandbox, type ImagePullState } from "../api.js";
 
 /** Max poll attempts before declaring a build timeout (5 min at 2s intervals) */
 const MAX_BUILD_POLLS = 150;
 
+/**
+ * Legacy Docker Builder page — now powered by Sandbox profiles.
+ * Users are directed to the Sandboxes page for full management.
+ */
 export function DockerBuilderPage() {
   // Docker availability
   const [dockerAvailable, setDockerAvailable] = useState<boolean | null>(null);
@@ -20,9 +24,9 @@ export function DockerBuilderPage() {
   const [imageStates, setImageStates] = useState<Record<string, ImagePullState>>({});
   const pullPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Envs for building (we allow building for any env that has a dockerfile)
-  const [envs, setEnvs] = useState<CompanionEnv[]>([]);
-  const [selectedEnvSlug, setSelectedEnvSlug] = useState<string>("");
+  // Sandboxes for building (we allow building for any sandbox that has a dockerfile)
+  const [sandboxes, setSandboxes] = useState<CompanionSandbox[]>([]);
+  const [selectedSandboxSlug, setSelectedSandboxSlug] = useState<string>("");
 
   // Guard against setState after unmount
   const mountedRef = useRef(true);
@@ -31,7 +35,7 @@ export function DockerBuilderPage() {
     return () => { mountedRef.current = false; };
   }, []);
 
-  const selectedEnv = envs.find((e) => e.slug === selectedEnvSlug);
+  const selectedSandbox = sandboxes.find((s) => s.slug === selectedSandboxSlug);
 
   const refreshImageStatus = useCallback((tag: string) => {
     api.getImageStatus(tag).then((state) => {
@@ -91,7 +95,7 @@ export function DockerBuilderPage() {
       }
     }).catch(() => setDockerAvailable(false));
 
-    api.listEnvs().then(setEnvs).catch(() => {});
+    api.listSandboxes().then(setSandboxes).catch(() => {});
   }, [refreshImages]);
 
   // Check image status for all available images on mount
@@ -103,25 +107,21 @@ export function DockerBuilderPage() {
   }, [availableImages, dockerAvailable, refreshImageStatus]);
 
   const pollCountRef = useRef(0);
-  // Token ref to cancel in-flight poll chains when the env changes.
-  // Each handleBuild() call creates a new token; stale polls from a
-  // previous build bail out when their captured token no longer matches.
   const buildTokenRef = useRef<object | null>(null);
 
-  // Reset build state when environment selection changes so stale results
-  // from a previous env don't carry over to the newly selected env.
+  // Reset build state when sandbox selection changes
   useEffect(() => {
-    buildTokenRef.current = null; // cancel any in-flight poll chain
+    buildTokenRef.current = null;
     setBuildState("idle");
     setBuildLog("");
     setBuildError("");
     setLastBuiltTag("");
     setLastBuiltAt(null);
     pollCountRef.current = 0;
-  }, [selectedEnvSlug]);
+  }, [selectedSandboxSlug]);
 
   async function handleBuild() {
-    if (!selectedEnvSlug) return;
+    if (!selectedSandboxSlug) return;
     const token = {};
     buildTokenRef.current = token;
     setBuildState("building");
@@ -129,7 +129,7 @@ export function DockerBuilderPage() {
     setBuildError("");
     pollCountRef.current = 0;
     try {
-      await api.buildEnvImage(selectedEnvSlug);
+      await api.buildSandboxImage(selectedSandboxSlug);
       const poll = async () => {
         if (!mountedRef.current || buildTokenRef.current !== token) return;
         if (pollCountRef.current++ >= MAX_BUILD_POLLS) {
@@ -139,7 +139,7 @@ export function DockerBuilderPage() {
           return;
         }
         try {
-          const status = await api.getEnvBuildStatus(selectedEnvSlug);
+          const status = await api.getSandboxBuildStatus(selectedSandboxSlug);
           if (!mountedRef.current || buildTokenRef.current !== token) return;
           if (status.buildStatus === "building") {
             setTimeout(poll, 2000);
@@ -150,7 +150,7 @@ export function DockerBuilderPage() {
               setLastBuiltTag(status.imageTag || "");
               setLastBuiltAt(status.lastBuiltAt || Date.now());
               refreshImages();
-              api.listEnvs().then((e) => { if (mountedRef.current) setEnvs(e); }).catch(() => {});
+              api.listSandboxes().then((s) => { if (mountedRef.current) setSandboxes(s); }).catch(() => {});
             } else {
               setBuildState("error");
               setBuildError(status.buildError || "Unknown error");
@@ -181,12 +181,11 @@ export function DockerBuilderPage() {
     <span className="text-[10px] px-2 py-1 rounded-md bg-amber-500/10 text-amber-500 font-medium">No Docker</span>
   );
 
-  const envsWithDockerfile = envs.filter((e) => e.dockerfile);
+  const sandboxesWithDockerfile = sandboxes.filter((s) => s.dockerfile);
 
-  // Derive read-only display values from the selected env
-  const displayImageTag = selectedEnv?.imageTag || (selectedEnvSlug ? `companion-env-${selectedEnvSlug}:latest` : "");
-  const displayBaseImage = selectedEnv?.baseImage || "";
-  const displayDockerfile = selectedEnv?.dockerfile || "";
+  // Derive read-only display values from the selected sandbox
+  const displayImageTag = selectedSandbox?.imageTag || (selectedSandboxSlug ? `companion-sandbox-${selectedSandboxSlug}:latest` : "");
+  const displayDockerfile = selectedSandbox?.dockerfile || "";
 
   return (
     <div className="h-full bg-cc-bg text-cc-fg font-sans-ui antialiased overflow-y-auto overflow-x-hidden">
@@ -196,7 +195,8 @@ export function DockerBuilderPage() {
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-cc-fg">Docker Builder</h1>
             <p className="mt-0.5 text-[13px] text-cc-muted leading-relaxed">
-              Build and manage Docker images for environments.
+              Build Docker images for sandbox profiles.{" "}
+              <a href="#/sandboxes" className="text-cc-primary hover:underline">Manage sandboxes</a>
             </p>
           </div>
           {dockerBadge}
@@ -206,31 +206,31 @@ export function DockerBuilderPage() {
         <div className="mt-6 rounded-xl bg-cc-card p-4 sm:p-5 space-y-4">
           <h2 className="text-sm font-semibold text-cc-fg">Build Image</h2>
 
-          {/* Environment selector */}
+          {/* Sandbox selector */}
           <div>
-            <label className="block text-[11px] text-cc-muted mb-1">Environment</label>
+            <label className="block text-[11px] text-cc-muted mb-1">Sandbox</label>
             <select
-              aria-label="Environment"
-              value={selectedEnvSlug}
-              onChange={(e) => setSelectedEnvSlug(e.target.value)}
+              aria-label="Sandbox"
+              value={selectedSandboxSlug}
+              onChange={(e) => setSelectedSandboxSlug(e.target.value)}
               disabled={!dockerAvailable}
               className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow disabled:opacity-50"
             >
-              <option value="">Select an environment with a Dockerfile</option>
-              {envsWithDockerfile.map((env) => (
-                <option key={env.slug} value={env.slug}>{env.name}</option>
+              <option value="">Select a sandbox with a Dockerfile</option>
+              {sandboxesWithDockerfile.map((s) => (
+                <option key={s.slug} value={s.slug}>{s.name}</option>
               ))}
             </select>
-            {envs.length > 0 && envsWithDockerfile.length === 0 && (
+            {sandboxes.length > 0 && sandboxesWithDockerfile.length === 0 && (
               <p className="mt-1.5 text-[11px] text-cc-muted">
-                No environments have a Dockerfile configured. Add one in the{" "}
-                <a href="#/environments" className="text-cc-primary hover:underline">Environments</a> page.
+                No sandboxes have a Dockerfile configured. Add one in the{" "}
+                <a href="#/sandboxes" className="text-cc-primary hover:underline">Sandboxes</a> page.
               </p>
             )}
           </div>
 
-          {/* Read-only env details shown when an env is selected */}
-          {selectedEnv && (
+          {/* Read-only sandbox details shown when a sandbox is selected */}
+          {selectedSandbox && (
             <>
               {/* Image tag (read-only — determined by server) */}
               <div>
@@ -240,36 +240,15 @@ export function DockerBuilderPage() {
                 </div>
               </div>
 
-              {/* Base image (read-only) */}
-              {displayBaseImage && (
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] text-cc-muted">Base Image</label>
-                    {imageStates[displayBaseImage]?.status === "ready" && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-500">Ready</span>
-                    )}
-                    {imageStates[displayBaseImage]?.status === "pulling" && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 flex items-center gap-1">
-                        <span className="w-2.5 h-2.5 border border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
-                        Pulling...
-                      </span>
-                    )}
-                  </div>
-                  <div className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg font-mono-code opacity-70">
-                    {displayBaseImage}
-                  </div>
-                </div>
-              )}
-
               {/* Dockerfile (read-only preview) */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-[11px] text-cc-muted">Dockerfile</label>
                   <a
-                    href="#/environments"
+                    href="#/sandboxes"
                     className="text-[10px] text-cc-primary hover:underline"
                   >
-                    Edit in Environments
+                    Edit in Sandboxes
                   </a>
                 </div>
                 <pre className="w-full px-3 py-2.5 text-[11px] font-mono-code bg-cc-bg rounded-lg text-cc-fg max-h-[200px] overflow-auto whitespace-pre-wrap opacity-70">
@@ -281,29 +260,12 @@ export function DockerBuilderPage() {
 
           {/* Actions */}
           <div className="flex items-center gap-2 pt-1">
-            {displayBaseImage && selectedEnv && (
-              <button
-                onClick={() => handlePullImage(displayBaseImage)}
-                disabled={!dockerAvailable || imageStates[displayBaseImage]?.status === "pulling"}
-                className={`px-3 py-2.5 min-h-[44px] text-xs font-medium rounded-lg transition-colors ${
-                  !dockerAvailable || imageStates[displayBaseImage]?.status === "pulling"
-                    ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                    : "bg-cc-hover text-cc-fg hover:bg-cc-active cursor-pointer"
-                }`}
-              >
-                {imageStates[displayBaseImage]?.status === "pulling"
-                  ? "Pulling..."
-                  : imageStates[displayBaseImage]?.status === "ready"
-                    ? "Pull / Update base image"
-                    : "Pull base image"}
-              </button>
-            )}
             <div className="flex-1" />
             <button
               onClick={handleBuild}
-              disabled={!dockerAvailable || !selectedEnvSlug || buildState === "building"}
+              disabled={!dockerAvailable || !selectedSandboxSlug || buildState === "building"}
               className={`px-4 py-2.5 min-h-[44px] text-sm font-medium rounded-lg transition-colors ${
-                dockerAvailable && selectedEnvSlug && buildState !== "building"
+                dockerAvailable && selectedSandboxSlug && buildState !== "building"
                   ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
                   : "bg-cc-hover text-cc-muted cursor-not-allowed"
               }`}
@@ -340,7 +302,7 @@ export function DockerBuilderPage() {
               </div>
               <button
                 onClick={handleBuild}
-                disabled={!selectedEnvSlug}
+                disabled={!selectedSandboxSlug}
                 className="text-xs text-cc-primary hover:underline cursor-pointer"
               >
                 Retry

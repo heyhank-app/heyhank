@@ -272,10 +272,8 @@ describe("ImagePullManager", () => {
   });
 
   describe("initFromEnvironments", () => {
-    it("pre-pulls missing images for all environments", async () => {
+    it("is a no-op since environments no longer carry Docker fields", async () => {
       mockImageExists.mockReturnValue(false);
-      // Make pull hang so we can observe "pulling" state
-      mockPullImage.mockImplementation(() => new Promise(() => {}));
       mockListEnvs.mockReturnValue([
         { name: "env1", slug: "env1", baseImage: "the-companion:latest", variables: {}, createdAt: 0, updatedAt: 0 },
         { name: "env2", slug: "env2", imageTag: "custom:v1", variables: {}, createdAt: 0, updatedAt: 0 },
@@ -284,12 +282,10 @@ describe("ImagePullManager", () => {
       const manager = await createManager();
       manager.initFromEnvironments();
 
-      // the-companion:latest has a registry mapping, so it's pulling
-      const state1 = manager.getState("the-companion:latest");
-      expect(state1.status).toBe("pulling");
-      // custom:v1 has no registry mapping, so it errors immediately
-      const state2 = manager.getState("custom:v1");
-      expect(state2.status).toBe("error");
+      // initFromEnvironments is now a no-op — Docker fields moved to Sandboxes.
+      // No image pulls should be triggered regardless of environment config.
+      expect(mockPullImage).not.toHaveBeenCalled();
+      expect(mockListEnvs).not.toHaveBeenCalled();
     });
 
     it("skips images that are already available", async () => {

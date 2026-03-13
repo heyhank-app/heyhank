@@ -222,6 +222,8 @@ export interface CreateSessionOpts {
   createBranch?: boolean;
   useWorktree?: boolean;
   backend?: "claude" | "codex";
+  sandboxEnabled?: boolean;
+  sandboxSlug?: string;
   container?: ContainerCreateOpts;
   resumeSessionAt?: string;
   forkSession?: boolean;
@@ -309,15 +311,19 @@ export interface CompanionEnv {
   name: string;
   slug: string;
   variables: Record<string, string>;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CompanionSandbox {
+  name: string;
+  slug: string;
   dockerfile?: string;
+  initScript?: string;
   imageTag?: string;
-  baseImage?: string;
   buildStatus?: "idle" | "building" | "success" | "error";
   buildError?: string;
   lastBuiltAt?: number;
-  ports?: number[];
-  volumes?: string[];
-  initScript?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -416,6 +422,7 @@ export interface AppSettings {
   aiValidationAutoDeny: boolean;
   publicUrl: string;
   updateChannel: "stable" | "prerelease";
+  dockerAutoUpdate: boolean;
 }
 
 export interface LinearConnectionSummary {
@@ -874,35 +881,40 @@ export const api = {
   listEnvs: () => get<CompanionEnv[]>("/envs"),
   getEnv: (slug: string) =>
     get<CompanionEnv>(`/envs/${encodeURIComponent(slug)}`),
-  createEnv: (name: string, variables: Record<string, string>, docker?: {
-    dockerfile?: string;
-    baseImage?: string;
-    ports?: number[];
-    volumes?: string[];
-    initScript?: string;
-  }) =>
-    post<CompanionEnv>("/envs", { name, variables, ...docker }),
+  createEnv: (name: string, variables: Record<string, string>) =>
+    post<CompanionEnv>("/envs", { name, variables }),
   updateEnv: (
     slug: string,
     data: {
       name?: string;
       variables?: Record<string, string>;
-      dockerfile?: string;
-      baseImage?: string;
-      ports?: number[];
-      volumes?: string[];
-      initScript?: string;
     },
   ) => put<CompanionEnv>(`/envs/${encodeURIComponent(slug)}`, data),
   deleteEnv: (slug: string) => del(`/envs/${encodeURIComponent(slug)}`),
 
-  // Environment Docker builds
-  buildEnvImage: (slug: string) =>
-    post<{ ok: boolean; imageTag: string }>(`/envs/${encodeURIComponent(slug)}/build`),
-  getEnvBuildStatus: (slug: string) =>
+  // Sandboxes
+  listSandboxes: () => get<CompanionSandbox[]>("/sandboxes"),
+  getSandbox: (slug: string) =>
+    get<CompanionSandbox>(`/sandboxes/${encodeURIComponent(slug)}`),
+  createSandbox: (name: string, opts?: { dockerfile?: string; initScript?: string }) =>
+    post<CompanionSandbox>("/sandboxes", { name, ...opts }),
+  updateSandbox: (
+    slug: string,
+    data: {
+      name?: string;
+      dockerfile?: string;
+      initScript?: string;
+      imageTag?: string;
+    },
+  ) => put<CompanionSandbox>(`/sandboxes/${encodeURIComponent(slug)}`, data),
+  deleteSandbox: (slug: string) => del(`/sandboxes/${encodeURIComponent(slug)}`),
+  buildSandboxImage: (slug: string) =>
+    post<{ success: boolean; imageTag?: string; log: string }>(`/sandboxes/${encodeURIComponent(slug)}/build`),
+  getSandboxBuildStatus: (slug: string) =>
     get<{ buildStatus: string; buildError?: string; lastBuiltAt?: number; imageTag?: string }>(
-      `/envs/${encodeURIComponent(slug)}/build-status`,
+      `/sandboxes/${encodeURIComponent(slug)}/build-status`,
     ),
+
   buildBaseImage: () =>
     post<{ ok: boolean; tag: string }>("/docker/build-base"),
   getBaseImageStatus: () =>
@@ -926,6 +938,7 @@ export const api = {
     editorTabEnabled?: boolean;
     publicUrl?: string;
     updateChannel?: "stable" | "prerelease";
+    dockerAutoUpdate?: boolean;
   }) => put<AppSettings>("/settings", data),
   verifyAnthropicKey: (apiKey: string) =>
     post<{ valid: boolean; error?: string }>("/settings/anthropic/verify", { apiKey }),

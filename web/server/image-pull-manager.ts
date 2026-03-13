@@ -2,7 +2,6 @@ import { join, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { containerManager, ContainerManager } from "./container-manager.js";
-import * as envManager from "./env-manager.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -150,16 +149,12 @@ class ImagePullManager {
 
   /**
    * On server startup, check all environments and pre-pull missing images.
+   * Environments no longer carry Docker fields — this is now a no-op stub
+   * kept for backwards compatibility with callers.
    */
   initFromEnvironments(): void {
-    const envs = envManager.listEnvs();
-    for (const env of envs) {
-      const image = env.imageTag || env.baseImage;
-      if (image && !containerManager.imageExists(image)) {
-        console.log(`[image-pull-manager] Pre-pulling missing image for env "${env.name}": ${image}`);
-        this.ensureImage(image);
-      }
-    }
+    // Environments no longer have imageTag/baseImage (moved to Sandboxes).
+    // Nothing to pre-pull from envs.
   }
 
   // ─── Internal ─────────────────────────────────────────────────────────────

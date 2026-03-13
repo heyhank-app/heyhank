@@ -27,6 +27,7 @@ const TailscalePage = lazy(() => import("./components/TailscalePage.js").then((m
 const PromptsPage = lazy(() => import("./components/PromptsPage.js").then((m) => ({ default: m.PromptsPage })));
 const EnvManager = lazy(() => import("./components/EnvManager.js").then((m) => ({ default: m.EnvManager })));
 const DockerBuilderPage = lazy(() => import("./components/DockerBuilderPage.js").then((m) => ({ default: m.DockerBuilderPage })));
+const SandboxManager = lazy(() => import("./components/SandboxManager.js").then((m) => ({ default: m.SandboxManager })));
 const CronManager = lazy(() => import("./components/CronManager.js").then((m) => ({ default: m.CronManager })));
 const AgentsPage = lazy(() => import("./components/AgentsPage.js").then((m) => ({ default: m.AgentsPage })));
 const RunsPage = lazy(() => import("./components/RunsPage.js").then((m) => ({ default: m.RunsPage })));
@@ -73,6 +74,7 @@ export default function App() {
   const isTerminalPage = route.page === "terminal";
   const isEnvironmentsPage = route.page === "environments";
   const isDockerBuilderPage = route.page === "docker-builder";
+  const isSandboxesPage = route.page === "sandboxes";
   const isScheduledPage = route.page === "scheduled";
   const isAgentsPage = route.page === "agents" || route.page === "agent-detail";
   const isRunsPage = route.page === "runs";
@@ -245,6 +247,12 @@ export default function App() {
           {isDockerBuilderPage && (
             <div className="absolute inset-0">
               <Suspense fallback={<LazyFallback />}><DockerBuilderPage /></Suspense>
+            </div>
+          )}
+
+          {isSandboxesPage && (
+            <div className="absolute inset-0">
+              <Suspense fallback={<LazyFallback />}><SandboxManager embedded /></Suspense>
             </div>
           )}
 

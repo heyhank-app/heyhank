@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { api, type CompanionEnv, type ImagePullState } from "../api.js";
+import { api, type CompanionEnv } from "../api.js";
 
 interface Props {
   onClose?: () => void;
@@ -12,104 +12,18 @@ interface VarRow {
   value: string;
 }
 
-type Tab = "variables" | "docker" | "ports" | "init";
-
-const DEFAULT_DOCKERFILE = `FROM the-companion:latest
-
-# Add project-specific dependencies here
-# RUN apt-get update && apt-get install -y ...
-# RUN npm install -g ...
-
-WORKDIR /workspace
-CMD ["sleep", "infinity"]
-`;
-
 export function EnvManager({ onClose, embedded = false }: Props) {
   const [envs, setEnvs] = useState<CompanionEnv[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editVars, setEditVars] = useState<VarRow[]>([]);
-  const [editDockerfile, setEditDockerfile] = useState("");
-  const [editBaseImage, setEditBaseImage] = useState("");
-  const [editPorts, setEditPorts] = useState<number[]>([]);
-  const [editInitScript, setEditInitScript] = useState("");
   const [error, setError] = useState("");
-
-  // Docker availability
-  const [dockerAvailable, setDockerAvailable] = useState<boolean | null>(null);
-  const [availableImages, setAvailableImages] = useState<string[]>([]);
-
-  // Image pull state tracking (keyed by image tag)
-  const [imageStates, setImageStates] = useState<Record<string, ImagePullState>>({});
-  const pullPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  /** Fetch pull status for a specific image and update state */
-  const refreshImageStatus = useCallback((tag: string) => {
-    api.getImageStatus(tag).then((state) => {
-      setImageStates((prev) => ({ ...prev, [tag]: state }));
-    }).catch(() => {});
-  }, []);
-
-  /** Trigger a pull for an image and start polling */
-  const handlePullImage = useCallback((tag: string) => {
-    api.pullImage(tag).then((res) => {
-      if (res.state) {
-        setImageStates((prev) => ({ ...prev, [tag]: res.state }));
-      }
-    }).catch(() => {});
-  }, []);
-
-  // Track pulling images in a ref so the interval callback always reads current values
-  const pullingImagesRef = useRef<string[]>([]);
-  useEffect(() => {
-    const pullingImages = Object.entries(imageStates)
-      .filter(([, s]) => s.status === "pulling")
-      .map(([tag]) => tag);
-    pullingImagesRef.current = pullingImages;
-
-    if (pullingImages.length === 0) {
-      if (pullPollRef.current) {
-        clearInterval(pullPollRef.current);
-        pullPollRef.current = null;
-      }
-      return;
-    }
-
-    if (!pullPollRef.current) {
-      pullPollRef.current = setInterval(() => {
-        for (const tag of pullingImagesRef.current) {
-          refreshImageStatus(tag);
-        }
-      }, 2000);
-    }
-
-    return () => {
-      if (pullPollRef.current) {
-        clearInterval(pullPollRef.current);
-        pullPollRef.current = null;
-      }
-    };
-  }, [imageStates, refreshImageStatus]);
-
-  // On mount, check image status for all envs that have docker images
-  useEffect(() => {
-    if (!dockerAvailable) return;
-    for (const env of envs) {
-      const img = env.imageTag || env.baseImage;
-      if (img) refreshImageStatus(img);
-    }
-  }, [envs, dockerAvailable, refreshImageStatus]);
 
   // New env form
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newVars, setNewVars] = useState<VarRow[]>([{ key: "", value: "" }]);
-  const [newDockerfile, setNewDockerfile] = useState("");
-  const [newBaseImage, setNewBaseImage] = useState("");
-  const [newPorts, setNewPorts] = useState<number[]>([]);
-  const [newInitScript, setNewInitScript] = useState("");
-  const [newTab, setNewTab] = useState<Tab>("variables");
   const [creating, setCreating] = useState(false);
 
   const refresh = useCallback(() => {
@@ -118,13 +32,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
 
   useEffect(() => {
     refresh();
-    // Check Docker availability
-    api.getContainerStatus().then((s) => {
-      setDockerAvailable(s.available);
-      if (s.available) {
-        api.getContainerImages().then(setAvailableImages).catch(() => {});
-      }
-    }).catch(() => setDockerAvailable(false));
   }, [refresh]);
 
   function startEdit(env: CompanionEnv) {
@@ -133,10 +40,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
     const rows = Object.entries(env.variables).map(([key, value]) => ({ key, value }));
     if (rows.length === 0) rows.push({ key: "", value: "" });
     setEditVars(rows);
-    setEditDockerfile(env.dockerfile || "");
-    setEditBaseImage(env.baseImage || "");
-    setEditPorts(env.ports || []);
-    setEditInitScript(env.initScript || "");
     setError("");
   }
 
@@ -156,10 +59,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
       await api.updateEnv(editingSlug, {
         name: editName.trim() || undefined,
         variables,
-        dockerfile: editDockerfile || undefined,
-        baseImage: editBaseImage || undefined,
-        ports: editPorts.length > 0 ? editPorts : undefined,
-        initScript: editInitScript || undefined,
       });
       setEditingSlug(null);
       setError("");
@@ -189,19 +88,9 @@ export function EnvManager({ onClose, embedded = false }: Props) {
       if (k) variables[k] = row.value;
     }
     try {
-      await api.createEnv(name, variables, {
-        dockerfile: newDockerfile || undefined,
-        baseImage: newBaseImage || undefined,
-        ports: newPorts.length > 0 ? newPorts : undefined,
-        initScript: newInitScript || undefined,
-      });
+      await api.createEnv(name, variables);
       setNewName("");
       setNewVars([{ key: "", value: "" }]);
-      setNewDockerfile("");
-      setNewBaseImage("");
-      setNewPorts([]);
-      setNewInitScript("");
-      setNewTab("variables");
       setShowCreate(false);
       setError("");
       refresh();
@@ -211,12 +100,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
       setCreating(false);
     }
   }
-
-  const dockerBadge = dockerAvailable === null ? null : dockerAvailable ? (
-    <span className="text-[10px] px-2 py-1 rounded-md bg-green-500/10 text-green-500 font-medium">Docker</span>
-  ) : (
-    <span className="text-[10px] px-2 py-1 rounded-md bg-amber-500/10 text-amber-500 font-medium">No Docker</span>
-  );
 
   /* ─── Embedded (full page) ───────────────────────────────────────── */
 
@@ -231,15 +114,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
               <p className="mt-0.5 text-[13px] text-cc-muted leading-relaxed">
                 Reusable runtime profiles.
               </p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <a
-                href="#/docker-builder"
-                className="text-[11px] px-2.5 py-1.5 rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors"
-              >
-                Open Docker Builder
-              </a>
-              {dockerBadge}
             </div>
           </div>
 
@@ -277,11 +151,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
                   if (e.key === "Enter" && newName.trim()) handleCreate();
                 }}
               />
-              {renderTabs(newTab, setNewTab)}
-              {newTab === "variables" && <VarEditor rows={newVars} onChange={setNewVars} />}
-              {newTab === "docker" && renderDockerTab(newDockerfile, setNewDockerfile, newBaseImage, setNewBaseImage)}
-              {newTab === "ports" && renderPortsTab(newPorts, setNewPorts)}
-              {newTab === "init" && renderInitScriptTab(newInitScript, setNewInitScript)}
+              <VarEditor rows={newVars} onChange={setNewVars} />
 
               {error && (
                 <div className="px-3 py-2 rounded-lg bg-cc-error/10 text-xs text-cc-error">{error}</div>
@@ -341,18 +211,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
                           <div className="text-[11px] font-medium text-cc-muted mb-1.5">Variables</div>
                           <VarEditor rows={editVars} onChange={setEditVars} />
                         </div>
-                        <div>
-                          <div className="text-[11px] font-medium text-cc-muted mb-1.5">Docker Image (optional)</div>
-                          {renderDockerTab(editDockerfile, setEditDockerfile, editBaseImage, setEditBaseImage, env)}
-                        </div>
-                        <div>
-                          <div className="text-[11px] font-medium text-cc-muted mb-1.5">Ports</div>
-                          {renderPortsTab(editPorts, setEditPorts)}
-                        </div>
-                        <div>
-                          <div className="text-[11px] font-medium text-cc-muted mb-1.5">Init Script</div>
-                          {renderInitScriptTab(editInitScript, setEditInitScript)}
-                        </div>
                       </div>
                       <div className="flex justify-end gap-2">
                         <button
@@ -409,11 +267,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
           if (e.key === "Enter" && newName.trim()) handleCreate();
         }}
       />
-      {renderTabs(newTab, setNewTab)}
-      {newTab === "variables" && <VarEditor rows={newVars} onChange={setNewVars} />}
-      {newTab === "docker" && renderDockerTab(newDockerfile, setNewDockerfile, newBaseImage, setNewBaseImage)}
-      {newTab === "ports" && renderPortsTab(newPorts, setNewPorts)}
-      {newTab === "init" && renderInitScriptTab(newInitScript, setNewInitScript)}
+      <VarEditor rows={newVars} onChange={setNewVars} />
       <button
         onClick={handleCreate}
         disabled={!newName.trim() || creating}
@@ -438,11 +292,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
         <div key={env.slug} className="rounded-xl bg-cc-card overflow-hidden">
           <div className="flex items-center gap-2 px-3 py-2.5">
             <span className="text-sm font-medium text-cc-fg flex-1">{env.name}</span>
-            {env.imageTag && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-mono-code">
-                {env.imageTag.split(":")[0]?.split("/").pop() || env.imageTag}
-              </span>
-            )}
             <span className="text-xs text-cc-muted">
               {Object.keys(env.variables).length} var{Object.keys(env.variables).length !== 1 ? "s" : ""}
             </span>
@@ -462,9 +311,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
                 className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow" />
               <div className="space-y-3">
                 <div><div className="text-[11px] font-medium text-cc-muted mb-1.5">Variables</div><VarEditor rows={editVars} onChange={setEditVars} /></div>
-                <div><div className="text-[11px] font-medium text-cc-muted mb-1.5">Docker Image (optional)</div>{renderDockerTab(editDockerfile, setEditDockerfile, editBaseImage, setEditBaseImage, env)}</div>
-                <div><div className="text-[11px] font-medium text-cc-muted mb-1.5">Ports</div>{renderPortsTab(editPorts, setEditPorts)}</div>
-                <div><div className="text-[11px] font-medium text-cc-muted mb-1.5">Init Script</div>{renderInitScriptTab(editInitScript, setEditInitScript)}</div>
               </div>
               <button onClick={saveEdit} className="px-4 py-2.5 min-h-[44px] text-sm font-medium bg-cc-primary hover:bg-cc-primary-hover text-white rounded-lg transition-colors cursor-pointer">Save</button>
             </div>
@@ -494,7 +340,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
       <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-cc-fg">Manage Environments</h2>
-          {dockerBadge}
         </div>
         {onClose && (
           <button
@@ -522,203 +367,6 @@ export function EnvManager({ onClose, embedded = false }: Props) {
     </div>,
     document.body,
   );
-
-  /* ─── Shared tab/section renderers ───────────────────────────────── */
-
-  function renderTabs(activeTab: Tab, setTab: (t: Tab) => void) {
-    return (
-      <div className="flex gap-0.5 mb-2.5">
-        {(["variables", "docker", "ports", "init"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-3 py-2.5 min-h-[44px] text-[11px] font-medium transition-colors cursor-pointer capitalize rounded-md ${
-              activeTab === t
-                ? "text-cc-primary bg-cc-primary/8"
-                : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-    );
-  }
-
-  function renderDockerTab(
-    dockerfile: string,
-    setDockerfile: (v: string) => void,
-    baseImage: string,
-    setBaseImage: (v: string) => void,
-    env?: CompanionEnv,
-  ) {
-    const effectiveImg = env?.imageTag || baseImage;
-    const imgState = effectiveImg ? imageStates[effectiveImg] : undefined;
-    const isPulling = imgState?.status === "pulling";
-
-    return (
-      <div className="space-y-3">
-        {/* Base image selector */}
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <label className="text-[11px] text-cc-muted">Base Image</label>
-            {effectiveImg && (
-              <div className="flex items-center gap-1.5">
-                {imgState?.status === "ready" && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-500">Ready</span>
-                )}
-                {imgState?.status === "pulling" && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 border border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
-                    Pulling...
-                  </span>
-                )}
-                {imgState?.status === "idle" && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-cc-hover text-cc-muted">Not downloaded</span>
-                )}
-                {imgState?.status === "error" && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-cc-error/10 text-cc-error">Pull failed</span>
-                )}
-                <button
-                  onClick={() => handlePullImage(effectiveImg)}
-                  disabled={isPulling}
-                  className={`text-xs px-2.5 py-1.5 min-h-[44px] rounded transition-colors ${
-                    isPulling
-                      ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                      : "bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 cursor-pointer"
-                  }`}
-                >
-                  {isPulling ? "Pulling..." : imgState?.status === "ready" ? "Update" : "Pull"}
-                </button>
-              </div>
-            )}
-          </div>
-          <select
-            value={baseImage}
-            onChange={(e) => {
-              setBaseImage(e.target.value);
-              if (e.target.value) refreshImageStatus(e.target.value);
-            }}
-            className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
-          >
-            <option value="">None (local execution)</option>
-            <option value="the-companion:latest">the-companion:latest</option>
-            {availableImages
-              .filter((img) => img !== "the-companion:latest")
-              .map((img) => (
-                <option key={img} value={img}>{img}</option>
-              ))}
-          </select>
-        </div>
-
-        {/* Pull progress */}
-        {isPulling && imgState?.progress && imgState.progress.length > 0 && (
-          <pre className="px-3 py-2 text-[10px] font-mono-code bg-cc-code-bg rounded-lg text-cc-muted max-h-[120px] overflow-auto whitespace-pre-wrap">
-            {imgState.progress.slice(-20).join("\n")}
-          </pre>
-        )}
-
-        {/* Dockerfile editor */}
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <label className="text-[11px] text-cc-muted">Dockerfile (optional override)</label>
-            {!dockerfile && (
-              <button
-                onClick={() => setDockerfile(DEFAULT_DOCKERFILE)}
-                className="text-[10px] text-cc-primary hover:underline cursor-pointer"
-              >
-                Use template
-              </button>
-            )}
-          </div>
-          <textarea
-            value={dockerfile}
-            onChange={(e) => setDockerfile(e.target.value)}
-            placeholder="# Custom Dockerfile content..."
-            rows={10}
-            className="w-full px-3 py-2.5 text-[11px] font-mono-code bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 resize-y transition-shadow"
-            style={{ minHeight: "120px" }}
-          />
-        </div>
-
-        {/* Link to Docker Builder for building */}
-        {dockerfile && (
-          <p className="text-[10px] text-cc-muted">
-            Use the{" "}
-            <a href="#/docker-builder" className="text-cc-primary hover:underline">Docker Builder</a>
-            {" "}to build this image.
-          </p>
-        )}
-      </div>
-    );
-  }
-
-  function renderPortsTab(ports: number[], setPorts: (p: number[]) => void) {
-    return (
-      <div className="space-y-2">
-        <label className="block text-[11px] text-cc-muted">Ports to expose in the container</label>
-        {ports.map((port, i) => (
-          <div key={i} className="flex items-center gap-1.5">
-            <input
-              type="number"
-              value={port}
-              onChange={(e) => {
-                const next = [...ports];
-                next[i] = parseInt(e.target.value, 10) || 0;
-                setPorts(next);
-              }}
-              min={1}
-              max={65535}
-              className="w-28 px-3 py-2.5 min-h-[44px] text-xs font-mono-code bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
-            />
-            <button
-              onClick={() => setPorts(ports.filter((_, idx) => idx !== i))}
-              aria-label="Remove port"
-              className="w-10 h-10 min-h-[44px] flex items-center justify-center rounded-lg text-cc-muted hover:text-cc-error hover:bg-cc-error/10 transition-colors cursor-pointer shrink-0"
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
-                <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
-              </svg>
-            </button>
-          </div>
-        ))}
-        <button
-          onClick={() => setPorts([...ports, 3000])}
-          className="text-xs py-2 min-h-[44px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
-        >
-          + Add port
-        </button>
-      </div>
-    );
-  }
-
-  function renderInitScriptTab(
-    initScript: string,
-    setInitScript: (v: string) => void,
-  ) {
-    return (
-      <div className="space-y-3">
-        <div>
-          <label className="block text-[11px] text-cc-muted mb-1">
-            Init Script
-          </label>
-          <textarea
-            value={initScript}
-            onChange={(e) => setInitScript(e.target.value)}
-            placeholder={"# Runs inside the container before Claude starts\n# Example:\nbun install\npip install -r requirements.txt"}
-            rows={10}
-            className="w-full px-3 py-2.5 text-[11px] font-mono-code bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 resize-y transition-shadow"
-            style={{ minHeight: "120px" }}
-          />
-        </div>
-        <p className="text-[10px] text-cc-muted">
-          This shell script runs as root inside the container via{" "}
-          <code className="bg-cc-hover px-1 rounded">sh -lc</code> before the session starts.
-          Timeout: 120s.
-        </p>
-      </div>
-    );
-  }
 }
 
 /* ─── Env Row (for embedded page — display only) ─────────────────── */
@@ -744,21 +392,9 @@ function EnvRow({ env, varCount, onStartEdit, onDelete }: EnvRowProps) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-cc-fg truncate">{env.name}</span>
-          {env.imageTag && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-mono-code">
-              {env.imageTag.split(":")[0]?.split("/").pop() || env.imageTag}
-            </span>
-          )}
-          {!env.imageTag && env.baseImage && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-cc-hover text-cc-muted font-mono-code">
-              {env.baseImage}
-            </span>
-          )}
         </div>
         <p className="mt-0.5 text-xs text-cc-muted">
           {varCount} variable{varCount !== 1 ? "s" : ""}
-          {env.ports && env.ports.length > 0 && ` · ${env.ports.length} port${env.ports.length !== 1 ? "s" : ""}`}
-          {env.initScript && " · init script"}
         </p>
       </div>
 

@@ -10,6 +10,8 @@ import {
   setUpdateInProgress,
 } from "../update-checker.js";
 import { refreshServiceDefinition } from "../service.js";
+import { getSettings } from "../settings-manager.js";
+import { imagePullManager } from "../image-pull-manager.js";
 
 export function registerSystemRoutes(
   api: Hono,
@@ -125,6 +127,22 @@ export function registerSystemRoutes(
           );
           setUpdateInProgress(false);
           return;
+        }
+
+        // Re-pull Docker image if auto-update is enabled
+        if (getSettings().dockerAutoUpdate) {
+          try {
+            console.log("[update] Re-pulling Docker image (dockerAutoUpdate enabled)...");
+            imagePullManager.pull("the-companion:latest");
+            const ready = await imagePullManager.waitForReady("the-companion:latest", 120_000);
+            if (ready) {
+              console.log("[update] Docker image re-pull complete.");
+            } else {
+              console.warn("[update] Docker image re-pull failed or timed out, continuing with restart.");
+            }
+          } catch (err) {
+            console.warn("[update] Docker image re-pull error, continuing:", err);
+          }
         }
 
         try {
