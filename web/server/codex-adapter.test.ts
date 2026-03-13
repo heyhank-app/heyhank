@@ -3434,6 +3434,92 @@ describe("CodexAdapter with ICodexTransport", () => {
     expect(mock.calls.length).toBe(2);
   });
 
+  it("falls back to thread/start when thread/resume fails with non-transient error", async () => {
+    // When thread/resume fails (e.g. "no rollout found"), the adapter should
+    // automatically fall back to thread/start instead of failing entirely.
+    // This prevents the recurring issue where Codex sessions can't restart
+    // after the previous thread's rollout state becomes stale.
+    const mock = createMockTransport();
+    const initErrors: string[] = [];
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(mock.transport, "test-session-transport", {
+      model: "gpt-5.3-codex",
+      cwd: "/workspace",
+      threadId: "thr_stale_rollout",
+    });
+    adapter.onInitError((err) => initErrors.push(err));
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Resolve initialize (call #1)
+    mock.resolveCall(1, { userAgent: "codex" });
+    await new Promise((r) => setTimeout(r, 20));
+
+    // thread/resume (call #2) fails with non-transient error
+    expect(mock.calls[1]?.method).toBe("thread/resume");
+    mock.rejectCall(2, new Error("no rollout found for thread id thr_stale_rollout"));
+    await new Promise((r) => setTimeout(r, 100));
+
+    // The adapter should have made a fallback thread/start call (call #3)
+    expect(mock.calls.length).toBe(3);
+    expect(mock.calls[2]?.method).toBe("thread/start");
+
+    // Resolve the fallback thread/start
+    mock.resolveCall(3, { thread: { id: "thr_fresh_new" } });
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Should have initialized successfully with the new thread
+    expect(adapter.getThreadId()).toBe("thr_fresh_new");
+    // No init errors should have been raised (fallback succeeded)
+    expect(initErrors.length).toBe(0);
+
+    // Verify that options.threadId was updated: after resetForReconnect,
+    // the adapter should attempt thread/resume with the NEW thread ID,
+    // not the original stale one.
+    const mock2 = createMockTransport();
+    adapter.resetForReconnect(mock2.transport);
+    await new Promise((r) => setTimeout(r, 50));
+    mock2.resolveCall(1, { userAgent: "codex" });
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Should now try to resume "thr_fresh_new", not "thr_stale_rollout"
+    expect(mock2.calls[1]?.method).toBe("thread/resume");
+    expect(mock2.calls[1]?.params?.threadId).toBe("thr_fresh_new");
+  });
+
+  it("propagates thread/start failure even after resume fallback", async () => {
+    // If both thread/resume AND the fallback thread/start fail,
+    // the init error should still be reported.
+    const mock = createMockTransport();
+    const initErrors: string[] = [];
+    const adapter = new CodexAdapter(mock.transport, "test-session-transport", {
+      model: "gpt-5.3-codex",
+      cwd: "/workspace",
+      threadId: "thr_broken",
+    });
+    adapter.onInitError((err) => initErrors.push(err));
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Resolve initialize (call #1)
+    mock.resolveCall(1, { userAgent: "codex" });
+    await new Promise((r) => setTimeout(r, 20));
+
+    // thread/resume (call #2) fails
+    mock.rejectCall(2, new Error("no rollout found"));
+    await new Promise((r) => setTimeout(r, 100));
+
+    // fallback thread/start (call #3) also fails
+    expect(mock.calls[2]?.method).toBe("thread/start");
+    mock.rejectCall(3, new Error("server unavailable"));
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Should have reported the init error
+    expect(initErrors.length).toBe(1);
+    expect(initErrors[0]).toContain("server unavailable");
+  });
+
   it("resetForReconnect re-initializes with new transport", async () => {
     // resetForReconnect should allow the adapter to re-init with a fresh transport.
     const mock1 = createMockTransport();
