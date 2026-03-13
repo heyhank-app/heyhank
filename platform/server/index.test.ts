@@ -54,7 +54,12 @@ describe("GET /api/status", () => {
       service: "companion-cloud",
       version: "0.1.0",
       status: "ok",
+      provisioning: {
+        provider: expect.any(String),
+        regions: expect.any(Array),
+      },
     });
+    expect(body.provisioning.regions.length).toBeGreaterThan(0);
   });
 
   it("includes CORS headers on /api/* routes", async () => {

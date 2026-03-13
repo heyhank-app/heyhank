@@ -1,42 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Provisioner } from "./provisioner";
-import type { Plan } from "./provisioner";
 
-/**
- * Tests for the Provisioner class — orchestrates Fly.io machine and volume
- * lifecycle for customer instance provisioning/deprovisioning.
- *
- * Strategy: mock `global.fetch` so the underlying FlyMachinesClient and
- * FlyVolumesClient HTTP calls are intercepted. Also mock `node:crypto`
- * randomBytes for deterministic authSecret values.
- *
- * We use global.fetch mocking (rather than vi.mock for class constructors)
- * because vitest relative-path module mocking has resolution issues with
- * Bun's bundler-mode module resolution.
- */
-
-// ── Mock randomBytes ────────────────────────────────────────────────────
-const FAKE_AUTH_SECRET = "ab".repeat(32); // 64 hex chars
+const FAKE_AUTH_SECRET = "ab".repeat(32);
 vi.mock("node:crypto", () => ({
-  randomBytes: vi.fn(() => ({
+  randomBytes: vi.fn((size?: number) => ({
     toString: (encoding: string) => {
-      if (encoding === "hex") return FAKE_AUTH_SECRET;
-      return "mock";
+      if (encoding !== "hex") return "mock";
+      if (size === 32) return FAKE_AUTH_SECRET;
+      if (size === 4) return "feedbeef";
+      return "cd".repeat(size ?? 1);
     },
   })),
 }));
 
-// ── Fetch mock helpers ──────────────────────────────────────────────────
-
-const TEST_TOKEN = "fly-token";
-const TEST_APP = "companion-app";
-const TEST_IMAGE = "registry.fly.io/companion:latest";
-const FLY_BASE = `https://api.machines.dev/v1/apps/${TEST_APP}`;
-
-let fetchMock: ReturnType<typeof vi.fn>;
-let savedFetch: typeof global.fetch;
-
-/** Create a mock Response. */
 function okResponse(data: unknown): Response {
   return {
     ok: true,
@@ -46,329 +22,540 @@ function okResponse(data: unknown): Response {
   } as unknown as Response;
 }
 
-/**
- * Set up the fetch mock to respond correctly for a full provision flow:
- * 1. POST /volumes → volume response
- * 2. POST /machines → machine response
- * 3. GET /machines/:id → started state (for waitForState)
- */
-function setupProvisionFetchMock(overrides: {
-  volumeId?: string;
-  machineId?: string;
-  machineState?: string;
-} = {}) {
-  const volumeId = overrides.volumeId ?? "vol-123";
-  const machineId = overrides.machineId ?? "mach-456";
-  const machineState = overrides.machineState ?? "started";
+describe("Provisioner (hetzner)", () => {
+  const HETZNER_BASE = "https://api.hetzner.cloud/v1";
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let savedFetch: typeof global.fetch;
+  let serverStatus = "running";
 
-  fetchMock.mockImplementation((url: string, opts: RequestInit) => {
-    const method = opts.method ?? "GET";
+  function setupBaseFetch() {
+    fetchMock.mockImplementation((url: string, opts: RequestInit) => {
+      const method = opts.method ?? "GET";
 
-    // Volume creation
-    if (url === `${FLY_BASE}/volumes` && method === "POST") {
-      return Promise.resolve(okResponse({ id: volumeId }));
-    }
-    // Machine creation
-    if (url === `${FLY_BASE}/machines` && method === "POST") {
-      return Promise.resolve(okResponse({ id: machineId }));
-    }
-    // getMachine (for waitForState polling)
-    if (url === `${FLY_BASE}/machines/${machineId}` && method === "GET") {
-      return Promise.resolve(okResponse({ id: machineId, state: machineState }));
-    }
-    // startMachine
-    if (url === `${FLY_BASE}/machines/${machineId}/start` && method === "POST") {
-      return Promise.resolve(okResponse({}));
-    }
-    // stopMachine
-    if (url === `${FLY_BASE}/machines/${machineId}/stop` && method === "POST") {
-      return Promise.resolve(okResponse({}));
-    }
-    // destroyMachine (with or without force)
-    if (url.startsWith(`${FLY_BASE}/machines/${machineId}`) && method === "DELETE") {
-      return Promise.resolve(okResponse({}));
-    }
-    // deleteVolume
-    if (url === `${FLY_BASE}/volumes/${volumeId}` && method === "DELETE") {
-      return Promise.resolve(okResponse({}));
-    }
+      if (url === `${HETZNER_BASE}/volumes` && method === "POST") {
+        return Promise.resolve(okResponse({ volume: { id: 901, name: "companion_test", size: 10 } }));
+      }
+      if (url === `${HETZNER_BASE}/servers` && method === "POST") {
+        return Promise.resolve(okResponse({
+          server: { id: 801, status: "starting", public_net: { ipv4: { ip: "1.2.3.4" } } },
+          action: { id: 701, status: "running", command: "create_server" },
+        }));
+      }
+      if (url === `${HETZNER_BASE}/actions/701` && method === "GET") {
+        return Promise.resolve(okResponse({ action: { id: 701, status: "success", command: "create_server" } }));
+      }
+      if (url === `${HETZNER_BASE}/actions/702` && method === "GET") {
+        return Promise.resolve(okResponse({ action: { id: 702, status: "success", command: "poweron" } }));
+      }
+      if (url === `${HETZNER_BASE}/actions/703` && method === "GET") {
+        return Promise.resolve(okResponse({ action: { id: 703, status: "success", command: "poweroff" } }));
+      }
+      if (url === `${HETZNER_BASE}/actions/704` && method === "GET") {
+        return Promise.resolve(okResponse({ action: { id: 704, status: "success", command: "change_type" } }));
+      }
+      if (url === `${HETZNER_BASE}/servers/801` && method === "GET") {
+        return Promise.resolve(okResponse({
+          server: { id: 801, status: serverStatus, public_net: { ipv4: { ip: "1.2.3.4" } } },
+        }));
+      }
+      if (url === `${HETZNER_BASE}/servers/801/actions/poweron` && method === "POST") {
+        serverStatus = "running";
+        return Promise.resolve(okResponse({ action: { id: 702, status: "success", command: "poweron" } }));
+      }
+      if (url === `${HETZNER_BASE}/servers/801/actions/poweroff` && method === "POST") {
+        serverStatus = "off";
+        return Promise.resolve(okResponse({ action: { id: 703, status: "success", command: "poweroff" } }));
+      }
+      if (url === `${HETZNER_BASE}/servers/801/actions/change_type` && method === "POST") {
+        serverStatus = "off";
+        return Promise.resolve(okResponse({ action: { id: 704, status: "success", command: "change_type" } }));
+      }
+      if (url === `${HETZNER_BASE}/servers/801` && method === "DELETE") {
+        return Promise.resolve(okResponse({}));
+      }
+      if (url === `${HETZNER_BASE}/volumes/901` && method === "DELETE") {
+        return Promise.resolve(okResponse({}));
+      }
 
-    // Fallback: unexpected call
-    return Promise.resolve({
-      ok: false,
-      status: 404,
-      json: () => Promise.resolve({ error: "Not found" }),
-      text: () => Promise.resolve(`Unexpected fetch: ${method} ${url}`),
-    } as unknown as Response);
-  });
-}
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        text: () => Promise.resolve(`Unexpected fetch: ${method} ${url}`),
+      } as unknown as Response);
+    });
+  }
 
-function baseInput(overrides: Partial<Parameters<Provisioner["provision"]>[0]> = {}) {
-  return {
-    organizationId: "org-1",
-    plan: "starter" as Plan,
-    region: "iad",
-    hostname: "acme",
-    loginUrl: "https://acme.example.com/login",
-    ...overrides,
-  };
-}
-
-describe("Provisioner", () => {
-  let provisioner: Provisioner;
+  function makeProvisioner() {
+    return new Provisioner({
+      hetznerToken: "hcloud-token",
+      companionImage: "docker.io/stangirard/the-companion-server:latest",
+      hetznerServerTypes: {
+        starter: "cpx11",
+        pro: "cpx21",
+        enterprise: "cpx31",
+      },
+    });
+  }
 
   beforeEach(() => {
     savedFetch = global.fetch;
     fetchMock = vi.fn();
     global.fetch = fetchMock as unknown as typeof fetch;
-
-    setupProvisionFetchMock();
-    provisioner = new Provisioner(TEST_TOKEN, TEST_APP, TEST_IMAGE);
+    serverStatus = "running";
+    setupBaseFetch();
   });
 
   afterEach(() => {
     global.fetch = savedFetch;
   });
 
-  // ── provision ───────────────────────────────────────────────────────
-
-  describe("provision", () => {
-    it("creates a volume with the correct plan-based size, then creates a machine, and waits for started state", async () => {
-      await provisioner.provision(baseInput());
-
-      // Collect all fetch calls to verify the sequence.
-      const calls = fetchMock.mock.calls;
-
-      // 1st call: create volume (POST /volumes)
-      expect(calls[0][0]).toBe(`${FLY_BASE}/volumes`);
-      expect(calls[0][1].method).toBe("POST");
-      const volumeBody = JSON.parse(calls[0][1].body);
-      expect(volumeBody.name).toBe("companion_acme");
-      expect(volumeBody.region).toBe("iad");
-      expect(volumeBody.size_gb).toBe(10);
-
-      // 2nd call: create machine (POST /machines)
-      expect(calls[1][0]).toBe(`${FLY_BASE}/machines`);
-      expect(calls[1][1].method).toBe("POST");
-      const machineBody = JSON.parse(calls[1][1].body);
-      expect(machineBody.name).toBe("companion-acme");
-      expect(machineBody.region).toBe("iad");
-      expect(machineBody.config.image).toBe(TEST_IMAGE);
-      expect(machineBody.config.mounts).toEqual([{ volume: "vol-123", path: "/data" }]);
-
-      // 3rd call: waitForState → GET /machines/:id
-      expect(calls[2][0]).toBe(`${FLY_BASE}/machines/mach-456`);
-      expect(calls[2][1].method).toBe("GET");
+  it("provisions volume+server and returns IDs", async () => {
+    const provisioner = makeProvisioner();
+    const result = await provisioner.provision({
+      organizationId: "org-1",
+      plan: "starter",
+      region: "iad",
+      hostname: "demo",
+      loginUrl: "https://example.com/login",
     });
 
-    it("sanitizes and truncates volume names to Fly constraints", async () => {
-      await provisioner.provision(
-        baseInput({ hostname: "ACME-VERY-LONG-HOSTNAME-WITH-SYMBOLS!!!and-more" }),
-      );
-
-      const volumeBody = JSON.parse(fetchMock.mock.calls[0][1].body);
-      expect(volumeBody.name).toBe("companion_acme_very_long_hostn");
-      expect(volumeBody.name.length).toBeLessThanOrEqual(30);
-      expect(volumeBody.name).toMatch(/^[a-z0-9_]+$/);
+    expect(result).toEqual({
+      providerMachineId: "801",
+      providerVolumeId: "901",
+      authSecret: FAKE_AUTH_SECRET,
+      hostname: "demo",
     });
 
-    it.each([
-      ["starter", { cpus: 2, memory_mb: 2048, cpu_kind: "shared", storage_gb: 10 }],
-      ["pro", { cpus: 4, memory_mb: 4096, cpu_kind: "shared", storage_gb: 50 }],
-      ["enterprise", { cpus: 4, memory_mb: 8192, cpu_kind: "performance", storage_gb: 100 }],
-    ] as const)(
-      "uses correct CPU, memory, cpu_kind, and storage for the %s plan",
-      async (plan, expected) => {
-        await provisioner.provision(baseInput({ plan }));
+    const serverCall = fetchMock.mock.calls.find((c: any[]) => c[0] === `${HETZNER_BASE}/servers`);
+    const body = JSON.parse(serverCall![1].body);
+    expect(body.server_type).toBe("cpx11");
+    expect(body.user_data).toContain("COMPANION_AUTH_TOKEN=");
+    expect(body.user_data).toContain("COMPANION_AUTH_ENABLED=0");
 
-        const calls = fetchMock.mock.calls;
-
-        // Verify volume size in the first call (POST /volumes).
-        const volumeBody = JSON.parse(calls[0][1].body);
-        expect(volumeBody.size_gb).toBe(expected.storage_gb);
-
-        // Verify machine guest config in the second call (POST /machines).
-        const machineBody = JSON.parse(calls[1][1].body);
-        expect(machineBody.config.guest).toEqual({
-          cpus: expected.cpus,
-          memory_mb: expected.memory_mb,
-          cpu_kind: expected.cpu_kind,
-        });
-      },
-    );
-
-    it("includes TAILSCALE_AUTH_KEY in machine env when tailscaleAuthKey is provided", async () => {
-      await provisioner.provision(baseInput({ tailscaleAuthKey: "tskey-secret-123" }));
-
-      const machineBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-      expect(machineBody.config.env.TAILSCALE_AUTH_KEY).toBe("tskey-secret-123");
-    });
-
-    it("does NOT include TAILSCALE_AUTH_KEY in machine env when tailscaleAuthKey is omitted", async () => {
-      await provisioner.provision(baseInput());
-
-      const machineBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-      expect(machineBody.config.env).not.toHaveProperty("TAILSCALE_AUTH_KEY");
-    });
-
-    it("returns the correct result shape with flyMachineId, flyVolumeId, authSecret, and hostname", async () => {
-      const result = await provisioner.provision(baseInput());
-
-      expect(result).toEqual({
-        flyMachineId: "mach-456",
-        flyVolumeId: "vol-123",
-        authSecret: FAKE_AUTH_SECRET,
-        hostname: "acme",
-      });
-    });
-
-    it("calls onProgress callback at each provisioning step when provided", async () => {
-      const progressCalls: Array<[string, string, string]> = [];
-      const onProgress = vi.fn((step: string, label: string, status: string) => {
-        progressCalls.push([step, label, status]);
-      });
-
-      await provisioner.provision(baseInput({ onProgress }));
-
-      // Verify progress was called for each step (in_progress + done)
-      expect(onProgress).toHaveBeenCalled();
-
-      // Check the step names are correct and in order
-      const stepNames = progressCalls.map(([step]) => step);
-      expect(stepNames).toContain("creating_volume");
-      expect(stepNames).toContain("creating_machine");
-      expect(stepNames).toContain("waiting_start");
-
-      // Each step should have both "in_progress" and "done" calls
-      const volumeStatuses = progressCalls.filter(([s]) => s === "creating_volume").map(([, , status]) => status);
-      expect(volumeStatuses).toEqual(["in_progress", "done"]);
-
-      const machineStatuses = progressCalls.filter(([s]) => s === "creating_machine").map(([, , status]) => status);
-      expect(machineStatuses).toEqual(["in_progress", "done"]);
-
-      const waitStatuses = progressCalls.filter(([s]) => s === "waiting_start").map(([, , status]) => status);
-      expect(waitStatuses).toEqual(["in_progress", "done"]);
-    });
-
-    it("works without onProgress callback (backward compatible)", async () => {
-      // Should not throw when onProgress is not provided
-      const result = await provisioner.provision(baseInput());
-      expect(result.flyMachineId).toBe("mach-456");
-    });
-
-    it("sets standard env vars on the machine config", async () => {
-      await provisioner.provision(baseInput());
-
-      const machineBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-      const env = machineBody.config.env;
-      expect(env.NODE_ENV).toBe("production");
-      expect(env.COMPANION_HOME).toBe("/data/companion");
-      expect(env.COMPANION_SESSION_DIR).toBe("/data/sessions");
-      expect(env.COMPANION_AUTH_ENABLED).toBe("1");
-      expect(env.COMPANION_AUTH_SECRET).toBe(FAKE_AUTH_SECRET);
-      expect(env.COMPANION_LOGIN_URL).toBe("https://acme.example.com/login");
-    });
+    const volumeCall = fetchMock.mock.calls.find((c: any[]) => c[0] === `${HETZNER_BASE}/volumes`);
+    expect(JSON.parse(volumeCall![1].body).name).toBe("companion_demo_feedbeef");
+    expect(body.name).toBe("companion-demo-feedbeef");
   });
 
-  // ── deprovision ─────────────────────────────────────────────────────
+  it("falls back to server ipv4 hostname when hostname is empty", async () => {
+    const provisioner = makeProvisioner();
+    const result = await provisioner.provision({
+      organizationId: "org-1",
+      plan: "starter",
+      region: "iad",
+      hostname: "",
+      loginUrl: "",
+    });
+    expect(result.hostname).toBe("1.2.3.4");
+  });
 
-  describe("deprovision", () => {
-    it("stops the machine, waits for stopped state, then destroys machine and deletes volume", async () => {
-      // Override to return "stopped" for waitForState during deprovision.
-      setupProvisionFetchMock({ machineState: "stopped" });
+  it("supports start/stop/getStatus/deprovision", async () => {
+    const provisioner = makeProvisioner();
+    await expect(provisioner.start("801")).resolves.toBeUndefined();
+    await expect(provisioner.stop("801")).resolves.toBeUndefined();
+    await expect(provisioner.getStatus("801")).resolves.toBe("off");
+    await expect(provisioner.deprovision("801", "901")).resolves.toBeUndefined();
+  });
 
-      await provisioner.deprovision("mach-456", "vol-123");
+  it("resizes with required stop/change/start lifecycle", async () => {
+    const provisioner = makeProvisioner();
+    await expect(provisioner.resize("801", "pro")).resolves.toBeUndefined();
 
-      const calls = fetchMock.mock.calls;
-      const methods = calls.map((c: any[]) => `${c[1].method} ${c[0]}`);
+    const methods = fetchMock.mock.calls.map((c: any[]) => `${c[1].method} ${c[0]}`);
+    expect(methods).toContain(`POST ${HETZNER_BASE}/servers/801/actions/poweroff`);
+    expect(methods).toContain(`POST ${HETZNER_BASE}/servers/801/actions/change_type`);
+    expect(methods).toContain(`POST ${HETZNER_BASE}/servers/801/actions/poweron`);
 
-      // Verify sequence: stop → getMachine (waitForState) → destroy → deleteVolume
-      expect(methods).toContain(`POST ${FLY_BASE}/machines/mach-456/stop`);
-      expect(methods).toContain(`GET ${FLY_BASE}/machines/mach-456`);
-      expect(methods).toContain(`DELETE ${FLY_BASE}/machines/mach-456?force=true`);
-      expect(methods).toContain(`DELETE ${FLY_BASE}/volumes/vol-123`);
+    const changeTypeCall = fetchMock.mock.calls.find(
+      (c: any[]) => c[0] === `${HETZNER_BASE}/servers/801/actions/change_type`,
+    );
+    expect(JSON.parse(changeTypeCall![1].body).server_type).toBe("cpx21");
+  });
+
+  it("sanitizes loginUrl/tailscale values before embedding cloud-init", async () => {
+    const provisioner = makeProvisioner();
+    await provisioner.provision({
+      organizationId: "org-1",
+      plan: "starter",
+      region: "iad",
+      hostname: "demo",
+      loginUrl: "https://ok.example.com\nMALICIOUS",
+      tailscaleAuthKey: "tskey\nMALICIOUS",
     });
 
-    it("still destroys machine and deletes volume even if stopMachine throws (machine already stopped)", async () => {
-      // Make stop fail with a 422, but destroy and delete succeed.
-      fetchMock.mockImplementation((url: string, opts: RequestInit) => {
-        const method = opts.method ?? "GET";
-        if (url.endsWith("/stop") && method === "POST") {
+    const serverCall = fetchMock.mock.calls.find((c: any[]) => c[0] === `${HETZNER_BASE}/servers`);
+    const body = JSON.parse(serverCall![1].body);
+    expect(body.user_data).not.toContain("\nMALICIOUS");
+  });
+
+  it("falls back to next location when primary location is unavailable", async () => {
+    fetchMock.mockImplementation((url: string, opts: RequestInit) => {
+      const method = opts.method ?? "GET";
+      if (url === `${HETZNER_BASE}/volumes` && method === "POST") {
+        const body = JSON.parse(String(opts.body));
+        if (body.location === "ash") {
           return Promise.resolve({
             ok: false,
             status: 422,
-            json: () => Promise.resolve({}),
-            text: () => Promise.resolve("machine already stopped"),
+            text: () =>
+              Promise.resolve(
+                `{"error":{"code":"invalid_input","message":"invalid input in field 'location'"}}`,
+              ),
           } as unknown as Response);
         }
-        if (url.startsWith(`${FLY_BASE}/machines/mach-456`) && method === "DELETE") {
-          return Promise.resolve(okResponse({}));
-        }
-        if (url === `${FLY_BASE}/volumes/vol-123` && method === "DELETE") {
-          return Promise.resolve(okResponse({}));
-        }
+        return Promise.resolve(okResponse({ volume: { id: 901, name: "companion_test", size: 10 } }));
+      }
+      if (url === `${HETZNER_BASE}/servers` && method === "POST") {
+        return Promise.resolve(okResponse({
+          server: { id: 801, status: "starting", public_net: { ipv4: { ip: "1.2.3.4" } } },
+          action: { id: 701, status: "running", command: "create_server" },
+        }));
+      }
+      if (url === `${HETZNER_BASE}/actions/701` && method === "GET") {
+        return Promise.resolve(okResponse({ action: { id: 701, status: "success", command: "create_server" } }));
+      }
+      if (url === `${HETZNER_BASE}/servers/801` && method === "GET") {
+        return Promise.resolve(okResponse({
+          server: { id: 801, status: "running", public_net: { ipv4: { ip: "1.2.3.4" } } },
+        }));
+      }
+      if (url === `${HETZNER_BASE}/servers/801` && method === "DELETE") {
         return Promise.resolve(okResponse({}));
-      });
-
-      // Should not throw despite stopMachine failing.
-      await expect(provisioner.deprovision("mach-456", "vol-123")).resolves.toBeUndefined();
-
-      // Verify destroy and delete were still called.
-      const calls = fetchMock.mock.calls;
-      const methods = calls.map((c: any[]) => `${c[1].method} ${c[0]}`);
-      expect(methods).toContain(`DELETE ${FLY_BASE}/machines/mach-456?force=true`);
-      expect(methods).toContain(`DELETE ${FLY_BASE}/volumes/vol-123`);
+      }
+      if (url === `${HETZNER_BASE}/volumes/901` && method === "DELETE") {
+        return Promise.resolve(okResponse({}));
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        text: () => Promise.resolve(`Unexpected fetch: ${method} ${url}`),
+      } as unknown as Response);
     });
+
+    const provisioner = makeProvisioner();
+    await provisioner.provision({
+      organizationId: "org-1",
+      plan: "starter",
+      region: "iad",
+      hostname: "demo",
+      loginUrl: "",
+    });
+
+    const createVolumeBodies = fetchMock.mock.calls
+      .filter((c: any[]) => c[0] === `${HETZNER_BASE}/volumes` && c[1].method === "POST")
+      .map((c: any[]) => JSON.parse(c[1].body));
+    expect(createVolumeBodies[0].location).toBe("ash");
+    expect(createVolumeBodies[1].location).toBe("hil");
+
+    const serverCall = fetchMock.mock.calls.find((c: any[]) => c[0] === `${HETZNER_BASE}/servers`);
+    expect(JSON.parse(serverCall![1].body).location).toBe("hil");
   });
 
-  // ── start ───────────────────────────────────────────────────────────
-
-  describe("start", () => {
-    it("starts the machine and waits for started state with 60s timeout", async () => {
-      await provisioner.start("mach-456");
-
-      const calls = fetchMock.mock.calls;
-      const methods = calls.map((c: any[]) => `${c[1].method} ${c[0]}`);
-
-      // Should call start then getMachine (for waitForState)
-      expect(methods).toContain(`POST ${FLY_BASE}/machines/mach-456/start`);
-      expect(methods).toContain(`GET ${FLY_BASE}/machines/mach-456`);
+  it("retries with another location when server type is unsupported in first location", async () => {
+    fetchMock.mockImplementation((url: string, opts: RequestInit) => {
+      const method = opts.method ?? "GET";
+      if (url === `${HETZNER_BASE}/volumes` && method === "POST") {
+        const body = JSON.parse(String(opts.body));
+        if (body.location === "ash") {
+          return Promise.resolve(okResponse({ volume: { id: 901, name: "companion_test_a", size: 10 } }));
+        }
+        return Promise.resolve(okResponse({ volume: { id: 902, name: "companion_test_b", size: 10 } }));
+      }
+      if (url === `${HETZNER_BASE}/servers` && method === "POST") {
+        const body = JSON.parse(String(opts.body));
+        if (body.location === "ash") {
+          return Promise.resolve({
+            ok: false,
+            status: 422,
+            text: () =>
+              Promise.resolve(
+                `{"error":{"code":"invalid_input","message":"unsupported location for server type"}}`,
+              ),
+          } as unknown as Response);
+        }
+        return Promise.resolve(okResponse({
+          server: { id: 801, status: "starting", public_net: { ipv4: { ip: "1.2.3.4" } } },
+          action: { id: 701, status: "running", command: "create_server" },
+        }));
+      }
+      if (url === `${HETZNER_BASE}/actions/701` && method === "GET") {
+        return Promise.resolve(okResponse({ action: { id: 701, status: "success", command: "create_server" } }));
+      }
+      if (url === `${HETZNER_BASE}/servers/801` && method === "GET") {
+        return Promise.resolve(okResponse({
+          server: { id: 801, status: "running", public_net: { ipv4: { ip: "1.2.3.4" } } },
+        }));
+      }
+      if (url === `${HETZNER_BASE}/volumes/901` && method === "DELETE") {
+        return Promise.resolve(okResponse({}));
+      }
+      if (url === `${HETZNER_BASE}/servers/801` && method === "DELETE") {
+        return Promise.resolve(okResponse({}));
+      }
+      if (url === `${HETZNER_BASE}/volumes/902` && method === "DELETE") {
+        return Promise.resolve(okResponse({}));
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        text: () => Promise.resolve(`Unexpected fetch: ${method} ${url}`),
+      } as unknown as Response);
     });
+
+    const provisioner = makeProvisioner();
+    const result = await provisioner.provision({
+      organizationId: "org-1",
+      plan: "starter",
+      region: "iad",
+      hostname: "demo",
+      loginUrl: "",
+    });
+
+    expect(result.providerVolumeId).toBe("902");
+    const createdServerBodies = fetchMock.mock.calls
+      .filter((c: any[]) => c[0] === `${HETZNER_BASE}/servers` && c[1].method === "POST")
+      .map((c: any[]) => JSON.parse(c[1].body));
+    expect(createdServerBodies[0].location).toBe("ash");
+    expect(createdServerBodies[1].location).toBe("hil");
   });
 
-  // ── stop ────────────────────────────────────────────────────────────
-
-  describe("stop", () => {
-    it("stops the machine and waits for stopped state with 30s timeout", async () => {
-      setupProvisionFetchMock({ machineState: "stopped" });
-
-      await provisioner.stop("mach-456");
-
-      const calls = fetchMock.mock.calls;
-      const methods = calls.map((c: any[]) => `${c[1].method} ${c[0]}`);
-
-      expect(methods).toContain(`POST ${FLY_BASE}/machines/mach-456/stop`);
-      expect(methods).toContain(`GET ${FLY_BASE}/machines/mach-456`);
+  it("falls back to another server type within the selected geography", async () => {
+    fetchMock.mockImplementation((url: string, opts: RequestInit) => {
+      const method = opts.method ?? "GET";
+      if (url === `${HETZNER_BASE}/volumes` && method === "POST") {
+        return Promise.resolve(okResponse({ volume: { id: 901, name: "companion_test_a", size: 10 } }));
+      }
+      if (url === `${HETZNER_BASE}/servers` && method === "POST") {
+        const body = JSON.parse(String(opts.body));
+        if (body.server_type === "cpx11") {
+          return Promise.resolve({
+            ok: false,
+            status: 422,
+            text: () =>
+              Promise.resolve(
+                `{"error":{"code":"invalid_input","message":"unsupported location for server type"}}`,
+              ),
+          } as unknown as Response);
+        }
+        return Promise.resolve(okResponse({
+          server: { id: 801, status: "starting", public_net: { ipv4: { ip: "1.2.3.4" } } },
+          action: { id: 701, status: "running", command: "create_server" },
+        }));
+      }
+      if (url === `${HETZNER_BASE}/actions/701` && method === "GET") {
+        return Promise.resolve(okResponse({ action: { id: 701, status: "success", command: "create_server" } }));
+      }
+      if (url === `${HETZNER_BASE}/servers/801` && method === "GET") {
+        return Promise.resolve(okResponse({
+          server: { id: 801, status: "running", public_net: { ipv4: { ip: "1.2.3.4" } } },
+        }));
+      }
+      if (url === `${HETZNER_BASE}/volumes/901` && method === "DELETE") {
+        return Promise.resolve(okResponse({}));
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        text: () => Promise.resolve(`Unexpected fetch: ${method} ${url}`),
+      } as unknown as Response);
     });
+
+    const provisioner = new Provisioner({
+      hetznerToken: "hcloud-token",
+      companionImage: "docker.io/stangirard/the-companion-server:latest",
+      hetznerServerTypes: {
+        starter: "cpx11",
+      },
+    });
+
+    await provisioner.provision({
+      organizationId: "org-1",
+      plan: "starter",
+      region: "cdg",
+      hostname: "demo",
+      loginUrl: "",
+    });
+
+    const createdServerBodies = fetchMock.mock.calls
+      .filter((c: any[]) => c[0] === `${HETZNER_BASE}/servers` && c[1].method === "POST")
+      .map((c: any[]) => JSON.parse(c[1].body));
+
+    expect(createdServerBodies.some((body: any) => body.server_type === "cpx11")).toBe(true);
+    expect(createdServerBodies.some((body: any) => body.server_type === "cpx22")).toBe(true);
+    expect(createdServerBodies.every((body: any) => ["fsn1", "nbg1", "hel1"].includes(body.location))).toBe(true);
   });
 
-  // ── getStatus ───────────────────────────────────────────────────────
-
-  describe("getStatus", () => {
-    it("returns the machine state from getMachine", async () => {
-      const status = await provisioner.getStatus("mach-456");
-
-      expect(fetchMock).toHaveBeenCalledOnce();
-      expect(fetchMock.mock.calls[0][0]).toBe(`${FLY_BASE}/machines/mach-456`);
-      expect(status).toBe("started");
+  it("retries with a fallback when the configured server type is deprecated", async () => {
+    fetchMock.mockImplementation((url: string, opts: RequestInit) => {
+      const method = opts.method ?? "GET";
+      if (url === `${HETZNER_BASE}/volumes` && method === "POST") {
+        return Promise.resolve(okResponse({ volume: { id: 901, name: "companion_test_a", size: 10 } }));
+      }
+      if (url === `${HETZNER_BASE}/servers` && method === "POST") {
+        const body = JSON.parse(String(opts.body));
+        if (body.server_type === "104") {
+          return Promise.resolve({
+            ok: false,
+            status: 422,
+            text: () =>
+              Promise.resolve(
+                `{"error":{"code":"invalid_input","message":"server type 104 is deprecated"}}`,
+              ),
+          } as unknown as Response);
+        }
+        return Promise.resolve(okResponse({
+          server: { id: 801, status: "starting", public_net: { ipv4: { ip: "1.2.3.4" } } },
+          action: { id: 701, status: "running", command: "create_server" },
+        }));
+      }
+      if (url === `${HETZNER_BASE}/actions/701` && method === "GET") {
+        return Promise.resolve(okResponse({ action: { id: 701, status: "success", command: "create_server" } }));
+      }
+      if (url === `${HETZNER_BASE}/servers/801` && method === "GET") {
+        return Promise.resolve(okResponse({
+          server: { id: 801, status: "running", public_net: { ipv4: { ip: "1.2.3.4" } } },
+        }));
+      }
+      if (url === `${HETZNER_BASE}/volumes/901` && method === "DELETE") {
+        return Promise.resolve(okResponse({}));
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        text: () => Promise.resolve(`Unexpected fetch: ${method} ${url}`),
+      } as unknown as Response);
     });
 
-    it("returns the stopped state when machine is stopped", async () => {
-      setupProvisionFetchMock({ machineState: "stopped" });
-
-      const status = await provisioner.getStatus("mach-456");
-
-      expect(status).toBe("stopped");
+    const provisioner = new Provisioner({
+      hetznerToken: "hcloud-token",
+      companionImage: "docker.io/stangirard/the-companion-server:latest",
+      hetznerServerTypes: {
+        starter: "104",
+      },
     });
+
+    await provisioner.provision({
+      organizationId: "org-1",
+      plan: "starter",
+      region: "cdg",
+      hostname: "demo",
+      loginUrl: "",
+    });
+
+    const createdServerBodies = fetchMock.mock.calls
+      .filter((c: any[]) => c[0] === `${HETZNER_BASE}/servers` && c[1].method === "POST")
+      .map((c: any[]) => JSON.parse(c[1].body));
+    expect(createdServerBodies[0].server_type).toBe("104");
+    expect(createdServerBodies.some((body: any) => body.server_type === "cpx11" || body.server_type === "cpx22")).toBe(true);
+  });
+
+  it("retries the next European location when a server location is disabled", async () => {
+    fetchMock.mockImplementation((url: string, opts: RequestInit) => {
+      const method = opts.method ?? "GET";
+      if (url === `${HETZNER_BASE}/volumes` && method === "POST") {
+        const body = JSON.parse(String(opts.body));
+        if (body.location === "nbg1") {
+          return Promise.resolve(okResponse({ volume: { id: 901, name: "companion_test_a", size: 10 } }));
+        }
+        return Promise.resolve(okResponse({ volume: { id: 902, name: "companion_test_b", size: 10 } }));
+      }
+      if (url === `${HETZNER_BASE}/servers` && method === "POST") {
+        const body = JSON.parse(String(opts.body));
+        if (body.location === "nbg1") {
+          return Promise.resolve({
+            ok: false,
+            status: 412,
+            text: () =>
+              Promise.resolve(
+                `{"error":{"code":"resource_unavailable","message":"server location disabled"}}`,
+              ),
+          } as unknown as Response);
+        }
+        return Promise.resolve(okResponse({
+          server: { id: 801, status: "starting", public_net: { ipv4: { ip: "1.2.3.4" } } },
+          action: { id: 701, status: "running", command: "create_server" },
+        }));
+      }
+      if (url === `${HETZNER_BASE}/actions/701` && method === "GET") {
+        return Promise.resolve(okResponse({ action: { id: 701, status: "success", command: "create_server" } }));
+      }
+      if (url === `${HETZNER_BASE}/servers/801` && method === "GET") {
+        return Promise.resolve(okResponse({
+          server: { id: 801, status: "running", public_net: { ipv4: { ip: "1.2.3.4" } } },
+        }));
+      }
+      if (url === `${HETZNER_BASE}/volumes/901` && method === "DELETE") {
+        return Promise.resolve(okResponse({}));
+      }
+      if (url === `${HETZNER_BASE}/volumes/902` && method === "DELETE") {
+        return Promise.resolve(okResponse({}));
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        text: () => Promise.resolve(`Unexpected fetch: ${method} ${url}`),
+      } as unknown as Response);
+    });
+
+    const provisioner = new Provisioner({
+      hetznerToken: "hcloud-token",
+      companionImage: "docker.io/stangirard/the-companion-server:latest",
+      hetznerServerTypes: {
+        starter: "cpx22",
+      },
+    });
+
+    await provisioner.provision({
+      organizationId: "org-1",
+      plan: "starter",
+      region: "cdg",
+      hostname: "demo",
+      loginUrl: "",
+    });
+
+    const createdServerBodies = fetchMock.mock.calls
+      .filter((c: any[]) => c[0] === `${HETZNER_BASE}/servers` && c[1].method === "POST")
+      .map((c: any[]) => JSON.parse(c[1].body));
+    expect(createdServerBodies[0].location).toBe("nbg1");
+    expect(createdServerBodies[1].location).toBe("hel1");
+  });
+
+  it("does not cross from Europe selection into US locations", async () => {
+    fetchMock.mockImplementation((url: string, opts: RequestInit) => {
+      const method = opts.method ?? "GET";
+      if (url === `${HETZNER_BASE}/volumes` && method === "POST") {
+        return Promise.resolve({
+          ok: false,
+          status: 422,
+          text: () =>
+            Promise.resolve(
+              `{"error":{"code":"invalid_input","message":"invalid input in field 'location'"}}`,
+            ),
+        } as unknown as Response);
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        text: () => Promise.resolve(`Unexpected fetch: ${method} ${url}`),
+      } as unknown as Response);
+    });
+
+    const provisioner = makeProvisioner();
+    await expect(
+      provisioner.provision({
+        organizationId: "org-1",
+        plan: "starter",
+        region: "cdg",
+        hostname: "demo",
+        loginUrl: "",
+      }),
+    ).rejects.toThrow(/location/);
+
+    const createVolumeBodies = fetchMock.mock.calls
+      .filter((c: any[]) => c[0] === `${HETZNER_BASE}/volumes` && c[1].method === "POST")
+      .map((c: any[]) => JSON.parse(c[1].body));
+    const attemptedLocations = createVolumeBodies.map((b: any) => b.location);
+    expect(new Set(attemptedLocations)).toEqual(new Set(["fsn1", "nbg1", "hel1"]));
+    expect(attemptedLocations).not.toContain("ash");
   });
 });

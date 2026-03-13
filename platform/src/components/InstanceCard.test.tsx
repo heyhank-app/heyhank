@@ -17,7 +17,7 @@ const mockOnAction = vi.fn();
 
 const runningInstance = {
   id: "inst-1",
-  hostname: "my-instance.fly.dev",
+  hostname: "my-instance.example.com",
   machineStatus: "started",
   region: "iad",
   ownerType: "shared",
@@ -25,7 +25,7 @@ const runningInstance = {
 
 const stoppedInstance = {
   id: "inst-2",
-  hostname: "stopped-instance.fly.dev",
+  hostname: "stopped-instance.example.com",
   machineStatus: "stopped",
   region: "cdg",
   ownerType: "personal",
@@ -40,7 +40,7 @@ describe("InstanceCard", () => {
 
   it("renders the instance hostname", () => {
     render(<InstanceCard instance={runningInstance} onActionComplete={mockOnAction} />);
-    expect(screen.getByText("my-instance.fly.dev")).toBeDefined();
+    expect(screen.getByText("my-instance.example.com")).toBeDefined();
   });
 
   it("renders the region", () => {

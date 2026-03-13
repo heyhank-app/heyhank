@@ -50,16 +50,16 @@ describe("Dashboard", () => {
   it("renders instance cards after loading", async () => {
     mockListInstances.mockResolvedValue({
       instances: [
-        { id: "i-1", hostname: "app-one.fly.dev", machineStatus: "started", region: "iad" },
-        { id: "i-2", hostname: "app-two.fly.dev", machineStatus: "stopped", region: "cdg" },
+        { id: "i-1", hostname: "app-one.example.com", machineStatus: "started", region: "iad" },
+        { id: "i-2", hostname: "app-two.example.com", machineStatus: "stopped", region: "cdg" },
       ],
     });
 
     render(<Dashboard />);
 
     await waitFor(() => {
-      expect(screen.getByText("app-one.fly.dev")).toBeTruthy();
-      expect(screen.getByText("app-two.fly.dev")).toBeTruthy();
+      expect(screen.getByText("app-one.example.com")).toBeTruthy();
+      expect(screen.getByText("app-two.example.com")).toBeTruthy();
     });
   });
 
@@ -90,7 +90,7 @@ describe("Dashboard", () => {
   it("polls when transitional instances exist", async () => {
     // Always return transitional instances so polling stays active
     mockListInstances.mockResolvedValue({
-      instances: [{ id: "i-1", hostname: "app.fly.dev", machineStatus: "provisioning", region: "iad" }],
+      instances: [{ id: "i-1", hostname: "app.example.com", machineStatus: "provisioning", region: "iad" }],
     });
 
     render(<Dashboard />);
@@ -116,14 +116,14 @@ describe("Dashboard", () => {
   it("has no accessibility violations", async () => {
     mockListInstances.mockResolvedValue({
       instances: [
-        { id: "i-1", hostname: "app.fly.dev", machineStatus: "started", region: "iad", ownerType: "shared" },
+        { id: "i-1", hostname: "app.example.com", machineStatus: "started", region: "iad", ownerType: "shared" },
       ],
     });
 
     const { container } = render(<Dashboard />);
 
     await waitFor(() => {
-      expect(screen.getByText("app.fly.dev")).toBeTruthy();
+      expect(screen.getByText("app.example.com")).toBeTruthy();
     });
 
     const results = await axe(container);

@@ -62,10 +62,22 @@ function getCookie(c: Context, name: string): string | undefined {
 
 function setAuthCookie(c: Context, token: string): void {
   const encoded = encodeURIComponent(token);
+  const secure = shouldUseSecureCookie(c) ? "; Secure" : "";
   c.header(
     "Set-Cookie",
-    `companion_token=${encoded}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`,
+    `companion_token=${encoded}; Path=/; HttpOnly${secure}; SameSite=Lax; Max-Age=900`,
   );
+}
+
+function shouldUseSecureCookie(c: Context): boolean {
+  const forwardedProto = c.req.header("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+  if (forwardedProto) return forwardedProto === "https";
+
+  try {
+    return new URL(c.req.url).protocol === "https:";
+  } catch {
+    return true;
+  }
 }
 
 function redirectOrUnauthorized(c: Context): Response {

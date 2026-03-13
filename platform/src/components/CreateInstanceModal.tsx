@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
@@ -9,15 +9,42 @@ interface CreateInstanceModalProps {
   onInstanceCreated: () => void;
 }
 
+const DEFAULT_REGIONS = [
+  { value: "iad", label: "US East (ASH)" },
+  { value: "cdg", label: "Europe (FSN)" },
+];
+
 export function CreateInstanceModal({ onClose, onInstanceCreated }: CreateInstanceModalProps) {
   const [plan, setPlan] = useState("starter");
   const [region, setRegion] = useState("iad");
   const [ownerType, setOwnerType] = useState<"shared" | "personal">("shared");
+  const [regionOptions, setRegionOptions] = useState(DEFAULT_REGIONS);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [steps, setSteps] = useState<ProvisioningStep[]>([]);
   const isStreaming = steps.length > 0;
   const hasError = steps.some((s) => s.status === "error") || !!error;
+
+  useEffect(() => {
+    let mounted = true;
+    void api
+      .getStatus()
+      .then((status) => {
+        if (!mounted) return;
+        const regions = status.provisioning?.regions?.length
+          ? status.provisioning.regions
+          : DEFAULT_REGIONS;
+        setRegionOptions(regions);
+        setRegion(regions[0].value);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setRegionOptions(DEFAULT_REGIONS);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   async function handleCreate() {
     setLoading(true);
@@ -99,11 +126,16 @@ export function CreateInstanceModal({ onClose, onInstanceCreated }: CreateInstan
               onChange={(e) => setRegion(e.target.value)}
               className="w-full px-3 py-2.5 bg-cc-input-bg border border-cc-border rounded-lg text-sm text-cc-fg outline-none focus:border-cc-primary mb-5 appearance-none"
             >
-              <option value="iad">US East (IAD)</option>
-              <option value="lax">US West (LAX)</option>
-              <option value="cdg">Europe (CDG)</option>
-              <option value="nrt">Asia (NRT)</option>
+              {regionOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
+
+            <p className="text-[11px] text-cc-muted -mt-3 mb-5">
+              Provider: Hetzner Cloud
+            </p>
 
             {/* Ownership */}
             <label className="block text-xs text-cc-muted mb-2">Ownership</label>

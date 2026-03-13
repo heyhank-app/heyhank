@@ -6,6 +6,21 @@ import type { ProvisioningStep } from "./types";
 
 const BASE = "/api";
 
+export interface ProvisioningRegion {
+  value: string;
+  label: string;
+}
+
+export interface ControlPlaneStatus {
+  service: string;
+  version: string;
+  status: string;
+  provisioning?: {
+    provider?: "hetzner";
+    regions?: ProvisioningRegion[];
+  };
+}
+
 async function request<T>(
   method: string,
   path: string,
@@ -56,6 +71,7 @@ async function createInstanceStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let result: { instance: unknown } | null = null;
+  let streamError: Error | null = null;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -63,15 +79,15 @@ async function createInstanceStream(
     // otherwise decode the incoming chunk in streaming mode.
     buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
 
-    // Parse SSE events: split on double newlines
-    const chunks = buffer.split("\n\n");
+    // Parse SSE events with support for LF and CRLF line endings.
+    const chunks = buffer.split(/\r?\n\r?\n/);
     buffer = chunks.pop() || "";
 
     for (const chunk of chunks) {
       if (!chunk.trim()) continue;
       let eventType = "";
       let eventData = "";
-      for (const line of chunk.split("\n")) {
+      for (const line of chunk.split(/\r?\n/)) {
         if (line.startsWith("event:")) eventType = line.slice(6).trim();
         else if (line.startsWith("data:")) eventData = line.slice(5).trim();
       }
@@ -87,11 +103,17 @@ async function createInstanceStream(
         onProgress(parsed as ProvisioningStep);
       } else if (eventType === "done") {
         result = parsed as { instance: unknown };
+        await reader.cancel();
+        break;
       } else if (eventType === "error") {
-        throw new Error((parsed as { error: string }).error || "Instance creation failed");
+        streamError = new Error((parsed as { error: string }).error || "Instance creation failed");
+        await reader.cancel();
+        break;
       }
     }
 
+    if (streamError) throw streamError;
+    if (result) return result;
     if (done) break;
   }
 
@@ -127,5 +149,5 @@ export const api = {
   getUsage: () => request("GET", "/dashboard/usage"),
 
   // Status
-  getStatus: () => request("GET", "/status"),
+  getStatus: () => request<ControlPlaneStatus>("GET", "/status"),
 };

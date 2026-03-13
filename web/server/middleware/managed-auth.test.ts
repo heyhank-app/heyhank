@@ -158,6 +158,30 @@ describe("managed-auth middleware", () => {
     expect(res.headers.get("set-cookie")).toContain("companion_token=");
   });
 
+  it("sets a Secure auth cookie for HTTPS requests", async () => {
+    process.env.COMPANION_AUTH_ENABLED = "1";
+    process.env.COMPANION_AUTH_SECRET = TEST_SECRET;
+    const app = createTestApp();
+
+    const token = await createToken(TEST_SECRET, 60);
+    const res = await app.request(`https://instance.example.com/api/sessions?token=${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).toContain("Secure");
+  });
+
+  it("omits Secure on auth cookie for direct HTTP instance URLs", async () => {
+    process.env.COMPANION_AUTH_ENABLED = "1";
+    process.env.COMPANION_AUTH_SECRET = TEST_SECRET;
+    const app = createTestApp();
+
+    const token = await createToken(TEST_SECRET, 60);
+    const res = await app.request(`http://5.161.114.105/?token=${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).not.toContain("Secure");
+  });
+
   it("persists query-token auth as cookie for follow-up requests", async () => {
     process.env.COMPANION_AUTH_ENABLED = "1";
     process.env.COMPANION_AUTH_SECRET = TEST_SECRET;

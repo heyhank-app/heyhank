@@ -37,8 +37,10 @@ export const instances = pgTable("instances", {
   organizationId: text("organization_id").notNull(),
   ownerId: text("owner_id"), // null = shared instance
   ownerType: text("owner_type").notNull().default("shared"), // "shared" | "personal"
-  flyMachineId: text("fly_machine_id").unique(),
-  flyVolumeId: text("fly_volume_id"),
+  // Keep legacy SQL column names for backward compatibility with existing DBs.
+  // Property names are provider-neutral in application code.
+  providerMachineId: text("fly_machine_id").unique(),
+  providerVolumeId: text("fly_volume_id"),
   region: text("region").notNull().default("iad"),
   hostname: text("hostname").unique(),
   customDomain: text("custom_domain"),

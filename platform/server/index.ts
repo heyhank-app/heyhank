@@ -8,6 +8,11 @@ import { dashboard } from "./routes/dashboard.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT) || 3458;
+const instanceProvider = "hetzner";
+const provisioningRegions = [
+  { value: "iad", label: "US East (ASH)" },
+  { value: "cdg", label: "Europe (FSN)" },
+];
 
 const app = new Hono();
 
@@ -60,6 +65,10 @@ app.get("/api/status", (c) => {
     service: "companion-cloud",
     version: "0.1.0",
     status: "ok",
+    provisioning: {
+      provider: instanceProvider,
+      regions: provisioningRegions,
+    },
   });
 });
 

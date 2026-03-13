@@ -6,9 +6,11 @@ import { CreateInstanceModal } from "./CreateInstanceModal";
 
 // Mock the API module
 const mockCreateInstanceStream = vi.fn();
+const mockGetStatus = vi.fn();
 vi.mock("@/lib/api", () => ({
   api: {
     createInstanceStream: (...args: any[]) => mockCreateInstanceStream(...args),
+    getStatus: (...args: any[]) => mockGetStatus(...args),
   },
 }));
 
@@ -18,6 +20,18 @@ const mockOnCreated = vi.fn();
 describe("CreateInstanceModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetStatus.mockResolvedValue({
+      service: "companion-cloud",
+      version: "0.1.0",
+      status: "ok",
+      provisioning: {
+        provider: "hetzner",
+        regions: [
+          { value: "iad", label: "US East (ASH)" },
+          { value: "cdg", label: "Europe (FSN)" },
+        ],
+      },
+    });
   });
 
   // ── Render tests ──────────────────────────────────────────────────────
@@ -79,8 +93,8 @@ describe("CreateInstanceModal", () => {
   it("starts streaming when Create Instance button is clicked", async () => {
     // Simulate a successful SSE stream
     mockCreateInstanceStream.mockImplementation(async (_data: any, onProgress: any) => {
-      onProgress({ step: "ensuring_app", label: "Ensuring Fly app exists", status: "in_progress" });
-      onProgress({ step: "ensuring_app", label: "Ensuring Fly app exists", status: "done" });
+      onProgress({ step: "ensuring_app", label: "Creating server", status: "in_progress" });
+      onProgress({ step: "ensuring_app", label: "Creating server", status: "done" });
       return { instance: { id: "inst-new" } };
     });
 
