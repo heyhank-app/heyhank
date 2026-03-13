@@ -4459,6 +4459,44 @@ describe("POST /api/sessions/create-stream", () => {
     expect(doneData.cwd).toBe("/test");
   });
 
+  it("emits 'Launching Codex...' label for codex backend", async () => {
+    // The SSE progress label should reflect the backend type
+    const res = await app.request("/api/sessions/create-stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/test", backend: "codex" }),
+    });
+
+    expect(res.status).toBe(200);
+    const events = await parseSSE(res);
+    const launchingEvent = events
+      .filter((e) => e.event === "progress")
+      .map((e) => JSON.parse(e.data))
+      .find((d) => d.step === "launching_cli" && d.status === "in_progress");
+
+    expect(launchingEvent).toBeDefined();
+    expect(launchingEvent!.label).toBe("Launching Codex...");
+  });
+
+  it("emits 'Launching Claude Code...' label for claude backend", async () => {
+    // Default backend (claude) should show Claude Code in the label
+    const res = await app.request("/api/sessions/create-stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/test" }),
+    });
+
+    expect(res.status).toBe(200);
+    const events = await parseSSE(res);
+    const launchingEvent = events
+      .filter((e) => e.event === "progress")
+      .map((e) => JSON.parse(e.data))
+      .find((d) => d.step === "launching_cli" && d.status === "in_progress");
+
+    expect(launchingEvent).toBeDefined();
+    expect(launchingEvent!.label).toBe("Launching Claude Code...");
+  });
+
   it("passes launch branching controls through to launcher", async () => {
     const res = await app.request("/api/sessions/create-stream", {
       method: "POST",

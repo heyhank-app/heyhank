@@ -853,7 +853,7 @@ export function createRoutes(
         }
 
         // --- Step: Launch CLI ---
-        await emitProgress(stream, "launching_cli", "Launching Claude Code...", "in_progress");
+        await emitProgress(stream, "launching_cli", `Launching ${backend === "codex" ? "Codex" : "Claude Code"}...`, "in_progress");
 
         const session = launcher.launch({
           model: body.model,

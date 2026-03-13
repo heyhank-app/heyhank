@@ -630,8 +630,8 @@ export function HomePage() {
           permissionMode: mode,
           cwd: effectiveCwd || undefined,
           envSlug: selectedEnv || undefined,
-          sandboxEnabled: backend === "claude" && sandboxEnabled ? true : undefined,
-          sandboxSlug: backend === "claude" && sandboxEnabled && selectedSandbox ? selectedSandbox : undefined,
+          sandboxEnabled: sandboxEnabled ? true : undefined,
+          sandboxSlug: sandboxEnabled && selectedSandbox ? selectedSandbox : undefined,
           branch: effectiveBranch,
           createBranch: effectiveCreateBranch ? true : undefined,
           useWorktree: effectiveUseWorktree ? true : undefined,
@@ -1116,8 +1116,8 @@ export function HomePage() {
             )}
           </div>
 
-          {/* Sandbox selector — only available for Claude Code backend */}
-          {backend === "claude" && <div className="relative" ref={sandboxDropdownRef}>
+          {/* Sandbox selector */}
+          <div className="relative" ref={sandboxDropdownRef}>
             <button
               onClick={() => {
                 if (!showSandboxDropdown) {
@@ -1223,7 +1223,7 @@ export function HomePage() {
                 </div>
               </div>
             )}
-          </div>}
+          </div>
 
           {/* Model selector */}
           <div className="relative" ref={modelDropdownRef}>
