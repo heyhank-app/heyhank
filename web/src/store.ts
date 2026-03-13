@@ -109,6 +109,7 @@ interface AppState {
   updateInfo: UpdateInfo | null;
   updateDismissedVersion: string | null;
   updateOverlayActive: boolean;
+  dockerUpdateDialogOpen: boolean;
 
   // Session creation progress (SSE streaming)
   creationProgress: CreationProgressEvent[] | null;
@@ -224,6 +225,7 @@ interface AppState {
   setUpdateInfo: (info: UpdateInfo | null) => void;
   dismissUpdate: (version: string) => void;
   setUpdateOverlayActive: (active: boolean) => void;
+  setDockerUpdateDialogOpen: (open: boolean) => void;
   setEditorTabEnabled: (enabled: boolean) => void;
 
   // Diff panel actions
@@ -369,6 +371,7 @@ export const useStore = create<AppState>((set) => ({
   updateInfo: null,
   updateDismissedVersion: getInitialDismissedVersion(),
   updateOverlayActive: false,
+  dockerUpdateDialogOpen: false,
   darkMode: getInitialDarkMode(),
   notificationSound: getInitialNotificationSound(),
   notificationDesktop: getInitialNotificationDesktop(),
@@ -852,6 +855,7 @@ export const useStore = create<AppState>((set) => ({
     set({ updateDismissedVersion: version });
   },
   setUpdateOverlayActive: (active) => set({ updateOverlayActive: active }),
+  setDockerUpdateDialogOpen: (open) => set({ dockerUpdateDialogOpen: open }),
   setEditorTabEnabled: (enabled) => set({ editorTabEnabled: enabled }),
 
   setActiveTab: (tab) => set({ activeTab: tab }),

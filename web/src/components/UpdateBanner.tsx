@@ -15,10 +15,13 @@ export function UpdateBanner() {
   const handleUpdate = async () => {
     setUpdating(true);
     try {
+      // Flag so the Docker image update dialog appears after restart
+      localStorage.setItem("companion_docker_prompt_pending", "1");
       await api.triggerUpdate();
       // Show the full-screen updating overlay
       useStore.getState().setUpdateOverlayActive(true);
     } catch (err) {
+      localStorage.removeItem("companion_docker_prompt_pending");
       captureException(err);
       setUpdating(false);
     }

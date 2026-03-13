@@ -213,10 +213,13 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
     setUpdateStatus("");
     setUpdateError("");
     try {
+      // Flag so the Docker image update dialog appears after restart
+      localStorage.setItem("companion_docker_prompt_pending", "1");
       const res = await api.triggerUpdate();
       setUpdateStatus(res.message);
       setUpdateOverlayActive(true);
     } catch (err: unknown) {
+      localStorage.removeItem("companion_docker_prompt_pending");
       setUpdateError(err instanceof Error ? err.message : String(err));
       setUpdatingApp(false);
     }

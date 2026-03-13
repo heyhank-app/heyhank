@@ -40,6 +40,7 @@ import { LinearLogo } from "./LinearLogo.js";
 import { SessionCreationProgress } from "./SessionCreationProgress.js";
 import { SessionLaunchOverlay } from "./SessionLaunchOverlay.js";
 import { PlaygroundUpdateOverlay } from "./UpdateOverlay.js";
+import { PlaygroundDockerUpdateDialog } from "./DockerUpdateDialog.js";
 import { SessionItem } from "./SessionItem.js";
 import type { CreationProgressEvent } from "../types.js";
 import type { SessionItem as SessionItemType } from "../utils/project-grouping.js";
@@ -2532,6 +2533,26 @@ export function Playground() {
               <div className="relative h-[360px] bg-cc-bg rounded-lg overflow-hidden border border-cc-border">
                 <PlaygroundUpdateOverlay phase="ready" />
               </div>
+            </Card>
+          </div>
+        </Section>
+        {/* ─── Docker Update Dialog ─────────────────────────── */}
+        <Section
+          title="Docker Update Dialog"
+          description="Post-update dialog asking whether to also update the sandbox Docker image"
+        >
+          <div className="space-y-4">
+            <Card label="Prompt phase">
+              <PlaygroundDockerUpdateDialog phase="prompt" />
+            </Card>
+            <Card label="Pulling phase">
+              <PlaygroundDockerUpdateDialog phase="pulling" />
+            </Card>
+            <Card label="Done phase">
+              <PlaygroundDockerUpdateDialog phase="done" />
+            </Card>
+            <Card label="Error phase">
+              <PlaygroundDockerUpdateDialog phase="error" />
             </Card>
           </div>
         </Section>

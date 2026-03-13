@@ -46,6 +46,7 @@ const { mockStoreState, mockGetState } = vi.hoisted(() => {
     setTaskPanelOpen: vi.fn(),
     clearCreation: vi.fn(),
     setUpdateInfo: vi.fn(),
+    setDockerUpdateDialogOpen: vi.fn(),
   };
   mockGetState.mockReturnValue(mockStoreState);
   return { mockStoreState, mockGetState };
@@ -141,6 +142,10 @@ vi.mock("./components/UpdateOverlay.js", () => ({
   ),
 }));
 
+vi.mock("./components/DockerUpdateDialog.js", () => ({
+  DockerUpdateDialog: () => <div data-testid="docker-update-dialog">DockerUpdateDialog</div>,
+}));
+
 // Lazy-loaded pages: mock each module so dynamic import() resolves immediately
 vi.mock("./components/Playground.js", () => ({
   Playground: () => <div data-testid="playground">Playground</div>,
@@ -221,10 +226,12 @@ beforeEach(() => {
     setTaskPanelOpen: vi.fn(),
     clearCreation: vi.fn(),
     setUpdateInfo: vi.fn(),
+    setDockerUpdateDialogOpen: vi.fn(),
   });
   mockGetState.mockReturnValue(mockStoreState);
   (parseHash as ReturnType<typeof vi.fn>).mockReturnValue({ page: "home" });
   window.location.hash = "";
+  localStorage.removeItem("companion_docker_prompt_pending");
 });
 
 // ─── Tests ───────────────────────────────────────────────────────
@@ -406,6 +413,27 @@ describe("App", () => {
       // Playground route should NOT have sidebar/topbar
       expect(screen.queryByTestId("sidebar")).not.toBeInTheDocument();
       expect(screen.queryByTestId("topbar")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("docker update dialog activation", () => {
+    it("opens DockerUpdateDialog and clears localStorage when companion_docker_prompt_pending is set", () => {
+      // After an app update, the localStorage flag triggers the Docker update dialog.
+      // This useEffect reads the flag, removes it, and opens the dialog via the store.
+      localStorage.setItem("companion_docker_prompt_pending", "1");
+      setStoreValues({ isAuthenticated: true });
+      render(<App />);
+
+      expect(mockStoreState.setDockerUpdateDialogOpen).toHaveBeenCalledWith(true);
+      expect(localStorage.getItem("companion_docker_prompt_pending")).toBeNull();
+    });
+
+    it("does not open DockerUpdateDialog on normal page load", () => {
+      // Without the localStorage flag, the dialog should not be triggered.
+      setStoreValues({ isAuthenticated: true });
+      render(<App />);
+
+      expect(mockStoreState.setDockerUpdateDialogOpen).not.toHaveBeenCalled();
     });
   });
 

@@ -17,6 +17,7 @@ import { SessionTerminalDock } from "./components/SessionTerminalDock.js";
 import { SessionEditorPane } from "./components/SessionEditorPane.js";
 import { SessionBrowserPane } from "./components/SessionBrowserPane.js";
 import { UpdateOverlay } from "./components/UpdateOverlay.js";
+import { DockerUpdateDialog } from "./components/DockerUpdateDialog.js";
 
 // Lazy-loaded route-level pages (not needed for initial render)
 const Playground = lazy(() => import("./components/Playground.js").then((m) => ({ default: m.Playground })));
@@ -162,6 +163,14 @@ export default function App() {
     api.getSettings().then((s) => {
       if (s.publicUrl) useStore.getState().setPublicUrl(s.publicUrl);
     }).catch(() => {});
+  }, []);
+
+  // Show Docker image update dialog if an app update just completed
+  useEffect(() => {
+    if (localStorage.getItem("companion_docker_prompt_pending") === "1") {
+      localStorage.removeItem("companion_docker_prompt_pending");
+      useStore.getState().setDockerUpdateDialogOpen(true);
+    }
   }, []);
 
   // Auth gate: show login page when not authenticated
@@ -349,6 +358,7 @@ export default function App() {
         </>
       )}
       <UpdateOverlay active={updateOverlayActive} />
+      <DockerUpdateDialog />
     </div>
   );
 }
