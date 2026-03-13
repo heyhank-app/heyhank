@@ -21,11 +21,9 @@ vi.mock("./env-manager.js", () => ({
 vi.mock("./sandbox-manager.js", () => ({
   listSandboxes: vi.fn(() => []),
   getSandbox: vi.fn(() => null),
-  getEffectiveImage: vi.fn(() => "the-companion:latest"),
   createSandbox: vi.fn(),
   updateSandbox: vi.fn(),
   deleteSandbox: vi.fn(() => false),
-  updateBuildStatus: vi.fn(() => null),
 }));
 
 vi.mock("./prompt-manager.js", () => ({
@@ -651,7 +649,7 @@ describe("POST /api/sessions/create", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     vi.spyOn(containerManager, "imageExists").mockReturnValueOnce(true);
     vi.spyOn(containerManager, "createContainer").mockImplementationOnce(() => {
       throw new Error("docker daemon timeout");
@@ -686,7 +684,7 @@ describe("POST /api/sessions/create", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
 
     const res = await app.request("/api/sessions/create", {
       method: "POST",
@@ -715,7 +713,7 @@ describe("POST /api/sessions/create", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     vi.spyOn(containerManager, "imageExists").mockReturnValueOnce(true);
     const createSpy = vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-codex",
@@ -760,7 +758,7 @@ describe("POST /api/sessions/create", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     const createSpy = vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-vscode",
       name: "companion-vscode",
@@ -800,7 +798,7 @@ describe("POST /api/sessions/create", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     mockImagePullIsReady.mockReturnValue(false);
     mockImagePullGetState.mockReturnValue({
       image: "the-companion:latest",
@@ -847,7 +845,7 @@ describe("POST /api/sessions/create", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     vi.spyOn(containerManager, "imageExists").mockReturnValueOnce(true);
     vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-init",
@@ -894,7 +892,7 @@ describe("POST /api/sessions/create", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     vi.spyOn(containerManager, "imageExists").mockReturnValueOnce(true);
     vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-fail",
@@ -946,7 +944,7 @@ describe("POST /api/sessions/create", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-git",
       name: "companion-git",
@@ -997,7 +995,7 @@ describe("POST /api/sessions/create", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-nobranch",
       name: "companion-nobranch",
@@ -1042,7 +1040,7 @@ describe("POST /api/sessions/create", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-failcheckout",
       name: "companion-failcheckout",
@@ -1116,7 +1114,7 @@ describe("POST /api/sessions/create", () => {
     // Validates the default image fallback path: when sandboxEnabled is true
     // but no sandboxSlug is given, the route should use "the-companion:latest"
     // as the effectiveImage without calling sandboxManager.getSandbox or
-    // sandboxManager.getEffectiveImage, since there is no sandbox to look up.
+    // since there is no sandbox to look up.
     vi.mocked(envManager.getEnv).mockReturnValue({
       name: "my-env",
       slug: "my-env",
@@ -1148,10 +1146,6 @@ describe("POST /api/sessions/create", () => {
     // sandboxManager.getSandbox should NOT be called because no sandboxSlug was provided.
     // The route only calls getSandbox when body.sandboxSlug is truthy.
     expect(sandboxManager.getSandbox).not.toHaveBeenCalled();
-
-    // sandboxManager.getEffectiveImage should NOT be called because companionSandbox is null
-    // (no sandboxSlug means no sandbox lookup), so the route falls through to the default image.
-    expect(sandboxManager.getEffectiveImage).not.toHaveBeenCalled();
 
     // The container should have been created with the default base image
     const createContainerCall = vi.mocked(containerManager.createContainer).mock.calls[0];
@@ -4689,7 +4683,7 @@ describe("POST /api/sessions/create-stream", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     vi.spyOn(containerManager, "imageExists").mockReturnValueOnce(true);
     vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-stream",
@@ -4744,7 +4738,7 @@ describe("POST /api/sessions/create-stream", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     // Image not ready initially — pull manager will handle it
     mockImagePullIsReady.mockReturnValue(false);
     mockImagePullGetState.mockReturnValue({
@@ -4802,7 +4796,7 @@ describe("POST /api/sessions/create-stream", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     mockImagePullIsReady.mockReturnValue(false);
     mockImagePullGetState.mockReturnValue({
       image: "the-companion:latest",
@@ -4840,7 +4834,7 @@ describe("POST /api/sessions/create-stream", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     vi.spyOn(containerManager, "imageExists").mockReturnValueOnce(true);
     vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-init-stream",
@@ -4890,7 +4884,7 @@ describe("POST /api/sessions/create-stream", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     vi.spyOn(containerManager, "imageExists").mockReturnValueOnce(true);
     vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-fail-stream",
@@ -4953,7 +4947,7 @@ describe("POST /api/sessions/create-stream", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-git-stream",
       name: "companion-git-stream",
@@ -5029,7 +5023,7 @@ describe("POST /api/sessions/create-stream", () => {
       createdAt: 1000,
       updatedAt: 1000,
     });
-    vi.mocked(sandboxManager.getEffectiveImage).mockReturnValue("the-companion:latest");
+
     vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-fail-git",
       name: "companion-fail-git",

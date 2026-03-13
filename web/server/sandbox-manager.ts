@@ -14,18 +14,8 @@ import { homedir } from "node:os";
 export interface CompanionSandbox {
   name: string;
   slug: string;
-  /** Raw Dockerfile content (optional, for building custom image from the-companion:latest) */
-  dockerfile?: string;
   /** Shell script to run inside the container before the CLI session starts */
   initScript?: string;
-  /** Tag of the built custom image (e.g. "companion-sandbox-myproject:latest") */
-  imageTag?: string;
-  /** Current build status */
-  buildStatus?: "idle" | "building" | "success" | "error";
-  /** Last build error message */
-  buildError?: string;
-  /** Timestamp of last successful build */
-  lastBuiltAt?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -33,9 +23,7 @@ export interface CompanionSandbox {
 /** Fields that can be updated via the update API */
 export interface SandboxUpdateFields {
   name?: string;
-  dockerfile?: string;
   initScript?: string;
-  imageTag?: string;
 }
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
@@ -102,20 +90,9 @@ export function getSandbox(slug: string): CompanionSandbox | null {
   }
 }
 
-/**
- * Return the effective Docker image for a sandbox.
- * Returns imageTag if a custom image has been built, otherwise "the-companion:latest".
- * Always returns a string because sandboxes always have a base image.
- */
-export function getEffectiveImage(slug: string): string {
-  const sandbox = getSandbox(slug);
-  if (!sandbox) return "the-companion:latest";
-  return sandbox.imageTag || "the-companion:latest";
-}
-
 export function createSandbox(
   name: string,
-  opts?: { dockerfile?: string; initScript?: string },
+  opts?: { initScript?: string },
 ): CompanionSandbox {
   if (!name || !name.trim()) throw new Error("Sandbox name is required");
   const slug = slugify(name.trim());
@@ -136,7 +113,6 @@ export function createSandbox(
 
   // Apply optional fields if provided
   if (opts) {
-    if (opts.dockerfile !== undefined) sandbox.dockerfile = opts.dockerfile;
     if (opts.initScript !== undefined) sandbox.initScript = opts.initScript;
   }
 
@@ -169,9 +145,7 @@ export function updateSandbox(
   };
 
   // Apply field updates (only override if explicitly provided)
-  if (updates.dockerfile !== undefined) sandbox.dockerfile = updates.dockerfile;
   if (updates.initScript !== undefined) sandbox.initScript = updates.initScript;
-  if (updates.imageTag !== undefined) sandbox.imageTag = updates.imageTag;
 
   // If slug changed, delete old file
   if (newSlug !== slug) {
@@ -180,33 +154,6 @@ export function updateSandbox(
 
   writeFileSync(filePath(newSlug), JSON.stringify(sandbox, null, 2), "utf-8");
   return sandbox;
-}
-
-/**
- * Update the build status fields of a sandbox.
- * Used during Docker image builds to track progress.
- */
-export function updateBuildStatus(
-  slug: string,
-  status: CompanionSandbox["buildStatus"],
-  opts?: { error?: string; imageTag?: string },
-): CompanionSandbox | null {
-  ensureDir();
-  const existing = getSandbox(slug);
-  if (!existing) return null;
-
-  existing.buildStatus = status;
-  existing.updatedAt = Date.now();
-
-  if (opts?.error !== undefined) existing.buildError = opts.error;
-  if (opts?.imageTag !== undefined) existing.imageTag = opts.imageTag;
-  if (status === "success") {
-    existing.lastBuiltAt = Date.now();
-    existing.buildError = undefined;
-  }
-
-  writeFileSync(filePath(slug), JSON.stringify(existing, null, 2), "utf-8");
-  return existing;
 }
 
 export function deleteSandbox(slug: string): boolean {

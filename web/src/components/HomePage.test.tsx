@@ -551,8 +551,8 @@ describe("HomePage", () => {
   it("opens environment dropdown and selects an environment", async () => {
     // The env dropdown should list available environments and allow selection.
     const testEnvs = [
-      { slug: "dev", name: "Development", variables: { API_KEY: "xxx" }, baseImage: "", imageTag: "" },
-      { slug: "prod", name: "Production", variables: { A: "1", B: "2" }, baseImage: "", imageTag: "" },
+      { slug: "dev", name: "Development", variables: { API_KEY: "xxx" } },
+      { slug: "prod", name: "Production", variables: { A: "1", B: "2" } },
     ];
     mockApi.listEnvs.mockResolvedValue(testEnvs);
 
@@ -609,7 +609,7 @@ describe("HomePage", () => {
     // Selecting "No environment" should clear the env selection and localStorage value.
     // First select an env through the dropdown, then clear it.
     const testEnvs = [
-      { slug: "dev", name: "Development", variables: { API_KEY: "xxx" }, baseImage: "", imageTag: "" },
+      { slug: "dev", name: "Development", variables: { API_KEY: "xxx" } },
     ];
     mockApi.listEnvs.mockResolvedValue(testEnvs);
 

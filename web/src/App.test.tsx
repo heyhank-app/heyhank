@@ -166,10 +166,6 @@ vi.mock("./components/EnvManager.js", () => ({
   EnvManager: () => <div data-testid="env-manager">EnvManager</div>,
 }));
 
-vi.mock("./components/DockerBuilderPage.js", () => ({
-  DockerBuilderPage: () => <div data-testid="docker-builder-page">DockerBuilderPage</div>,
-}));
-
 vi.mock("./components/CronManager.js", () => ({
   CronManager: () => <div data-testid="cron-manager">CronManager</div>,
 }));
@@ -388,14 +384,6 @@ describe("App", () => {
       render(<App />);
       await waitFor(() => {
         expect(screen.getByTestId("env-manager")).toBeInTheDocument();
-      });
-    });
-
-    it("renders DockerBuilderPage for docker-builder route", async () => {
-      (parseHash as ReturnType<typeof vi.fn>).mockReturnValue({ page: "docker-builder" });
-      render(<App />);
-      await waitFor(() => {
-        expect(screen.getByTestId("docker-builder-page")).toBeInTheDocument();
       });
     });
 

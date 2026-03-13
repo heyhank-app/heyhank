@@ -10,7 +10,6 @@ export type Route =
   | { page: "prompts" }
   | { page: "terminal" }
   | { page: "environments" }
-  | { page: "docker-builder" }
   | { page: "sandboxes" }
   | { page: "scheduled" }
   | { page: "agents" }
@@ -41,7 +40,6 @@ export function parseHash(hash: string): Route {
   if (hash === "#/prompts") return { page: "prompts" };
   if (hash === "#/terminal") return { page: "terminal" };
   if (hash === "#/environments") return { page: "environments" };
-  if (hash === "#/docker-builder") return { page: "docker-builder" };
   if (hash === "#/sandboxes") return { page: "sandboxes" };
   // #/scheduled redirects to #/agents (cron absorbed into agents)
   if (hash === "#/scheduled") return { page: "agents" };

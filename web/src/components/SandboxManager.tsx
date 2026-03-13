@@ -5,16 +5,6 @@ interface Props {
   embedded?: boolean;
 }
 
-const DEFAULT_DOCKERFILE = `FROM the-companion:latest
-
-# Add project-specific dependencies here
-# RUN apt-get update && apt-get install -y ...
-# RUN npm install -g ...
-
-WORKDIR /workspace
-CMD ["sleep", "infinity"]
-`;
-
 export function SandboxManager({ embedded = false }: Props) {
   const [sandboxes, setSandboxes] = useState<CompanionSandbox[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,36 +21,27 @@ export function SandboxManager({ embedded = false }: Props) {
 
   // Create form
   const [newName, setNewName] = useState("");
-  const [newDockerfile, setNewDockerfile] = useState("");
   const [newInitScript, setNewInitScript] = useState("");
 
   // Edit form
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-  const [editDockerfile, setEditDockerfile] = useState("");
   const [editInitScript, setEditInitScript] = useState("");
 
-  // Build status polling per sandbox
-  const [buildStatuses, setBuildStatuses] = useState<
-    Record<string, { buildStatus: string; buildError?: string; lastBuiltAt?: number; imageTag?: string }>
-  >({});
-  const buildPollRefs = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  // Init script test state
+  const [testingSlug, setTestingSlug] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{ success: boolean; exitCode: number; output: string } | null>(null);
+  // Cancellation token to prevent stale test results from surfacing after save/cancel
+  const testTokenRef = useRef({});
 
-  // Cleanup all build polling intervals on unmount
-  useEffect(() => {
-    return () => {
-      for (const interval of buildPollRefs.current.values()) {
-        clearInterval(interval);
-      }
-      buildPollRefs.current.clear();
-    };
-  }, []);
+  // Server cwd (for test-init)
+  const [serverCwd, setServerCwd] = useState<string>("");
 
   const refresh = useCallback(() => {
     api.listSandboxes().then(setSandboxes).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
-  // On mount: load sandboxes, check Docker, check base image
+  // On mount: load sandboxes, check Docker, check base image, get server cwd
   useEffect(() => {
     refresh();
     api.getContainerStatus()
@@ -68,6 +49,9 @@ export function SandboxManager({ embedded = false }: Props) {
       .catch(() => setDockerAvailable(false));
     api.getImageStatus("the-companion:latest")
       .then((state) => setBaseImageState(state))
+      .catch(() => {});
+    api.getHome()
+      .then(({ cwd }) => setServerCwd(cwd))
       .catch(() => {});
   }, [refresh]);
 
@@ -111,11 +95,9 @@ export function SandboxManager({ embedded = false }: Props) {
     setCreating(true);
     try {
       await api.createSandbox(name, {
-        dockerfile: newDockerfile || undefined,
         initScript: newInitScript || undefined,
       });
       setNewName("");
-      setNewDockerfile("");
       setNewInitScript("");
       setShowCreate(false);
       setError("");
@@ -128,27 +110,33 @@ export function SandboxManager({ embedded = false }: Props) {
   }
 
   function startEdit(sandbox: CompanionSandbox) {
+    testTokenRef.current = {};
     setEditingSlug(sandbox.slug);
     setEditName(sandbox.name);
-    setEditDockerfile(sandbox.dockerfile || "");
     setEditInitScript(sandbox.initScript || "");
+    setTestResult(null);
     setError("");
   }
 
   function cancelEdit() {
+    testTokenRef.current = {};
     setEditingSlug(null);
+    setTestResult(null);
+    setTestingSlug(null);
     setError("");
   }
 
   async function saveEdit() {
     if (!editingSlug) return;
+    testTokenRef.current = {};
+    setTestingSlug(null);
     try {
       await api.updateSandbox(editingSlug, {
         name: editName.trim() || undefined,
-        dockerfile: editDockerfile || undefined,
         initScript: editInitScript || undefined,
       });
       setEditingSlug(null);
+      setTestResult(null);
       setError("");
       refresh();
     } catch (e: unknown) {
@@ -166,59 +154,28 @@ export function SandboxManager({ embedded = false }: Props) {
     }
   }
 
-  async function handleBuild(slug: string) {
-    setBuildStatuses((prev) => ({
-      ...prev,
-      [slug]: { buildStatus: "building" },
-    }));
+  async function handleTestInitScript(slug: string) {
+    if (!serverCwd) return;
+    const token = {};
+    testTokenRef.current = token;
+    setTestingSlug(slug);
+    setTestResult(null);
     try {
-      const result = await api.buildSandboxImage(slug);
-      if (result.success) {
-        setBuildStatuses((prev) => ({
-          ...prev,
-          [slug]: { buildStatus: "success", imageTag: result.imageTag },
-        }));
-      } else {
-        setBuildStatuses((prev) => ({
-          ...prev,
-          [slug]: { buildStatus: "error", buildError: "Build failed" },
-        }));
-      }
-      refresh();
+      // Send the current (possibly unsaved) init script content directly
+      // to the test endpoint — no save needed, so Cancel still discards edits.
+      const result = await api.testInitScript(slug, serverCwd, editInitScript);
+      if (testTokenRef.current !== token) return; // stale — form was saved/cancelled
+      setTestResult(result);
     } catch (e: unknown) {
-      setBuildStatuses((prev) => ({
-        ...prev,
-        [slug]: {
-          buildStatus: "error",
-          buildError: e instanceof Error ? e.message : String(e),
-        },
-      }));
+      if (testTokenRef.current !== token) return;
+      setTestResult({
+        success: false,
+        exitCode: -1,
+        output: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      if (testTokenRef.current === token) setTestingSlug(null);
     }
-
-    // Start polling build status (cleaned up via refs on unmount)
-    // Clear any existing poll for this slug first
-    const existingPoll = buildPollRefs.current.get(slug);
-    if (existingPoll) clearInterval(existingPoll);
-
-    const pollInterval = setInterval(() => {
-      api.getSandboxBuildStatus(slug)
-        .then((status) => {
-          setBuildStatuses((prev) => ({
-            ...prev,
-            [slug]: status,
-          }));
-          if (status.buildStatus !== "building") {
-            clearInterval(pollInterval);
-            buildPollRefs.current.delete(slug);
-            refresh();
-          }
-        })
-        .catch(() => {
-          clearInterval(pollInterval);
-          buildPollRefs.current.delete(slug);
-        });
-    }, 2000);
-    buildPollRefs.current.set(slug, pollInterval);
   }
 
   const dockerBadge =
@@ -231,20 +188,6 @@ export function SandboxManager({ embedded = false }: Props) {
         No Docker
       </span>
     );
-
-  const dockerfileWarning =
-    newDockerfile && !newDockerfile.trimStart().startsWith("FROM the-companion") ? (
-      <p className="text-[10px] text-amber-500 mt-1">
-        Warning: Dockerfile does not start with FROM the-companion. The sandbox may not work correctly without the base image.
-      </p>
-    ) : null;
-
-  const editDockerfileWarning =
-    editDockerfile && !editDockerfile.trimStart().startsWith("FROM the-companion") ? (
-      <p className="text-[10px] text-amber-500 mt-1">
-        Warning: Dockerfile does not start with FROM the-companion. The sandbox may not work correctly without the base image.
-      </p>
-    ) : null;
 
   /* ─── Base image status banner ───────────────────────────────────── */
 
@@ -364,30 +307,6 @@ export function SandboxManager({ embedded = false }: Props) {
                 }}
               />
 
-              {/* Dockerfile */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[11px] font-medium text-cc-muted">Dockerfile (optional)</label>
-                  {!newDockerfile && (
-                    <button
-                      onClick={() => setNewDockerfile(DEFAULT_DOCKERFILE)}
-                      className="text-[10px] text-cc-primary hover:underline cursor-pointer"
-                    >
-                      Use template
-                    </button>
-                  )}
-                </div>
-                <textarea
-                  value={newDockerfile}
-                  onChange={(e) => setNewDockerfile(e.target.value)}
-                  placeholder="# Custom Dockerfile content..."
-                  rows={8}
-                  className="w-full px-3 py-2.5 text-[11px] font-mono-code bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 resize-y transition-shadow"
-                  style={{ minHeight: "100px" }}
-                />
-                {dockerfileWarning}
-              </div>
-
               {/* Init Script */}
               <div>
                 <label className="block text-[11px] font-medium text-cc-muted mb-1">Init Script (optional)</label>
@@ -438,7 +357,6 @@ export function SandboxManager({ embedded = false }: Props) {
             <div className="space-y-1">
               {sandboxes.map((sandbox) => {
                 const isEditing = editingSlug === sandbox.slug;
-                const status = buildStatuses[sandbox.slug];
 
                 if (isEditing) {
                   return (
@@ -455,36 +373,14 @@ export function SandboxManager({ embedded = false }: Props) {
                         className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
                       />
 
-                      {/* Dockerfile */}
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="text-[11px] font-medium text-cc-muted">Dockerfile (optional)</div>
-                          {!editDockerfile && (
-                            <button
-                              onClick={() => setEditDockerfile(DEFAULT_DOCKERFILE)}
-                              className="text-[10px] text-cc-primary hover:underline cursor-pointer"
-                            >
-                              Use template
-                            </button>
-                          )}
-                        </div>
-                        <textarea
-                          value={editDockerfile}
-                          onChange={(e) => setEditDockerfile(e.target.value)}
-                          placeholder="# Custom Dockerfile content..."
-                          rows={8}
-                          className="w-full px-3 py-2.5 text-[11px] font-mono-code bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 resize-y transition-shadow"
-                          style={{ minHeight: "100px" }}
-                        />
-                        {editDockerfileWarning}
-                      </div>
-
                       {/* Init Script */}
                       <div>
-                        <div className="text-[11px] font-medium text-cc-muted mb-1">Init Script (optional)</div>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="text-[11px] font-medium text-cc-muted">Init Script (optional)</div>
+                        </div>
                         <textarea
                           value={editInitScript}
-                          onChange={(e) => setEditInitScript(e.target.value)}
+                          onChange={(e) => { setEditInitScript(e.target.value); setTestResult(null); }}
                           placeholder={"# Runs inside the container before Claude starts\n# Example:\nbun install\npip install -r requirements.txt"}
                           rows={5}
                           className="w-full px-3 py-2.5 text-[11px] font-mono-code bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 resize-y transition-shadow"
@@ -492,36 +388,42 @@ export function SandboxManager({ embedded = false }: Props) {
                         />
                       </div>
 
-                      {/* Build status for this sandbox */}
-                      {status?.buildStatus === "building" && (
+                      {/* Test init script result */}
+                      {testingSlug === sandbox.slug && (
                         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 text-xs text-amber-500">
                           <span className="w-3 h-3 border-2 border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
-                          Building image...
+                          Testing init script...
                         </div>
                       )}
-                      {status?.buildStatus === "success" && (
-                        <div className="px-3 py-2 rounded-lg bg-green-500/10 text-xs text-green-500">
-                          Build successful{status.imageTag ? `: ${status.imageTag}` : ""}
-                        </div>
-                      )}
-                      {status?.buildStatus === "error" && status.buildError && (
-                        <div className="px-3 py-2 rounded-lg bg-cc-error/10 text-xs text-cc-error">
-                          Build error: {status.buildError}
+                      {testResult && testingSlug !== sandbox.slug && (
+                        <div className="space-y-2">
+                          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${
+                            testResult.success
+                              ? "bg-green-500/10 text-green-500"
+                              : "bg-cc-error/10 text-cc-error"
+                          }`}>
+                            {testResult.success ? "Test passed" : `Test failed (exit ${testResult.exitCode})`}
+                          </div>
+                          {testResult.output && (
+                            <pre className="px-3 py-2 text-[10px] font-mono-code bg-cc-code-bg rounded-lg text-cc-muted max-h-[200px] overflow-auto whitespace-pre-wrap">
+                              {testResult.output}
+                            </pre>
+                          )}
                         </div>
                       )}
 
                       <div className="flex justify-end gap-2">
-                        {editDockerfile && (
+                        {editInitScript.trim() && dockerAvailable && (
                           <button
-                            onClick={() => void handleBuild(sandbox.slug)}
-                            disabled={status?.buildStatus === "building"}
+                            onClick={() => void handleTestInitScript(sandbox.slug)}
+                            disabled={testingSlug === sandbox.slug || !serverCwd}
                             className={`px-3 py-2.5 min-h-[44px] text-sm rounded-lg font-medium transition-colors ${
-                              status?.buildStatus === "building"
+                              testingSlug === sandbox.slug || !serverCwd
                                 ? "bg-cc-hover text-cc-muted cursor-not-allowed"
                                 : "bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 cursor-pointer"
                             }`}
                           >
-                            {status?.buildStatus === "building" ? "Building..." : "Build Image"}
+                            {testingSlug === sandbox.slug ? "Testing..." : "Test Init Script"}
                           </button>
                         )}
                         <button
@@ -545,7 +447,6 @@ export function SandboxManager({ embedded = false }: Props) {
                   <SandboxRow
                     key={sandbox.slug}
                     sandbox={sandbox}
-                    buildStatus={status}
                     onStartEdit={() => startEdit(sandbox)}
                     onDelete={() => void handleDelete(sandbox.slug)}
                   />
@@ -580,12 +481,11 @@ export function SandboxManager({ embedded = false }: Props) {
 
 interface SandboxRowProps {
   sandbox: CompanionSandbox;
-  buildStatus?: { buildStatus: string; buildError?: string; lastBuiltAt?: number; imageTag?: string };
   onStartEdit: () => void;
   onDelete: () => void;
 }
 
-function SandboxRow({ sandbox, buildStatus, onStartEdit, onDelete }: SandboxRowProps) {
+function SandboxRow({ sandbox, onStartEdit, onDelete }: SandboxRowProps) {
   return (
     <div className="group flex items-start gap-3 px-3 py-3 min-h-[44px] rounded-lg hover:bg-cc-hover/60 transition-colors">
       {/* Icon */}
@@ -600,27 +500,9 @@ function SandboxRow({ sandbox, buildStatus, onStartEdit, onDelete }: SandboxRowP
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-cc-fg truncate">{sandbox.name}</span>
-          {(sandbox.imageTag || buildStatus?.imageTag) && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-mono-code">
-              {(sandbox.imageTag || buildStatus?.imageTag || "").split(":")[0]?.split("/").pop() || sandbox.imageTag || buildStatus?.imageTag}
-            </span>
-          )}
-          {buildStatus?.buildStatus === "success" && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-500">Built</span>
-          )}
-          {buildStatus?.buildStatus === "building" && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 flex items-center gap-1">
-              <span className="w-2 h-2 border border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
-              Building
-            </span>
-          )}
-          {buildStatus?.buildStatus === "error" && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-cc-error/10 text-cc-error">Error</span>
-          )}
         </div>
         <p className="mt-0.5 text-xs text-cc-muted">
-          {sandbox.dockerfile ? "custom image" : "default image"}
-          {sandbox.initScript ? " · init script" : ""}
+          {sandbox.initScript ? "init script" : "no init script"}
         </p>
       </div>
 

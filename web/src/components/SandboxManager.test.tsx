@@ -6,7 +6,7 @@
  * renders in two modes: "embedded" (full-page with CRUD UI) and a non-embedded
  * fallback that simply shows a message to use embedded mode.
  *
- * Each sandbox has a name, optional Dockerfile, and optional init script.
+ * Each sandbox has a name and optional init script.
  * On mount the component loads sandboxes, checks Docker availability, and
  * checks the base image status.
  *
@@ -18,9 +18,8 @@
  * - Create flow: toggle form, fill fields, submit, error handling
  * - Edit flow: open edit view, modify fields, save, cancel
  * - Delete flow: delete sandbox, error handling
- * - Build flow: trigger build, observe build status
+ * - Test init script flow: trigger test, observe result
  * - Base image banner: display states (ready, pulling, not downloaded, error)
- * - Dockerfile warning when not starting with FROM the-companion
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
@@ -31,11 +30,11 @@ const mockListSandboxes = vi.fn();
 const mockCreateSandbox = vi.fn();
 const mockUpdateSandbox = vi.fn();
 const mockDeleteSandbox = vi.fn();
-const mockBuildSandboxImage = vi.fn();
-const mockGetSandboxBuildStatus = vi.fn();
+const mockTestInitScript = vi.fn();
 const mockGetContainerStatus = vi.fn();
 const mockGetImageStatus = vi.fn();
 const mockPullImage = vi.fn();
+const mockGetHome = vi.fn();
 
 vi.mock("../api.js", () => ({
   api: {
@@ -43,11 +42,11 @@ vi.mock("../api.js", () => ({
     createSandbox: (...args: unknown[]) => mockCreateSandbox(...args),
     updateSandbox: (...args: unknown[]) => mockUpdateSandbox(...args),
     deleteSandbox: (...args: unknown[]) => mockDeleteSandbox(...args),
-    buildSandboxImage: (...args: unknown[]) => mockBuildSandboxImage(...args),
-    getSandboxBuildStatus: (...args: unknown[]) => mockGetSandboxBuildStatus(...args),
+    testInitScript: (...args: unknown[]) => mockTestInitScript(...args),
     getContainerStatus: (...args: unknown[]) => mockGetContainerStatus(...args),
     getImageStatus: (...args: unknown[]) => mockGetImageStatus(...args),
     pullImage: (...args: unknown[]) => mockPullImage(...args),
+    getHome: (...args: unknown[]) => mockGetHome(...args),
   },
 }));
 
@@ -60,9 +59,7 @@ function makeSandbox(overrides: Record<string, unknown> = {}) {
   return {
     name: "My Sandbox",
     slug: "my-sandbox",
-    dockerfile: "FROM the-companion:latest\nWORKDIR /workspace",
     initScript: "bun install",
-    imageTag: "companion-sandbox-my-sandbox:latest",
     createdAt: Date.now(),
     updatedAt: Date.now(),
     ...overrides,
@@ -75,16 +72,16 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers({ shouldAdvanceTime: true });
 
-  // Default: Docker available, base image ready, one sandbox
+  // Default: Docker available, base image ready, one sandbox, server cwd
   mockListSandboxes.mockResolvedValue([makeSandbox()]);
   mockGetContainerStatus.mockResolvedValue({ available: true, version: "27.0.0" });
   mockGetImageStatus.mockResolvedValue({ image: "the-companion:latest", status: "ready", progress: [] });
   mockCreateSandbox.mockResolvedValue(makeSandbox());
   mockUpdateSandbox.mockResolvedValue(makeSandbox());
   mockDeleteSandbox.mockResolvedValue({});
-  mockBuildSandboxImage.mockResolvedValue({ success: true, imageTag: "companion-sandbox-my-sandbox:latest" });
-  mockGetSandboxBuildStatus.mockResolvedValue({ buildStatus: "success" });
+  mockTestInitScript.mockResolvedValue({ success: true, exitCode: 0, output: "ok\n" });
   mockPullImage.mockResolvedValue({ ok: true, state: { image: "the-companion:latest", status: "pulling", progress: [] } });
+  mockGetHome.mockResolvedValue({ home: "/home/user", cwd: "/home/user/project" });
 });
 
 afterEach(() => {
@@ -161,14 +158,12 @@ describe("SandboxManager list states", () => {
   });
 
   it("displays sandbox list with sandbox names and metadata", async () => {
-    // When sandboxes exist, each sandbox name and description metadata
-    // (custom image indicator, init script indicator) should be visible.
+    // When sandboxes exist, each sandbox name and init script indicator
+    // should be visible.
     render(<SandboxManager embedded />);
     await screen.findByText("My Sandbox");
-    // The sandbox has a dockerfile, so "custom image" should appear
-    expect(screen.getByText(/custom image/)).toBeInTheDocument();
     // The sandbox has an initScript, so "init script" should appear
-    expect(screen.getByText(/init script/)).toBeInTheDocument();
+    expect(screen.getByText("init script")).toBeInTheDocument();
     // Stats line
     expect(screen.getByText("1 sandbox")).toBeInTheDocument();
   });
@@ -184,13 +179,12 @@ describe("SandboxManager list states", () => {
     expect(screen.getByText("2 sandboxes")).toBeInTheDocument();
   });
 
-  it("shows default image text when sandbox has no dockerfile", async () => {
-    // When a sandbox has no custom dockerfile, it uses the "default image"
-    // label instead of "custom image".
-    mockListSandboxes.mockResolvedValue([makeSandbox({ dockerfile: undefined, initScript: undefined })]);
+  it("shows 'no init script' text when sandbox has no initScript", async () => {
+    // When a sandbox has no init script, it should show "no init script"
+    mockListSandboxes.mockResolvedValue([makeSandbox({ initScript: undefined })]);
     render(<SandboxManager embedded />);
     await screen.findByText("My Sandbox");
-    expect(screen.getByText("default image")).toBeInTheDocument();
+    expect(screen.getByText("no init script")).toBeInTheDocument();
   });
 });
 
@@ -213,8 +207,8 @@ describe("SandboxManager create flow", () => {
   });
 
   it("creates a new sandbox with name only", async () => {
-    // Creating a sandbox with just a name (no dockerfile or init script)
-    // should call createSandbox with the name and undefined options.
+    // Creating a sandbox with just a name (no init script) should call
+    // createSandbox with the name and undefined options.
     render(<SandboxManager embedded />);
     await screen.findByText("My Sandbox");
 
@@ -226,15 +220,14 @@ describe("SandboxManager create flow", () => {
 
     await waitFor(() => {
       expect(mockCreateSandbox).toHaveBeenCalledWith("test-sandbox", {
-        dockerfile: undefined,
         initScript: undefined,
       });
     });
   });
 
-  it("creates a sandbox with dockerfile and init script", async () => {
-    // When all fields (name, dockerfile, init script) are provided, all
-    // values should be passed to the createSandbox API call.
+  it("creates a sandbox with init script", async () => {
+    // When name and init script are provided, both values should be
+    // passed to the createSandbox API call.
     render(<SandboxManager embedded />);
     await screen.findByText("My Sandbox");
 
@@ -242,9 +235,6 @@ describe("SandboxManager create flow", () => {
 
     fireEvent.change(screen.getByPlaceholderText("Sandbox name (e.g. node-project)"), {
       target: { value: "full-sandbox" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("# Custom Dockerfile content..."), {
-      target: { value: "FROM the-companion:latest\nRUN apt-get update" },
     });
     fireEvent.change(
       screen.getByPlaceholderText(/Runs inside the container/),
@@ -254,7 +244,6 @@ describe("SandboxManager create flow", () => {
 
     await waitFor(() => {
       expect(mockCreateSandbox).toHaveBeenCalledWith("full-sandbox", {
-        dockerfile: "FROM the-companion:latest\nRUN apt-get update",
         initScript: "npm install",
       });
     });
@@ -344,37 +333,6 @@ describe("SandboxManager create flow", () => {
 
     await screen.findByText("string error");
   });
-
-  it("populates dockerfile with template when Use template is clicked", async () => {
-    // The create form offers a "Use template" link that populates the
-    // dockerfile textarea with a default Dockerfile content.
-    render(<SandboxManager embedded />);
-    await screen.findByText("My Sandbox");
-
-    fireEvent.click(screen.getByRole("button", { name: /new sandbox/i }));
-
-    // "Use template" should be visible when dockerfile is empty
-    fireEvent.click(screen.getByText("Use template"));
-
-    // The textarea should now contain the default template
-    const textarea = screen.getByPlaceholderText("# Custom Dockerfile content...") as HTMLTextAreaElement;
-    expect(textarea.value).toContain("FROM the-companion:latest");
-    expect(textarea.value).toContain("WORKDIR /workspace");
-  });
-
-  it("shows dockerfile warning when FROM does not start with the-companion", async () => {
-    // When the user enters a Dockerfile that does not start with
-    // "FROM the-companion", a warning message should appear.
-    render(<SandboxManager embedded />);
-    await screen.findByText("My Sandbox");
-
-    fireEvent.click(screen.getByRole("button", { name: /new sandbox/i }));
-    fireEvent.change(screen.getByPlaceholderText("# Custom Dockerfile content..."), {
-      target: { value: "FROM node:20" },
-    });
-
-    expect(screen.getByText(/does not start with FROM the-companion/)).toBeInTheDocument();
-  });
 });
 
 // ─── Edit Sandbox Flow ─────────────────────────────────────────
@@ -382,7 +340,7 @@ describe("SandboxManager create flow", () => {
 describe("SandboxManager edit flow", () => {
   it("opens edit view and displays current sandbox values", async () => {
     // Clicking the Edit button on a sandbox row should switch it to an
-    // editable form with the current name, dockerfile, and init script.
+    // editable form with the current name and init script.
     render(<SandboxManager embedded />);
     await screen.findByText("My Sandbox");
 
@@ -390,11 +348,6 @@ describe("SandboxManager edit flow", () => {
 
     // Name input should contain the current name
     expect(screen.getByDisplayValue("My Sandbox")).toBeInTheDocument();
-    // Dockerfile textarea should contain current content (multiline values
-    // need to be checked via the element's value property since
-    // getByDisplayValue does not reliably match multiline strings)
-    const dockerfileTextarea = screen.getByPlaceholderText("# Custom Dockerfile content...") as HTMLTextAreaElement;
-    expect(dockerfileTextarea.value).toBe("FROM the-companion:latest\nWORKDIR /workspace");
     // Init script textarea should contain current content
     expect(screen.getByDisplayValue("bun install")).toBeInTheDocument();
   });
@@ -414,7 +367,6 @@ describe("SandboxManager edit flow", () => {
     await waitFor(() => {
       expect(mockUpdateSandbox).toHaveBeenCalledWith("my-sandbox", {
         name: "Renamed Sandbox",
-        dockerfile: "FROM the-companion:latest\nWORKDIR /workspace",
         initScript: "bun install",
       });
     });
@@ -459,31 +411,6 @@ describe("SandboxManager edit flow", () => {
 
     await screen.findByText("update error string");
   });
-
-  it("shows Use template button in edit when dockerfile is empty", async () => {
-    // When editing a sandbox that has no dockerfile, the "Use template"
-    // link should be available to populate a default template.
-    mockListSandboxes.mockResolvedValue([makeSandbox({ dockerfile: undefined })]);
-    render(<SandboxManager embedded />);
-    await screen.findByText("My Sandbox");
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    // Should show "Use template" since dockerfile is empty
-    expect(screen.getByText("Use template")).toBeInTheDocument();
-  });
-
-  it("shows dockerfile warning in edit mode when FROM is not the-companion", async () => {
-    // When the edited Dockerfile does not start with FROM the-companion,
-    // a warning should be displayed.
-    mockListSandboxes.mockResolvedValue([makeSandbox({ dockerfile: "FROM alpine:latest" })]);
-    render(<SandboxManager embedded />);
-    await screen.findByText("My Sandbox");
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    expect(screen.getByText(/does not start with FROM the-companion/)).toBeInTheDocument();
-  });
 });
 
 // ─── Delete Sandbox Flow ───────────────────────────────────────
@@ -523,127 +450,128 @@ describe("SandboxManager delete flow", () => {
 
     await screen.findByText("delete error string");
   });
-
-  it("can delete a different sandbox while editing another", async () => {
-    // When one sandbox is in edit mode and the user deletes a different
-    // sandbox, the delete should succeed and the editing state should
-    // remain for the sandbox being edited.
-    mockListSandboxes.mockResolvedValue([
-      makeSandbox(),
-      makeSandbox({ name: "Other", slug: "other" }),
-    ]);
-    render(<SandboxManager embedded />);
-    await screen.findByText("My Sandbox");
-
-    // Start editing "My Sandbox" — this replaces its row with the edit form
-    const editButtons = screen.getAllByRole("button", { name: "Edit" });
-    fireEvent.click(editButtons[0]);
-    expect(screen.getByDisplayValue("My Sandbox")).toBeInTheDocument();
-
-    // "Other" sandbox still has its Delete button visible (it's not being edited)
-    // After deletion of "Other", the list refreshes without it.
-    mockListSandboxes.mockResolvedValue([
-      makeSandbox(),
-    ]);
-
-    // Click Delete on "Other" (the only visible Delete button now)
-    const deleteButtons = screen.getAllByRole("button", { name: "Delete" });
-    fireEvent.click(deleteButtons[0]);
-
-    await waitFor(() => {
-      expect(mockDeleteSandbox).toHaveBeenCalledWith("other");
-    });
-
-    // Edit form for "My Sandbox" should still be visible
-    expect(screen.getByDisplayValue("My Sandbox")).toBeInTheDocument();
-  });
 });
 
-// ─── Build Flow ────────────────────────────────────────────────
+// ─── Test Init Script Flow ──────────────────────────────────────
 
-describe("SandboxManager build flow", () => {
-  it("shows Build Image button in edit mode when dockerfile exists", async () => {
-    // The Build Image button should only appear in the edit view when
-    // the sandbox has a Dockerfile configured.
+describe("SandboxManager test init script flow", () => {
+  it("shows Test Init Script button in edit mode when init script exists and Docker is available", async () => {
+    // The Test Init Script button should appear in the edit view when
+    // the sandbox has an init script and Docker is available.
     render(<SandboxManager embedded />);
     await screen.findByText("My Sandbox");
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    expect(screen.getByRole("button", { name: /build image/i })).toBeInTheDocument();
-  });
-
-  it("does not show Build Image button in edit mode when dockerfile is empty", async () => {
-    // When editing a sandbox without a dockerfile, the Build Image
-    // button should not be rendered.
-    mockListSandboxes.mockResolvedValue([makeSandbox({ dockerfile: "" })]);
-    render(<SandboxManager embedded />);
-    await screen.findByText("My Sandbox");
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-
-    expect(screen.queryByRole("button", { name: /build image/i })).not.toBeInTheDocument();
-  });
-
-  it("triggers build and shows building status", async () => {
-    // Clicking Build Image should call buildSandboxImage and show
-    // "Building..." in the button and a building status indicator.
-    mockBuildSandboxImage.mockReturnValue(new Promise(() => {})); // Hang to observe building state
-    render(<SandboxManager embedded />);
-    await screen.findByText("My Sandbox");
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.click(screen.getByRole("button", { name: /build image/i }));
 
     await waitFor(() => {
-      expect(mockBuildSandboxImage).toHaveBeenCalledWith("my-sandbox");
-    });
-
-    // Should show building indicator
-    expect(screen.getByText("Building image...")).toBeInTheDocument();
-    expect(screen.getByText("Building...")).toBeInTheDocument();
-  });
-
-  it("shows success status after build completes", async () => {
-    // When buildSandboxImage resolves successfully, a success message
-    // should be displayed with the image tag.
-    render(<SandboxManager embedded />);
-    await screen.findByText("My Sandbox");
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.click(screen.getByRole("button", { name: /build image/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText(/Build successful/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /test init script/i })).toBeInTheDocument();
     });
   });
 
-  it("shows error status when build fails", async () => {
-    // When buildSandboxImage rejects, an error message should be displayed.
-    mockBuildSandboxImage.mockRejectedValue(new Error("Docker daemon not running"));
+  it("does not show Test Init Script button when init script is empty", async () => {
+    // When editing a sandbox without an init script, the Test button
+    // should not be rendered.
+    mockListSandboxes.mockResolvedValue([makeSandbox({ initScript: "" })]);
     render(<SandboxManager embedded />);
     await screen.findByText("My Sandbox");
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.click(screen.getByRole("button", { name: /build image/i }));
 
-    await waitFor(() => {
-      expect(screen.getByText(/Docker daemon not running/)).toBeInTheDocument();
-    });
+    expect(screen.queryByRole("button", { name: /test init script/i })).not.toBeInTheDocument();
   });
 
-  it("shows error status when build returns unsuccessful result", async () => {
-    // When buildSandboxImage resolves with success: false, a generic
-    // build failure error should be displayed.
-    mockBuildSandboxImage.mockResolvedValue({ success: false });
+  it("does not show Test Init Script button when Docker is unavailable", async () => {
+    // When Docker is not available, the Test button should not appear
+    // even if the sandbox has an init script.
+    mockGetContainerStatus.mockResolvedValue({ available: false });
     render(<SandboxManager embedded />);
     await screen.findByText("My Sandbox");
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.click(screen.getByRole("button", { name: /build image/i }));
+
+    // Wait for Docker status to resolve
+    await screen.findByText("No Docker");
+
+    expect(screen.queryByRole("button", { name: /test init script/i })).not.toBeInTheDocument();
+  });
+
+  it("shows success result after successful test", async () => {
+    // When testInitScript resolves with success=true, the component
+    // should display "Test passed".
+    mockTestInitScript.mockResolvedValue({ success: true, exitCode: 0, output: "hello\n" });
+    render(<SandboxManager embedded />);
+    await screen.findByText("My Sandbox");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Build error: Build failed/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /test init script/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /test init script/i }));
+
+    await screen.findByText("Test passed");
+    expect(screen.getByText("hello", { exact: false })).toBeInTheDocument();
+  });
+
+  it("shows failure result when init script test fails", async () => {
+    // When testInitScript resolves with success=false, the component
+    // should display the exit code and output.
+    mockTestInitScript.mockResolvedValue({ success: false, exitCode: 1, output: "command not found\n" });
+    render(<SandboxManager embedded />);
+    await screen.findByText("My Sandbox");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /test init script/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /test init script/i }));
+
+    await screen.findByText(/Test failed \(exit 1\)/);
+    expect(screen.getByText("command not found", { exact: false })).toBeInTheDocument();
+  });
+
+  it("shows error result when test request throws", async () => {
+    // When testInitScript rejects with an error, the component should
+    // display the error message as a test failure.
+    mockTestInitScript.mockRejectedValue(new Error("Docker crashed"));
+    render(<SandboxManager embedded />);
+    await screen.findByText("My Sandbox");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /test init script/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /test init script/i }));
+
+    await screen.findByText(/Test failed/);
+    expect(screen.getByText("Docker crashed")).toBeInTheDocument();
+  });
+
+  it("sends init script content directly without saving first", async () => {
+    // The test button should send the current (unsaved) init script content
+    // to the test endpoint without calling updateSandbox, so Cancel still
+    // discards edits.
+    render(<SandboxManager embedded />);
+    await screen.findByText("My Sandbox");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /test init script/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /test init script/i }));
+
+    await waitFor(() => {
+      // testInitScript should be called with the init script content
+      expect(mockTestInitScript).toHaveBeenCalledWith("my-sandbox", "/home/user/project", "bun install");
+      // updateSandbox should NOT be called — no silent save
+      expect(mockUpdateSandbox).not.toHaveBeenCalled();
     });
   });
 });

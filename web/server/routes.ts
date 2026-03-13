@@ -239,9 +239,7 @@ export function createRoutes(
       // Resolve Docker image early so we know whether git ops should run on host or in container
       let effectiveImage: string | null = null;
       if (sandboxEnabled) {
-        effectiveImage = companionSandbox
-          ? sandboxManager.getEffectiveImage(body.sandboxSlug)
-          : "the-companion:latest";
+        effectiveImage = "the-companion:latest";
       } else if (body.container?.image) {
         effectiveImage = body.container.image;
       }
@@ -567,9 +565,7 @@ export function createRoutes(
         // Resolve Docker image early so we know whether git ops should run on host or in container
         let effectiveImage: string | null = null;
         if (sandboxEnabled) {
-          effectiveImage = companionSandbox
-            ? sandboxManager.getEffectiveImage(body.sandboxSlug)
-            : "the-companion:latest";
+          effectiveImage = "the-companion:latest";
         } else if (body.container?.image) {
           effectiveImage = body.container.image;
         }
