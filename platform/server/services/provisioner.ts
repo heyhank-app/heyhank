@@ -13,6 +13,8 @@ const PLAN_CONFIGS = {
 
 export type Plan = keyof typeof PLAN_CONFIGS;
 
+export type ProvisionProgressFn = (step: string, label: string, status: "in_progress" | "done" | "error") => void;
+
 interface ProvisionInput {
   organizationId: string;
   plan: Plan;
@@ -20,6 +22,7 @@ interface ProvisionInput {
   hostname: string;
   loginUrl: string;
   tailscaleAuthKey?: string;
+  onProgress?: ProvisionProgressFn;
 }
 
 interface ProvisionResult {
@@ -72,13 +75,16 @@ export class Provisioner {
   async provision(input: ProvisionInput): Promise<ProvisionResult> {
     const config = PLAN_CONFIGS[input.plan];
     const authSecret = randomBytes(32).toString("hex");
+    const progress = input.onProgress ?? (() => {});
 
     // Step 1: Create volume
+    progress("creating_volume", "Creating storage volume", "in_progress");
     const volume = await this.volumes.createVolume({
       name: makeVolumeName(input.hostname),
       region: input.region,
       size_gb: config.storage_gb,
     });
+    progress("creating_volume", "Creating storage volume", "done");
 
     // Step 2: Create machine
     const env: Record<string, string> = {
@@ -95,6 +101,7 @@ export class Provisioner {
       env.TAILSCALE_AUTH_KEY = input.tailscaleAuthKey;
     }
 
+    progress("creating_machine", "Creating machine", "in_progress");
     let machine;
     try {
       machine = await this.machines.createMachine({
@@ -129,9 +136,12 @@ export class Provisioner {
           auto_start: true,
         },
       });
+      progress("creating_machine", "Creating machine", "done");
 
       // Step 3: Wait for machine to be running
+      progress("waiting_start", "Waiting for machine to start", "in_progress");
       await this.machines.waitForState(machine.id, "started", 90_000);
+      progress("waiting_start", "Waiting for machine to start", "done");
     } catch (err) {
       // Clean up resources if machine creation/startup fails
       if (machine) {

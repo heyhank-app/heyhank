@@ -222,6 +222,40 @@ describe("Provisioner", () => {
       });
     });
 
+    it("calls onProgress callback at each provisioning step when provided", async () => {
+      const progressCalls: Array<[string, string, string]> = [];
+      const onProgress = vi.fn((step: string, label: string, status: string) => {
+        progressCalls.push([step, label, status]);
+      });
+
+      await provisioner.provision(baseInput({ onProgress }));
+
+      // Verify progress was called for each step (in_progress + done)
+      expect(onProgress).toHaveBeenCalled();
+
+      // Check the step names are correct and in order
+      const stepNames = progressCalls.map(([step]) => step);
+      expect(stepNames).toContain("creating_volume");
+      expect(stepNames).toContain("creating_machine");
+      expect(stepNames).toContain("waiting_start");
+
+      // Each step should have both "in_progress" and "done" calls
+      const volumeStatuses = progressCalls.filter(([s]) => s === "creating_volume").map(([, , status]) => status);
+      expect(volumeStatuses).toEqual(["in_progress", "done"]);
+
+      const machineStatuses = progressCalls.filter(([s]) => s === "creating_machine").map(([, , status]) => status);
+      expect(machineStatuses).toEqual(["in_progress", "done"]);
+
+      const waitStatuses = progressCalls.filter(([s]) => s === "waiting_start").map(([, , status]) => status);
+      expect(waitStatuses).toEqual(["in_progress", "done"]);
+    });
+
+    it("works without onProgress callback (backward compatible)", async () => {
+      // Should not throw when onProgress is not provided
+      const result = await provisioner.provision(baseInput());
+      expect(result.flyMachineId).toBe("mach-456");
+    });
+
     it("sets standard env vars on the machine config", async () => {
       await provisioner.provision(baseInput());
 

@@ -1,6 +1,13 @@
+import { resolve } from "path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "@": resolve(__dirname, "src"),
+      "@server": resolve(__dirname, "server"),
+    },
+  },
   test: {
     globals: true,
     environment: "node",
@@ -15,6 +22,7 @@ export default defineConfig({
       ["src/**/*.test.ts", "jsdom"],
       ["src/**/*.test.tsx", "jsdom"],
     ],
+    setupFiles: ["src/test-setup.ts"],
     env: { NODE_ENV: "test" },
   },
 });

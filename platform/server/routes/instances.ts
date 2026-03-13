@@ -1,5 +1,6 @@
 import { and, eq, isNull, or } from "drizzle-orm";
 import { Hono } from "hono";
+import { streamSSE, type SSEStreamingApi } from "hono/streaming";
 import {
   requireAuth,
   requireOrganization,
@@ -254,6 +255,138 @@ instances.post("/", async (c) => {
   return c.json({
     message: "Instance provisioned",
     instance: created,
+  });
+});
+
+/**
+ * SSE streaming endpoint for instance creation with real-time progress.
+ * Emits progress events for each provisioning step, then a final "done" event
+ * with the created instance data. Follows the same pattern as
+ * web/server/routes.ts create-stream.
+ */
+instances.post("/create-stream", async (c) => {
+  const orgId = c.get("organizationId");
+  const userId = c.get("auth").userId;
+  const body = await c.req.json<{
+    plan?: string;
+    region?: string;
+    hostname?: string;
+    ownerType?: "shared" | "personal";
+    flyAppName?: string;
+  }>();
+
+  const ownerType = body.ownerType || "shared";
+  const ownerId = userId;
+  const plan = (body.plan || "starter") as Plan;
+  const region = body.region || "iad";
+  const flyAppName = body.flyAppName?.trim() || makeFlyAppName(userId, orgId);
+
+  if (!VALID_PLANS.includes(plan)) {
+    return c.json({ error: `Invalid plan: ${body.plan}` }, 400);
+  }
+
+  let provisioner: Provisioner;
+  try {
+    provisioner = getProvisioner(flyAppName);
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+
+  const emitProgress = (
+    stream: SSEStreamingApi,
+    step: string,
+    label: string,
+    status: "in_progress" | "done" | "error",
+  ) =>
+    stream.writeSSE({
+      event: "progress",
+      data: JSON.stringify({ step, label, status }),
+    });
+
+  return streamSSE(c, async (stream) => {
+    // Track the last in-progress step so we can mark it as error on failure.
+    let activeStep: { step: string; label: string } | null = null;
+    // Track provisioned resources so we can clean up on DB-save failure.
+    let provisioned: Awaited<ReturnType<Provisioner["provision"]>> | null = null;
+
+    try {
+      // Step 1: Ensure Fly app
+      activeStep = { step: "ensuring_app", label: "Ensuring Fly app exists" };
+      await emitProgress(stream, "ensuring_app", "Ensuring Fly app exists", "in_progress");
+      const apps = getAppsClient();
+      await apps.ensureAppExists(flyAppName);
+      await apps.ensurePublicIps(flyAppName);
+      await emitProgress(stream, "ensuring_app", "Ensuring Fly app exists", "done");
+      activeStep = null;
+
+      // Step 2-4: Provision (volume, machine, wait) — progress emitted by provisioner
+      const hostname = makeHostname(flyAppName, body.hostname);
+      const loginUrl = resolveLoginUrl(c);
+
+      provisioned = await provisioner.provision({
+        organizationId: orgId,
+        plan,
+        region,
+        hostname,
+        loginUrl,
+        onProgress: (step, label, status) => {
+          if (status === "in_progress") activeStep = { step, label };
+          else if (status === "done") activeStep = null;
+          void emitProgress(stream, step, label, status).catch(() => {});
+        },
+      });
+
+      // Step 5: Save to DB
+      activeStep = { step: "saving_db", label: "Saving instance" };
+      await emitProgress(stream, "saving_db", "Saving instance", "in_progress");
+      const db = getDb();
+      const [created] = await db
+        .insert(instancesTable)
+        .values({
+          organizationId: orgId,
+          ownerId,
+          ownerType,
+          flyMachineId: provisioned.flyMachineId,
+          flyVolumeId: provisioned.flyVolumeId,
+          region,
+          hostname: provisioned.hostname,
+          machineStatus: "started",
+          authSecret: provisioned.authSecret,
+          config: { plan, flyAppName },
+        })
+        .returning();
+      // DB save succeeded — clear provisioned so the catch block won't
+      // deprovision resources that are now referenced by the DB record.
+      provisioned = null;
+      await emitProgress(stream, "saving_db", "Saving instance", "done");
+      activeStep = null;
+
+      // Done
+      await stream.writeSSE({
+        event: "done",
+        data: JSON.stringify({ instance: sanitizeInstance(created) }),
+      });
+    } catch (err: any) {
+      // Mark the in-flight step as error so the UI stops spinning.
+      if (activeStep) {
+        await emitProgress(stream, activeStep.step, activeStep.label, "error").catch(() => {});
+      }
+
+      // Clean up orphaned Fly resources if provisioning succeeded but DB save failed.
+      if (provisioned) {
+        try {
+          await provisioner.deprovision(provisioned.flyMachineId, provisioned.flyVolumeId);
+        } catch {
+          // Best-effort cleanup — log but don't mask the original error.
+        }
+      }
+
+      const message = err.message || "Instance creation failed";
+      await stream.writeSSE({
+        event: "error",
+        data: JSON.stringify({ error: message }),
+      });
+    }
   });
 });
 

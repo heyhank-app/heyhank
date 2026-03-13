@@ -308,6 +308,82 @@ describe("instances routes", () => {
     });
   });
 
+  describe("POST /create-stream", () => {
+    it("streams SSE progress events during provisioning and emits done", async () => {
+      provisionMock.mockImplementation(async (input: any) => {
+        // Simulate progress callbacks if provided
+        if (input.onProgress) {
+          input.onProgress("creating_volume", "Creating storage volume", "in_progress");
+          input.onProgress("creating_volume", "Creating storage volume", "done");
+          input.onProgress("creating_machine", "Creating machine", "in_progress");
+          input.onProgress("creating_machine", "Creating machine", "done");
+          input.onProgress("waiting_start", "Waiting for machine to start", "in_progress");
+          input.onProgress("waiting_start", "Waiting for machine to start", "done");
+        }
+        return {
+          flyMachineId: "mach-123",
+          flyVolumeId: "vol-123",
+          authSecret: "secret-123",
+          hostname: "test-hostname",
+        };
+      });
+
+      const persisted = {
+        id: "8c9bbf79-9c44-4e4f-9840-12edd3eff2db",
+        organizationId: MOCK_ORG_ID,
+        machineStatus: "started",
+      };
+      insertReturningMock.mockResolvedValue([persisted]);
+
+      const res = await instances.request("/create-stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: "starter", region: "iad", ownerType: "shared" }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/event-stream");
+
+      // Read the full SSE stream body
+      const text = await res.text();
+
+      // Verify progress events were emitted
+      expect(text).toContain("event: progress");
+      expect(text).toContain("ensuring_app");
+      expect(text).toContain("saving_db");
+
+      // Verify done event at the end
+      expect(text).toContain("event: done");
+    });
+
+    it("streams an error event when provisioning fails", async () => {
+      ensureAppExistsMock.mockRejectedValueOnce(new Error("Fly app creation failed"));
+
+      const res = await instances.request("/create-stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: "starter" }),
+      });
+
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      expect(text).toContain("event: error");
+      expect(text).toContain("Fly app creation failed");
+    });
+
+    it("rejects invalid plans before streaming", async () => {
+      const res = await instances.request("/create-stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: "invalid-plan" }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain("Invalid plan");
+    });
+  });
+
   describe("DELETE /:id", () => {
     it("deprovisions machine+volume and deletes the DB row", async () => {
       findFirstMock.mockResolvedValue({
