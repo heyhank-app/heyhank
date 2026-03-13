@@ -229,7 +229,8 @@ describe("NoVncProxy", () => {
     const buf = Buffer.from([0x01, 0x02, 0x03]);
     proxy.handleMessage(ws, buf);
 
-    expect(upstream.send).toHaveBeenCalledWith(buf);
+    // After dead-code removal, Buffer input is always converted to Uint8Array
+    expect(upstream.send).toHaveBeenCalledWith(new Uint8Array(buf));
   });
 
   it("is a no-op when pair not found", () => {

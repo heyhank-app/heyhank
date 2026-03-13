@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { setCookie } from "hono/cookie";
+import { getCookie, setCookie } from "hono/cookie";
 import { streamSSE, type SSEStreamingApi } from "hono/streaming";
 import { execSync } from "node:child_process";
 import { resolveBinary } from "./path-resolver.js";
@@ -167,7 +167,10 @@ export function createRoutes(
 
     const authHeader = c.req.header("Authorization");
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!verifyToken(token)) {
+    // Also check the companion_auth cookie — iframes (browser preview) can't
+    // send Authorization headers, but browsers do forward cookies automatically.
+    const cookieToken = getCookie(c, "companion_auth") ?? null;
+    if (!verifyToken(token) && !verifyToken(cookieToken)) {
       return c.json({ error: "unauthorized" }, 401);
     }
     return next();
@@ -713,7 +716,7 @@ export function createRoutes(
             : [];
           const containerPorts: (number | { port: number; hostIp?: string })[] = [
             ...Array.from(new Set([
-              ...requestedPorts,
+              ...requestedPorts.filter((p: number) => p !== NOVNC_CONTAINER_PORT),
               VSCODE_EDITOR_CONTAINER_PORT,
               ...(backend === "codex" ? [CODEX_APP_SERVER_CONTAINER_PORT] : []),
             ])),
@@ -1184,14 +1187,14 @@ export function createRoutes(
         "  x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -noxdamage -wait 20 &>/dev/null &",
         "  sleep 0.3",
         "  websockify --web /usr/share/novnc/ 6080 localhost:5900 &>/dev/null &",
-        "  sleep 0.5",
+        "  sleep 1.0",
         "fi",
       ].join("\n");
 
-      containerManager.execInContainer(
+      await containerManager.execInContainerAsync(
         container.containerId,
         ["sh", "-c", startScript],
-        15_000,
+        { timeout: 15_000 },
       );
 
       // Optionally launch Chromium to a URL (validate scheme if provided)
@@ -1222,15 +1225,15 @@ export function createRoutes(
         "fi",
       ].join("\n");
 
-      containerManager.execInContainer(
+      await containerManager.execInContainerAsync(
         container.containerId,
         ["sh", "-c", launchChrome],
-        10_000,
+        { timeout: 10_000 },
       );
 
-      // Wait for noVNC to be ready (up to 5s)
+      // Wait for noVNC to be ready (up to 10s)
       let noVncReady = false;
-      for (let i = 0; i < 25; i++) {
+      for (let i = 0; i < 50; i++) {
         try {
           const res = await fetch(`http://127.0.0.1:${portMapping.hostPort}/`);
           if (res.ok || res.status === 200) {
@@ -1303,15 +1306,14 @@ export function createRoutes(
         `xdotool type --clearmodifiers ${shellEscapeArg(url)}`,
         "xdotool key --clearmodifiers Return",
       ].join(" && ");
-      containerManager.execInContainer(
+      await containerManager.execInContainerAsync(
         container.containerId,
         ["sh", "-c", navScript],
-        10_000,
+        { timeout: 10_000 },
       );
       return c.json({ ok: true, url });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      return c.json({ error: `Navigation failed: ${message}` }, 500);
+    } catch {
+      return c.json({ error: "Navigation failed" }, 500);
     }
   });
 
@@ -1334,6 +1336,12 @@ export function createRoutes(
     const fullPath = c.req.path;
     const proxyPrefix = `/api/sessions/${id}/browser/proxy/`;
     const subPath = fullPath.startsWith(proxyPrefix) ? fullPath.slice(proxyPrefix.length) : "";
+
+    // Block path traversal (defense-in-depth)
+    if (subPath.includes("..")) {
+      return c.json({ error: "Invalid path" }, 400);
+    }
+
     const queryString = new URL(c.req.url).search;
 
     try {
@@ -1348,16 +1356,15 @@ export function createRoutes(
         status: upstream.status,
         headers,
       });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      return c.json({ error: `Proxy failed: ${message}` }, 502);
+    } catch {
+      return c.json({ error: "Proxy failed: upstream unreachable" }, 502);
     }
   });
 
 
   // HTTP proxy for host browser preview — proxies localhost requests through the companion’s port
   const HOP_BY_HOP = new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "proxy-connection", "te", "trailer"]);
-  api.get("/sessions/:id/browser/host-proxy/:port/*", async (c) => {
+  api.all("/sessions/:id/browser/host-proxy/:port/*", async (c) => {
     const id = c.req.param("id");
     const session = launcher.getSession(id);
     if (!session) return c.json({ error: "Session not found" }, 404);
@@ -1368,10 +1375,11 @@ export function createRoutes(
       return c.json({ error: "Invalid port" }, 400);
     }
 
-    // Block proxying to the companion server itself (would bypass remote auth via localhost check)
+    // Block well-known sensitive service ports to limit SSRF surface area
+    const BLOCKED_PORTS = new Set([22, 23, 25, 110, 143, 3306, 5432, 6379, 27017, 11211]);
     const serverPort = port || (process.env.NODE_ENV === "production" ? 3456 : 3457);
-    if (portNum === serverPort) {
-      return c.json({ error: "Cannot proxy to the companion server" }, 400);
+    if (portNum === serverPort || BLOCKED_PORTS.has(portNum)) {
+      return c.json({ error: "Port not allowed" }, 400);
     }
 
     // Reconstruct path from wildcard — only take path, query comes separately
@@ -1390,7 +1398,13 @@ export function createRoutes(
     const timeout = setTimeout(() => controller.abort(), 15_000);
     try {
       const targetUrl = `http://127.0.0.1:${portNum}/${subPath}${queryString}`;
-      const upstream = await fetch(targetUrl, { redirect: "follow", signal: controller.signal });
+      const upstream = await fetch(targetUrl, {
+        method: c.req.method,
+        headers: { "accept": c.req.header("accept") || "*/*" },
+        body: ["GET", "HEAD"].includes(c.req.method) ? undefined : c.req.raw.body,
+        redirect: "follow",
+        signal: controller.signal,
+      });
       clearTimeout(timeout);
       // Forward response headers, stripping hop-by-hop headers
       const headers = new Headers();

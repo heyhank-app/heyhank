@@ -11,7 +11,7 @@
  * - Reload button refreshes the iframe
  * - Accessibility (axe scan)
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -30,6 +30,13 @@ import { SessionBrowserPane } from "./SessionBrowserPane.js";
 beforeEach(() => {
   mockStartBrowser.mockReset();
   mockNavigateBrowser.mockReset();
+});
+
+afterEach(() => {
+  // Clean up localStorage to prevent test leaks (e.g. companion_auth_token
+  // set during auth token injection tests). Using afterEach ensures cleanup
+  // runs even if an assertion throws.
+  localStorage.removeItem("companion_auth_token");
 });
 
 describe("SessionBrowserPane", () => {
@@ -93,7 +100,7 @@ describe("SessionBrowserPane", () => {
     });
 
     const input = screen.getByLabelText("Navigate URL");
-    fireEvent.change(input, { target: { value: "http://example.com/path" } });
+    fireEvent.change(input, { target: { value: "http://localhost/path" } });
     fireEvent.click(screen.getByText("Go"));
 
     await waitFor(() => {
@@ -158,6 +165,24 @@ describe("SessionBrowserPane", () => {
     expect(screen.getByText("Only http:// and https:// URLs are supported")).toBeInTheDocument();
   });
 
+  it("rejects non-localhost hostnames in host mode", async () => {
+    // Host mode only proxies localhost — remote hostnames are not supported
+    mockStartBrowser.mockResolvedValue({
+      available: true,
+      mode: "host",
+    });
+    render(<SessionBrowserPane sessionId="s1" />);
+    await waitFor(() => {
+      expect(screen.getByText("Enter a URL and click Go to preview.")).toBeInTheDocument();
+    });
+
+    const input = screen.getByLabelText("Navigate URL");
+    fireEvent.change(input, { target: { value: "http://example.com/path" } });
+    fireEvent.click(screen.getByText("Go"));
+
+    expect(screen.getByText("Host mode only supports localhost URLs (e.g. http://localhost:3000)")).toBeInTheDocument();
+  });
+
   // ─── API returns unavailable ──────────────────────────────────────────
   it("shows error when API returns unavailable", async () => {
     mockStartBrowser.mockResolvedValue({
@@ -211,7 +236,6 @@ describe("SessionBrowserPane", () => {
       // The path parameter should now include the token so noVNC forwards it on WS connect
       expect(iframe.getAttribute("src")).toContain("path=ws%2Fnovnc%2Fs1%3Ftoken%3Dtest-secret-token");
     });
-    localStorage.removeItem("companion_auth_token");
   });
 
   // ─── Container navigation ────────────────────────────────────────────

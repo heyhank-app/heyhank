@@ -5421,7 +5421,7 @@ describe("POST /api/sessions/:id/browser/start", () => {
     });
     vi.spyOn(containerManager, "hasBinaryInContainer").mockReturnValue(true);
     vi.spyOn(containerManager, "isContainerAlive").mockReturnValue("running");
-    const execSpy = vi.spyOn(containerManager, "execInContainer").mockReturnValue("");
+    const execSpy = vi.spyOn(containerManager, "execInContainerAsync").mockResolvedValue({ exitCode: 0, output: "" });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok", { status: 200 }));
 
     const res = await app.request("/api/sessions/s1/browser/start", { method: "POST" });
@@ -5436,12 +5436,12 @@ describe("POST /api/sessions/:id/browser/start", () => {
     expect(json.url).toContain("/api/sessions/s1/browser/proxy/vnc.html");
     expect(json.url).toContain("autoconnect=true");
     expect(json.url).toContain("path=ws/novnc/s1");
-    // Should have called execInContainer for the display stack and Chrome
+    // Should have called execInContainerAsync for the display stack and Chrome
     expect(execSpy).toHaveBeenCalledTimes(2);
     fetchSpy.mockRestore();
   });
 
-  it("returns unavailable when noVNC polling times out", { timeout: 15_000 }, async () => {
+  it("returns unavailable when noVNC polling times out", { timeout: 25_000 }, async () => {
     launcher.getSession.mockReturnValue({
       sessionId: "s1",
       state: "running",
@@ -5459,7 +5459,7 @@ describe("POST /api/sessions/:id/browser/start", () => {
     });
     vi.spyOn(containerManager, "hasBinaryInContainer").mockReturnValue(true);
     vi.spyOn(containerManager, "isContainerAlive").mockReturnValue("running");
-    vi.spyOn(containerManager, "execInContainer").mockReturnValue("");
+    vi.spyOn(containerManager, "execInContainerAsync").mockResolvedValue({ exitCode: 0, output: "" });
     // Simulate noVNC never becoming ready — all fetches throw
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("connection refused"));
 
@@ -5493,7 +5493,7 @@ describe("POST /api/sessions/:id/browser/start", () => {
     });
     vi.spyOn(containerManager, "hasBinaryInContainer").mockReturnValue(true);
     vi.spyOn(containerManager, "isContainerAlive").mockReturnValue("running");
-    vi.spyOn(containerManager, "execInContainer").mockReturnValue("");
+    vi.spyOn(containerManager, "execInContainerAsync").mockResolvedValue({ exitCode: 0, output: "" });
 
     const res = await app.request("/api/sessions/s1/browser/start", {
       method: "POST",
@@ -5572,7 +5572,7 @@ describe("POST /api/sessions/:id/browser/navigate", () => {
       containerCwd: "/workspace",
       state: "running",
     });
-    const execSpy = vi.spyOn(containerManager, "execInContainer").mockReturnValue("");
+    const execSpy = vi.spyOn(containerManager, "execInContainerAsync").mockResolvedValue({ exitCode: 0, output: "" });
 
     const res = await app.request("/api/sessions/s1/browser/navigate", {
       method: "POST",
@@ -5586,7 +5586,7 @@ describe("POST /api/sessions/:id/browser/navigate", () => {
     expect(execSpy).toHaveBeenCalledWith(
       "cid-1",
       expect.arrayContaining(["sh", "-c"]),
-      10_000,
+      { timeout: 10_000 },
     );
   });
 });
@@ -5713,7 +5713,23 @@ describe("GET /api/sessions/:id/browser/host-proxy/:port/*", () => {
 
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toContain("Cannot proxy to the companion server");
+    expect(json.error).toContain("Port not allowed");
+  });
+
+  it("blocks well-known sensitive service ports", async () => {
+    // Sensitive ports (databases, caches, mail) should be blocked to limit SSRF
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+    });
+
+    for (const blockedPort of [5432, 3306, 6379, 27017]) {
+      const res = await app.request(`/api/sessions/s1/browser/host-proxy/${blockedPort}/`);
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error).toContain("Port not allowed");
+    }
   });
 
   it("proxies request to localhost on the given port", async () => {

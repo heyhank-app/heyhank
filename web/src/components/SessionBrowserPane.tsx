@@ -62,6 +62,10 @@ export function SessionBrowserPane({ sessionId }: SessionBrowserPaneProps) {
           setNavError("Only http:// and https:// URLs are supported");
           return;
         }
+        if (parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
+          setNavError("Host mode only supports localhost URLs (e.g. http://localhost:3000)");
+          return;
+        }
         const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
         const subPath = parsed.pathname.replace(/^\//, "");
         const proxyUrl = `/api/sessions/${encodeURIComponent(sessionId)}/browser/host-proxy/${port}/${subPath}${parsed.search}`;
@@ -151,7 +155,10 @@ export function SessionBrowserPane({ sessionId }: SessionBrowserPaneProps) {
             src={browserUrl}
             className="w-full h-full border-0"
             title="Browser preview"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            // Container mode needs allow-same-origin for noVNC WebSocket connections.
+            // This is intentional: noVNC content is trusted (our own server in the container).
+            // Host mode omits allow-same-origin to isolate proxied third-party content.
+            sandbox={browserMode === "container" ? "allow-scripts allow-same-origin allow-forms allow-popups" : "allow-scripts allow-forms allow-popups"}
           />
         ) : browserMode === "host" ? (
           <div className="h-full flex items-center justify-center p-4 text-sm text-cc-muted">

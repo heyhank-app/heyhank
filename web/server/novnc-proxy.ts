@@ -79,11 +79,7 @@ export class NoVncProxy {
     if (upstreamWs.readyState !== WebSocket.OPEN) return;
 
     try {
-      if (msg instanceof Buffer || msg instanceof Uint8Array) {
-        upstreamWs.send(msg);
-      } else {
-        upstreamWs.send(msg);
-      }
+      upstreamWs.send(msg instanceof Buffer ? new Uint8Array(msg) : msg);
     } catch {
       // Upstream may have closed
     }
