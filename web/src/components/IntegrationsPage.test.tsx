@@ -12,6 +12,7 @@ const mockApi = {
   getSettings: vi.fn(),
   getLinearConnection: vi.fn(),
   getTailscaleStatus: vi.fn(),
+  listAgents: vi.fn(),
 };
 
 vi.mock("../api.js", () => ({
@@ -19,6 +20,7 @@ vi.mock("../api.js", () => ({
     getSettings: (...args: unknown[]) => mockApi.getSettings(...args),
     getLinearConnection: (...args: unknown[]) => mockApi.getLinearConnection(...args),
     getTailscaleStatus: (...args: unknown[]) => mockApi.getTailscaleStatus(...args),
+    listAgents: (...args: unknown[]) => mockApi.listAgents(...args),
   },
 }));
 
@@ -61,6 +63,7 @@ beforeEach(() => {
     funnelUrl: null,
     error: null,
   });
+  mockApi.listAgents.mockResolvedValue([]);
   window.location.hash = "#/integrations";
 });
 

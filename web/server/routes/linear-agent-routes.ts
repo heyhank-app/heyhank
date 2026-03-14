@@ -8,6 +8,7 @@ import type { Hono } from "hono";
 import type { LinearAgentBridge } from "../linear-agent-bridge.js";
 import * as linearAgent from "../linear-agent.js";
 import type { AgentSessionEventPayload } from "../linear-agent.js";
+import * as agentStore from "../agent-store.js";
 import { getSettings, updateSettings } from "../settings-manager.js";
 
 /**
@@ -19,16 +20,12 @@ export function registerLinearAgentWebhookRoute(
   api: Hono,
   bridge: LinearAgentBridge,
 ): void {
-  // Webhook endpoint — verified via HMAC-SHA256 signature
+  // Webhook endpoint — verified via HMAC-SHA256 signature (per-agent lookup)
   api.post("/linear/agent-webhook", async (c) => {
     const rawBody = await c.req.text();
     const signature = c.req.header("linear-signature") ?? c.req.header("x-linear-signature");
 
-    // Verify webhook signature
-    if (!linearAgent.verifyWebhookSignature(rawBody, signature ?? null)) {
-      return c.json({ error: "Invalid signature" }, 401);
-    }
-
+    // Parse payload first to extract oauthClientId for agent lookup
     let payload: AgentSessionEventPayload;
     try {
       payload = JSON.parse(rawBody) as AgentSessionEventPayload;
@@ -39,6 +36,23 @@ export function registerLinearAgentWebhookRoute(
     // Only handle AgentSessionEvent
     if (payload.type !== "AgentSessionEvent") {
       return c.json({ ok: true, ignored: true });
+    }
+
+    // Look up the agent by oauthClientId to get the correct webhook secret
+    const agent = agentStore.listAgents().find(
+      (a) => a.enabled && a.triggers?.linear?.enabled
+        && a.triggers.linear.oauthClientId === payload.oauthClientId,
+    );
+
+    if (!agent) {
+      console.error(`[linear-agent-routes] No agent found for oauthClientId: ${payload.oauthClientId}`);
+      return c.json({ error: "No agent configured for this OAuth client" }, 404);
+    }
+
+    // Verify webhook signature with this agent's webhook secret
+    const webhookSecret = agent.triggers?.linear?.webhookSecret || "";
+    if (!linearAgent.verifyWebhookSignature(webhookSecret, rawBody, signature ?? null)) {
+      return c.json({ error: "Invalid signature" }, 401);
     }
 
     // Dispatch asynchronously — must return 200 within 5s
@@ -66,28 +80,39 @@ export function registerLinearAgentWebhookRoute(
     }
 
     // Validate the state nonce to prevent CSRF
-    if (!linearAgent.validateOAuthState(state)) {
+    const stateResult = linearAgent.validateOAuthState(state);
+    if (!stateResult.valid) {
       return c.redirect("/#/settings/linear?oauth_error=invalid_state");
     }
+
+    // Determine redirect target — validate returnTo is a safe relative hash-router path
+    // to prevent open redirects (state passes through the browser and could be tampered with)
+    const rawReturnTo = stateResult.returnTo;
+    const redirectBase = (rawReturnTo && /^\/?#\//.test(rawReturnTo)) ? rawReturnTo : "/#/settings/linear";
 
     // Build redirect URI (must match what was sent in the authorize request)
     const settings = getSettings();
     const baseUrl = settings.publicUrl || `http://localhost:${process.env.PORT || 3456}`;
     const redirectUri = `${baseUrl}/api/linear/oauth/callback`;
 
-    const tokens = await linearAgent.exchangeCodeForTokens(code, redirectUri);
+    // Use staged credentials from global settings for the token exchange
+    const tokens = await linearAgent.exchangeCodeForTokens(
+      { clientId: settings.linearOAuthClientId, clientSecret: settings.linearOAuthClientSecret },
+      code,
+      redirectUri,
+    );
     if (!tokens) {
-      return c.redirect("/#/settings/linear?oauth_error=token_exchange_failed");
+      return c.redirect(`${redirectBase}?oauth_error=token_exchange_failed`);
     }
 
-    // Persist tokens
+    // Persist tokens to global staging (will be moved to agent on creation)
     updateSettings({
       linearOAuthAccessToken: tokens.accessToken,
       linearOAuthRefreshToken: tokens.refreshToken,
     });
 
     console.log("[linear-agent-routes] OAuth tokens obtained successfully");
-    return c.redirect("/#/settings/linear?oauth_success=true");
+    return c.redirect(`${redirectBase}?oauth_success=true`);
   });
 }
 
@@ -101,7 +126,10 @@ export function registerLinearAgentProtectedRoutes(api: Hono): void {
     const settings = getSettings();
     const baseUrl = settings.publicUrl || `http://localhost:${process.env.PORT || 3456}`;
     const redirectUri = `${baseUrl}/api/linear/oauth/callback`;
-    const result = linearAgent.getOAuthAuthorizeUrl(redirectUri);
+    const returnTo = c.req.query("returnTo");
+    // Validate returnTo is a safe relative hash-router path to prevent open redirects
+    const safeReturnTo = returnTo && /^\/?#\//.test(returnTo) ? returnTo : undefined;
+    const result = linearAgent.getOAuthAuthorizeUrl(settings.linearOAuthClientId, redirectUri, safeReturnTo);
 
     if (!result) {
       return c.json({ error: "OAuth client ID not configured" }, 400);
@@ -114,7 +142,11 @@ export function registerLinearAgentProtectedRoutes(api: Hono): void {
   api.get("/linear/oauth/status", (c) => {
     const settings = getSettings();
     return c.json({
-      configured: linearAgent.isLinearOAuthConfigured(),
+      configured: linearAgent.isLinearOAuthConfigured({
+        clientId: settings.linearOAuthClientId,
+        clientSecret: settings.linearOAuthClientSecret,
+        accessToken: settings.linearOAuthAccessToken,
+      }),
       hasClientId: !!settings.linearOAuthClientId.trim(),
       hasClientSecret: !!settings.linearOAuthClientSecret.trim(),
       hasWebhookSecret: !!settings.linearOAuthWebhookSecret.trim(),

@@ -80,9 +80,19 @@ export interface AgentConfig {
       /** true = recurring cron, false = one-shot */
       recurring: boolean;
     };
-    /** Linear Agent Interaction SDK trigger (uses global OAuth app) */
+    /** Linear Agent Interaction SDK trigger (per-agent OAuth app) */
     linear?: {
       enabled: boolean;
+      /** OAuth app client ID from Linear */
+      oauthClientId?: string;
+      /** OAuth app client secret */
+      oauthClientSecret?: string;
+      /** Webhook signing secret for this agent's Linear OAuth app */
+      webhookSecret?: string;
+      /** OAuth access token (obtained via actor=app install flow) */
+      accessToken?: string;
+      /** OAuth refresh token (for 24h token rotation) */
+      refreshToken?: string;
     };
   };
 

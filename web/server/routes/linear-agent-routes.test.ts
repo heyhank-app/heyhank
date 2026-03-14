@@ -14,6 +14,11 @@ vi.mock("../linear-agent.js", () => ({
   validateOAuthState: vi.fn(),
 }));
 
+// Mock agent-store
+vi.mock("../agent-store.js", () => ({
+  listAgents: vi.fn(),
+}));
+
 // Mock settings-manager
 vi.mock("../settings-manager.js", () => ({
   getSettings: vi.fn().mockReturnValue({
@@ -28,6 +33,7 @@ vi.mock("../settings-manager.js", () => ({
 
 import * as linearAgent from "../linear-agent.js";
 import * as settingsManager from "../settings-manager.js";
+import * as agentStore from "../agent-store.js";
 import {
   registerLinearAgentWebhookRoute,
   registerLinearAgentProtectedRoutes,
@@ -49,13 +55,30 @@ function createApp() {
   return { app, bridge };
 }
 
+const testAgent = {
+  id: "agent-1",
+  name: "Linear Bot",
+  enabled: true,
+  triggers: {
+    linear: {
+      enabled: true,
+      oauthClientId: "test-client-id",
+      webhookSecret: "test-webhook-secret",
+    },
+  },
+};
+
 const validPayload = {
   type: "AgentSessionEvent",
   action: "created",
-  data: {
+  oauthClientId: "test-client-id",
+  agentSession: {
     id: "session-123",
-    promptContext: "Fix the bug",
+    status: "pending",
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
   },
+  promptContext: "Fix the bug",
 };
 
 // ─── Webhook endpoint tests ─────────────────────────────────────────────────
@@ -70,6 +93,8 @@ describe("POST /linear/agent-webhook", () => {
   });
 
   it("returns 401 when webhook signature is invalid", async () => {
+    // Agent must be found first (per-agent lookup), then signature check fails
+    vi.mocked(agentStore.listAgents).mockReturnValue([testAgent] as ReturnType<typeof agentStore.listAgents>);
     vi.mocked(linearAgent.verifyWebhookSignature).mockReturnValue(false);
 
     const res = await app.request("/linear/agent-webhook", {
@@ -84,8 +109,7 @@ describe("POST /linear/agent-webhook", () => {
   });
 
   it("returns 400 for invalid JSON body", async () => {
-    vi.mocked(linearAgent.verifyWebhookSignature).mockReturnValue(true);
-
+    // JSON parsing now happens before signature verification
     const res = await app.request("/linear/agent-webhook", {
       method: "POST",
       body: "not-json{{",
@@ -98,6 +122,7 @@ describe("POST /linear/agent-webhook", () => {
   });
 
   it("dispatches AgentSessionEvent to bridge and returns 200", async () => {
+    vi.mocked(agentStore.listAgents).mockReturnValue([testAgent] as ReturnType<typeof agentStore.listAgents>);
     vi.mocked(linearAgent.verifyWebhookSignature).mockReturnValue(true);
 
     const res = await app.request("/linear/agent-webhook", {
@@ -116,8 +141,7 @@ describe("POST /linear/agent-webhook", () => {
   });
 
   it("ignores non-AgentSessionEvent types", async () => {
-    vi.mocked(linearAgent.verifyWebhookSignature).mockReturnValue(true);
-
+    // Type check happens before agent lookup, so no agent mock needed
     const res = await app.request("/linear/agent-webhook", {
       method: "POST",
       body: JSON.stringify({ type: "Issue", action: "created", data: {} }),
@@ -131,6 +155,7 @@ describe("POST /linear/agent-webhook", () => {
   });
 
   it("accepts x-linear-signature header as fallback", async () => {
+    vi.mocked(agentStore.listAgents).mockReturnValue([testAgent] as ReturnType<typeof agentStore.listAgents>);
     vi.mocked(linearAgent.verifyWebhookSignature).mockReturnValue(true);
 
     const res = await app.request("/linear/agent-webhook", {
@@ -140,10 +165,27 @@ describe("POST /linear/agent-webhook", () => {
     });
 
     expect(res.status).toBe(200);
+    // verifyWebhookSignature now takes (webhookSecret, rawBody, signature)
     expect(linearAgent.verifyWebhookSignature).toHaveBeenCalledWith(
+      "test-webhook-secret",
       expect.any(String),
       "valid-sig",
     );
+  });
+
+  it("returns 404 when no agent matches the oauthClientId", async () => {
+    // No agents configured — should return 404
+    vi.mocked(agentStore.listAgents).mockReturnValue([]);
+
+    const res = await app.request("/linear/agent-webhook", {
+      method: "POST",
+      body: JSON.stringify(validPayload),
+      headers: { "Content-Type": "application/json", "linear-signature": "valid-sig" },
+    });
+
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toContain("No agent configured");
   });
 });
 
@@ -174,6 +216,7 @@ describe("GET /linear/oauth/callback", () => {
   });
 
   it("redirects with error when state is missing (CSRF protection)", async () => {
+    vi.mocked(linearAgent.validateOAuthState).mockReturnValue({ valid: false });
     const res = await app.request("/linear/oauth/callback?code=auth-code-123");
 
     expect(res.status).toBe(302);
@@ -182,7 +225,7 @@ describe("GET /linear/oauth/callback", () => {
   });
 
   it("redirects with error when state is invalid (CSRF protection)", async () => {
-    vi.mocked(linearAgent.validateOAuthState).mockReturnValue(false);
+    vi.mocked(linearAgent.validateOAuthState).mockReturnValue({ valid: false });
 
     const res = await app.request("/linear/oauth/callback?code=auth-code-123&state=bad-state");
 
@@ -192,7 +235,7 @@ describe("GET /linear/oauth/callback", () => {
   });
 
   it("exchanges code for tokens and redirects on success", async () => {
-    vi.mocked(linearAgent.validateOAuthState).mockReturnValue(true);
+    vi.mocked(linearAgent.validateOAuthState).mockReturnValue({ valid: true });
     vi.mocked(linearAgent.exchangeCodeForTokens).mockResolvedValue({
       accessToken: "new-access",
       refreshToken: "new-refresh",
@@ -204,7 +247,14 @@ describe("GET /linear/oauth/callback", () => {
     const location = res.headers.get("location");
     expect(location).toContain("oauth_success=true");
 
-    // Should persist tokens
+    // exchangeCodeForTokens now receives credentials object as first arg
+    expect(linearAgent.exchangeCodeForTokens).toHaveBeenCalledWith(
+      { clientId: "client-id", clientSecret: "client-secret" },
+      "auth-code-123",
+      expect.stringContaining("/api/linear/oauth/callback"),
+    );
+
+    // Should persist tokens to global staging
     expect(settingsManager.updateSettings).toHaveBeenCalledWith({
       linearOAuthAccessToken: "new-access",
       linearOAuthRefreshToken: "new-refresh",
@@ -212,7 +262,7 @@ describe("GET /linear/oauth/callback", () => {
   });
 
   it("redirects with error when token exchange fails", async () => {
-    vi.mocked(linearAgent.validateOAuthState).mockReturnValue(true);
+    vi.mocked(linearAgent.validateOAuthState).mockReturnValue({ valid: true });
     vi.mocked(linearAgent.exchangeCodeForTokens).mockResolvedValue(null);
 
     const res = await app.request("/linear/oauth/callback?code=bad-code&state=valid-state");
@@ -244,6 +294,13 @@ describe("GET /linear/oauth/authorize-url", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.url).toContain("linear.app/oauth/authorize");
+
+    // getOAuthAuthorizeUrl now receives clientId as first arg
+    expect(linearAgent.getOAuthAuthorizeUrl).toHaveBeenCalledWith(
+      "client-id",
+      expect.stringContaining("/api/linear/oauth/callback"),
+      undefined,
+    );
   });
 
   it("returns 400 when OAuth client ID is not configured", async () => {
@@ -279,6 +336,13 @@ describe("GET /linear/oauth/status", () => {
     expect(body.hasClientSecret).toBe(true);
     expect(body.hasWebhookSecret).toBe(true);
     expect(body.hasAccessToken).toBe(true);
+
+    // isLinearOAuthConfigured now receives credentials object
+    expect(linearAgent.isLinearOAuthConfigured).toHaveBeenCalledWith({
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      accessToken: "access-token",
+    });
   });
 });
 

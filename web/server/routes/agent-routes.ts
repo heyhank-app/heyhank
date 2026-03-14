@@ -3,6 +3,7 @@ import type { Hono } from "hono";
 import * as agentStore from "../agent-store.js";
 import type { AgentExecutor } from "../agent-executor.js";
 import type { AgentConfig, AgentConfigExport } from "../agent-types.js";
+import { getSettings, updateSettings } from "../settings-manager.js";
 
 /** Fields the user can set when creating/updating an agent */
 const EDITABLE_FIELDS = [
@@ -22,6 +23,24 @@ function pickEditable(body: Record<string, unknown>): Partial<AgentConfig> {
   return result as Partial<AgentConfig>;
 }
 
+/** Strip sensitive Linear OAuth credentials before sending to the browser */
+function sanitizeAgent(agent: AgentConfig & { nextRunAt?: number | null }): Record<string, unknown> {
+  if (!agent.triggers?.linear) return agent as unknown as Record<string, unknown>;
+  const { oauthClientSecret, webhookSecret, accessToken, refreshToken, ...safeLinear } = agent.triggers.linear;
+  return {
+    ...agent,
+    triggers: {
+      ...agent.triggers,
+      linear: {
+        ...safeLinear,
+        hasAccessToken: !!accessToken,
+        hasClientSecret: !!oauthClientSecret,
+        hasWebhookSecret: !!webhookSecret,
+      },
+    },
+  } as unknown as Record<string, unknown>;
+}
+
 /** Strip internal tracking fields to produce a portable export */
 function toExport(agent: AgentConfig): AgentConfigExport {
   const {
@@ -35,6 +54,11 @@ function toExport(agent: AgentConfig): AgentConfigExport {
     enabled: _en,
     ...exportable
   } = agent;
+  // Strip Linear OAuth credentials from export
+  if (exportable.triggers?.linear) {
+    const { oauthClientId, oauthClientSecret, webhookSecret, accessToken, refreshToken, ...safeLinear } = exportable.triggers.linear;
+    exportable.triggers = { ...exportable.triggers, linear: safeLinear };
+  }
   return exportable;
 }
 
@@ -46,7 +70,7 @@ export function registerAgentRoutes(
 
   api.get("/agents", (c) => {
     const agents = agentStore.listAgents();
-    const enriched = agents.map((a) => ({
+    const enriched = agents.map((a) => sanitizeAgent({
       ...a,
       nextRunAt: agentExecutor?.getNextRunTime(a.id)?.getTime() ?? null,
     }));
@@ -56,10 +80,10 @@ export function registerAgentRoutes(
   api.get("/agents/:id", (c) => {
     const agent = agentStore.getAgent(c.req.param("id"));
     if (!agent) return c.json({ error: "Agent not found" }, 404);
-    return c.json({
+    return c.json(sanitizeAgent({
       ...agent,
       nextRunAt: agentExecutor?.getNextRunTime(agent.id)?.getTime() ?? null,
-    });
+    }));
   });
 
   api.post("/agents", async (c) => {
@@ -88,10 +112,46 @@ export function registerAgentRoutes(
         triggers: body.triggers,
         enabled: body.enabled ?? true,
       });
+
+      // If this is a Linear agent with no credentials, copy from global staging
+      if (agent.triggers?.linear?.enabled && !agent.triggers.linear.oauthClientId) {
+        const settings = getSettings();
+        if (settings.linearOAuthClientId) {
+          const updated = agentStore.updateAgent(agent.id, {
+            triggers: {
+              ...agent.triggers,
+              linear: {
+                ...agent.triggers.linear,
+                oauthClientId: settings.linearOAuthClientId,
+                oauthClientSecret: settings.linearOAuthClientSecret,
+                webhookSecret: settings.linearOAuthWebhookSecret,
+                accessToken: settings.linearOAuthAccessToken,
+                refreshToken: settings.linearOAuthRefreshToken,
+              },
+            },
+          });
+          // Clear global staging credentials
+          updateSettings({
+            linearOAuthClientId: "",
+            linearOAuthClientSecret: "",
+            linearOAuthWebhookSecret: "",
+            linearOAuthAccessToken: "",
+            linearOAuthRefreshToken: "",
+          });
+          // Use the updated agent for the response
+          if (updated) {
+            if (updated.enabled && updated.triggers?.schedule?.enabled) {
+              agentExecutor?.scheduleAgent(updated);
+            }
+            return c.json(sanitizeAgent({ ...updated, nextRunAt: null }), 201);
+          }
+        }
+      }
+
       if (agent.enabled && agent.triggers?.schedule?.enabled) {
         agentExecutor?.scheduleAgent(agent);
       }
-      return c.json(agent, 201);
+      return c.json(sanitizeAgent({ ...agent, nextRunAt: null }), 201);
     } catch (e: unknown) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
     }
@@ -114,7 +174,7 @@ export function registerAgentRoutes(
       } else {
         agentExecutor?.stopAgent(agent.id);
       }
-      return c.json(agent);
+      return c.json(sanitizeAgent({ ...agent, nextRunAt: agentExecutor?.getNextRunTime(agent.id)?.getTime() ?? null }));
     } catch (e: unknown) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
     }
@@ -140,7 +200,7 @@ export function registerAgentRoutes(
     } else if (updated) {
       agentExecutor?.stopAgent(updated.id);
     }
-    return c.json(updated);
+    return c.json(updated ? sanitizeAgent({ ...updated, nextRunAt: agentExecutor?.getNextRunTime(updated.id)?.getTime() ?? null }) : updated);
   });
 
   // ── Run (manual trigger) ───────────────────────────────────────────────
@@ -203,7 +263,7 @@ export function registerAgentRoutes(
         triggers: body.triggers,
         enabled: false, // Imported agents start disabled for safety
       });
-      return c.json(agent, 201);
+      return c.json(sanitizeAgent({ ...agent, nextRunAt: null }), 201);
     } catch (e: unknown) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
     }
@@ -221,7 +281,7 @@ export function registerAgentRoutes(
     const id = c.req.param("id");
     const agent = agentStore.regenerateWebhookSecret(id);
     if (!agent) return c.json({ error: "Agent not found" }, 404);
-    return c.json(agent);
+    return c.json(sanitizeAgent({ ...agent, nextRunAt: agentExecutor?.getNextRunTime(agent.id)?.getTime() ?? null }));
   });
 
   // ── Webhook Trigger ────────────────────────────────────────────────────

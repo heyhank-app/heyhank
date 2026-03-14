@@ -21,15 +21,15 @@ export interface CompanionSettings {
   linearArchiveTransition: boolean;
   linearArchiveTransitionStateId: string;
   linearArchiveTransitionStateName: string;
-  /** Linear OAuth app client ID (for Agent Interaction SDK) */
+  /** @deprecated Used only as staging during wizard flow. Per-agent credentials are in AgentConfig.triggers.linear. */
   linearOAuthClientId: string;
-  /** Linear OAuth app client secret */
+  /** @deprecated Used only as staging during wizard flow. Per-agent credentials are in AgentConfig.triggers.linear. */
   linearOAuthClientSecret: string;
-  /** Webhook signing secret for the Linear OAuth app */
+  /** @deprecated Used only as staging during wizard flow. Per-agent credentials are in AgentConfig.triggers.linear. */
   linearOAuthWebhookSecret: string;
-  /** OAuth access token (obtained via actor=app install flow) */
+  /** @deprecated Used only as staging during wizard flow. Per-agent credentials are in AgentConfig.triggers.linear. */
   linearOAuthAccessToken: string;
-  /** OAuth refresh token (for 24h token rotation) */
+  /** @deprecated Used only as staging during wizard flow. Per-agent credentials are in AgentConfig.triggers.linear. */
   linearOAuthRefreshToken: string;
   editorTabEnabled: boolean;
   aiValidationEnabled: boolean;

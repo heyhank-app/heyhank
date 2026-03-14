@@ -29,6 +29,7 @@ import { RecorderManager } from "./recorder.js";
 import { CronScheduler } from "./cron-scheduler.js";
 import { AgentExecutor } from "./agent-executor.js";
 import { migrateCronJobsToAgents } from "./agent-cron-migrator.js";
+import { migrateLinearCredentialsToAgents } from "./linear-credential-migration.js";
 import { authenticateManagedWebSocket } from "./ws-auth.js";
 import { LinearAgentBridge } from "./linear-agent-bridge.js";
 import { NoVncProxy } from "./novnc-proxy.js";
@@ -420,6 +421,7 @@ cronScheduler.startAll();
 
 // ── Agent system ────────────────────────────────────────────────────────────
 migrateCronJobsToAgents();
+migrateLinearCredentialsToAgents();
 agentExecutor.startAll();
 
 // ── Image pull manager — pre-pull missing Docker images for environments ────

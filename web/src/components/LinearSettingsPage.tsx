@@ -58,6 +58,14 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // ─── Per-agent Linear OAuth status ──────────────────────────────────
+  const [linearAgents, setLinearAgents] = useState<Array<{
+    id: string;
+    name: string;
+    hasAccessToken?: boolean;
+    oauthClientId?: string;
+  }>>([]);
+
   // ─── Linear OAuth Agent App state (unchanged from original) ────────
   const [oauthClientId, setOauthClientId] = useState("");
   const [oauthClientSecret, setOauthClientSecret] = useState("");
@@ -90,6 +98,20 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
     api.getLinearOAuthStatus().then((s) => {
       setOauthConfigured(s.configured);
       setOauthHasAccessToken(s.hasAccessToken);
+    }).catch(() => {});
+
+    // Load per-agent Linear OAuth status
+    api.listAgents().then((agents) => {
+      setLinearAgents(
+        agents
+          .filter(a => a.triggers?.linear?.enabled)
+          .map(a => ({
+            id: a.id,
+            name: a.name,
+            hasAccessToken: a.triggers?.linear?.hasAccessToken,
+            oauthClientId: a.triggers?.linear?.oauthClientId,
+          }))
+      );
     }).catch(() => {});
 
     // Check for OAuth callback success/error in URL
@@ -785,7 +807,7 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
             )}
           </h2>
           <p className="text-xs text-cc-muted">
-            Create a dedicated agent user in Linear that responds to @mentions. This uses Linear's native Agent Interaction SDK for a rich in-app experience with session activities, thoughts, and plans.
+            Enter credentials when setting up a new Linear agent. Each agent uses its own OAuth app.
           </p>
 
           <div className="space-y-3">
@@ -844,11 +866,20 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
 
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <span className="text-xs text-cc-muted">
-              {oauthHasAccessToken
-                ? "Agent app installed — agents with the Linear trigger will respond to @mentions"
-                : oauthConfigured
-                  ? "Credentials saved — install the app to connect"
-                  : "Not configured"}
+              {(() => {
+                const connectedAgents = linearAgents.filter(a => a.hasAccessToken).length;
+                const needInstall = linearAgents.filter(a => !a.hasAccessToken).length;
+                if (linearAgents.length === 0) {
+                  return "No agents configured \u2014 create one in the Agents page";
+                }
+                if (connectedAgents > 0 && needInstall > 0) {
+                  return `${connectedAgents} agent(s) connected, ${needInstall} agent(s) need installation`;
+                }
+                if (connectedAgents > 0) {
+                  return `${connectedAgents} agent(s) connected`;
+                }
+                return `${needInstall} agent(s) need installation`;
+              })()}
             </span>
             <div className="flex items-center gap-2">
               {oauthHasAccessToken && (
@@ -938,6 +969,31 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
               </button>
             </div>
           </div>
+
+          {/* Per-agent OAuth status */}
+          {linearAgents.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <p className="text-xs font-medium text-cc-muted">Agent OAuth Status</p>
+              {linearAgents.map(agent => (
+                <div key={agent.id} className="flex items-center justify-between px-3 py-2 rounded-lg border border-cc-border/50 bg-cc-bg/50">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-1.5 h-1.5 rounded-full ${agent.hasAccessToken ? 'bg-cc-success' : 'bg-cc-muted'}`} />
+                    <span className="text-sm text-cc-fg">{agent.name}</span>
+                  </div>
+                  <span className="text-xs text-cc-muted">
+                    {agent.hasAccessToken ? 'Connected' : 'Not connected'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {linearAgents.length === 0 && (
+            <p className="mt-3 text-xs text-cc-muted">
+              No Linear agents configured.{" "}
+              <a href="#/agents?setup=linear" className="text-cc-primary underline">Create one</a> to get started.
+            </p>
+          )}
 
           {/* Setup instructions */}
           <details className="text-xs text-cc-muted">

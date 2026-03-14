@@ -3696,3 +3696,78 @@ describe("CLI message deduplication", () => {
     expect(browser.send).toHaveBeenCalledTimes(2);
   });
 });
+
+// ─── Linear session ID mapping ──────────────────────────────────────────────
+
+describe("Linear session ID mapping", () => {
+  it("setLinearSessionId sets linearSessionId on session state", () => {
+    // Create a session via getOrCreateSession, then call setLinearSessionId
+    // and verify the linearSessionId is persisted on the session state.
+    bridge.getOrCreateSession("s1");
+    const saveSpy = vi.spyOn(store, "save");
+
+    bridge.setLinearSessionId("s1", "linear-abc-123");
+
+    const session = bridge.getSession("s1")!;
+    expect(session.state.linearSessionId).toBe("linear-abc-123");
+
+    // Verify persistSession was called (via store.save) to persist the change
+    expect(saveSpy).toHaveBeenCalled();
+    const lastCall = saveSpy.mock.calls[saveSpy.mock.calls.length - 1][0];
+    expect(lastCall.id).toBe("s1");
+    expect(lastCall.state.linearSessionId).toBe("linear-abc-123");
+  });
+
+  it("setLinearSessionId is a no-op when session does not exist", () => {
+    // Calling setLinearSessionId with a non-existent sessionId should not
+    // throw an error and should not create a new session.
+    const saveSpy = vi.spyOn(store, "save");
+
+    expect(() => {
+      bridge.setLinearSessionId("nonexistent-session", "linear-xyz");
+    }).not.toThrow();
+
+    // No session should have been created
+    expect(bridge.getSession("nonexistent-session")).toBeUndefined();
+
+    // persistSession should NOT have been called since the session doesn't exist
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it("getLinearSessionMappings returns sessions with linearSessionId", () => {
+    // Create multiple sessions, set linearSessionId on some of them,
+    // and verify only the sessions with a linearSessionId are returned.
+    bridge.getOrCreateSession("s1");
+    bridge.getOrCreateSession("s2");
+    bridge.getOrCreateSession("s3");
+
+    bridge.setLinearSessionId("s1", "linear-aaa");
+    bridge.setLinearSessionId("s3", "linear-ccc");
+    // s2 intentionally left without a linearSessionId
+
+    const mappings = bridge.getLinearSessionMappings();
+
+    expect(mappings).toHaveLength(2);
+    expect(mappings).toEqual(
+      expect.arrayContaining([
+        { sessionId: "s1", linearSessionId: "linear-aaa" },
+        { sessionId: "s3", linearSessionId: "linear-ccc" },
+      ]),
+    );
+
+    // Verify s2 (which has no linearSessionId) is NOT included
+    const s2Mapping = mappings.find((m) => m.sessionId === "s2");
+    expect(s2Mapping).toBeUndefined();
+  });
+
+  it("getLinearSessionMappings returns empty array when no sessions have linearSessionId", () => {
+    // Create sessions without setting any linearSessionId and verify
+    // the method returns an empty array.
+    bridge.getOrCreateSession("s1");
+    bridge.getOrCreateSession("s2");
+
+    const mappings = bridge.getLinearSessionMappings();
+
+    expect(mappings).toEqual([]);
+  });
+});

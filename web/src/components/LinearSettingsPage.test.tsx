@@ -22,6 +22,7 @@ const mockApi = {
   deleteLinearConnection: vi.fn(),
   verifyLinearConnection: vi.fn(),
   updateLinearConnection: vi.fn(),
+  listAgents: vi.fn(),
 };
 
 vi.mock("../api.js", () => ({
@@ -38,6 +39,7 @@ vi.mock("../api.js", () => ({
     deleteLinearConnection: (...args: unknown[]) => mockApi.deleteLinearConnection(...args),
     verifyLinearConnection: (...args: unknown[]) => mockApi.verifyLinearConnection(...args),
     updateLinearConnection: (...args: unknown[]) => mockApi.updateLinearConnection(...args),
+    listAgents: (...args: unknown[]) => mockApi.listAgents(...args),
   },
 }));
 
@@ -82,6 +84,8 @@ beforeEach(() => {
     hasWebhookSecret: false,
     hasAccessToken: false,
   });
+
+  mockApi.listAgents.mockResolvedValue([]);
 
   mockApi.updateSettings.mockResolvedValue({
     anthropicApiKeyConfigured: false,
@@ -412,9 +416,10 @@ describe("LinearSettingsPage — OAuth Agent App section", () => {
   });
 
   it("shows 'Not configured' status when OAuth is not set up", async () => {
-    // Verifies the status text when no OAuth credentials are configured
+    // Verifies the status text when no agents are configured with Linear
     render(<LinearSettingsPage />);
-    expect(await screen.findByText("Not configured")).toBeInTheDocument();
+    // With no agents, the component shows "No agents configured — create one in the Agents page"
+    expect(await screen.findByText(/No agents configured/i)).toBeInTheDocument();
   });
 
   it("renders all OAuth input fields", async () => {
@@ -455,7 +460,7 @@ describe("LinearSettingsPage — OAuth Agent App section", () => {
   });
 
   it("shows connected status when OAuth has access token", async () => {
-    // Verifies the connected badge and status text when OAuth is fully configured
+    // Verifies the connected badge when OAuth is fully configured and agents exist
     mockApi.getLinearOAuthStatus.mockResolvedValue({
       configured: true,
       hasClientId: true,
@@ -463,11 +468,14 @@ describe("LinearSettingsPage — OAuth Agent App section", () => {
       hasWebhookSecret: true,
       hasAccessToken: true,
     });
+    mockApi.listAgents.mockResolvedValue([
+      { id: "a1", name: "My Agent", enabled: true, triggers: { linear: { enabled: true, hasAccessToken: true } } },
+    ]);
 
     render(<LinearSettingsPage />);
 
-    // Should show the agent status text indicating it's connected
-    expect(await screen.findByText(/agents with the Linear trigger/i)).toBeInTheDocument();
+    // Should show the per-agent status text indicating agents are connected
+    expect(await screen.findByText(/1 agent\(s\) connected/)).toBeInTheDocument();
   });
 
   it("opens OAuth authorize URL when Install to Workspace is clicked", async () => {
@@ -520,8 +528,12 @@ describe("LinearSettingsPage — OAuth Agent App section", () => {
 
     render(<LinearSettingsPage />);
 
-    // Wait for the OAuth connected status text (unique to the OAuth section)
-    await screen.findByText(/agents with the Linear trigger/i);
+    // Wait for the "Connected" badge to appear in the OAuth section header
+    await waitFor(() => {
+      const badges = screen.getAllByText("Connected");
+      // At least one should be in the OAuth section
+      expect(badges.length).toBeGreaterThan(0);
+    });
 
     // Find and click the OAuth Disconnect button
     const disconnectButtons = screen.getAllByRole("button", { name: "Disconnect" });
@@ -550,8 +562,9 @@ describe("LinearSettingsPage — OAuth Agent App section", () => {
   });
 
   it("shows 'Credentials saved' status when configured but not installed", async () => {
-    // Verifies the intermediate status text when OAuth has credentials saved
-    // on the server but no access token (not yet installed to workspace).
+    // Verifies that when OAuth has credentials saved on the server but
+    // no access token, the Install to Workspace button is enabled.
+    // With per-agent credentials, the status now shows agent-level info.
     mockApi.getLinearOAuthStatus.mockResolvedValue({
       configured: true,
       hasClientId: true,
@@ -559,10 +572,18 @@ describe("LinearSettingsPage — OAuth Agent App section", () => {
       hasWebhookSecret: false,
       hasAccessToken: false,
     });
+    mockApi.listAgents.mockResolvedValue([
+      { id: "a1", name: "My Agent", enabled: true, triggers: { linear: { enabled: true, hasAccessToken: false } } },
+    ]);
 
     render(<LinearSettingsPage />);
 
-    expect(await screen.findByText(/Credentials saved/i)).toBeInTheDocument();
+    // Should show the agent needing installation
+    expect(await screen.findByText(/1 agent\(s\) need installation/)).toBeInTheDocument();
+    // Install to Workspace button should be enabled (credentials configured)
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Install to Workspace" })).not.toBeDisabled();
+    });
   });
 
   it("shows error when Save Credentials fails", async () => {
@@ -700,7 +721,12 @@ describe("LinearSettingsPage — OAuth Agent App section", () => {
     mockApi.disconnectLinearOAuth.mockRejectedValueOnce(new Error("Disconnect failed"));
 
     render(<LinearSettingsPage />);
-    await screen.findByText(/agents with the Linear trigger/i);
+
+    // Wait for the "Connected" badge to appear in the OAuth section header
+    await waitFor(() => {
+      const badges = screen.getAllByText("Connected");
+      expect(badges.length).toBeGreaterThan(0);
+    });
 
     const disconnectButtons = screen.getAllByRole("button", { name: "Disconnect" });
     fireEvent.click(disconnectButtons[disconnectButtons.length - 1]);

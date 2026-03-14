@@ -145,6 +145,25 @@ export class WsBridge {
     return () => { this.resultListeners.get(sessionId)?.delete(cb); };
   }
 
+  /** Set the Linear agent session ID on a Companion session and persist it. */
+  setLinearSessionId(sessionId: string, linearSessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.state.linearSessionId = linearSessionId;
+    this.persistSession(session);
+  }
+
+  /** Return all sessions that have a linearSessionId set (for map restoration on startup). */
+  getLinearSessionMappings(): Array<{ sessionId: string; linearSessionId: string }> {
+    const mappings: Array<{ sessionId: string; linearSessionId: string }> = [];
+    for (const [sessionId, session] of this.sessions) {
+      if (session.state.linearSessionId) {
+        mappings.push({ sessionId, linearSessionId: session.state.linearSessionId });
+      }
+    }
+    return mappings;
+  }
+
   /**
    * Pre-populate a session with container info so that handleSystemMessage
    * preserves the host cwd instead of overwriting it with /workspace.

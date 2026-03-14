@@ -116,8 +116,8 @@ export class AgentExecutor {
     if (!agent) return;
     if (!agent.enabled && !opts?.force) return;
 
-    // Overlap prevention: skip if previous execution is still running
-    if (agent.lastSessionId && this.launcher.isAlive(agent.lastSessionId)) {
+    // Overlap prevention: skip if previous execution is still running (unless forced)
+    if (!opts?.force && agent.lastSessionId && this.launcher.isAlive(agent.lastSessionId)) {
       console.log(`[agent-executor] Skipping "${agent.name}" — previous execution still running (${agent.lastSessionId})`);
       return;
     }

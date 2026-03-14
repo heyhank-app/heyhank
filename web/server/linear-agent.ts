@@ -2,36 +2,52 @@
 // Handles OAuth token management, webhook signature verification, and GraphQL
 // mutations for the Linear Agent Interaction SDK (agent sessions, activities).
 //
-// This module is stateless — it reads credentials from settings-manager.ts on
-// each call. Token refresh is handled transparently on 401.
+// This module is parameterized — all functions accept credentials as arguments
+// rather than reading from global settings. Callers are responsible for
+// providing the correct LinearOAuthCredentials for the agent being operated on.
+// Token refresh is handled transparently on 401.
 
 import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
-import { getSettings, updateSettings } from "./settings-manager.js";
+
+/** OAuth credentials for a specific Linear agent. */
+export interface LinearOAuthCredentials {
+  clientId: string;
+  clientSecret: string;
+  webhookSecret: string;
+  accessToken: string;
+  refreshToken: string;
+}
 
 // ─── OAuth state management (CSRF protection) ───────────────────────────────
 // Short-lived nonces for the OAuth authorization flow. Each nonce expires after 10 minutes.
 const oauthStateNonces = new Map<string, number>();
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-/** Generate a random state nonce for OAuth CSRF protection. */
-export function generateOAuthState(): string {
+/** Generate a random state nonce for OAuth CSRF protection.
+ *  Optionally encodes a `returnTo` path so the OAuth callback can redirect
+ *  back to the originating page (e.g. the setup wizard). */
+export function generateOAuthState(returnTo?: string): string {
   // Prune expired nonces
   const now = Date.now();
   for (const [nonce, expiresAt] of oauthStateNonces) {
     if (expiresAt < now) oauthStateNonces.delete(nonce);
   }
-  const state = randomBytes(24).toString("hex");
-  oauthStateNonces.set(state, now + OAUTH_STATE_TTL_MS);
-  return state;
+  const nonce = randomBytes(24).toString("hex");
+  oauthStateNonces.set(nonce, now + OAUTH_STATE_TTL_MS);
+  return returnTo ? `${nonce}:${encodeURIComponent(returnTo)}` : nonce;
 }
 
-/** Validate and consume an OAuth state nonce. Returns true if valid. */
-export function validateOAuthState(state: string | null | undefined): boolean {
-  if (!state) return false;
-  const expiresAt = oauthStateNonces.get(state);
-  if (!expiresAt) return false;
-  oauthStateNonces.delete(state); // consume — single use
-  return Date.now() < expiresAt;
+/** Validate and consume an OAuth state nonce.
+ *  Returns validity and an optional `returnTo` path encoded in the state. */
+export function validateOAuthState(state: string | null | undefined): { valid: boolean; returnTo?: string } {
+  if (!state) return { valid: false };
+  const colonIdx = state.indexOf(":");
+  const nonce = colonIdx >= 0 ? state.slice(0, colonIdx) : state;
+  const returnTo = colonIdx >= 0 ? decodeURIComponent(state.slice(colonIdx + 1)) : undefined;
+  const expiresAt = oauthStateNonces.get(nonce);
+  if (!expiresAt) return { valid: false };
+  oauthStateNonces.delete(nonce); // consume — single use
+  return Date.now() < expiresAt ? { valid: true, returnTo } : { valid: false };
 }
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -79,43 +95,118 @@ export interface AgentPlanItem {
   status: "pending" | "inProgress" | "completed" | "canceled";
 }
 
+/** The agent session object nested inside the webhook payload. */
+export interface AgentSessionData {
+  id: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  creatorId?: string;
+  issueId?: string;
+  commentId?: string;
+  url?: string;
+  externalUrls?: Array<{ label: string; url: string }>;
+  summary?: string | null;
+  plan?: unknown;
+  context?: unknown[];
+  creator?: {
+    id: string;
+    name: string;
+    email?: string;
+    url?: string;
+  };
+  comment?: {
+    id: string;
+    body: string;
+    userId: string;
+    issueId: string;
+  };
+  issue?: {
+    id: string;
+    title: string;
+    identifier: string;
+    url: string;
+    description?: string;
+    teamId?: string;
+    team?: {
+      id: string;
+      key: string;
+      name: string;
+    };
+  };
+}
+
 export interface AgentSessionEventPayload {
   action: "created" | "prompted";
   type: "AgentSessionEvent";
-  data: {
+  createdAt?: string;
+  organizationId?: string;
+  oauthClientId?: string;
+  appUserId?: string;
+  /** The agent session — contains id, issue, comment, creator, etc. */
+  agentSession?: AgentSessionData;
+  /** Rich XML prompt context provided by Linear */
+  promptContext?: string;
+  /** Previous comments in the thread */
+  previousComments?: Array<{
     id: string;
-    issueId?: string;
-    agentId?: string;
-    promptContext?: string;
-  };
-  /** Present on "prompted" events — the user's follow-up message */
+    body: string;
+    userId: string;
+    issueId: string;
+  }>;
+  /** Agent guidance configured in Linear */
+  guidance?: string | null;
+  /** Present on "prompted" events — the user's follow-up activity */
   agentActivity?: {
+    id?: string;
+    /** Nested content with type and body */
+    content?: {
+      type?: string;
+      body?: string;
+    };
+    /** Direct body (legacy/alternative format) */
     body?: string;
+    sourceCommentId?: string;
+    userId?: string;
+    user?: {
+      id: string;
+      name: string;
+      email?: string;
+    };
   };
   webhookTimestamp?: number;
-  organizationId?: string;
+  webhookId?: string;
 }
 
-// ─── GraphQL helper ─────────────────────────────────────────────────────────
+// ─── GraphQL helper ───────────────────────────────────────────────────────────
 
-/** Guard against concurrent 401s triggering multiple simultaneous refresh requests. */
-let refreshPromise: Promise<string | null> | null = null;
+/** Guard against concurrent 401s triggering multiple simultaneous refresh requests.
+ *  Keyed by clientId so each agent's refresh is coalesced independently. */
+const refreshPromises = new Map<string, Promise<string | null>>();
 
-/** Get a refreshed token, coalescing concurrent refresh requests into a single call. */
-async function getRefreshedToken(): Promise<string | null> {
-  if (!refreshPromise) {
-    refreshPromise = refreshAccessToken().finally(() => { refreshPromise = null; });
+/** Get a refreshed token, coalescing concurrent refresh requests into a single call per agent. */
+async function getRefreshedToken(
+  creds: LinearOAuthCredentials,
+  onTokensRefreshed?: (tokens: { accessToken: string; refreshToken: string }) => void,
+): Promise<string | null> {
+  const key = creds.clientId;
+  if (!refreshPromises.has(key)) {
+    const promise = refreshAccessToken(creds, onTokensRefreshed).finally(() => {
+      refreshPromises.delete(key);
+    });
+    refreshPromises.set(key, promise);
   }
-  return refreshPromise;
+  return refreshPromises.get(key)!;
 }
 
 /** Execute a GraphQL query against the Linear API with automatic token refresh. */
 export async function linearGraphQL<T = unknown>(
+  creds: LinearOAuthCredentials,
   query: string,
   variables?: Record<string, unknown>,
+  onTokensRefreshed?: (tokens: { accessToken: string; refreshToken: string }) => void,
 ): Promise<{ data?: T; errors?: Array<{ message: string }> }> {
-  const settings = getSettings();
-  let token = settings.linearOAuthAccessToken;
+  let token = creds.accessToken;
 
   if (!token) {
     throw new Error("Linear OAuth not configured — no access token");
@@ -124,8 +215,8 @@ export async function linearGraphQL<T = unknown>(
   let response = await fetchGraphQL(token, query, variables);
 
   // Auto-refresh on 401 — coalesced to prevent concurrent refresh races
-  if (response.status === 401 && settings.linearOAuthRefreshToken) {
-    const refreshed = await getRefreshedToken();
+  if (response.status === 401 && creds.refreshToken) {
+    const refreshed = await getRefreshedToken(creds, onTokensRefreshed);
     if (refreshed) {
       token = refreshed;
       response = await fetchGraphQL(token, query, variables);
@@ -155,14 +246,16 @@ async function fetchGraphQL(
   });
 }
 
-// ─── Token management ───────────────────────────────────────────────────────
+// ─── Token management ─────────────────────────────────────────────────────────
 
 /** Refresh the OAuth access token using the refresh token. Returns the new token or null. */
-export async function refreshAccessToken(): Promise<string | null> {
-  const settings = getSettings();
-  const { linearOAuthClientId, linearOAuthClientSecret, linearOAuthRefreshToken } = settings;
+export async function refreshAccessToken(
+  creds: LinearOAuthCredentials,
+  onTokensRefreshed?: (tokens: { accessToken: string; refreshToken: string }) => void,
+): Promise<string | null> {
+  const { clientId, clientSecret, refreshToken } = creds;
 
-  if (!linearOAuthClientId || !linearOAuthClientSecret || !linearOAuthRefreshToken) {
+  if (!clientId || !clientSecret || !refreshToken) {
     return null;
   }
 
@@ -172,9 +265,9 @@ export async function refreshAccessToken(): Promise<string | null> {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         grant_type: "refresh_token",
-        refresh_token: linearOAuthRefreshToken,
-        client_id: linearOAuthClientId,
-        client_secret: linearOAuthClientSecret,
+        refresh_token: refreshToken,
+        client_id: clientId,
+        client_secret: clientSecret,
       }),
     });
 
@@ -189,10 +282,10 @@ export async function refreshAccessToken(): Promise<string | null> {
       expires_in: number;
     };
 
-    // Persist new tokens
-    updateSettings({
-      linearOAuthAccessToken: data.access_token,
-      linearOAuthRefreshToken: data.refresh_token || linearOAuthRefreshToken,
+    // Notify caller of refreshed tokens so they can persist them
+    onTokensRefreshed?.({
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || refreshToken,
     });
 
     console.log("[linear-agent] OAuth token refreshed successfully");
@@ -205,11 +298,11 @@ export async function refreshAccessToken(): Promise<string | null> {
 
 /** Exchange an authorization code for tokens (used during OAuth callback). */
 export async function exchangeCodeForTokens(
+  creds: Pick<LinearOAuthCredentials, "clientId" | "clientSecret">,
   code: string,
   redirectUri: string,
 ): Promise<{ accessToken: string; refreshToken: string } | null> {
-  const settings = getSettings();
-  const { linearOAuthClientId, linearOAuthClientSecret } = settings;
+  const { clientId: linearOAuthClientId, clientSecret: linearOAuthClientSecret } = creds;
 
   if (!linearOAuthClientId || !linearOAuthClientSecret) {
     return null;
@@ -251,12 +344,11 @@ export async function exchangeCodeForTokens(
   }
 }
 
-// ─── Webhook verification ───────────────────────────────────────────────────
+// ─── Webhook verification ─────────────────────────────────────────────────────
 
 /** Verify a Linear webhook signature using HMAC-SHA256. */
-export function verifyWebhookSignature(body: string, signature: string | null): boolean {
-  const settings = getSettings();
-  const secret = settings.linearOAuthWebhookSecret;
+export function verifyWebhookSignature(webhookSecret: string, body: string, signature: string | null): boolean {
+  const secret = webhookSecret;
 
   if (!secret || !signature) return false;
 
@@ -267,14 +359,16 @@ export function verifyWebhookSignature(body: string, signature: string | null): 
   return timingSafeEqual(Buffer.from(computed, "hex"), Buffer.from(signature, "hex"));
 }
 
-// ─── Agent Activities ───────────────────────────────────────────────────────
+// ─── Agent Activities ─────────────────────────────────────────────────────────
 
 /** Post an agent activity to a Linear agent session. */
 export async function postActivity(
+  creds: LinearOAuthCredentials,
   agentSessionId: string,
   content: AgentActivityContent,
 ): Promise<void> {
   const result = await linearGraphQL<{ agentActivityCreate?: { success: boolean } }>(
+    creds,
     `mutation CompanionAgentActivity($input: AgentActivityCreateInput!) {
       agentActivityCreate(input: $input) { success }
     }`,
@@ -288,10 +382,12 @@ export async function postActivity(
 
 /** Update the external URLs on an agent session (links back to Companion). */
 export async function updateSessionUrls(
+  creds: LinearOAuthCredentials,
   agentSessionId: string,
   urls: Array<{ label: string; url: string }>,
 ): Promise<void> {
   const result = await linearGraphQL<{ agentSessionUpdate?: { success: boolean } }>(
+    creds,
     `mutation CompanionAgentSessionUpdate($id: String!, $input: AgentSessionUpdateInput!) {
       agentSessionUpdate(id: $id, input: $input) { success }
     }`,
@@ -305,10 +401,12 @@ export async function updateSessionUrls(
 
 /** Update the plan (checklist) on an agent session. */
 export async function updateSessionPlan(
+  creds: LinearOAuthCredentials,
   agentSessionId: string,
   plan: AgentPlanItem[],
 ): Promise<void> {
   const result = await linearGraphQL<{ agentSessionUpdate?: { success: boolean } }>(
+    creds,
     `mutation CompanionAgentPlanUpdate($id: String!, $input: AgentSessionUpdateInput!) {
       agentSessionUpdate(id: $id, input: $input) { success }
     }`,
@@ -321,19 +419,18 @@ export async function updateSessionPlan(
 }
 
 /** Check if Linear OAuth is fully configured (has client credentials + access token). */
-export function isLinearOAuthConfigured(): boolean {
-  const s = getSettings();
-  return !!(s.linearOAuthClientId.trim() && s.linearOAuthClientSecret.trim() && s.linearOAuthAccessToken.trim());
+export function isLinearOAuthConfigured(creds: Partial<LinearOAuthCredentials>): boolean {
+  return !!((creds.clientId || "").trim() && (creds.clientSecret || "").trim() && (creds.accessToken || "").trim());
 }
 
-/** Get the OAuth authorization URL for installing the app with actor=app. */
-export function getOAuthAuthorizeUrl(redirectUri: string): { url: string; state: string } | null {
-  const settings = getSettings();
-  if (!settings.linearOAuthClientId) return null;
+/** Get the OAuth authorization URL for installing the app with actor=app.
+ *  Pass `returnTo` to redirect back to a specific page after the OAuth callback. */
+export function getOAuthAuthorizeUrl(clientId: string, redirectUri: string, returnTo?: string): { url: string; state: string } | null {
+  if (!clientId) return null;
 
-  const state = generateOAuthState();
+  const state = generateOAuthState(returnTo);
   const params = new URLSearchParams({
-    client_id: settings.linearOAuthClientId,
+    client_id: clientId,
     redirect_uri: redirectUri,
     response_type: "code",
     scope: "read,write,issues:create,comments:create,app:mentionable",

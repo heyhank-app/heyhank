@@ -5,132 +5,85 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createHmac } from "node:crypto";
 
-// Mock settings-manager — must be before importing the module under test
-vi.mock("./settings-manager.js", () => ({
-  getSettings: vi.fn(),
-  updateSettings: vi.fn(),
-}));
-
-import * as settingsManager from "./settings-manager.js";
-import type { CompanionSettings } from "./settings-manager.js";
+import type { LinearOAuthCredentials } from "./linear-agent.js";
+import {
+  verifyWebhookSignature,
+  isLinearOAuthConfigured,
+  getOAuthAuthorizeUrl,
+  exchangeCodeForTokens,
+  refreshAccessToken,
+  linearGraphQL,
+  postActivity,
+  updateSessionUrls,
+  updateSessionPlan,
+  generateOAuthState,
+  validateOAuthState,
+} from "./linear-agent.js";
 
 // Mock global fetch
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-// Default settings for tests
-function makeSettings(overrides: Partial<CompanionSettings> = {}): CompanionSettings {
-  return {
-    anthropicApiKey: "",
-    anthropicModel: "claude-sonnet-4-6",
-    linearApiKey: "",
-    linearAutoTransition: false,
-    linearAutoTransitionStateId: "",
-    linearAutoTransitionStateName: "",
-    linearArchiveTransition: false,
-    linearArchiveTransitionStateId: "",
-    linearArchiveTransitionStateName: "",
-    linearOAuthClientId: "client-id",
-    linearOAuthClientSecret: "client-secret",
-    linearOAuthWebhookSecret: "webhook-secret",
-    linearOAuthAccessToken: "access-token",
-    linearOAuthRefreshToken: "refresh-token",
-    editorTabEnabled: false,
-    aiValidationEnabled: false,
-    aiValidationAutoApprove: true,
-    aiValidationAutoDeny: false,
-    publicUrl: "",
-    updateChannel: "stable",
-    dockerAutoUpdate: false,
-    updatedAt: 0,
-    ...overrides,
-  };
-}
+// Default test credentials matching the LinearOAuthCredentials interface
+const testCreds: LinearOAuthCredentials = {
+  clientId: "client-id",
+  clientSecret: "client-secret",
+  webhookSecret: "webhook-secret",
+  accessToken: "access-token",
+  refreshToken: "refresh-token",
+};
 
-// Import module under test — must come after mocks
-let linearAgent: typeof import("./linear-agent.js");
-
-beforeEach(async () => {
+beforeEach(() => {
   vi.clearAllMocks();
-  vi.resetModules();
-  // Re-import to reset module state
-  linearAgent = await import("./linear-agent.js");
-  // Re-mock since resetModules clears mocks
-  const sm = await import("./settings-manager.js");
-  vi.mocked(sm.getSettings).mockReturnValue(makeSettings());
 });
 
 // ─── Webhook signature verification ──────────────────────────────────────────
 
 describe("verifyWebhookSignature", () => {
-  it("returns true for valid HMAC-SHA256 signature", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings({ linearOAuthWebhookSecret: "test-secret" }));
-
+  it("returns true for valid HMAC-SHA256 signature", () => {
     const body = '{"type":"AgentSessionEvent"}';
     const signature = createHmac("sha256", "test-secret").update(body).digest("hex");
 
-    expect(linearAgent.verifyWebhookSignature(body, signature)).toBe(true);
+    expect(verifyWebhookSignature("test-secret", body, signature)).toBe(true);
   });
 
-  it("returns false for invalid signature", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings({ linearOAuthWebhookSecret: "test-secret" }));
-
-    expect(linearAgent.verifyWebhookSignature("body", "bad-signature")).toBe(false);
+  it("returns false for invalid signature", () => {
+    expect(verifyWebhookSignature("test-secret", "body", "bad-signature")).toBe(false);
   });
 
-  it("returns false when webhook secret is not configured", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings({ linearOAuthWebhookSecret: "" }));
-
-    expect(linearAgent.verifyWebhookSignature("body", "some-sig")).toBe(false);
+  it("returns false when webhook secret is not configured", () => {
+    expect(verifyWebhookSignature("", "body", "some-sig")).toBe(false);
   });
 
-  it("returns false when signature is null", async () => {
-    expect(linearAgent.verifyWebhookSignature("body", null)).toBe(false);
+  it("returns false when signature is null", () => {
+    expect(verifyWebhookSignature("webhook-secret", "body", null)).toBe(false);
   });
 
-  it("returns false for malformed hex signature (timing-safe compare failure)", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings({ linearOAuthWebhookSecret: "test-secret" }));
-
+  it("returns false for malformed hex signature (timing-safe compare failure)", () => {
     // Non-hex string will cause Buffer.from to produce different length
-    expect(linearAgent.verifyWebhookSignature("body", "not-valid-hex!!")).toBe(false);
+    expect(verifyWebhookSignature("test-secret", "body", "not-valid-hex!!")).toBe(false);
   });
 });
 
 // ─── OAuth configuration checks ─────────────────────────────────────────────
 
 describe("isLinearOAuthConfigured", () => {
-  it("returns true when all required fields are present", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings());
-
-    expect(linearAgent.isLinearOAuthConfigured()).toBe(true);
+  it("returns true when all required fields are present", () => {
+    expect(isLinearOAuthConfigured(testCreds)).toBe(true);
   });
 
-  it("returns false when client ID is missing", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings({ linearOAuthClientId: "" }));
-
-    expect(linearAgent.isLinearOAuthConfigured()).toBe(false);
+  it("returns false when client ID is missing", () => {
+    expect(isLinearOAuthConfigured({ ...testCreds, clientId: "" })).toBe(false);
   });
 
-  it("returns false when access token is missing", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings({ linearOAuthAccessToken: "" }));
-
-    expect(linearAgent.isLinearOAuthConfigured()).toBe(false);
+  it("returns false when access token is missing", () => {
+    expect(isLinearOAuthConfigured({ ...testCreds, accessToken: "" })).toBe(false);
   });
 });
 
 describe("getOAuthAuthorizeUrl", () => {
-  it("returns authorization URL and state nonce with correct parameters", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings({ linearOAuthClientId: "my-client-id" }));
-
-    const result = linearAgent.getOAuthAuthorizeUrl("http://localhost:3456/api/linear/oauth/callback");
+  it("returns authorization URL and state nonce with correct parameters", () => {
+    const result = getOAuthAuthorizeUrl("my-client-id", "http://localhost:3456/api/linear/oauth/callback");
     expect(result).not.toBeNull();
     expect(result!.url).toContain("linear.app/oauth/authorize");
     expect(result!.url).toContain("client_id=my-client-id");
@@ -141,11 +94,8 @@ describe("getOAuthAuthorizeUrl", () => {
     expect(result!.state).toBeTruthy();
   });
 
-  it("returns null when client ID is not configured", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings({ linearOAuthClientId: "" }));
-
-    expect(linearAgent.getOAuthAuthorizeUrl("http://localhost/callback")).toBeNull();
+  it("returns null when client ID is not configured", () => {
+    expect(getOAuthAuthorizeUrl("", "http://localhost/callback")).toBeNull();
   });
 });
 
@@ -153,26 +103,38 @@ describe("getOAuthAuthorizeUrl", () => {
 
 describe("OAuth state nonce (CSRF protection)", () => {
   it("generates unique state nonces", () => {
-    const state1 = linearAgent.generateOAuthState();
-    const state2 = linearAgent.generateOAuthState();
+    const state1 = generateOAuthState();
+    const state2 = generateOAuthState();
     expect(state1).not.toBe(state2);
     expect(state1.length).toBe(48); // 24 bytes → 48 hex chars
   });
 
   it("validates a generated state nonce (single use)", () => {
-    const state = linearAgent.generateOAuthState();
-    expect(linearAgent.validateOAuthState(state)).toBe(true);
+    const state = generateOAuthState();
+    expect(validateOAuthState(state)).toEqual({ valid: true });
     // Second use should fail — consumed
-    expect(linearAgent.validateOAuthState(state)).toBe(false);
+    expect(validateOAuthState(state)).toEqual({ valid: false });
   });
 
   it("rejects unknown state nonces", () => {
-    expect(linearAgent.validateOAuthState("unknown-nonce")).toBe(false);
+    expect(validateOAuthState("unknown-nonce")).toEqual({ valid: false });
   });
 
   it("rejects null/undefined state", () => {
-    expect(linearAgent.validateOAuthState(null)).toBe(false);
-    expect(linearAgent.validateOAuthState(undefined)).toBe(false);
+    expect(validateOAuthState(null)).toEqual({ valid: false });
+    expect(validateOAuthState(undefined)).toEqual({ valid: false });
+  });
+
+  it("preserves returnTo path in state", () => {
+    const state = generateOAuthState("/#/setup/linear-agent");
+    const result = validateOAuthState(state);
+    expect(result).toEqual({ valid: true, returnTo: "/#/setup/linear-agent" });
+  });
+
+  it("works without returnTo", () => {
+    const state = generateOAuthState();
+    const result = validateOAuthState(state);
+    expect(result).toEqual({ valid: true });
   });
 });
 
@@ -180,8 +142,6 @@ describe("OAuth state nonce (CSRF protection)", () => {
 
 describe("exchangeCodeForTokens", () => {
   it("exchanges authorization code for tokens", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings());
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({
@@ -192,7 +152,11 @@ describe("exchangeCodeForTokens", () => {
       }),
     });
 
-    const result = await linearAgent.exchangeCodeForTokens("auth-code", "http://localhost/callback");
+    const result = await exchangeCodeForTokens(
+      { clientId: testCreds.clientId, clientSecret: testCreds.clientSecret },
+      "auth-code",
+      "http://localhost/callback",
+    );
 
     expect(result).toEqual({ accessToken: "new-access", refreshToken: "new-refresh" });
     expect(mockFetch).toHaveBeenCalledWith("https://api.linear.app/oauth/token", expect.objectContaining({
@@ -201,32 +165,37 @@ describe("exchangeCodeForTokens", () => {
   });
 
   it("returns null when client credentials are missing", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings({ linearOAuthClientId: "" }));
-
-    const result = await linearAgent.exchangeCodeForTokens("code", "http://localhost/callback");
+    const result = await exchangeCodeForTokens(
+      { clientId: "", clientSecret: testCreds.clientSecret },
+      "code",
+      "http://localhost/callback",
+    );
     expect(result).toBeNull();
   });
 
   it("returns null when token exchange fails", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings());
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 400,
       text: () => Promise.resolve("Bad Request"),
     });
 
-    const result = await linearAgent.exchangeCodeForTokens("bad-code", "http://localhost/callback");
+    const result = await exchangeCodeForTokens(
+      { clientId: testCreds.clientId, clientSecret: testCreds.clientSecret },
+      "bad-code",
+      "http://localhost/callback",
+    );
     expect(result).toBeNull();
   });
 
   it("returns null when fetch throws a network error", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings());
     mockFetch.mockRejectedValueOnce(new Error("Network error"));
 
-    const result = await linearAgent.exchangeCodeForTokens("code", "http://localhost/callback");
+    const result = await exchangeCodeForTokens(
+      { clientId: testCreds.clientId, clientSecret: testCreds.clientSecret },
+      "code",
+      "http://localhost/callback",
+    );
     expect(result).toBeNull();
   });
 });
@@ -234,9 +203,7 @@ describe("exchangeCodeForTokens", () => {
 // ─── Token refresh ──────────────────────────────────────────────────────────
 
 describe("refreshAccessToken", () => {
-  it("refreshes token and persists new credentials", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings());
+  it("refreshes token and invokes onTokensRefreshed callback", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({
@@ -246,35 +213,29 @@ describe("refreshAccessToken", () => {
       }),
     });
 
-    const result = await linearAgent.refreshAccessToken();
+    const onTokensRefreshed = vi.fn();
+    const result = await refreshAccessToken(testCreds, onTokensRefreshed);
 
     expect(result).toBe("refreshed-access");
-    expect(sm.updateSettings).toHaveBeenCalledWith({
-      linearOAuthAccessToken: "refreshed-access",
-      linearOAuthRefreshToken: "refreshed-refresh",
+    expect(onTokensRefreshed).toHaveBeenCalledWith({
+      accessToken: "refreshed-access",
+      refreshToken: "refreshed-refresh",
     });
   });
 
   it("returns null when refresh credentials are missing", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings({ linearOAuthRefreshToken: "" }));
-
-    const result = await linearAgent.refreshAccessToken();
+    const result = await refreshAccessToken({ ...testCreds, refreshToken: "" });
     expect(result).toBeNull();
   });
 
   it("returns null when refresh request fails", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings());
     mockFetch.mockResolvedValueOnce({ ok: false, status: 401 });
 
-    const result = await linearAgent.refreshAccessToken();
+    const result = await refreshAccessToken(testCreds);
     expect(result).toBeNull();
   });
 
   it("keeps old refresh token if new one is not provided", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings({ linearOAuthRefreshToken: "old-refresh" }));
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({
@@ -284,11 +245,15 @@ describe("refreshAccessToken", () => {
       }),
     });
 
-    await linearAgent.refreshAccessToken();
+    const onTokensRefreshed = vi.fn();
+    await refreshAccessToken(
+      { ...testCreds, refreshToken: "old-refresh" },
+      onTokensRefreshed,
+    );
 
-    expect(sm.updateSettings).toHaveBeenCalledWith({
-      linearOAuthAccessToken: "new-access",
-      linearOAuthRefreshToken: "old-refresh",
+    expect(onTokensRefreshed).toHaveBeenCalledWith({
+      accessToken: "new-access",
+      refreshToken: "old-refresh",
     });
   });
 });
@@ -297,15 +262,13 @@ describe("refreshAccessToken", () => {
 
 describe("linearGraphQL", () => {
   it("sends authenticated GraphQL request and returns data", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings());
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: () => Promise.resolve({ data: { viewer: { id: "user-1" } } }),
     });
 
-    const result = await linearAgent.linearGraphQL("{ viewer { id } }");
+    const result = await linearGraphQL(testCreds, "{ viewer { id } }");
 
     expect(result).toEqual({ data: { viewer: { id: "user-1" } } });
     expect(mockFetch).toHaveBeenCalledWith("https://api.linear.app/graphql", expect.objectContaining({
@@ -317,32 +280,24 @@ describe("linearGraphQL", () => {
   });
 
   it("throws when no access token is configured", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings({ linearOAuthAccessToken: "" }));
-
-    await expect(linearAgent.linearGraphQL("{ viewer { id } }")).rejects.toThrow(
-      "Linear OAuth not configured"
-    );
+    await expect(
+      linearGraphQL({ ...testCreds, accessToken: "" }, "{ viewer { id } }")
+    ).rejects.toThrow("Linear OAuth not configured");
   });
 
   it("throws on non-OK response without 401", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings());
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 500,
       text: () => Promise.resolve("Internal Server Error"),
     });
 
-    await expect(linearAgent.linearGraphQL("{ viewer { id } }")).rejects.toThrow(
+    await expect(linearGraphQL(testCreds, "{ viewer { id } }")).rejects.toThrow(
       "Linear API error 500"
     );
   });
 
   it("auto-refreshes token on 401 and retries", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings());
-
     // First call: 401
     mockFetch.mockResolvedValueOnce({ ok: false, status: 401 });
     // Token refresh call
@@ -361,7 +316,7 @@ describe("linearGraphQL", () => {
       json: () => Promise.resolve({ data: { viewer: { id: "user-1" } } }),
     });
 
-    const result = await linearAgent.linearGraphQL("{ viewer { id } }");
+    const result = await linearGraphQL(testCreds, "{ viewer { id } }");
 
     expect(result).toEqual({ data: { viewer: { id: "user-1" } } });
     // Should have made 3 fetch calls: initial GraphQL, token refresh, retry GraphQL
@@ -373,15 +328,13 @@ describe("linearGraphQL", () => {
 
 describe("postActivity", () => {
   it("sends agentActivityCreate mutation with correct input", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings());
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: () => Promise.resolve({ data: { agentActivityCreate: { success: true } } }),
     });
 
-    await linearAgent.postActivity("session-123", { type: "thought", body: "Thinking...", ephemeral: true });
+    await postActivity(testCreds, "session-123", { type: "thought", body: "Thinking...", ephemeral: true });
 
     const fetchBody = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(fetchBody.variables.input).toEqual({
@@ -391,8 +344,6 @@ describe("postActivity", () => {
   });
 
   it("logs error when activity creation returns errors", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings());
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     mockFetch.mockResolvedValueOnce({
@@ -401,7 +352,7 @@ describe("postActivity", () => {
       json: () => Promise.resolve({ errors: [{ message: "Session not found" }] }),
     });
 
-    await linearAgent.postActivity("bad-session", { type: "response", body: "Done" });
+    await postActivity(testCreds, "bad-session", { type: "response", body: "Done" });
 
     expect(consoleSpy).toHaveBeenCalledWith(
       "[linear-agent] Activity creation failed:",
@@ -415,15 +366,13 @@ describe("postActivity", () => {
 
 describe("updateSessionUrls", () => {
   it("sends agentSessionUpdate mutation with external URLs", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings());
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: () => Promise.resolve({ data: { agentSessionUpdate: { success: true } } }),
     });
 
-    await linearAgent.updateSessionUrls("session-123", [
+    await updateSessionUrls(testCreds, "session-123", [
       { label: "Companion", url: "http://localhost:3456/#/session/abc" },
     ]);
 
@@ -436,8 +385,6 @@ describe("updateSessionUrls", () => {
 
 describe("updateSessionPlan", () => {
   it("sends agentSessionUpdate mutation with plan items", async () => {
-    const sm = await import("./settings-manager.js");
-    vi.mocked(sm.getSettings).mockReturnValue(makeSettings());
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -448,7 +395,7 @@ describe("updateSessionPlan", () => {
       { content: "Analyze issue", status: "completed" as const },
       { content: "Fix bug", status: "inProgress" as const },
     ];
-    await linearAgent.updateSessionPlan("session-123", plan);
+    await updateSessionPlan(testCreds, "session-123", plan);
 
     const fetchBody = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(fetchBody.variables.input.plan).toEqual(plan);
