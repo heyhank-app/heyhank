@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { COMPANION_HOME } from "./paths.js";
 import { existsSync, readFileSync } from "node:fs";
+import type { SessionOrchestrator } from "./session-orchestrator.js";
 import type { CliLauncher } from "./cli-launcher.js";
 import type { WsBridge } from "./ws-bridge.js";
 import type { SessionStore } from "./session-store.js";
@@ -37,7 +38,6 @@ import { discoverClaudeSessions } from "./claude-session-discovery.js";
 import { getClaudeSessionHistoryPage } from "./claude-session-history.js";
 import { verifyToken, getToken, getLanAddress, regenerateToken, getAllAddresses } from "./auth-manager.js";
 import QRCode from "qrcode";
-import { executeSessionCreation, SessionCreationError } from "./session-creation-service.js";
 import { VSCODE_EDITOR_CONTAINER_PORT, NOVNC_CONTAINER_PORT } from "./constants.js";
 
 const UPDATE_CHECK_STALE_MS = 5 * 60 * 1000;
@@ -50,6 +50,7 @@ function shellEscapeArg(value: string): string {
 }
 
 export function createRoutes(
+  orchestrator: SessionOrchestrator,
   launcher: CliLauncher,
   wsBridge: WsBridge,
   sessionStore: SessionStore,
@@ -61,7 +62,6 @@ export function createRoutes(
   agentExecutor?: import("./agent-executor.js").AgentExecutor,
   linearAgentBridge?: import("./linear-agent-bridge.js").LinearAgentBridge,
   port?: number,
-  clearAutoRelaunchCount?: (sessionId: string) => void,
 ) {
   const api = new Hono();
 
@@ -183,21 +183,13 @@ export function createRoutes(
 
   // ─── SDK Sessions (--sdk-url) ─────────────────────────────────────
 
-  const creationDeps = { launcher, wsBridge, worktreeTracker };
-
   api.post("/sessions/create", async (c) => {
     const body = await c.req.json().catch(() => ({}));
-    try {
-      const result = await executeSessionCreation(body, creationDeps);
-      return c.json(result.session);
-    } catch (e: unknown) {
-      if (e instanceof SessionCreationError) {
-        return c.json({ error: e.message }, e.statusCode as import('hono/utils/http-status').ContentfulStatusCode);
-      }
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error("[routes] Failed to create session:", msg);
-      return c.json({ error: msg }, 500);
+    const result = await orchestrator.createSession(body);
+    if (!result.ok) {
+      return c.json({ error: result.error }, result.status as any);
     }
+    return c.json(result.session);
   });
 
   // ─── SSE Session Creation (with progress streaming) ─────────────────────
@@ -206,39 +198,35 @@ export function createRoutes(
     const body = await c.req.json().catch(() => ({}));
 
     return streamSSE(c, async (stream) => {
-      try {
-        const result = await executeSessionCreation(
-          body,
-          creationDeps,
-          async (step, label, status, detail) => {
-            await stream.writeSSE({
-              event: "progress",
-              data: JSON.stringify({ step, label, status, detail }),
-            });
-          },
-        );
+      const result = await orchestrator.createSessionStreaming(
+        body,
+        async (step, label, status, detail) => {
+          await stream.writeSSE({
+            event: "progress",
+            data: JSON.stringify({ step, label, status, detail }),
+          });
+        },
+      );
 
-        const s = result.session;
-        await stream.writeSSE({
-          event: "done",
-          data: JSON.stringify({
-            sessionId: s.sessionId,
-            state: s.state,
-            cwd: s.cwd,
-            backendType: s.backendType,
-            resumeSessionAt: s.resumeSessionAt,
-            forkSession: s.forkSession,
-          }),
-        });
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        const step = e instanceof SessionCreationError ? e.step : undefined;
-        console.error("[routes] Failed to create session (stream):", msg);
+      if (!result.ok) {
         await stream.writeSSE({
           event: "error",
-          data: JSON.stringify({ error: msg, step }),
+          data: JSON.stringify({ error: result.error }),
         });
+        return;
       }
+
+      await stream.writeSSE({
+        event: "done",
+        data: JSON.stringify({
+          sessionId: result.session.sessionId,
+          state: result.session.state,
+          cwd: result.session.cwd,
+          backendType: result.session.backendType,
+          resumeSessionAt: result.session.resumeSessionAt,
+          forkSession: result.session.forkSession,
+        }),
+      });
     });
   });
 
@@ -751,20 +739,14 @@ export function createRoutes(
 
   api.post("/sessions/:id/kill", async (c) => {
     const id = c.req.param("id");
-    const killed = await launcher.kill(id);
-    if (!killed)
-      return c.json({ error: "Session not found or already exited" }, 404);
-
-    // Clean up container if any
-    containerManager.removeContainer(id);
-
+    const result = await orchestrator.killSession(id);
+    if (!result.ok) return c.json({ error: "Session not found or already exited" }, 404);
     return c.json({ ok: true });
   });
 
   api.post("/sessions/:id/relaunch", async (c) => {
     const id = c.req.param("id");
-    clearAutoRelaunchCount?.(id);
-    const result = await launcher.relaunch(id);
+    const result = await orchestrator.relaunchSession(id);
     if (!result.ok) {
       const status = result.error?.includes("not found") || result.error?.includes("Session not found") ? 404 : 503;
       return c.json({ error: result.error || "Relaunch failed" }, status);
@@ -1078,17 +1060,8 @@ export function createRoutes(
 
   api.delete("/sessions/:id", async (c) => {
     const id = c.req.param("id");
-    await launcher.kill(id);
-
-    // Clean up container if any
-    containerManager.removeContainer(id);
-
-    const worktreeResult = cleanupWorktree(id, true);
-    prPoller?.unwatch(id);
-    sessionLinearIssues.removeLinearIssue(id);
-    launcher.removeSession(id);
-    wsBridge.closeSession(id);
-    return c.json({ ok: true, worktree: worktreeResult });
+    const result = await orchestrator.deleteSession(id);
+    return c.json({ ok: true, worktree: result.worktree });
   });
 
   api.get("/sessions/:id/archive-info", async (c) => {
@@ -1156,67 +1129,16 @@ export function createRoutes(
   api.post("/sessions/:id/archive", async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json().catch(() => ({}));
-
-    // ─── Best-effort Linear transition before archive ─────────────────
-    let linearTransitionResult: { ok: boolean; skipped?: boolean; error?: string; issue?: { id: string; identifier: string; stateName: string; stateType: string } } | undefined;
-    const linearTransition = body.linearTransition as string | undefined;
-
-    if (linearTransition && linearTransition !== "none") {
-      const linkedIssue = sessionLinearIssues.getLinearIssue(id);
-      if (linkedIssue) {
-        const resolved = resolveApiKey(linkedIssue.connectionId);
-        if (resolved) {
-          const { apiKey: linearApiKey, connectionId: resolvedConnId } = resolved;
-          const settings = getSettings();
-          // Use connection-level archive settings if available, else fall back to global
-          const conn = resolvedConnId !== "legacy" ? getConnection(resolvedConnId) : null;
-          let targetStateId = "";
-
-          if (linearTransition === "backlog" && linkedIssue.teamId) {
-            // Resolve backlog state for the issue's team
-            const teams = await fetchLinearTeamStates(linearApiKey);
-            const team = teams.find((t) => t.id === linkedIssue.teamId);
-            const backlogState = team?.states.find((s) => s.type === "backlog");
-            if (backlogState) {
-              targetStateId = backlogState.id;
-            }
-          } else if (linearTransition === "configured") {
-            const archiveStateId = conn ? conn.archiveTransitionStateId : settings.linearArchiveTransitionStateId;
-            targetStateId = archiveStateId.trim();
-          }
-
-          if (targetStateId) {
-            try {
-              linearTransitionResult = await transitionLinearIssue(linkedIssue.id, targetStateId, linearApiKey, resolvedConnId);
-            } catch {
-              linearTransitionResult = { ok: false, error: "Transition failed unexpectedly" };
-            }
-          } else {
-            linearTransitionResult = { ok: true, skipped: true };
-          }
-        }
-      }
-    }
-
-    // ─── Existing archive logic ───────────────────────────────────────
-    await launcher.kill(id);
-
-    // Clean up container if any
-    containerManager.removeContainer(id);
-
-    // Stop PR polling for this session
-    prPoller?.unwatch(id);
-
-    const worktreeResult = cleanupWorktree(id, body.force);
-    launcher.setArchived(id, true);
-    sessionStore.setArchived(id, true);
-    return c.json({ ok: true, worktree: worktreeResult, linearTransition: linearTransitionResult });
+    const result = await orchestrator.archiveSession(id, {
+      force: body.force,
+      linearTransition: body.linearTransition,
+    });
+    return c.json({ ok: true, worktree: result.worktree, linearTransition: result.linearTransition });
   });
 
   api.post("/sessions/:id/unarchive", (c) => {
     const id = c.req.param("id");
-    launcher.setArchived(id, false);
-    sessionStore.setArchived(id, false);
+    orchestrator.unarchiveSession(id);
     return c.json({ ok: true });
   });
 
@@ -1341,42 +1263,6 @@ export function createRoutes(
   registerSkillRoutes(api);
   registerCronRoutes(api, cronScheduler);
   registerAgentRoutes(api, agentExecutor);
-
-  // ─── Worktree cleanup helper ────────────────────────────────────
-
-  function cleanupWorktree(
-    sessionId: string,
-    force?: boolean,
-  ): { cleaned?: boolean; dirty?: boolean; path?: string } | undefined {
-    const mapping = worktreeTracker.getBySession(sessionId);
-    if (!mapping) return undefined;
-
-    // Check if other sessions still use this worktree
-    if (worktreeTracker.isWorktreeInUse(mapping.worktreePath, sessionId)) {
-      worktreeTracker.removeBySession(sessionId);
-      return { cleaned: false, path: mapping.worktreePath };
-    }
-
-    // Auto-remove if clean, or force-remove if requested
-    const dirty = gitUtils.isWorktreeDirty(mapping.worktreePath);
-    if (dirty && !force) {
-      return { cleaned: false, dirty: true, path: mapping.worktreePath };
-    }
-
-    // Delete companion-managed branch if it differs from the user-selected branch
-    const branchToDelete =
-      mapping.actualBranch && mapping.actualBranch !== mapping.branch
-        ? mapping.actualBranch
-        : undefined;
-    const result = gitUtils.removeWorktree(mapping.repoRoot, mapping.worktreePath, {
-      force: dirty,
-      branchToDelete,
-    });
-    if (result.removed) {
-      worktreeTracker.removeBySession(sessionId);
-    }
-    return { cleaned: result.removed, path: mapping.worktreePath };
-  }
 
   return api;
 }

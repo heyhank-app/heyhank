@@ -21,13 +21,11 @@ import { containerManager } from "./container-manager.js";
 import { join } from "node:path";
 import { COMPANION_HOME } from "./paths.js";
 import { TerminalManager } from "./terminal-manager.js";
-import { generateSessionTitle } from "./auto-namer.js";
-import * as sessionNames from "./session-names.js";
-import { getSettings } from "./settings-manager.js";
 import { PRPoller } from "./pr-poller.js";
 import { RecorderManager } from "./recorder.js";
 import { CronScheduler } from "./cron-scheduler.js";
 import { AgentExecutor } from "./agent-executor.js";
+import { SessionOrchestrator } from "./session-orchestrator.js";
 import { migrateCronJobsToAgents } from "./agent-cron-migrator.js";
 import { migrateLinearCredentialsToAgents } from "./linear-credential-migration.js";
 import { authenticateManagedWebSocket } from "./ws-auth.js";
@@ -64,6 +62,11 @@ const cronScheduler = new CronScheduler(launcher, wsBridge);
 const agentExecutor = new AgentExecutor(launcher, wsBridge);
 const linearAgentBridge = new LinearAgentBridge(agentExecutor, wsBridge);
 
+const orchestrator = new SessionOrchestrator({
+  launcher, wsBridge, sessionStore, worktreeTracker,
+  prPoller, agentExecutor,
+});
+
 // ── Cloud relay connection (for receiving webhooks behind a firewall) ────────
 // The relay forwards platform webhooks (e.g. GitHub, Slack) to the Companion
 // instance via an outbound WebSocket. Currently no webhook handlers are
@@ -86,104 +89,8 @@ launcher.restoreFromDisk();
 wsBridge.restoreFromDisk();
 containerManager.restoreState(CONTAINER_STATE_PATH);
 
-// When the CLI reports its internal session_id, store it for --resume on relaunch
-wsBridge.onCLISessionIdReceived((sessionId, cliSessionId) => {
-  launcher.setCLISessionId(sessionId, cliSessionId);
-});
-
-// When a Codex adapter is created, attach it to the WsBridge
-launcher.onCodexAdapterCreated((sessionId, adapter) => {
-  wsBridge.attachCodexAdapter(sessionId, adapter);
-});
-
-// When a CLI/Codex process exits, mark the corresponding agent execution as completed
-launcher.onSessionExited((sessionId, exitCode) => {
-  agentExecutor.handleSessionExited(sessionId, exitCode);
-});
-
-// Start watching PRs when git info is resolved for a session
-wsBridge.onSessionGitInfoReadyCallback((sessionId, cwd, branch) => {
-  prPoller.watch(sessionId, cwd, branch);
-});
-
-// Auto-relaunch CLI when a browser connects to a session with no CLI
-const relaunchingSet = new Set<string>();
-const MAX_AUTO_RELAUNCHES = 3;
-const autoRelaunchCounts = new Map<string, number>();
-wsBridge.onCLIRelaunchNeededCallback(async (sessionId) => {
-  if (relaunchingSet.has(sessionId)) return;
-  const info = launcher.getSession(sessionId);
-  if (info?.archived) return;
-
-  // Add to set BEFORE the grace period to block concurrent browser connections
-  relaunchingSet.add(sessionId);
-
-  // Grace period: CLI does normal code-1000 WS reconnection cycles (~30s).
-  // Wait 10s, then check if CLI reconnected or process is still alive.
-  await new Promise(r => setTimeout(r, 10000));
-  if (wsBridge.isCliConnected(sessionId)) { relaunchingSet.delete(sessionId); return; }
-  const freshInfo = launcher.getSession(sessionId);
-  if (freshInfo && (freshInfo.state === "connected" || freshInfo.state === "running")) {
-    relaunchingSet.delete(sessionId); return;
-  }
-  // PID liveness check — session state/WS can be stale, but signal 0 is definitive
-  if (freshInfo?.pid) {
-    try { process.kill(freshInfo.pid, 0); relaunchingSet.delete(sessionId); return; } catch {}
-  }
-
-  const count = autoRelaunchCounts.get(sessionId) ?? 0;
-  if (count >= MAX_AUTO_RELAUNCHES) {
-    console.warn(`[server] Auto-relaunch limit (${MAX_AUTO_RELAUNCHES}) reached for session ${sessionId}, giving up`);
-    wsBridge.broadcastToSession(sessionId, {
-      type: "error",
-      message: "Session keeps crashing. Please relaunch manually.",
-    });
-    relaunchingSet.delete(sessionId);
-    return;
-  }
-
-  if (freshInfo && freshInfo.state !== "starting") {
-    autoRelaunchCounts.set(sessionId, count + 1);
-    console.log(`[server] Auto-relaunching CLI for session ${sessionId} (attempt ${count + 1}/${MAX_AUTO_RELAUNCHES})`);
-    try {
-      const result = await launcher.relaunch(sessionId);
-      if (!result.ok && result.error) {
-        wsBridge.broadcastToSession(sessionId, { type: "error", message: result.error });
-      } else {
-        autoRelaunchCounts.delete(sessionId);
-      }
-    } finally {
-      setTimeout(() => relaunchingSet.delete(sessionId), 5000);
-    }
-  } else {
-    relaunchingSet.delete(sessionId);
-  }
-});
-
-// Kill CLI when idle with no browsers for 20 minutes
-wsBridge.onIdleKillCallback(async (sessionId) => {
-  const info = launcher.getSession(sessionId);
-  if (!info || info.archived) return;
-  console.log(`[server] Idle-killing CLI for session ${sessionId} (no browsers, no activity)`);
-  await launcher.kill(sessionId);
-});
-
-// Auto-generate session title after first turn completes
-wsBridge.onFirstTurnCompletedCallback(async (sessionId, firstUserMessage) => {
-  // Don't overwrite a name that was already set (manual rename or prior auto-name)
-  if (sessionNames.getName(sessionId)) return;
-  if (!getSettings().anthropicApiKey.trim()) return;
-  const info = launcher.getSession(sessionId);
-  const model = info?.model || "claude-sonnet-4-6";
-  console.log(`[server] Auto-naming session ${sessionId} via Anthropic with model ${model}...`);
-  const title = await generateSessionTitle(firstUserMessage, model);
-  // Re-check: a manual rename may have occurred while we were generating
-  if (title && !sessionNames.getName(sessionId)) {
-    console.log(`[server] Auto-named session ${sessionId}: "${title}"`);
-    sessionNames.setName(sessionId, title);
-    wsBridge.broadcastNameUpdate(sessionId, title);
-  }
-});
+// ── Session orchestrator — centralizes lifecycle event wiring ────────────────
+orchestrator.initialize();
 
 console.log(`[server] Session persistence: ${sessionStore.directory}`);
 if (recorder.isGloballyEnabled()) {
@@ -217,7 +124,7 @@ if (managedAuthEnabled) {
 }
 
 app.use("/api/*", cors());
-app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor, linearAgentBridge, port));
+app.route("/api", createRoutes(orchestrator, launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor, linearAgentBridge, port));
 
 // Dynamic manifest — embeds auth token in start_url so PWA auto-authenticates
 // on first launch. iOS gives standalone PWAs isolated storage from Safari,
@@ -467,20 +374,3 @@ function gracefulShutdown() {
 process.on("SIGTERM", gracefulShutdown);
 process.on("SIGINT", gracefulShutdown);
 
-// ── Reconnection watchdog ────────────────────────────────────────────────────
-// After a server restart, restored CLI processes may not reconnect their
-// WebSocket. Give them a grace period, then kill + relaunch any that are
-// still in "starting" state (alive but no WS connection).
-const RECONNECT_GRACE_MS = Number(process.env.COMPANION_RECONNECT_GRACE_MS || "30000");
-const starting = launcher.getStartingSessions();
-if (starting.length > 0) {
-  console.log(`[server] Waiting ${RECONNECT_GRACE_MS / 1000}s for ${starting.length} CLI process(es) to reconnect...`);
-  setTimeout(async () => {
-    const stale = launcher.getStartingSessions();
-    for (const info of stale) {
-      if (info.archived) continue;
-      console.log(`[server] CLI for session ${info.sessionId} did not reconnect, relaunching...`);
-      await launcher.relaunch(info.sessionId);
-    }
-  }, RECONNECT_GRACE_MS);
-}
