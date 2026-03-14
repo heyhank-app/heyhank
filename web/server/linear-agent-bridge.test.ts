@@ -4,6 +4,7 @@
 // session persistence, plan relay, enriched prompts, tool results, and progress flush.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { companionBus } from "./event-bus.js";
 
 // Mock dependencies
 vi.mock("./agent-store.js", () => ({
@@ -36,8 +37,6 @@ function createMockAgentExecutor() {
 
 function createMockWsBridge(linearMappings: Array<{ sessionId: string; linearSessionId: string }> = []) {
   return {
-    onAssistantMessageForSession: vi.fn().mockReturnValue(() => {}),
-    onResultForSession: vi.fn().mockReturnValue(() => {}),
     injectUserMessage: vi.fn(),
     getSession: vi.fn().mockReturnValue({ id: "mock-session" }), // session exists by default
     setLinearSessionId: vi.fn(),
@@ -92,6 +91,7 @@ describe("LinearAgentBridge", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    companionBus.clear();
     vi.useFakeTimers();
     // Default: getAgent returns the testAgent (needed for setupRelay credential lookup)
     vi.mocked(agentStore.getAgent).mockReturnValue(testAgent as ReturnType<typeof agentStore.getAgent>);
@@ -135,15 +135,9 @@ describe("LinearAgentBridge", () => {
         ]),
       );
 
-      // Should set up relay listeners
-      expect(wsBridge.onAssistantMessageForSession).toHaveBeenCalledWith(
-        "comp-sess-1",
-        expect.any(Function),
-      );
-      expect(wsBridge.onResultForSession).toHaveBeenCalledWith(
-        "comp-sess-1",
-        expect.any(Function),
-      );
+      // Should set up relay listeners on the event bus
+      expect(companionBus.listenerCount("message:assistant")).toBeGreaterThan(0);
+      expect(companionBus.listenerCount("message:result")).toBeGreaterThan(0);
 
       // Should post "session started" thought
       expect(linearAgent.postActivity).toHaveBeenCalledWith(
@@ -437,37 +431,45 @@ describe("LinearAgentBridge", () => {
   });
 
   describe("relay — assistant message callbacks", () => {
-    // These tests exercise the relay callback functions that are registered
-    // inside setupRelay. We capture the callbacks via mock spies and invoke
-    // them with synthetic BrowserIncomingMessage payloads.
+    // These tests exercise the relay subscriptions that are registered
+    // inside setupRelay via companionBus. We emit events on the bus directly
+    // with synthetic BrowserIncomingMessage payloads.
 
-    async function createSessionAndCaptureCallbacks() {
+    async function createSessionAndSetupRelay() {
       vi.mocked(agentStore.listAgents).mockReturnValue([testAgent] as ReturnType<typeof agentStore.listAgents>);
       vi.mocked(executor.executeAgent).mockResolvedValue({ sessionId: "comp-sess-1" } as never);
       await bridge.handleEvent(makeCreatedEvent());
 
-      // Capture the callbacks registered by setupRelay
-      const assistantCb = vi.mocked(wsBridge.onAssistantMessageForSession).mock.calls[0][1];
-      const resultCb = vi.mocked(wsBridge.onResultForSession).mock.calls[0][1];
       vi.clearAllMocks(); // clear previous postActivity calls
-      return { assistantCb, resultCb };
+    }
+
+    /** Emit an assistant message for the test session via the bus. */
+    function emitAssistant(msg: unknown) {
+      companionBus.emit("message:assistant", { sessionId: "comp-sess-1", message: msg } as any);
+    }
+
+    /** Emit a result message for the test session via the bus. */
+    async function emitResult(msg: unknown = {}) {
+      companionBus.emit("message:result", { sessionId: "comp-sess-1", message: msg } as any);
+      // Allow async result handler to settle
+      await vi.advanceTimersByTimeAsync(0);
     }
 
     it("relays assistant text content as a response on turn completion", async () => {
-      const { assistantCb, resultCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
       // Simulate an assistant message with text content
-      assistantCb({
+      emitAssistant({
         type: "assistant",
         message: {
           content: [
             { type: "text", text: "Here is the fix for the login bug." },
           ],
         },
-      } as never);
+      });
 
       // Trigger turn completion — should post the accumulated text as a response
-      await resultCb({} as never);
+      await emitResult();
 
       expect(linearAgent.postActivity).toHaveBeenCalledWith(
         expect.any(Object),
@@ -477,17 +479,17 @@ describe("LinearAgentBridge", () => {
     });
 
     it("relays tool use as action activities", async () => {
-      const { assistantCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
       // Simulate an assistant message with a tool_use content block
-      assistantCb({
+      emitAssistant({
         type: "assistant",
         message: {
           content: [
             { type: "tool_use", name: "Edit", input: { file: "login.ts", line: 42 } },
           ],
         },
-      } as never);
+      });
 
       expect(linearAgent.postActivity).toHaveBeenCalledWith(
         expect.any(Object),
@@ -500,10 +502,10 @@ describe("LinearAgentBridge", () => {
     });
 
     it("relays all tool_use blocks when assistant calls multiple tools", async () => {
-      const { assistantCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
       // Simulate an assistant message with multiple parallel tool calls
-      assistantCb({
+      emitAssistant({
         type: "assistant",
         message: {
           content: [
@@ -512,7 +514,7 @@ describe("LinearAgentBridge", () => {
             { type: "tool_use", name: "Edit", input: { file: "c.ts" } },
           ],
         },
-      } as never);
+      });
 
       // All three tool_use blocks should be posted as action activities
       expect(linearAgent.postActivity).toHaveBeenCalledTimes(3);
@@ -529,19 +531,19 @@ describe("LinearAgentBridge", () => {
     });
 
     it("accumulates text across multiple assistant messages", async () => {
-      const { assistantCb, resultCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
       // Two assistant messages before turn completion
-      assistantCb({
+      emitAssistant({
         type: "assistant",
         message: { content: [{ type: "text", text: "Line 1" }] },
-      } as never);
-      assistantCb({
+      });
+      emitAssistant({
         type: "assistant",
         message: { content: [{ type: "text", text: "Line 2" }] },
-      } as never);
+      });
 
-      await resultCb({} as never);
+      await emitResult();
 
       // Should accumulate both into one response
       expect(linearAgent.postActivity).toHaveBeenCalledWith(
@@ -552,10 +554,10 @@ describe("LinearAgentBridge", () => {
     });
 
     it("does not post empty response when no text was accumulated", async () => {
-      const { resultCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
       // Turn completes with no assistant messages
-      await resultCb({} as never);
+      await emitResult();
 
       // Should not post a response activity
       expect(linearAgent.postActivity).not.toHaveBeenCalledWith(
@@ -565,12 +567,12 @@ describe("LinearAgentBridge", () => {
     });
 
     it("ignores non-assistant messages in text extraction", async () => {
-      const { assistantCb, resultCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
       // A non-assistant message type should be ignored
-      assistantCb({ type: "system", message: "hello" } as never);
+      emitAssistant({ type: "system", message: "hello" });
 
-      await resultCb({} as never);
+      await emitResult();
 
       // No response should be posted
       expect(linearAgent.postActivity).not.toHaveBeenCalledWith(
@@ -580,13 +582,13 @@ describe("LinearAgentBridge", () => {
     });
 
     it("handles assistant messages without message.content gracefully", async () => {
-      const { assistantCb, resultCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
       // Assistant message with no content array
-      assistantCb({ type: "assistant", message: {} } as never);
-      assistantCb({ type: "assistant" } as never);
+      emitAssistant({ type: "assistant", message: {} });
+      emitAssistant({ type: "assistant" });
 
-      await resultCb({} as never);
+      await emitResult();
 
       // No text accumulated → no response
       expect(linearAgent.postActivity).not.toHaveBeenCalledWith(
@@ -596,14 +598,14 @@ describe("LinearAgentBridge", () => {
     });
 
     it("extracts tool use without input gracefully", async () => {
-      const { assistantCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
-      assistantCb({
+      emitAssistant({
         type: "assistant",
         message: {
           content: [{ type: "tool_use", name: "Read" }],
         },
-      } as never);
+      });
 
       expect(linearAgent.postActivity).toHaveBeenCalledWith(
         expect.any(Object),
@@ -617,20 +619,26 @@ describe("LinearAgentBridge", () => {
     // Verifies that TodoWrite tool calls are intercepted and relayed as
     // Linear plan/checklist updates via updateSessionPlan().
 
-    async function createSessionAndCaptureCallbacks() {
+    async function createSessionAndSetupRelay() {
       vi.mocked(agentStore.listAgents).mockReturnValue([testAgent] as ReturnType<typeof agentStore.listAgents>);
       vi.mocked(executor.executeAgent).mockResolvedValue({ sessionId: "comp-sess-1" } as never);
       await bridge.handleEvent(makeCreatedEvent());
-      const assistantCb = vi.mocked(wsBridge.onAssistantMessageForSession).mock.calls[0][1];
-      const resultCb = vi.mocked(wsBridge.onResultForSession).mock.calls[0][1];
       vi.clearAllMocks();
-      return { assistantCb, resultCb };
+    }
+
+    function emitAssistant(msg: unknown) {
+      companionBus.emit("message:assistant", { sessionId: "comp-sess-1", message: msg } as any);
+    }
+
+    async function emitResult(msg: unknown = {}) {
+      companionBus.emit("message:result", { sessionId: "comp-sess-1", message: msg } as any);
+      await vi.advanceTimersByTimeAsync(0);
     }
 
     it("relays TodoWrite tool calls as Linear plan items", async () => {
-      const { assistantCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
-      assistantCb({
+      emitAssistant({
         type: "assistant",
         message: {
           content: [{
@@ -645,7 +653,7 @@ describe("LinearAgentBridge", () => {
             },
           }],
         },
-      } as never);
+      });
 
       expect(linearAgent.updateSessionPlan).toHaveBeenCalledWith(
         expect.any(Object),
@@ -659,10 +667,10 @@ describe("LinearAgentBridge", () => {
     });
 
     it("ignores TodoWrite with empty or invalid todos", async () => {
-      const { assistantCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
       // Empty todos array
-      assistantCb({
+      emitAssistant({
         type: "assistant",
         message: {
           content: [{
@@ -671,12 +679,12 @@ describe("LinearAgentBridge", () => {
             input: { todos: [] },
           }],
         },
-      } as never);
+      });
 
       expect(linearAgent.updateSessionPlan).not.toHaveBeenCalled();
 
       // No todos key
-      assistantCb({
+      emitAssistant({
         type: "assistant",
         message: {
           content: [{
@@ -685,7 +693,7 @@ describe("LinearAgentBridge", () => {
             input: {},
           }],
         },
-      } as never);
+      });
 
       expect(linearAgent.updateSessionPlan).not.toHaveBeenCalled();
     });
@@ -695,39 +703,41 @@ describe("LinearAgentBridge", () => {
     // Verifies that tool_result content blocks are matched back to their
     // corresponding tool_use and posted as action activities with result field.
 
-    async function createSessionAndCaptureCallbacks() {
+    async function createSessionAndSetupRelay() {
       vi.mocked(agentStore.listAgents).mockReturnValue([testAgent] as ReturnType<typeof agentStore.listAgents>);
       vi.mocked(executor.executeAgent).mockResolvedValue({ sessionId: "comp-sess-1" } as never);
       await bridge.handleEvent(makeCreatedEvent());
-      const assistantCb = vi.mocked(wsBridge.onAssistantMessageForSession).mock.calls[0][1];
       vi.clearAllMocks();
-      return { assistantCb };
+    }
+
+    function emitAssistant(msg: unknown) {
+      companionBus.emit("message:assistant", { sessionId: "comp-sess-1", message: msg } as any);
     }
 
     it("posts tool result as action activity when tool_result block matches a pending tool_use", async () => {
-      const { assistantCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
       // First message: tool_use with an id
-      assistantCb({
+      emitAssistant({
         type: "assistant",
         message: {
           content: [
             { type: "tool_use", id: "tu_123", name: "Read", input: { file: "main.ts" } },
           ],
         },
-      } as never);
+      });
 
       vi.clearAllMocks();
 
       // Second message: tool_result matching the tool_use id
-      assistantCb({
+      emitAssistant({
         type: "assistant",
         message: {
           content: [
             { type: "tool_result", tool_use_id: "tu_123", content: "const x = 42;" },
           ],
         },
-      } as never);
+      });
 
       expect(linearAgent.postActivity).toHaveBeenCalledWith(
         expect.any(Object),
@@ -741,17 +751,17 @@ describe("LinearAgentBridge", () => {
     });
 
     it("ignores tool_result blocks with no matching tool_use", async () => {
-      const { assistantCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
       // No preceding tool_use — just a tool_result with unknown id
-      assistantCb({
+      emitAssistant({
         type: "assistant",
         message: {
           content: [
             { type: "tool_result", tool_use_id: "unknown", content: "data" },
           ],
         },
-      } as never);
+      });
 
       // Should not post any action result
       expect(linearAgent.postActivity).not.toHaveBeenCalled();
@@ -762,24 +772,30 @@ describe("LinearAgentBridge", () => {
     // Verifies that accumulated text is periodically flushed as ephemeral
     // thought activities so Linear doesn't look stalled during long sessions.
 
-    async function createSessionAndCaptureCallbacks() {
+    async function createSessionAndSetupRelay() {
       vi.mocked(agentStore.listAgents).mockReturnValue([testAgent] as ReturnType<typeof agentStore.listAgents>);
       vi.mocked(executor.executeAgent).mockResolvedValue({ sessionId: "comp-sess-1" } as never);
       await bridge.handleEvent(makeCreatedEvent());
-      const assistantCb = vi.mocked(wsBridge.onAssistantMessageForSession).mock.calls[0][1];
-      const resultCb = vi.mocked(wsBridge.onResultForSession).mock.calls[0][1];
       vi.clearAllMocks();
-      return { assistantCb, resultCb };
+    }
+
+    function emitAssistant(msg: unknown) {
+      companionBus.emit("message:assistant", { sessionId: "comp-sess-1", message: msg } as any);
+    }
+
+    async function emitResult(msg: unknown = {}) {
+      companionBus.emit("message:result", { sessionId: "comp-sess-1", message: msg } as any);
+      await vi.advanceTimersByTimeAsync(0);
     }
 
     it("flushes accumulated text as ephemeral thought after 30 seconds", async () => {
-      const { assistantCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
       // Simulate text accumulation
-      assistantCb({
+      emitAssistant({
         type: "assistant",
         message: { content: [{ type: "text", text: "Working on the fix..." }] },
-      } as never);
+      });
 
       vi.clearAllMocks();
 
@@ -798,13 +814,13 @@ describe("LinearAgentBridge", () => {
     });
 
     it("does not flush when no new text has accumulated since last flush", async () => {
-      const { assistantCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
       // Accumulate some text
-      assistantCb({
+      emitAssistant({
         type: "assistant",
         message: { content: [{ type: "text", text: "First chunk" }] },
-      } as never);
+      });
 
       vi.clearAllMocks();
 
@@ -820,18 +836,18 @@ describe("LinearAgentBridge", () => {
     });
 
     it("resets flush state when turn completes", async () => {
-      const { assistantCb, resultCb } = await createSessionAndCaptureCallbacks();
+      await createSessionAndSetupRelay();
 
       // Accumulate and flush
-      assistantCb({
+      emitAssistant({
         type: "assistant",
         message: { content: [{ type: "text", text: "Before completion" }] },
-      } as never);
+      });
       vi.advanceTimersByTime(30_000);
       vi.clearAllMocks();
 
       // Turn completes — resets pendingText and lastFlushedLength
-      await resultCb({} as never);
+      await emitResult();
 
       // After completion, the timer interval has no new text to flush
       vi.advanceTimersByTime(30_000);
@@ -852,13 +868,13 @@ describe("LinearAgentBridge", () => {
       vi.mocked(executor.executeAgent).mockResolvedValue({ sessionId: "comp-sess-1" } as never);
       await bridge.handleEvent(makeCreatedEvent());
 
-      // Capture the result callback and trigger turn completion
-      const resultCb = vi.mocked(wsBridge.onResultForSession).mock.calls[0][1];
       vi.clearAllMocks();
       // Re-mock getAgent after clearAllMocks (needed for credential lookup in setupRelay)
       vi.mocked(agentStore.getAgent).mockReturnValue(testAgent as ReturnType<typeof agentStore.getAgent>);
 
-      await resultCb({} as never);
+      // Trigger turn completion via event bus
+      companionBus.emit("message:result", { sessionId: "comp-sess-1", message: {} } as any);
+      await vi.advanceTimersByTimeAsync(0);
 
       // Now send a follow-up — should inject into existing session, NOT create new
       await bridge.handleEvent(makePromptedEvent("linear-session-1", "What about the tests?"));
@@ -873,11 +889,10 @@ describe("LinearAgentBridge", () => {
       vi.mocked(executor.executeAgent).mockResolvedValue({ sessionId: "comp-sess-1" } as never);
       await bridge.handleEvent(makeCreatedEvent());
 
-      // First turn: simulate response and turn completion
-      const assistantCb1 = vi.mocked(wsBridge.onAssistantMessageForSession).mock.calls[0][1];
-      const resultCb1 = vi.mocked(wsBridge.onResultForSession).mock.calls[0][1];
-      assistantCb1({ type: "assistant", message: { content: [{ type: "text", text: "First response" }] } } as never);
-      await resultCb1({} as never);
+      // First turn: simulate response and turn completion via bus
+      companionBus.emit("message:assistant", { sessionId: "comp-sess-1", message: { type: "assistant", message: { content: [{ type: "text", text: "First response" }] } } } as any);
+      companionBus.emit("message:result", { sessionId: "comp-sess-1", message: {} } as any);
+      await vi.advanceTimersByTimeAsync(0);
 
       vi.clearAllMocks();
       // Re-mock getAgent after clearAllMocks (needed for credential lookup in setupRelay)
@@ -886,17 +901,16 @@ describe("LinearAgentBridge", () => {
       // Follow-up prompt — should re-establish relay
       await bridge.handleEvent(makePromptedEvent("linear-session-1", "Follow up"));
 
-      // setupRelay should have registered new listeners
-      expect(wsBridge.onAssistantMessageForSession).toHaveBeenCalledWith("comp-sess-1", expect.any(Function));
-      expect(wsBridge.onResultForSession).toHaveBeenCalledWith("comp-sess-1", expect.any(Function));
+      // setupRelay should have registered new listeners on the bus
+      expect(companionBus.listenerCount("message:assistant")).toBeGreaterThan(0);
+      expect(companionBus.listenerCount("message:result")).toBeGreaterThan(0);
 
-      // Simulate second turn response
-      const assistantCb2 = vi.mocked(wsBridge.onAssistantMessageForSession).mock.calls[0][1];
-      const resultCb2 = vi.mocked(wsBridge.onResultForSession).mock.calls[0][1];
+      // Simulate second turn response via bus
       vi.clearAllMocks();
 
-      assistantCb2({ type: "assistant", message: { content: [{ type: "text", text: "Second response" }] } } as never);
-      await resultCb2({} as never);
+      companionBus.emit("message:assistant", { sessionId: "comp-sess-1", message: { type: "assistant", message: { content: [{ type: "text", text: "Second response" }] } } } as any);
+      companionBus.emit("message:result", { sessionId: "comp-sess-1", message: {} } as any);
+      await vi.advanceTimersByTimeAsync(0);
 
       // The second response should be forwarded to Linear
       expect(linearAgent.postActivity).toHaveBeenCalledWith(
@@ -911,19 +925,21 @@ describe("LinearAgentBridge", () => {
     it("cleans up all session mappings and relay listeners", async () => {
       // Create a session
       vi.mocked(agentStore.listAgents).mockReturnValue([testAgent] as ReturnType<typeof agentStore.listAgents>);
-      const unsubAssistant = vi.fn();
-      const unsubResult = vi.fn();
-      vi.mocked(wsBridge.onAssistantMessageForSession).mockReturnValue(unsubAssistant);
-      vi.mocked(wsBridge.onResultForSession).mockReturnValue(unsubResult);
       vi.mocked(executor.executeAgent).mockResolvedValue({ sessionId: "comp-sess-1" } as never);
 
       await bridge.handleEvent(makeCreatedEvent());
 
+      // Should have listeners registered
+      const beforeAssistant = companionBus.listenerCount("message:assistant");
+      const beforeResult = companionBus.listenerCount("message:result");
+      expect(beforeAssistant).toBeGreaterThan(0);
+      expect(beforeResult).toBeGreaterThan(0);
+
       bridge.shutdown();
 
-      // Should call cleanup unsubscribers
-      expect(unsubAssistant).toHaveBeenCalled();
-      expect(unsubResult).toHaveBeenCalled();
+      // After shutdown, listeners should have been removed
+      expect(companionBus.listenerCount("message:assistant")).toBeLessThan(beforeAssistant);
+      expect(companionBus.listenerCount("message:result")).toBeLessThan(beforeResult);
     });
   });
 });

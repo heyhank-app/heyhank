@@ -15,6 +15,7 @@ import type { RecorderManager } from "./recorder.js";
 import { CodexAdapter } from "./codex-adapter.js";
 import { resolveBinary, getEnrichedPath } from "./path-resolver.js";
 import { containerManager } from "./container-manager.js";
+import { companionBus } from "./event-bus.js";
 import {
   getLegacyCodexHome,
   resolveCompanionCodexSessionHome,
@@ -178,21 +179,8 @@ export class CliLauncher {
   private port: number;
   private store: SessionStore | null = null;
   private recorder: RecorderManager | null = null;
-  private onCodexAdapter: ((sessionId: string, adapter: CodexAdapter) => void) | null = null;
-  private exitHandlers: ((sessionId: string, exitCode: number | null) => void)[] = [];
-
   constructor(port: number) {
     this.port = port;
-  }
-
-  /** Register a callback for when a CodexAdapter is created (WsBridge needs to attach it). */
-  onCodexAdapterCreated(cb: (sessionId: string, adapter: CodexAdapter) => void): void {
-    this.onCodexAdapter = cb;
-  }
-
-  /** Register a callback for when a CLI/Codex process exits. */
-  onSessionExited(cb: (sessionId: string, exitCode: number | null) => void): void {
-    this.exitHandlers.push(cb);
   }
 
   /** Attach a persistent store for surviving server restarts. */
@@ -613,9 +601,7 @@ export class CliLauncher {
       }
       this.processes.delete(sessionId);
       this.persistState();
-      for (const handler of this.exitHandlers) {
-        try { handler(sessionId, exitCode); } catch {}
-      }
+      companionBus.emit("session:exited", { sessionId, exitCode });
     });
 
     this.persistState();
@@ -883,9 +869,7 @@ export class CliLauncher {
     });
 
     // Notify the WsBridge to attach this adapter
-    if (this.onCodexAdapter) {
-      this.onCodexAdapter(sessionId, adapter);
-    }
+    companionBus.emit("backend:codex-adapter-created", { sessionId, adapter });
 
     info.state = "connected";
 
@@ -910,9 +894,7 @@ export class CliLauncher {
       this.processes.delete(sessionId);
       this.codexWsProxies.delete(sessionId);
       this.persistState();
-      for (const handler of this.exitHandlers) {
-        try { handler(sessionId, exitCode); } catch {}
-      }
+      companionBus.emit("session:exited", { sessionId, exitCode });
     };
 
     proxyProc.exited.then((exitCode) => {
@@ -1075,9 +1057,7 @@ export class CliLauncher {
     });
 
     // Notify the WsBridge to attach this adapter
-    if (this.onCodexAdapter) {
-      this.onCodexAdapter(sessionId, adapter);
-    }
+    companionBus.emit("backend:codex-adapter-created", { sessionId, adapter });
 
     // Mark as connected immediately (no WS handshake needed for stdio)
     info.state = "connected";
@@ -1092,9 +1072,7 @@ export class CliLauncher {
       }
       this.processes.delete(sessionId);
       this.persistState();
-      for (const handler of this.exitHandlers) {
-        try { handler(sessionId, exitCode); } catch {}
-      }
+      companionBus.emit("session:exited", { sessionId, exitCode });
     });
 
     this.persistState();

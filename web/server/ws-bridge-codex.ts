@@ -9,6 +9,7 @@ import type { Session } from "./ws-bridge-types.js";
 import { validatePermission } from "./ai-validator.js";
 import { getSettings } from "./settings-manager.js";
 import { getEffectiveAiValidation } from "./ai-validation-settings.js";
+import { companionBus } from "./event-bus.js";
 
 export interface CodexAttachDeps {
   persistSession: (session: Session) => void;
@@ -17,15 +18,7 @@ export interface CodexAttachDeps {
     options?: { broadcastUpdate?: boolean; notifyPoller?: boolean },
   ) => void;
   broadcastToBrowsers: (session: Session, msg: BrowserIncomingMessage) => void;
-  onCLISessionId: ((sessionId: string, cliSessionId: string) => void) | null;
-  onFirstTurnCompleted: ((sessionId: string, firstUserMessage: string) => void) | null;
   autoNamingAttempted: Set<string>;
-  /** Per-session listeners for assistant messages (used by chat relay). */
-  assistantMessageListeners: Map<string, Set<(msg: BrowserIncomingMessage) => void>>;
-  /** Per-session listeners for result messages (used by chat relay). */
-  resultListeners: Map<string, Set<(msg: BrowserIncomingMessage) => void>>;
-  /** Callback to request auto-relaunch when the backend dies while browsers are connected. */
-  onCLIRelaunchNeeded: ((sessionId: string) => void) | null;
 }
 
 export function attachCodexAdapterHandlers(
@@ -73,19 +66,11 @@ export function attachCodexAdapterHandlers(
       const assistantMsg = { ...msg, timestamp: msg.timestamp || Date.now() };
       session.messageHistory.push(assistantMsg);
       deps.persistSession(session);
-      // Invoke per-session listeners for chat relay
-      deps.assistantMessageListeners.get(sessionId)?.forEach((cb) => {
-        try { cb(assistantMsg); } catch (err) { console.error("[ws-bridge-codex] Assistant listener error:", err); }
-      });
+      companionBus.emit("message:assistant", { sessionId, message: assistantMsg });
     } else if (msg.type === "result") {
       session.messageHistory.push(msg);
       deps.persistSession(session);
-      // Invoke per-session listeners for chat relay
-      deps.resultListeners.get(sessionId)?.forEach((cb) => {
-        try {
-          Promise.resolve(cb(msg)).catch((err) => console.error("[ws-bridge-codex] Async result listener error:", err));
-        } catch (err) { console.error("[ws-bridge-codex] Result listener error:", err); }
-      });
+      companionBus.emit("message:result", { sessionId, message: msg });
     }
 
     if (msg.type === "assistant") {
@@ -133,20 +118,19 @@ export function attachCodexAdapterHandlers(
     if (
       msg.type === "result" &&
       !(msg.data as { is_error?: boolean }).is_error &&
-      deps.onFirstTurnCompleted &&
       !deps.autoNamingAttempted.has(session.id)
     ) {
       deps.autoNamingAttempted.add(session.id);
       const firstUserMsg = session.messageHistory.find((m) => m.type === "user_message");
       if (firstUserMsg && firstUserMsg.type === "user_message") {
-        deps.onFirstTurnCompleted(session.id, firstUserMsg.content);
+        companionBus.emit("session:first-turn-completed", { sessionId: session.id, firstUserMessage: firstUserMsg.content });
       }
     }
   });
 
   adapter.onSessionMeta((meta) => {
-    if (meta.cliSessionId && deps.onCLISessionId) {
-      deps.onCLISessionId(session.id, meta.cliSessionId);
+    if (meta.cliSessionId) {
+      companionBus.emit("session:cli-id-received", { sessionId: session.id, cliSessionId: meta.cliSessionId });
     }
     if (meta.model) session.state.model = meta.model;
     if (meta.cwd) session.state.cwd = meta.cwd;
@@ -174,9 +158,9 @@ export function attachCodexAdapterHandlers(
 
     // Auto-relaunch if browsers are still connected (don't leave users staring
     // at a dead session when the transport drops mid-conversation).
-    if (session.browserSockets.size > 0 && deps.onCLIRelaunchNeeded) {
+    if (session.browserSockets.size > 0) {
       console.log(`[ws-bridge] Auto-relaunching Codex for session ${sessionId} (${session.browserSockets.size} browser(s) connected)`);
-      deps.onCLIRelaunchNeeded(sessionId);
+      companionBus.emit("session:relaunch-needed", { sessionId });
     }
   });
 

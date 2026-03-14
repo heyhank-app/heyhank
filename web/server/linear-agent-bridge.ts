@@ -16,6 +16,7 @@ import * as agentStore from "./agent-store.js";
 import * as linearAgent from "./linear-agent.js";
 import type { AgentSessionEventPayload, AgentPlanItem, LinearOAuthCredentials } from "./linear-agent.js";
 import { getSettings } from "./settings-manager.js";
+import { companionBus } from "./event-bus.js";
 
 /** Interval (ms) for flushing intermediate progress as ephemeral thoughts. */
 const PROGRESS_FLUSH_INTERVAL_MS = 30_000;
@@ -348,7 +349,8 @@ export class LinearAgentBridge {
     const pendingToolUseIds = new Map<string, string>(); // tool_use_id → tool name
 
     // Relay assistant messages → Linear activities
-    const unsubAssistant = this.wsBridge.onAssistantMessageForSession(companionSessionId, (msg) => {
+    const unsubAssistant = companionBus.on("message:assistant", ({ sessionId, message: msg }) => {
+      if (sessionId !== companionSessionId) return;
       const text = extractTextFromAssistant(msg);
       if (text) {
         pendingText += (pendingText ? "\n" : "") + text;
@@ -424,7 +426,8 @@ export class LinearAgentBridge {
     // Relay turn completion → post accumulated text as a response activity.
     // Do NOT clean up session mappings or relay — the Linear agent session
     // is long-lived and supports multi-turn follow-ups via "prompted" events.
-    const unsubResult = this.wsBridge.onResultForSession(companionSessionId, async () => {
+    const unsubResult = companionBus.on("message:result", async ({ sessionId }) => {
+      if (sessionId !== companionSessionId) return;
       if (pendingText) {
         try {
           await linearAgent.postActivity(creds, linearSessionId, {
@@ -439,6 +442,15 @@ export class LinearAgentBridge {
       }
     });
     cleanups.push(unsubResult);
+
+    // Auto-cleanup relay when the Companion session exits, restoring the
+    // implicit cleanup that the old per-session WsBridge listener Maps provided.
+    const unsubExited = companionBus.on("session:exited", ({ sessionId }) => {
+      if (sessionId === companionSessionId) {
+        this.cleanupRelay(companionSessionId);
+      }
+    });
+    cleanups.push(unsubExited);
 
     this.sessionCleanups.set(companionSessionId, cleanups);
   }

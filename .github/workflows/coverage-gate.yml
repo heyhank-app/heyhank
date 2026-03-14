@@ -56,7 +56,7 @@ jobs:
             local CHANGED
             CHANGED=$(git diff --name-only --diff-filter=ACM origin/main...HEAD -- $DIFF_PATHS \
               | grep -E '\.(ts|tsx)$' \
-              | grep -v '\.test\.\|\.spec\.\|__mocks__\|test-setup\|session-types\.ts\|src/types\.ts\|agent-types\.ts\|server/index\.ts\|auth-schema\.ts' || true)
+              | grep -v '\.test\.\|\.spec\.\|__mocks__\|test-setup\|session-types\.ts\|src/types\.ts\|agent-types\.ts\|server/index\.ts\|auth-schema\.ts\|event-bus-types\.ts' || true)
 
             if [ -z "$CHANGED" ]; then
               echo "No new/changed source files in $PROJECT — nothing to gate."

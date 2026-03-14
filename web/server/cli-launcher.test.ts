@@ -71,6 +71,7 @@ vi.mock("node:fs", async (importOriginal) => {
 
 import { SessionStore } from "./session-store.js";
 import { CliLauncher } from "./cli-launcher.js";
+import { companionBus } from "./event-bus.js";
 
 // ─── Bun.spawn mock ─────────────────────────────────────────────────────────
 
@@ -143,6 +144,7 @@ let launcher: CliLauncher;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  companionBus.clear();
   delete process.env.COMPANION_CONTAINER_SDK_HOST;
   delete process.env.COMPANION_FORCE_BYPASS_IN_CONTAINER;
   // Default to stdio for most tests; WS launcher behavior is covered explicitly below.
@@ -905,7 +907,7 @@ describe("codex websocket launcher", () => {
     mockSpawn.mockReturnValueOnce(codexProc).mockReturnValueOnce(proxyProc);
 
     const onAdapter = vi.fn();
-    launcher.onCodexAdapterCreated(onAdapter);
+    companionBus.on("backend:codex-adapter-created", ({ sessionId, adapter }) => onAdapter(sessionId, adapter));
 
     launcher.launch({
       backendType: "codex",
@@ -953,7 +955,7 @@ describe("codex websocket launcher", () => {
     const { proc: proxyProc } = createPendingCodexWsProxyProc(5002);
     mockSpawn.mockReturnValueOnce(codexProc).mockReturnValueOnce(proxyProc);
 
-    launcher.onCodexAdapterCreated(vi.fn());
+    companionBus.on("backend:codex-adapter-created", vi.fn());
     launcher.launch({
       backendType: "codex",
       cwd: "/tmp/project",

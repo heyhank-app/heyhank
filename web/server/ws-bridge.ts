@@ -70,6 +70,7 @@ import {
 import { validatePermission } from "./ai-validator.js";
 import { getSettings } from "./settings-manager.js";
 import { getEffectiveAiValidation } from "./ai-validation-settings.js";
+import { companionBus } from "./event-bus.js";
 
 // ─── Bridge ───────────────────────────────────────────────────────────────────
 
@@ -84,15 +85,8 @@ export class WsBridge {
   private sessions = new Map<string, Session>();
   private store: SessionStore | null = null;
   private recorder: RecorderManager | null = null;
-  private onCLISessionId: ((sessionId: string, cliSessionId: string) => void) | null = null;
-  private onCLIRelaunchNeeded: ((sessionId: string) => void) | null = null;
-  private onFirstTurnCompleted: ((sessionId: string, firstUserMessage: string) => void) | null = null;
-  private onIdleKill: ((sessionId: string) => void) | null = null;
   private autoNamingAttempted = new Set<string>();
   private userMsgCounter = 0;
-  private onGitInfoReady: ((sessionId: string, cwd: string, branch: string) => void) | null = null;
-  private assistantMessageListeners = new Map<string, Set<(msg: BrowserIncomingMessage) => void>>();
-  private resultListeners = new Map<string, Set<(msg: BrowserIncomingMessage) => void>>();
   private static readonly GIT_SESSION_KEYS: GitSessionKey[] = [
     "git_branch",
     "is_worktree",
@@ -101,49 +95,6 @@ export class WsBridge {
     "git_ahead",
     "git_behind",
   ];
-
-  /** Register a callback for when we learn the CLI's internal session ID. */
-  onCLISessionIdReceived(cb: (sessionId: string, cliSessionId: string) => void): void {
-    this.onCLISessionId = cb;
-  }
-
-  /** Register a callback for when a browser connects but CLI is dead. */
-  onCLIRelaunchNeededCallback(cb: (sessionId: string) => void): void {
-    this.onCLIRelaunchNeeded = cb;
-  }
-
-  /** Register a callback for when a session completes its first turn. */
-  onFirstTurnCompletedCallback(cb: (sessionId: string, firstUserMessage: string) => void): void {
-    this.onFirstTurnCompleted = cb;
-  }
-
-  /** Register a callback for when a CLI should be killed due to idle + no browsers. */
-  onIdleKillCallback(cb: (sessionId: string) => void): void {
-    this.onIdleKill = cb;
-  }
-
-  /** Register a callback for when git info is resolved and branch is known. */
-  onSessionGitInfoReadyCallback(cb: (sessionId: string, cwd: string, branch: string) => void): void {
-    this.onGitInfoReady = cb;
-  }
-
-  /** Subscribe to assistant messages for a specific session (for chat relay). Returns unsubscribe fn. */
-  onAssistantMessageForSession(sessionId: string, cb: (msg: BrowserIncomingMessage) => void): () => void {
-    if (!this.assistantMessageListeners.has(sessionId)) {
-      this.assistantMessageListeners.set(sessionId, new Set());
-    }
-    this.assistantMessageListeners.get(sessionId)!.add(cb);
-    return () => { this.assistantMessageListeners.get(sessionId)?.delete(cb); };
-  }
-
-  /** Subscribe to result (turn completion) for a specific session. Returns unsubscribe fn. */
-  onResultForSession(sessionId: string, cb: (msg: BrowserIncomingMessage) => void): () => void {
-    if (!this.resultListeners.has(sessionId)) {
-      this.resultListeners.set(sessionId, new Set());
-    }
-    this.resultListeners.get(sessionId)!.add(cb);
-    return () => { this.resultListeners.get(sessionId)?.delete(cb); };
-  }
 
   /** Set the Linear agent session ID on a Companion session and persist it. */
   setLinearSessionId(sessionId: string, linearSessionId: string): void {
@@ -304,8 +255,8 @@ export class WsBridge {
       this.persistSession(session);
     }
 
-    if (options.notifyPoller && session.state.git_branch && session.state.cwd && this.onGitInfoReady) {
-      this.onGitInfoReady(session.id, session.state.cwd, session.state.git_branch);
+    if (options.notifyPoller && session.state.git_branch && session.state.cwd) {
+      companionBus.emit("session:git-info-ready", { sessionId: session.id, cwd: session.state.cwd, branch: session.state.git_branch });
     }
   }
 
@@ -383,8 +334,6 @@ export class WsBridge {
     this.stopIdleKillWatchdog(sessionId);
     this.sessions.delete(sessionId);
     this.autoNamingAttempted.delete(sessionId);
-    this.assistantMessageListeners.delete(sessionId);
-    this.resultListeners.delete(sessionId);
     this.store?.remove(sessionId);
   }
 
@@ -417,8 +366,6 @@ export class WsBridge {
 
     this.sessions.delete(sessionId);
     this.autoNamingAttempted.delete(sessionId);
-    this.assistantMessageListeners.delete(sessionId);
-    this.resultListeners.delete(sessionId);
     this.store?.remove(sessionId);
   }
 
@@ -438,12 +385,7 @@ export class WsBridge {
       persistSession: this.persistSession.bind(this),
       refreshGitInfo: this.refreshGitInfo.bind(this),
       broadcastToBrowsers: this.broadcastToBrowsers.bind(this),
-      onCLISessionId: this.onCLISessionId,
-      onFirstTurnCompleted: this.onFirstTurnCompleted,
       autoNamingAttempted: this.autoNamingAttempted,
-      assistantMessageListeners: this.assistantMessageListeners,
-      resultListeners: this.resultListeners,
-      onCLIRelaunchNeeded: this.onCLIRelaunchNeeded,
     });
   }
 
@@ -587,10 +529,8 @@ export class WsBridge {
       // Only signal disconnection if we're not within the debounce window
       // (CLI may be mid-reconnect — avoid UI flap and spurious relaunch)
       this.sendToBrowser(ws, { type: "cli_disconnected" });
-      if (this.onCLIRelaunchNeeded) {
-        console.log(`[ws-bridge] Browser connected but backend is dead for session ${sessionId}, requesting relaunch`);
-        this.onCLIRelaunchNeeded(sessionId);
-      }
+      console.log(`[ws-bridge] Browser connected but backend is dead for session ${sessionId}, requesting relaunch`);
+      companionBus.emit("session:relaunch-needed", { sessionId });
     }
   }
 
@@ -715,9 +655,7 @@ export class WsBridge {
     // Truly idle with no browsers — kill
     console.log(`[ws-bridge] Idle kill triggered for ${sessionId} (idle ${Math.round(idleMs / 60_000)}min, 0 browsers)`);
     this.stopIdleKillWatchdog(sessionId);
-    if (this.onIdleKill) {
-      this.onIdleKill(sessionId);
-    }
+    companionBus.emit("session:idle-kill", { sessionId });
   }
 
   // ── CLI message routing ─────────────────────────────────────────────────
@@ -782,8 +720,8 @@ export class WsBridge {
       // from the launcher UUID, causing duplicate entries in the sidebar.
 
       // Store the CLI's internal session_id so we can --resume on relaunch
-      if (msg.session_id && this.onCLISessionId) {
-        this.onCLISessionId(session.id, msg.session_id);
+      if (msg.session_id) {
+        companionBus.emit("session:cli-id-received", { sessionId: session.id, cliSessionId: msg.session_id });
       }
 
       session.state.model = msg.model;
@@ -950,9 +888,7 @@ export class WsBridge {
     };
     this.appendHistory(session, browserMsg);
     this.broadcastToBrowsers(session, browserMsg);
-    this.assistantMessageListeners.get(session.id)?.forEach((cb) => {
-      try { cb(browserMsg); } catch (err) { console.error("[ws-bridge] Assistant listener error:", err); }
-    });
+    companionBus.emit("message:assistant", { sessionId: session.id, message: browserMsg });
     this.persistSession(session);
   }
 
@@ -990,11 +926,7 @@ export class WsBridge {
     };
     this.appendHistory(session, browserMsg);
     this.broadcastToBrowsers(session, browserMsg);
-    this.resultListeners.get(session.id)?.forEach((cb) => {
-      try {
-        Promise.resolve(cb(browserMsg)).catch((err) => console.error("[ws-bridge] Async result listener error:", err));
-      } catch (err) { console.error("[ws-bridge] Result listener error:", err); }
-    });
+    companionBus.emit("message:result", { sessionId: session.id, message: browserMsg });
     this.persistSession(session);
 
     // Trigger auto-naming after the first successful result for this session.
@@ -1002,7 +934,6 @@ export class WsBridge {
     // even on the first user interaction. We track per-session instead.
     if (
       !msg.is_error &&
-      this.onFirstTurnCompleted &&
       !this.autoNamingAttempted.has(session.id)
     ) {
       this.autoNamingAttempted.add(session.id);
@@ -1010,7 +941,7 @@ export class WsBridge {
         (m) => m.type === "user_message",
       );
       if (firstUserMsg && firstUserMsg.type === "user_message") {
-        this.onFirstTurnCompleted(session.id, firstUserMsg.content);
+        companionBus.emit("session:first-turn-completed", { sessionId: session.id, firstUserMessage: firstUserMsg.content });
       }
     }
   }
