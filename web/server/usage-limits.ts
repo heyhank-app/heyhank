@@ -1,5 +1,5 @@
 import { execSync, execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -28,50 +28,83 @@ interface OAuthCredentials {
   [key: string]: unknown;
 }
 
-function readRawCredentials(): { raw: string; parsed: Record<string, unknown>; oauth: OAuthCredentials } | null {
-  try {
-    if (process.platform === "win32") {
-      const home =
-        process.env.USERPROFILE || process.env.HOME || homedir() || "";
-      const credPath = join(home, ".claude", ".credentials.json");
-      if (!existsSync(credPath)) return null;
+interface RawCredentials {
+  raw: string;
+  parsed: Record<string, unknown>;
+  oauth: OAuthCredentials;
+  sourcePath?: string;
+}
+
+// Credential file candidates - matches claude-container-auth.ts
+const CREDENTIAL_FILE_NAMES = [
+  ".credentials.json",
+  "auth.json",
+  ".auth.json",
+  "credentials.json",
+];
+
+function readCredentialsFromFile(): RawCredentials | null {
+  const home =
+    process.env.USERPROFILE || process.env.HOME || homedir() || "";
+  const claudeDir = join(home, ".claude");
+
+  for (const fileName of CREDENTIAL_FILE_NAMES) {
+    const credPath = join(claudeDir, fileName);
+    if (!existsSync(credPath)) continue;
+    try {
       const raw = readFileSync(credPath, "utf-8");
       const parsed = JSON.parse(raw);
+      if (!parsed?.claudeAiOauth?.accessToken) continue;
+      return { raw, parsed, oauth: parsed.claudeAiOauth, sourcePath: credPath };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+function readRawCredentials(): RawCredentials | null {
+  try {
+    // macOS: use Keychain via security command
+    if (process.platform === "darwin") {
+      const raw = execSync(
+        'security find-generic-password -s "Claude Code-credentials" -w',
+        { encoding: "utf-8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] },
+      ).trim();
+
+      const decoded = raw.startsWith("{")
+        ? raw
+        : Buffer.from(raw, "hex").toString("utf-8");
+
+      const parsed = JSON.parse(decoded);
       if (!parsed?.claudeAiOauth?.accessToken) return null;
-      return { raw, parsed, oauth: parsed.claudeAiOauth };
+      return { raw: decoded, parsed, oauth: parsed.claudeAiOauth };
     }
 
-    const raw = execSync(
-      'security find-generic-password -s "Claude Code-credentials" -w',
-      { encoding: "utf-8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] },
-    ).trim();
-
-    const decoded = raw.startsWith("{")
-      ? raw
-      : Buffer.from(raw, "hex").toString("utf-8");
-
-    const parsed = JSON.parse(decoded);
-    if (!parsed?.claudeAiOauth?.accessToken) return null;
-    return { raw: decoded, parsed, oauth: parsed.claudeAiOauth };
+    // Windows, Linux, Docker, and other platforms: read from credential files
+    return readCredentialsFromFile();
   } catch {
     return null;
   }
 }
 
-function writeCredentials(creds: Record<string, unknown>): void {
+function writeCredentials(creds: Record<string, unknown>, sourcePath?: string): void {
   try {
     const json = JSON.stringify(creds);
-    if (process.platform === "win32") {
-      const home =
-        process.env.USERPROFILE || process.env.HOME || homedir() || "";
-      const credPath = join(home, ".claude", ".credentials.json");
-      require("node:fs").writeFileSync(credPath, json, "utf-8");
-    } else {
+    if (process.platform === "darwin") {
       execFileSync(
         "security",
         ["add-generic-password", "-U", "-s", "Claude Code-credentials", "-a", "Claude Code", "-w", json],
         { timeout: 5000, stdio: ["pipe", "pipe", "pipe"] },
       );
+    } else {
+      // Write back to the same file that was read, or default to .credentials.json
+      const credPath = sourcePath ?? join(
+        process.env.USERPROFILE || process.env.HOME || homedir() || "",
+        ".claude",
+        ".credentials.json",
+      );
+      writeFileSync(credPath, json, "utf-8");
     }
   } catch {
     // best-effort
@@ -121,7 +154,7 @@ async function getValidAccessToken(): Promise<string | null> {
     return oauth.accessToken;
   }
 
-  // Token expired — try to refresh
+  // Token expired - try to refresh
   if (!oauth.refreshToken) return null;
 
   const refreshed = await refreshAccessToken(oauth.refreshToken);
@@ -134,7 +167,7 @@ async function getValidAccessToken(): Promise<string | null> {
     refreshToken: refreshed.refreshToken,
     expiresAt: Date.now() + refreshed.expiresIn * 1000,
   };
-  writeCredentials(creds.parsed);
+  writeCredentials(creds.parsed, creds.sourcePath);
 
   return refreshed.accessToken;
 }

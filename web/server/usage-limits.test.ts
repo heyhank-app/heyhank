@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -20,7 +20,7 @@ const mockFetch = vi.fn();
 globalThis.fetch = mockFetch as unknown as typeof fetch;
 
 // ---------------------------------------------------------------------------
-// Module under test — re-imported each time to reset module-level cache
+// Module under test - re-imported each time to reset module-level cache
 // ---------------------------------------------------------------------------
 let mod: typeof import("./usage-limits.js");
 const originalPlatform = process.platform;
@@ -71,41 +71,61 @@ const SAMPLE_LIMITS = {
 };
 
 // ===========================================================================
-// getCredentials
+// getCredentials (macOS - Keychain)
 // ===========================================================================
-describe("getCredentials", () => {
-  it("extracts token from plain JSON output", () => {
+describe("getCredentials (macOS)", () => {
+  beforeEach(() => {
+    // Force macOS platform so the Keychain (execSync) path is used
+    Object.defineProperty(process, "platform", { value: "darwin" });
+  });
+
+  it("extracts token from plain JSON output", async () => {
+    vi.resetModules();
+    mockFetch.mockReset();
+    const darwinMod = await import("./usage-limits.js");
     mockExecSync.mockReturnValue(makeCredentialsJson(SAMPLE_TOKEN));
-    expect(mod.getCredentials()).toBe(SAMPLE_TOKEN);
+    expect(darwinMod.getCredentials()).toBe(SAMPLE_TOKEN);
   });
 
-  it("extracts token from hex-encoded output", () => {
+  it("extracts token from hex-encoded output", async () => {
+    vi.resetModules();
+    mockFetch.mockReset();
+    const darwinMod = await import("./usage-limits.js");
     mockExecSync.mockReturnValue(makeCredentialsHex(SAMPLE_TOKEN));
-    expect(mod.getCredentials()).toBe(SAMPLE_TOKEN);
+    expect(darwinMod.getCredentials()).toBe(SAMPLE_TOKEN);
   });
 
-  it("returns null when execSync throws (e.g. not on macOS)", () => {
+  it("returns null when execSync throws (e.g. no keychain entry)", async () => {
+    vi.resetModules();
+    mockFetch.mockReset();
+    const darwinMod = await import("./usage-limits.js");
     mockExecSync.mockImplementation(() => {
       throw new Error("security: command not found");
     });
-    expect(mod.getCredentials()).toBeNull();
+    expect(darwinMod.getCredentials()).toBeNull();
   });
 
-  it("returns null when JSON has no claudeAiOauth field", () => {
+  it("returns null when JSON has no claudeAiOauth field", async () => {
+    vi.resetModules();
+    mockFetch.mockReset();
+    const darwinMod = await import("./usage-limits.js");
     mockExecSync.mockReturnValue(JSON.stringify({ other: "data" }));
-    expect(mod.getCredentials()).toBeNull();
+    expect(darwinMod.getCredentials()).toBeNull();
   });
 
-  it("returns token even when format doesn't match sk-ant-*", () => {
+  it("returns token even when format does not match sk-ant-*", async () => {
+    vi.resetModules();
+    mockFetch.mockReset();
+    const darwinMod = await import("./usage-limits.js");
     mockExecSync.mockReturnValue(
       JSON.stringify({ claudeAiOauth: { accessToken: "not-a-valid-token" } }),
     );
-    expect(mod.getCredentials()).toBe("not-a-valid-token");
+    expect(darwinMod.getCredentials()).toBe("not-a-valid-token");
   });
 });
 
 // ===========================================================================
-// getCredentials — Windows path
+// getCredentials - Windows path
 // ===========================================================================
 describe("getCredentials (Windows)", () => {
   let tempDir: string;
@@ -162,6 +182,138 @@ describe("getCredentials (Windows)", () => {
 });
 
 // ===========================================================================
+// getCredentials - Linux / Docker path
+// ===========================================================================
+describe("getCredentials (Linux / Docker)", () => {
+  let tempDir: string;
+  const originalHome = process.env.HOME;
+
+  beforeEach(() => {
+    // Force Linux platform so the file-based credential path is used
+    Object.defineProperty(process, "platform", { value: "linux" });
+    tempDir = mkdtempSync(join(tmpdir(), "usage-limits-linux-test-"));
+  });
+
+  afterEach(() => {
+    // Restore original HOME to avoid cross-test environment pollution
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("reads token from .credentials.json on Linux", async () => {
+    const claudeDir = join(tempDir, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(
+      join(claudeDir, ".credentials.json"),
+      makeCredentialsJson(SAMPLE_TOKEN),
+    );
+    process.env.HOME = tempDir;
+
+    vi.resetModules();
+    mockFetch.mockReset();
+    const linuxMod = await import("./usage-limits.js");
+    expect(linuxMod.getCredentials()).toBe(SAMPLE_TOKEN);
+  });
+
+  it("falls back to alternative credential file names", async () => {
+    // Only auth.json exists (not .credentials.json)
+    const claudeDir = join(tempDir, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(
+      join(claudeDir, "auth.json"),
+      makeCredentialsJson(SAMPLE_TOKEN),
+    );
+    process.env.HOME = tempDir;
+
+    vi.resetModules();
+    mockFetch.mockReset();
+    const linuxMod = await import("./usage-limits.js");
+    expect(linuxMod.getCredentials()).toBe(SAMPLE_TOKEN);
+  });
+
+  it("returns null when no credential files exist on Linux", async () => {
+    process.env.HOME = tempDir;
+
+    vi.resetModules();
+    mockFetch.mockReset();
+    const linuxMod = await import("./usage-limits.js");
+    expect(linuxMod.getCredentials()).toBeNull();
+  });
+
+  it("returns null when credentials file has invalid JSON on Linux", async () => {
+    const claudeDir = join(tempDir, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(join(claudeDir, ".credentials.json"), "NOT VALID JSON{{{");
+    process.env.HOME = tempDir;
+
+    vi.resetModules();
+    mockFetch.mockReset();
+    const linuxMod = await import("./usage-limits.js");
+    expect(linuxMod.getCredentials()).toBeNull();
+  });
+
+  it("does not call macOS security command on Linux", async () => {
+    const claudeDir = join(tempDir, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(
+      join(claudeDir, ".credentials.json"),
+      makeCredentialsJson(SAMPLE_TOKEN),
+    );
+    process.env.HOME = tempDir;
+
+    vi.resetModules();
+    mockFetch.mockReset();
+    const linuxMod = await import("./usage-limits.js");
+    linuxMod.getCredentials();
+    // security command should never be invoked on Linux
+    expect(mockExecSync).not.toHaveBeenCalled();
+  });
+
+  it("writes refreshed credentials back to the same source file", async () => {
+    // Credentials are stored in auth.json (not the default .credentials.json)
+    const claudeDir = join(tempDir, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(
+      join(claudeDir, "auth.json"),
+      makeCredentialsJson(SAMPLE_TOKEN, { expired: true }),
+    );
+    process.env.HOME = tempDir;
+
+    vi.resetModules();
+    mockFetch.mockReset();
+    const linuxMod = await import("./usage-limits.js");
+
+    // First call = token refresh, second call = usage API
+    mockFetch
+      .mockReturnValueOnce(
+        makeFetchResponse({
+          access_token: "sk-ant-new-token",
+          refresh_token: "sk-ant-new-refresh",
+          expires_in: 3600,
+        }),
+      )
+      .mockReturnValueOnce(makeFetchResponse(SAMPLE_LIMITS));
+
+    const result = await linuxMod.getUsageLimits();
+    expect(result).toEqual(SAMPLE_LIMITS);
+
+    // Credentials should have been written to file (not via execFileSync/security)
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+
+    // Verify the refreshed token was written back to auth.json (the source file)
+    const updatedCreds = JSON.parse(
+      readFileSync(join(claudeDir, "auth.json"), "utf-8"),
+    );
+    expect(updatedCreds.claudeAiOauth.accessToken).toBe("sk-ant-new-token");
+    expect(updatedCreds.claudeAiOauth.refreshToken).toBe("sk-ant-new-refresh");
+  });
+});
+
+// ===========================================================================
 // fetchUsageLimits
 // ===========================================================================
 describe("fetchUsageLimits", () => {
@@ -210,36 +362,50 @@ describe("fetchUsageLimits", () => {
 
 // ===========================================================================
 // getUsageLimits (orchestrator with cache)
+// These tests use macOS platform to exercise the execSync/keychain path
 // ===========================================================================
 describe("getUsageLimits", () => {
   const EMPTY = { five_hour: null, seven_day: null, extra_usage: null };
 
+  beforeEach(() => {
+    Object.defineProperty(process, "platform", { value: "darwin" });
+  });
+
   it("returns empty when no credentials are available", async () => {
+    vi.resetModules();
+    mockFetch.mockReset();
+    const darwinMod = await import("./usage-limits.js");
     mockExecSync.mockImplementation(() => {
       throw new Error("no keychain");
     });
-    const result = await mod.getUsageLimits();
+    const result = await darwinMod.getUsageLimits();
     expect(result).toEqual(EMPTY);
   });
 
   it("returns limits and caches the result", async () => {
+    vi.resetModules();
+    mockFetch.mockReset();
+    const darwinMod = await import("./usage-limits.js");
     mockExecSync.mockReturnValue(makeCredentialsJson(SAMPLE_TOKEN));
     mockFetch.mockReturnValue(makeFetchResponse(SAMPLE_LIMITS));
 
-    const first = await mod.getUsageLimits();
+    const first = await darwinMod.getUsageLimits();
     expect(first).toEqual(SAMPLE_LIMITS);
 
-    // Second call should use cache — fetch should not be called again
-    const second = await mod.getUsageLimits();
+    // Second call should use cache - fetch should not be called again
+    const second = await darwinMod.getUsageLimits();
     expect(second).toEqual(SAMPLE_LIMITS);
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it("refreshes cache after TTL expires", async () => {
+    vi.resetModules();
+    mockFetch.mockReset();
+    const darwinMod = await import("./usage-limits.js");
     mockExecSync.mockReturnValue(makeCredentialsJson(SAMPLE_TOKEN));
     mockFetch.mockReturnValue(makeFetchResponse(SAMPLE_LIMITS));
 
-    await mod.getUsageLimits();
+    await darwinMod.getUsageLimits();
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
     // Manually expire the cache by advancing Date.now via spy
@@ -252,7 +418,7 @@ describe("getUsageLimits", () => {
     };
     mockFetch.mockReturnValue(makeFetchResponse(updated));
 
-    const result = await mod.getUsageLimits();
+    const result = await darwinMod.getUsageLimits();
     expect(result).toEqual(updated);
     expect(mockFetch).toHaveBeenCalledTimes(2);
 
@@ -260,21 +426,35 @@ describe("getUsageLimits", () => {
   });
 
   it("returns empty when fetch fails", async () => {
+    vi.resetModules();
+    mockFetch.mockReset();
+    const darwinMod = await import("./usage-limits.js");
     mockExecSync.mockReturnValue(makeCredentialsJson(SAMPLE_TOKEN));
     mockFetch.mockReturnValue(makeFetchResponse({}, false));
 
-    const result = await mod.getUsageLimits();
+    const result = await darwinMod.getUsageLimits();
     expect(result).toEqual(EMPTY);
   });
 });
 
 // ===========================================================================
-// Token refresh flow (via getUsageLimits → getValidAccessToken)
+// Token refresh flow (via getUsageLimits -> getValidAccessToken)
+// These tests use macOS platform to exercise the execSync/keychain path
 // ===========================================================================
 describe("token refresh", () => {
   const EMPTY = { five_hour: null, seven_day: null, extra_usage: null };
 
+  beforeEach(() => {
+    Object.defineProperty(process, "platform", { value: "darwin" });
+  });
+
   it("refreshes an expired token and uses the new one", async () => {
+    vi.resetModules();
+    mockFetch.mockReset();
+    mockExecSync.mockReset();
+    mockExecFileSync.mockReset();
+    const darwinMod = await import("./usage-limits.js");
+
     // Provide an expired token
     mockExecSync.mockReturnValue(makeCredentialsJson(SAMPLE_TOKEN, { expired: true }));
 
@@ -289,7 +469,7 @@ describe("token refresh", () => {
       )
       .mockReturnValueOnce(makeFetchResponse(SAMPLE_LIMITS));
 
-    const result = await mod.getUsageLimits();
+    const result = await darwinMod.getUsageLimits();
     expect(result).toEqual(SAMPLE_LIMITS);
 
     // First fetch = refresh call to platform.claude.com
@@ -303,35 +483,50 @@ describe("token refresh", () => {
     expect(usageUrl).toContain("oauth/usage");
     expect(usageOpts.headers.Authorization).toBe("Bearer sk-ant-new-token");
 
-    // Credentials should have been written back via execFileSync
+    // Credentials should have been written back via execFileSync (macOS keychain)
     expect(mockExecFileSync).toHaveBeenCalled();
   });
 
   it("returns empty when token is expired and refresh fails", async () => {
+    vi.resetModules();
+    mockFetch.mockReset();
+    mockExecSync.mockReset();
+    const darwinMod = await import("./usage-limits.js");
+
     mockExecSync.mockReturnValue(makeCredentialsJson(SAMPLE_TOKEN, { expired: true }));
     // Refresh call fails
     mockFetch.mockReturnValueOnce(makeFetchResponse({}, false));
 
-    const result = await mod.getUsageLimits();
+    const result = await darwinMod.getUsageLimits();
     expect(result).toEqual(EMPTY);
     // Only the refresh call, no usage call
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it("returns empty when token is expired and refresh throws", async () => {
+    vi.resetModules();
+    mockFetch.mockReset();
+    mockExecSync.mockReset();
+    const darwinMod = await import("./usage-limits.js");
+
     mockExecSync.mockReturnValue(makeCredentialsJson(SAMPLE_TOKEN, { expired: true }));
     mockFetch.mockRejectedValueOnce(new Error("network error"));
 
-    const result = await mod.getUsageLimits();
+    const result = await darwinMod.getUsageLimits();
     expect(result).toEqual(EMPTY);
   });
 
   it("uses valid (non-expired) token without refreshing", async () => {
+    vi.resetModules();
+    mockFetch.mockReset();
+    mockExecSync.mockReset();
+    const darwinMod = await import("./usage-limits.js");
+
     // Token has a future expiry (default in makeCredentialsJson)
     mockExecSync.mockReturnValue(makeCredentialsJson(SAMPLE_TOKEN));
     mockFetch.mockReturnValueOnce(makeFetchResponse(SAMPLE_LIMITS));
 
-    const result = await mod.getUsageLimits();
+    const result = await darwinMod.getUsageLimits();
     expect(result).toEqual(SAMPLE_LIMITS);
     // Only one fetch call (usage API), no refresh call
     expect(mockFetch).toHaveBeenCalledTimes(1);
