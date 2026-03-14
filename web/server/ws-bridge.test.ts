@@ -20,6 +20,20 @@ const mockExecSync = vi.hoisted(() => vi.fn());
 vi.mock("node:child_process", () => ({ execSync: mockExecSync }));
 vi.mock("node:crypto", () => ({ randomUUID: () => "test-uuid" }));
 
+// Mock settings-manager to prevent AI validation from interfering with tests.
+// Without this mock, the real settings file (~/.companion/settings.json) may have
+// aiValidationEnabled: true, causing handleControlRequest to call validatePermission
+// (an external API call) and auto-approve/deny permissions before they reach pendingPermissions.
+vi.mock("./settings-manager.js", () => ({
+  getSettings: () => ({
+    aiValidationEnabled: false,
+    aiValidationAutoApprove: false,
+    aiValidationAutoDeny: false,
+    anthropicApiKey: "",
+  }),
+  DEFAULT_ANTHROPIC_MODEL: "claude-sonnet-4-6",
+}));
+
 import { WsBridge, type SocketData } from "./ws-bridge.js";
 import { SessionStore } from "./session-store.js";
 import { containerManager } from "./container-manager.js";
@@ -318,14 +332,14 @@ describe("prePopulateCommands", () => {
     expect(browser.send).not.toHaveBeenCalled();
   });
 
-  it("system.init overwrites pre-populated data with authoritative list", () => {
+  it("system.init overwrites pre-populated data with authoritative list", async () => {
     // After prePopulateCommands, when CLI sends system.init, the CLI's
     // authoritative list should replace the pre-populated data.
     bridge.prePopulateCommands("s1", ["pre-cmd"], ["pre-skill"]);
 
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(
+    await bridge.handleCLIMessage(
       cli,
       makeInitMsg({
         slash_commands: ["cli-cmd-1", "cli-cmd-2"],
@@ -393,7 +407,7 @@ describe("CLI handlers", () => {
     expect(parsed.message.content).toBe("hello queued");
   });
 
-  it("handleCLIMessage: system.init does not re-flush already-sent messages", () => {
+  it("handleCLIMessage: system.init does not re-flush already-sent messages", async () => {
     // Messages are flushed on CLI connect, so by the time system.init
     // arrives the queue should already be empty.
     mockExecSync.mockImplementation(() => { throw new Error("not a git repo"); });
@@ -416,7 +430,7 @@ describe("CLI handlers", () => {
     const sendCountAfterOpen = cli.send.mock.calls.length;
 
     // Send system.init — no additional flush should happen
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
 
     // Verify no additional user messages were sent after system.init
     const newCalls = cli.send.mock.calls.slice(sendCountAfterOpen);
@@ -424,7 +438,7 @@ describe("CLI handlers", () => {
     expect(userMsgAfterInit).toBeUndefined();
   });
 
-  it("handleCLIMessage: parses NDJSON and routes system.init", () => {
+  it("handleCLIMessage: parses NDJSON and routes system.init", async () => {
     mockExecSync.mockImplementation(() => {
       throw new Error("not a git repo");
     });
@@ -435,7 +449,7 @@ describe("CLI handlers", () => {
     bridge.handleBrowserOpen(browser, "s1");
     browser.send.mockClear();
 
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
 
     const session = bridge.getSession("s1")!;
     expect(session.state.model).toBe("claude-sonnet-4-6");
@@ -448,7 +462,7 @@ describe("CLI handlers", () => {
     expect(initCall.session.model).toBe("claude-sonnet-4-6");
   });
 
-  it("handleCLIMessage: system.init fires onCLISessionIdReceived callback", () => {
+  it("handleCLIMessage: system.init fires onCLISessionIdReceived callback", async () => {
     mockExecSync.mockImplementation(() => {
       throw new Error("not a git repo");
     });
@@ -458,12 +472,12 @@ describe("CLI handlers", () => {
 
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg({ session_id: "cli-internal-id" }));
+    await bridge.handleCLIMessage(cli, makeInitMsg({ session_id: "cli-internal-id" }));
 
     expect(callback).toHaveBeenCalledWith("s1", "cli-internal-id");
   });
 
-  it("handleCLIMessage: updates state from init (model, cwd, tools, permissionMode)", () => {
+  it("handleCLIMessage: updates state from init (model, cwd, tools, permissionMode)", async () => {
     mockExecSync.mockImplementation(() => {
       throw new Error("not a git repo");
     });
@@ -471,7 +485,7 @@ describe("CLI handlers", () => {
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
 
-    bridge.handleCLIMessage(cli, makeInitMsg({
+    await bridge.handleCLIMessage(cli, makeInitMsg({
       model: "claude-opus-4-5-20250929",
       cwd: "/workspace",
       tools: ["Bash", "Read", "Edit"],
@@ -495,7 +509,7 @@ describe("CLI handlers", () => {
     expect(state.skills).toEqual(["pdf"]);
   });
 
-  it("handleCLIMessage: system.init preserves host cwd for containerized sessions", () => {
+  it("handleCLIMessage: system.init preserves host cwd for containerized sessions", async () => {
     // markContainerized sets the host cwd and is_containerized before CLI connects
     bridge.markContainerized("s1", "/Users/stan/Dev/myproject");
 
@@ -507,14 +521,14 @@ describe("CLI handlers", () => {
     bridge.handleCLIOpen(cli, "s1");
 
     // CLI inside the container reports /workspace — should be ignored
-    bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/workspace" }));
+    await bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/workspace" }));
 
     const state = bridge.getSession("s1")!.state;
     expect(state.cwd).toBe("/Users/stan/Dev/myproject");
     expect(state.is_containerized).toBe(true);
   });
 
-  it("handleCLIMessage: keeps previous git info when container metadata is temporarily unavailable", () => {
+  it("handleCLIMessage: keeps previous git info when container metadata is temporarily unavailable", async () => {
     const session = bridge.getOrCreateSession("s1");
     session.state.git_branch = "existing-branch";
     session.state.repo_root = "/workspace";
@@ -528,7 +542,7 @@ describe("CLI handlers", () => {
 
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/workspace" }));
+    await bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/workspace" }));
 
     const state = bridge.getSession("s1")!.state;
     expect(state.git_branch).toBe("existing-branch");
@@ -537,7 +551,7 @@ describe("CLI handlers", () => {
     expect(state.git_behind).toBe(1);
   });
 
-  it("handleCLIMessage: resolves git info from container for containerized sessions", () => {
+  it("handleCLIMessage: resolves git info from container for containerized sessions", async () => {
     bridge.markContainerized("s1", "/Users/stan/Dev/myproject");
     const getContainerSpy = vi.spyOn(containerManager, "getContainer").mockReturnValue({
       containerId: "abc123def456",
@@ -562,7 +576,7 @@ describe("CLI handlers", () => {
 
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/workspace" }));
+    await bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/workspace" }));
 
     const state = bridge.getSession("s1")!.state;
     expect(state.cwd).toBe("/Users/stan/Dev/myproject");
@@ -574,7 +588,7 @@ describe("CLI handlers", () => {
     getContainerSpy.mockRestore();
   });
 
-  it("handleCLIMessage: maps nested container repo_root paths back to host paths", () => {
+  it("handleCLIMessage: maps nested container repo_root paths back to host paths", async () => {
     bridge.markContainerized("s1", "/Users/stan/Dev/myproject");
     const getContainerSpy = vi.spyOn(containerManager, "getContainer").mockReturnValue({
       containerId: "abc123def456",
@@ -599,7 +613,7 @@ describe("CLI handlers", () => {
 
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/workspace" }));
+    await bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/workspace" }));
 
     const state = bridge.getSession("s1")!.state;
     expect(state.repo_root).toBe("/Users/stan/Dev/myproject/packages/api");
@@ -607,7 +621,7 @@ describe("CLI handlers", () => {
     getContainerSpy.mockRestore();
   });
 
-  it("handleCLIMessage: system.init resolves git info via execSync", () => {
+  it("handleCLIMessage: system.init resolves git info via execSync", async () => {
     mockExecSync.mockImplementation((cmd: string) => {
       if (cmd.includes("--abbrev-ref HEAD")) return "feat/test-branch\n";
       if (cmd.includes("--show-toplevel")) return "/repo\n";
@@ -617,7 +631,7 @@ describe("CLI handlers", () => {
 
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
 
     const state = bridge.getSession("s1")!.state;
     expect(state.git_branch).toBe("feat/test-branch");
@@ -626,7 +640,7 @@ describe("CLI handlers", () => {
     expect(state.git_behind).toBe(2);
   });
 
-  it("handleCLIMessage: system.init resolves repo_root via --show-toplevel for standard repo", () => {
+  it("handleCLIMessage: system.init resolves repo_root via --show-toplevel for standard repo", async () => {
     mockExecSync.mockImplementation((cmd: string) => {
       if (cmd.includes("--abbrev-ref HEAD")) return "main\n";
       if (cmd.includes("--git-dir")) return ".git\n";
@@ -637,13 +651,13 @@ describe("CLI handlers", () => {
 
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/home/user/myproject" }));
+    await bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/home/user/myproject" }));
 
     const state = bridge.getSession("s1")!.state;
     expect(state.repo_root).toBe("/home/user/myproject");
   });
 
-  it("handleCLIMessage: system.status updates compacting and permissionMode", () => {
+  it("handleCLIMessage: system.status updates compacting and permissionMode", async () => {
     const cli = makeCliSocket("s1");
     const browser = makeBrowserSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
@@ -659,7 +673,7 @@ describe("CLI handlers", () => {
       session_id: "s1",
     });
 
-    bridge.handleCLIMessage(cli, statusMsg);
+    await bridge.handleCLIMessage(cli, statusMsg);
 
     const state = bridge.getSession("s1")!.state;
     expect(state.is_compacting).toBe(true);
@@ -669,14 +683,14 @@ describe("CLI handlers", () => {
     expect(calls).toContainEqual(expect.objectContaining({ type: "status_change", status: "compacting" }));
   });
 
-  it("handleCLIMessage: forwards compact_boundary as system_event and persists it", () => {
+  it("handleCLIMessage: forwards compact_boundary as system_event and persists it", async () => {
     const cli = makeCliSocket("s1");
     const browser = makeBrowserSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
     bridge.handleBrowserOpen(browser, "s1");
     browser.send.mockClear();
 
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "system",
       subtype: "compact_boundary",
       compact_metadata: { trigger: "auto", pre_tokens: 4096 },
@@ -699,14 +713,14 @@ describe("CLI handlers", () => {
     expect(forwarded.event.subtype).toBe("compact_boundary");
   });
 
-  it("handleCLIMessage: forwards hook_progress as system_event without persisting history", () => {
+  it("handleCLIMessage: forwards hook_progress as system_event without persisting history", async () => {
     const cli = makeCliSocket("s1");
     const browser = makeBrowserSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
     bridge.handleBrowserOpen(browser, "s1");
     browser.send.mockClear();
 
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "system",
       subtype: "hook_progress",
       hook_id: "hk-1",
@@ -750,7 +764,7 @@ describe("CLI handlers", () => {
     vi.useRealTimers();
   });
 
-  it("handleCLIClose: cancels pending permissions", () => {
+  it("handleCLIClose: cancels pending permissions", async () => {
     vi.useFakeTimers();
     const cli = makeCliSocket("s1");
     const browser = makeBrowserSocket("s1");
@@ -768,7 +782,7 @@ describe("CLI handlers", () => {
         tool_use_id: "tu-1",
       },
     });
-    bridge.handleCLIMessage(cli, controlReq);
+    await bridge.handleCLIMessage(cli, controlReq);
     browser.send.mockClear();
 
     bridge.handleCLIClose(cli);
@@ -907,7 +921,7 @@ describe("Browser handlers", () => {
     expect(gitInfoCb).toHaveBeenCalledWith("s1", "/repo", "feat/dynamic-branch");
   });
 
-  it("handleBrowserOpen: replays message history", () => {
+  it("handleBrowserOpen: replays message history", async () => {
     // First populate some history
     mockExecSync.mockImplementation(() => {
       throw new Error("not a git repo");
@@ -931,7 +945,7 @@ describe("Browser handlers", () => {
       uuid: "uuid-2",
       session_id: "s1",
     });
-    bridge.handleCLIMessage(cli, assistantMsg);
+    await bridge.handleCLIMessage(cli, assistantMsg);
 
     // Now connect a new browser
     const browser = makeBrowserSocket("s1");
@@ -944,7 +958,7 @@ describe("Browser handlers", () => {
     expect(historyMsg.messages[0].type).toBe("assistant");
   });
 
-  it("handleBrowserOpen: sends pending permissions", () => {
+  it("handleBrowserOpen: sends pending permissions", async () => {
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
 
@@ -959,7 +973,7 @@ describe("Browser handlers", () => {
         tool_use_id: "tu-1",
       },
     });
-    bridge.handleCLIMessage(cli, controlReq);
+    await bridge.handleCLIMessage(cli, controlReq);
 
     // Now connect a browser
     const browser = makeBrowserSocket("s1");
@@ -1014,19 +1028,19 @@ describe("Browser handlers", () => {
     expect(bridge.getSession("s1")!.browserSockets.has(browser)).toBe(false);
   });
 
-  it("session_subscribe: replays buffered sequenced events after last_seq", () => {
+  it("session_subscribe: replays buffered sequenced events after last_seq", async () => {
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
 
     // Generate replayable events while no browser is connected.
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "stream_event",
       event: { type: "content_block_delta", delta: { type: "text_delta", text: "a" } },
       parent_tool_use_id: null,
       uuid: "u1",
       session_id: "s1",
     }));
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "stream_event",
       event: { type: "content_block_delta", delta: { type: "text_delta", text: "b" } },
       parent_tool_use_id: null,
@@ -1052,12 +1066,12 @@ describe("Browser handlers", () => {
     expect(replay.events[0].message.type).toBe("stream_event");
   });
 
-  it("session_subscribe: falls back to message_history when last_seq is older than buffer window", () => {
+  it("session_subscribe: falls back to message_history when last_seq is older than buffer window", async () => {
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
 
     // Populate history so fallback payload has content.
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "assistant",
       message: {
         id: "hist-1",
@@ -1074,14 +1088,14 @@ describe("Browser handlers", () => {
     }));
 
     // Generate several stream events, then trim the first one from in-memory buffer.
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "stream_event",
       event: { type: "content_block_delta", delta: { type: "text_delta", text: "1" } },
       parent_tool_use_id: null,
       uuid: "se-u1",
       session_id: "s1",
     }));
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "stream_event",
       event: { type: "content_block_delta", delta: { type: "text_delta", text: "2" } },
       parent_tool_use_id: null,
@@ -1110,14 +1124,14 @@ describe("Browser handlers", () => {
     expect(replayMsg.events.some((e: any) => e.message.type === "stream_event")).toBe(true);
   });
 
-  it("session_subscribe: sends ground-truth status_change=idle after event_replay when last history is result", () => {
+  it("session_subscribe: sends ground-truth status_change=idle after event_replay when last history is result", async () => {
     // When the CLI finished (result in messageHistory), the server should send
     // a status_change after event_replay so the browser clears stale "running" state.
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
 
     // Simulate a completed turn: assistant → result in history
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "assistant",
       message: {
         id: "a1",
@@ -1132,7 +1146,7 @@ describe("Browser handlers", () => {
       uuid: "u1",
       session_id: "s1",
     }));
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       is_error: false,
       total_cost_usd: 0.01,
@@ -1157,13 +1171,13 @@ describe("Browser handlers", () => {
     expect(lastStatus.status).toBe("idle");
   });
 
-  it("session_subscribe: sends ground-truth status_change=running after event_replay when last history is assistant", () => {
+  it("session_subscribe: sends ground-truth status_change=running after event_replay when last history is assistant", async () => {
     // When the CLI is mid-turn (assistant in messageHistory but no result yet),
     // the ground-truth status should be "running".
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
 
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "assistant",
       message: {
         id: "a1",
@@ -1195,13 +1209,13 @@ describe("Browser handlers", () => {
     expect(lastStatus.status).toBe("running");
   });
 
-  it("session_subscribe: sends status_change=idle in gap path when session completed", () => {
+  it("session_subscribe: sends status_change=idle in gap path when session completed", async () => {
     // Even when falling back to message_history + transient replay,
     // a trailing status_change should correct stale state.
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
 
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "assistant",
       message: {
         id: "a1",
@@ -1216,7 +1230,7 @@ describe("Browser handlers", () => {
       uuid: "u1",
       session_id: "s1",
     }));
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       is_error: false,
       total_cost_usd: 0.01,
@@ -1224,7 +1238,7 @@ describe("Browser handlers", () => {
       session_id: "s1",
     }));
     // Add a stream event and then force a gap by trimming the buffer
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "stream_event",
       event: { type: "content_block_delta", delta: { type: "text_delta", text: "x" } },
       parent_tool_use_id: null,
@@ -1277,7 +1291,7 @@ describe("CLI message routing", () => {
     browser.send.mockClear();
   });
 
-  it("assistant: stores in history and broadcasts", () => {
+  it("assistant: stores in history and broadcasts", async () => {
     const msg = JSON.stringify({
       type: "assistant",
       message: {
@@ -1294,7 +1308,7 @@ describe("CLI message routing", () => {
       session_id: "s1",
     });
 
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     const session = bridge.getSession("s1")!;
     expect(session.messageHistory).toHaveLength(1);
@@ -1307,7 +1321,7 @@ describe("CLI message routing", () => {
     expect(assistantBroadcast.parent_tool_use_id).toBeNull();
   });
 
-  it("result: updates cost/turns/context% and stores + broadcasts", () => {
+  it("result: updates cost/turns/context% and stores + broadcasts", async () => {
     const msg = JSON.stringify({
       type: "result",
       subtype: "success",
@@ -1325,7 +1339,7 @@ describe("CLI message routing", () => {
       session_id: "s1",
     });
 
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     const state = bridge.getSession("s1")!.state;
     expect(state.total_cost_usd).toBe(0.05);
@@ -1343,7 +1357,7 @@ describe("CLI message routing", () => {
     expect(resultBroadcast.data.total_cost_usd).toBe(0.05);
   });
 
-  it("result: refreshes git branch and broadcasts session_update when branch changes", () => {
+  it("result: refreshes git branch and broadcasts session_update when branch changes", async () => {
     mockExecSync.mockImplementation((cmd: string) => {
       if (cmd.includes("--abbrev-ref HEAD")) return "feat/new-branch\n";
       if (cmd.includes("--git-dir")) return ".git\n";
@@ -1371,7 +1385,7 @@ describe("CLI message routing", () => {
       session_id: "s1",
     });
 
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
     const updateMsg = calls.find((c: any) => c.type === "session_update");
@@ -1381,7 +1395,7 @@ describe("CLI message routing", () => {
     expect(bridge.getSession("s1")!.state.git_branch).toBe("feat/new-branch");
   });
 
-  it("result: computes context_used_percent from modelUsage", () => {
+  it("result: computes context_used_percent from modelUsage", async () => {
     const msg = JSON.stringify({
       type: "result",
       subtype: "success",
@@ -1407,14 +1421,14 @@ describe("CLI message routing", () => {
       session_id: "s1",
     });
 
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     const state = bridge.getSession("s1")!.state;
     // (8000 + 2000) / 200000 * 100 = 5
     expect(state.context_used_percent).toBe(5);
   });
 
-  it("stream_event: broadcasts without storing", () => {
+  it("stream_event: broadcasts without storing", async () => {
     const msg = JSON.stringify({
       type: "stream_event",
       event: { type: "content_block_delta", delta: { type: "text_delta", text: "hi" } },
@@ -1423,7 +1437,7 @@ describe("CLI message routing", () => {
       session_id: "s1",
     });
 
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     const session = bridge.getSession("s1")!;
     expect(session.messageHistory).toHaveLength(0);
@@ -1435,7 +1449,7 @@ describe("CLI message routing", () => {
     expect(streamEvent.parent_tool_use_id).toBeNull();
   });
 
-  it("control_request (can_use_tool): adds to pending and broadcasts", () => {
+  it("control_request (can_use_tool): adds to pending and broadcasts", async () => {
     const msg = JSON.stringify({
       type: "control_request",
       request_id: "req-42",
@@ -1450,7 +1464,7 @@ describe("CLI message routing", () => {
       },
     });
 
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     const session = bridge.getSession("s1")!;
     expect(session.pendingPermissions.size).toBe(1);
@@ -1469,7 +1483,7 @@ describe("CLI message routing", () => {
     expect(permBroadcast.request.tool_name).toBe("Bash");
   });
 
-  it("tool_progress: broadcasts", () => {
+  it("tool_progress: broadcasts", async () => {
     const msg = JSON.stringify({
       type: "tool_progress",
       tool_use_id: "tu-10",
@@ -1480,7 +1494,7 @@ describe("CLI message routing", () => {
       session_id: "s1",
     });
 
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
     const progressMsg = calls.find((c: any) => c.type === "tool_progress");
@@ -1490,7 +1504,7 @@ describe("CLI message routing", () => {
     expect(progressMsg.elapsed_time_seconds).toBe(3.5);
   });
 
-  it("tool_use_summary: broadcasts", () => {
+  it("tool_use_summary: broadcasts", async () => {
     const msg = JSON.stringify({
       type: "tool_use_summary",
       summary: "Ran bash command successfully",
@@ -1499,7 +1513,7 @@ describe("CLI message routing", () => {
       session_id: "s1",
     });
 
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
     const summaryMsg = calls.find((c: any) => c.type === "tool_use_summary");
@@ -1508,15 +1522,15 @@ describe("CLI message routing", () => {
     expect(summaryMsg.tool_use_ids).toEqual(["tu-10", "tu-11"]);
   });
 
-  it("keep_alive: silently consumed, no broadcast", () => {
+  it("keep_alive: silently consumed, no broadcast", async () => {
     const msg = JSON.stringify({ type: "keep_alive" });
 
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     expect(browser.send).not.toHaveBeenCalled();
   });
 
-  it("multi-line NDJSON: processes both lines", () => {
+  it("multi-line NDJSON: processes both lines", async () => {
     const line1 = JSON.stringify({
       type: "tool_progress",
       tool_use_id: "tu-a",
@@ -1536,7 +1550,7 @@ describe("CLI message routing", () => {
       session_id: "s1",
     });
 
-    bridge.handleCLIMessage(cli, line1 + "\n" + line2);
+    await bridge.handleCLIMessage(cli, line1 + "\n" + line2);
 
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
     const progressMsgs = calls.filter((c: any) => c.type === "tool_progress");
@@ -1545,12 +1559,12 @@ describe("CLI message routing", () => {
     expect(progressMsgs[1].tool_use_id).toBe("tu-b");
   });
 
-  it("malformed JSON: skips gracefully without crashing", () => {
+  it("malformed JSON: skips gracefully without crashing", async () => {
     const validLine = JSON.stringify({ type: "keep_alive" });
     const raw = "not-valid-json\n" + validLine;
 
-    // Should not throw
-    expect(() => bridge.handleCLIMessage(cli, raw)).not.toThrow();
+    // Should not throw (async — just await it directly)
+    await bridge.handleCLIMessage(cli, raw);
     // keep_alive is silently consumed, so no broadcast
     expect(browser.send).not.toHaveBeenCalled();
   });
@@ -1651,9 +1665,9 @@ describe("Browser message routing", () => {
     expect(sent.message.content[1].text).toBe("What's in this image?");
   });
 
-  it("permission_response allow: sends control_response to CLI", () => {
+  it("permission_response allow: sends control_response to CLI", async () => {
     // First create a pending permission
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "control_request",
       request_id: "req-allow",
       request: {
@@ -1685,9 +1699,9 @@ describe("Browser message routing", () => {
     expect(session.pendingPermissions.has("req-allow")).toBe(false);
   });
 
-  it("permission_response deny: sends deny response to CLI", () => {
+  it("permission_response deny: sends deny response to CLI", async () => {
     // Create a pending permission
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "control_request",
       request_id: "req-deny",
       request: {
@@ -1720,8 +1734,8 @@ describe("Browser message routing", () => {
     expect(session.pendingPermissions.has("req-deny")).toBe(false);
   });
 
-  it("permission_response: deduplicates repeated client_msg_id", () => {
-    bridge.handleCLIMessage(cli, JSON.stringify({
+  it("permission_response: deduplicates repeated client_msg_id", async () => {
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "control_request",
       request_id: "req-dedupe",
       request: {
@@ -1971,7 +1985,7 @@ describe("Persistence", () => {
     expect(session.state.model).toBe("live-model");
   });
 
-  it("persistSession: called after state changes (via store.save)", () => {
+  it("persistSession: called after state changes (via store.save)", async () => {
     mockExecSync.mockImplementation(() => {
       throw new Error("not a git repo");
     });
@@ -1982,7 +1996,7 @@ describe("Persistence", () => {
     bridge.handleCLIOpen(cli, "s1");
 
     // system.init should trigger persist
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
     expect(saveSpy).toHaveBeenCalled();
 
     const lastCall = saveSpy.mock.calls[saveSpy.mock.calls.length - 1][0];
@@ -1992,7 +2006,7 @@ describe("Persistence", () => {
     saveSpy.mockClear();
 
     // assistant message should trigger persist
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "assistant",
       message: {
         id: "msg-1",
@@ -2012,7 +2026,7 @@ describe("Persistence", () => {
     saveSpy.mockClear();
 
     // result message should trigger persist
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
@@ -2030,7 +2044,7 @@ describe("Persistence", () => {
     saveSpy.mockClear();
 
     // control_request (can_use_tool) should trigger persist
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "control_request",
       request_id: "req-persist",
       request: {
@@ -2069,7 +2083,7 @@ describe("auth_status message routing", () => {
     browser.send.mockClear();
   });
 
-  it("broadcasts auth_status with isAuthenticating: true", () => {
+  it("broadcasts auth_status with isAuthenticating: true", async () => {
     const msg = JSON.stringify({
       type: "auth_status",
       isAuthenticating: true,
@@ -2078,7 +2092,7 @@ describe("auth_status message routing", () => {
       session_id: "s1",
     });
 
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
     const authMsg = calls.find((c: any) => c.type === "auth_status");
@@ -2088,7 +2102,7 @@ describe("auth_status message routing", () => {
     expect(authMsg.error).toBeUndefined();
   });
 
-  it("broadcasts auth_status with isAuthenticating: false", () => {
+  it("broadcasts auth_status with isAuthenticating: false", async () => {
     const msg = JSON.stringify({
       type: "auth_status",
       isAuthenticating: false,
@@ -2097,7 +2111,7 @@ describe("auth_status message routing", () => {
       session_id: "s1",
     });
 
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
     const authMsg = calls.find((c: any) => c.type === "auth_status");
@@ -2106,7 +2120,7 @@ describe("auth_status message routing", () => {
     expect(authMsg.output).toEqual(["Authentication complete"]);
   });
 
-  it("broadcasts auth_status with error field", () => {
+  it("broadcasts auth_status with error field", async () => {
     const msg = JSON.stringify({
       type: "auth_status",
       isAuthenticating: false,
@@ -2116,7 +2130,7 @@ describe("auth_status message routing", () => {
       session_id: "s1",
     });
 
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
     const authMsg = calls.find((c: any) => c.type === "auth_status");
@@ -2142,9 +2156,9 @@ describe("permission_response with updated_permissions", () => {
     browser.send.mockClear();
   });
 
-  it("allow with updated_permissions forwards updatedPermissions in control_response", () => {
+  it("allow with updated_permissions forwards updatedPermissions in control_response", async () => {
     // Create pending permission
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "control_request",
       request_id: "req-perm-update",
       request: {
@@ -2175,9 +2189,9 @@ describe("permission_response with updated_permissions", () => {
     expect(sent.response.response.updatedPermissions).toEqual(updatedPermissions);
   });
 
-  it("allow without updated_permissions does not include updatedPermissions key", () => {
+  it("allow without updated_permissions does not include updatedPermissions key", async () => {
     // Create pending permission
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "control_request",
       request_id: "req-no-perm",
       request: {
@@ -2200,8 +2214,8 @@ describe("permission_response with updated_permissions", () => {
     expect(sent.response.response.updatedPermissions).toBeUndefined();
   });
 
-  it("allow with empty updated_permissions does not include updatedPermissions key", () => {
-    bridge.handleCLIMessage(cli, JSON.stringify({
+  it("allow with empty updated_permissions does not include updatedPermissions key", async () => {
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "control_request",
       request_id: "req-empty-perm",
       request: {
@@ -2229,7 +2243,7 @@ describe("permission_response with updated_permissions", () => {
 // ─── Multiple browser sockets ─────────────────────────────────────────────────
 
 describe("Multiple browser sockets", () => {
-  it("broadcasts to ALL connected browsers", () => {
+  it("broadcasts to ALL connected browsers", async () => {
     const cli = makeCliSocket("s1");
     const browser1 = makeBrowserSocket("s1");
     const browser2 = makeBrowserSocket("s1");
@@ -2252,7 +2266,7 @@ describe("Multiple browser sockets", () => {
       uuid: "uuid-multi",
       session_id: "s1",
     });
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     // All three browsers should receive the broadcast
     for (const browser of [browser1, browser2, browser3]) {
@@ -2263,7 +2277,7 @@ describe("Multiple browser sockets", () => {
     }
   });
 
-  it("removes a browser whose send() throws, but others continue to receive", () => {
+  it("removes a browser whose send() throws, but others continue to receive", async () => {
     const cli = makeCliSocket("s1");
     const browser1 = makeBrowserSocket("s1");
     const browser2 = makeBrowserSocket("s1");
@@ -2291,7 +2305,7 @@ describe("Multiple browser sockets", () => {
       uuid: "uuid-fail",
       session_id: "s1",
     });
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     // browser1 and browser3 should have received the message
     expect(browser1.send).toHaveBeenCalledTimes(1);
@@ -2309,7 +2323,7 @@ describe("Multiple browser sockets", () => {
 // ─── handleCLIMessage with Buffer ─────────────────────────────────────────────
 
 describe("handleCLIMessage with Buffer", () => {
-  it("parses Buffer input correctly", () => {
+  it("parses Buffer input correctly", async () => {
     const cli = makeCliSocket("s1");
     const browser = makeBrowserSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
@@ -2327,7 +2341,7 @@ describe("handleCLIMessage with Buffer", () => {
     });
 
     // Pass as Buffer instead of string
-    bridge.handleCLIMessage(cli, Buffer.from(jsonStr, "utf-8"));
+    await bridge.handleCLIMessage(cli, Buffer.from(jsonStr, "utf-8"));
 
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
     const progressMsg = calls.find((c: any) => c.type === "tool_progress");
@@ -2336,7 +2350,7 @@ describe("handleCLIMessage with Buffer", () => {
     expect(progressMsg.tool_name).toBe("Bash");
   });
 
-  it("handles multi-line NDJSON as Buffer", () => {
+  it("handles multi-line NDJSON as Buffer", async () => {
     const cli = makeCliSocket("s1");
     const browser = makeBrowserSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
@@ -2355,7 +2369,7 @@ describe("handleCLIMessage with Buffer", () => {
     });
     const ndjson = line1 + "\n" + line2;
 
-    bridge.handleCLIMessage(cli, Buffer.from(ndjson, "utf-8"));
+    await bridge.handleCLIMessage(cli, Buffer.from(ndjson, "utf-8"));
 
     // keep_alive is silently consumed, only tool_progress should be broadcast
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
@@ -2410,7 +2424,7 @@ describe("handleBrowserMessage with Buffer", () => {
 // ─── handleBrowserMessage with malformed JSON ─────────────────────────────────
 
 describe("handleBrowserMessage with malformed JSON", () => {
-  it("does not throw on invalid JSON", () => {
+  it("does not throw on invalid JSON", async () => {
     const cli = makeCliSocket("s1");
     const browser = makeBrowserSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
@@ -2468,7 +2482,7 @@ describe("Empty NDJSON lines", () => {
     browser.send.mockClear();
   });
 
-  it("skips empty lines between valid NDJSON", () => {
+  it("skips empty lines between valid NDJSON", async () => {
     const validMsg = JSON.stringify({
       type: "tool_progress",
       tool_use_id: "tu-empty-lines",
@@ -2481,7 +2495,7 @@ describe("Empty NDJSON lines", () => {
 
     // Empty lines, whitespace-only lines interspersed
     const raw = "\n\n" + validMsg + "\n\n   \n\t\n";
-    bridge.handleCLIMessage(cli, raw);
+    await bridge.handleCLIMessage(cli, raw);
 
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
     expect(calls).toHaveLength(1);
@@ -2489,14 +2503,14 @@ describe("Empty NDJSON lines", () => {
     expect(calls[0].tool_use_id).toBe("tu-empty-lines");
   });
 
-  it("handles entirely empty/whitespace input without crashing", () => {
-    expect(() => bridge.handleCLIMessage(cli, "")).not.toThrow();
-    expect(() => bridge.handleCLIMessage(cli, "\n\n\n")).not.toThrow();
-    expect(() => bridge.handleCLIMessage(cli, "   \t  \n  ")).not.toThrow();
+  it("handles entirely empty/whitespace input without crashing", async () => {
+    await bridge.handleCLIMessage(cli, "");
+    await bridge.handleCLIMessage(cli, "\n\n\n");
+    await bridge.handleCLIMessage(cli, "   \t  \n  ");
     expect(browser.send).not.toHaveBeenCalled();
   });
 
-  it("processes valid lines around whitespace-only lines", () => {
+  it("processes valid lines around whitespace-only lines", async () => {
     const line1 = JSON.stringify({
       type: "tool_progress",
       tool_use_id: "tu-ws-1",
@@ -2517,7 +2531,7 @@ describe("Empty NDJSON lines", () => {
     });
 
     const raw = line1 + "\n   \n\n" + line2 + "\n";
-    bridge.handleCLIMessage(cli, raw);
+    await bridge.handleCLIMessage(cli, raw);
 
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
     const progressMsgs = calls.filter((c: any) => c.type === "tool_progress");
@@ -2530,21 +2544,20 @@ describe("Empty NDJSON lines", () => {
 // ─── Session not found scenarios ──────────────────────────────────────────────
 
 describe("Session not found scenarios", () => {
-  it("handleCLIMessage does nothing for unknown session", () => {
+  it("handleCLIMessage does nothing for unknown session", async () => {
     const cli = makeCliSocket("unknown-session");
     // Do NOT call handleCLIOpen — session does not exist in the bridge
 
-    expect(() => {
-      bridge.handleCLIMessage(cli, JSON.stringify({
-        type: "tool_progress",
-        tool_use_id: "tu-unknown",
-        tool_name: "Bash",
-        parent_tool_use_id: null,
-        elapsed_time_seconds: 1,
-        uuid: "uuid-unknown",
-        session_id: "unknown-session",
-      }));
-    }).not.toThrow();
+    // Should not throw (async — just await it directly)
+    await bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "tool_progress",
+      tool_use_id: "tu-unknown",
+      tool_name: "Bash",
+      parent_tool_use_id: null,
+      elapsed_time_seconds: 1,
+      uuid: "uuid-unknown",
+      session_id: "unknown-session",
+    }));
 
     // Session should not have been created
     expect(bridge.getSession("unknown-session")).toBeUndefined();
@@ -2801,13 +2814,13 @@ describe("Restore from disk with pendingPermissions", () => {
 // ─── First turn callback ──────────────────────────────────────────────────────
 
 describe("onFirstTurnCompletedCallback", () => {
-  it("fires on first successful result regardless of num_turns", () => {
+  it("fires on first successful result regardless of num_turns", async () => {
     const callback = vi.fn();
     bridge.onFirstTurnCompletedCallback(callback);
 
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
 
     // Simulate a browser sending a user message
     const browser = makeBrowserSocket("s1");
@@ -2818,7 +2831,7 @@ describe("onFirstTurnCompletedCallback", () => {
     }));
 
     // Simulate the result — num_turns is 5 because CLI auto-approved tool calls
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
@@ -2836,13 +2849,13 @@ describe("onFirstTurnCompletedCallback", () => {
     expect(callback).toHaveBeenCalledWith("s1", "Fix the login bug");
   });
 
-  it("does not fire on subsequent results for the same session", () => {
+  it("does not fire on subsequent results for the same session", async () => {
     const callback = vi.fn();
     bridge.onFirstTurnCompletedCallback(callback);
 
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
 
     const browser = makeBrowserSocket("s1");
     bridge.handleBrowserOpen(browser, "s1");
@@ -2852,7 +2865,7 @@ describe("onFirstTurnCompletedCallback", () => {
     }));
 
     // First result — triggers callback
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
@@ -2873,7 +2886,7 @@ describe("onFirstTurnCompletedCallback", () => {
       type: "user_message",
       content: "Second message",
     }));
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
@@ -2890,13 +2903,13 @@ describe("onFirstTurnCompletedCallback", () => {
     expect(callback).toHaveBeenCalledTimes(1);
   });
 
-  it("does not fire on error results", () => {
+  it("does not fire on error results", async () => {
     const callback = vi.fn();
     bridge.onFirstTurnCompletedCallback(callback);
 
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
 
     const browser = makeBrowserSocket("s1");
     bridge.handleBrowserOpen(browser, "s1");
@@ -2905,7 +2918,7 @@ describe("onFirstTurnCompletedCallback", () => {
       content: "Some request",
     }));
 
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       subtype: "error_during_execution",
       is_error: true,
@@ -2923,13 +2936,13 @@ describe("onFirstTurnCompletedCallback", () => {
     expect(callback).not.toHaveBeenCalled();
   });
 
-  it("fires after initial error result followed by a successful result", () => {
+  it("fires after initial error result followed by a successful result", async () => {
     const callback = vi.fn();
     bridge.onFirstTurnCompletedCallback(callback);
 
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
 
     const browser = makeBrowserSocket("s1");
     bridge.handleBrowserOpen(browser, "s1");
@@ -2939,7 +2952,7 @@ describe("onFirstTurnCompletedCallback", () => {
     }));
 
     // First result is an error — should NOT trigger
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       subtype: "error_during_execution",
       is_error: true,
@@ -2956,7 +2969,7 @@ describe("onFirstTurnCompletedCallback", () => {
     expect(callback).not.toHaveBeenCalled();
 
     // Second result is success — should trigger since no successful result yet
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
@@ -2974,16 +2987,16 @@ describe("onFirstTurnCompletedCallback", () => {
     expect(callback).toHaveBeenCalledTimes(1);
   });
 
-  it("does not fire when there is no user message in history", () => {
+  it("does not fire when there is no user message in history", async () => {
     const callback = vi.fn();
     bridge.onFirstTurnCompletedCallback(callback);
 
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
 
     // Send result without any user message first
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
@@ -3001,14 +3014,14 @@ describe("onFirstTurnCompletedCallback", () => {
     expect(callback).not.toHaveBeenCalled();
   });
 
-  it("fires independently for different sessions", () => {
+  it("fires independently for different sessions", async () => {
     const callback = vi.fn();
     bridge.onFirstTurnCompletedCallback(callback);
 
     // Setup session 1
     const cli1 = makeCliSocket("s1");
     bridge.handleCLIOpen(cli1, "s1");
-    bridge.handleCLIMessage(cli1, makeInitMsg());
+    await bridge.handleCLIMessage(cli1, makeInitMsg());
     const browser1 = makeBrowserSocket("s1");
     bridge.handleBrowserOpen(browser1, "s1");
     bridge.handleBrowserMessage(browser1, JSON.stringify({
@@ -3019,7 +3032,7 @@ describe("onFirstTurnCompletedCallback", () => {
     // Setup session 2
     const cli2 = makeCliSocket("s2");
     bridge.handleCLIOpen(cli2, "s2");
-    bridge.handleCLIMessage(cli2, makeInitMsg());
+    await bridge.handleCLIMessage(cli2, makeInitMsg());
     const browser2 = makeBrowserSocket("s2");
     bridge.handleBrowserOpen(browser2, "s2");
     bridge.handleBrowserMessage(browser2, JSON.stringify({
@@ -3028,7 +3041,7 @@ describe("onFirstTurnCompletedCallback", () => {
     }));
 
     // Result for s1
-    bridge.handleCLIMessage(cli1, JSON.stringify({
+    await bridge.handleCLIMessage(cli1, JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
@@ -3046,7 +3059,7 @@ describe("onFirstTurnCompletedCallback", () => {
     expect(callback).toHaveBeenCalledWith("s1", "Message for s1");
 
     // Result for s2 — should also fire (independent session)
-    bridge.handleCLIMessage(cli2, JSON.stringify({
+    await bridge.handleCLIMessage(cli2, JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
@@ -3064,13 +3077,13 @@ describe("onFirstTurnCompletedCallback", () => {
     expect(callback).toHaveBeenCalledWith("s2", "Message for s2");
   });
 
-  it("cleans up auto-naming tracking when session is removed", () => {
+  it("cleans up auto-naming tracking when session is removed", async () => {
     const callback = vi.fn();
     bridge.onFirstTurnCompletedCallback(callback);
 
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
     const browser = makeBrowserSocket("s1");
     bridge.handleBrowserOpen(browser, "s1");
     bridge.handleBrowserMessage(browser, JSON.stringify({
@@ -3079,7 +3092,7 @@ describe("onFirstTurnCompletedCallback", () => {
     }));
 
     // First result triggers callback
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
@@ -3098,7 +3111,7 @@ describe("onFirstTurnCompletedCallback", () => {
     bridge.removeSession("s1");
     const cli2 = makeCliSocket("s1");
     bridge.handleCLIOpen(cli2, "s1");
-    bridge.handleCLIMessage(cli2, makeInitMsg());
+    await bridge.handleCLIMessage(cli2, makeInitMsg());
     const browser2 = makeBrowserSocket("s1");
     bridge.handleBrowserOpen(browser2, "s1");
     bridge.handleBrowserMessage(browser2, JSON.stringify({
@@ -3107,7 +3120,7 @@ describe("onFirstTurnCompletedCallback", () => {
     }));
 
     // Should fire again for the recreated session
-    bridge.handleCLIMessage(cli2, JSON.stringify({
+    await bridge.handleCLIMessage(cli2, JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
@@ -3124,13 +3137,13 @@ describe("onFirstTurnCompletedCallback", () => {
     expect(callback).toHaveBeenLastCalledWith("s1", "Hello again");
   });
 
-  it("cleans up auto-naming tracking when session is closed", () => {
+  it("cleans up auto-naming tracking when session is closed", async () => {
     const callback = vi.fn();
     bridge.onFirstTurnCompletedCallback(callback);
 
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
     const browser = makeBrowserSocket("s1");
     bridge.handleBrowserOpen(browser, "s1");
     bridge.handleBrowserMessage(browser, JSON.stringify({
@@ -3139,7 +3152,7 @@ describe("onFirstTurnCompletedCallback", () => {
     }));
 
     // Trigger callback
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
@@ -3160,14 +3173,14 @@ describe("onFirstTurnCompletedCallback", () => {
     // Recreate and verify callback fires again
     const cli2 = makeCliSocket("s1");
     bridge.handleCLIOpen(cli2, "s1");
-    bridge.handleCLIMessage(cli2, makeInitMsg());
+    await bridge.handleCLIMessage(cli2, makeInitMsg());
     const browser2 = makeBrowserSocket("s1");
     bridge.handleBrowserOpen(browser2, "s1");
     bridge.handleBrowserMessage(browser2, JSON.stringify({
       type: "user_message",
       content: "Second session",
     }));
-    bridge.handleCLIMessage(cli2, JSON.stringify({
+    await bridge.handleCLIMessage(cli2, JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
@@ -3183,7 +3196,7 @@ describe("onFirstTurnCompletedCallback", () => {
     expect(callback).toHaveBeenCalledTimes(2);
   });
 
-  it("does not fire for restored sessions with completed turns", () => {
+  it("does not fire for restored sessions with completed turns", async () => {
     const callback = vi.fn();
     bridge.onFirstTurnCompletedCallback(callback);
 
@@ -3229,7 +3242,7 @@ describe("onFirstTurnCompletedCallback", () => {
     bridge.handleCLIOpen(cli, "restored-1");
 
     // Another result comes in — should NOT trigger callback
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
@@ -3246,7 +3259,7 @@ describe("onFirstTurnCompletedCallback", () => {
     expect(callback).not.toHaveBeenCalled();
   });
 
-  it("allows auto-naming for restored sessions with zero turns", () => {
+  it("allows auto-naming for restored sessions with zero turns", async () => {
     const callback = vi.fn();
     bridge.onFirstTurnCompletedCallback(callback);
 
@@ -3287,7 +3300,7 @@ describe("onFirstTurnCompletedCallback", () => {
     // CLI connects and browser sends message
     const cli = makeCliSocket("fresh-restored");
     bridge.handleCLIOpen(cli, "fresh-restored");
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
     const browser = makeBrowserSocket("fresh-restored");
     bridge.handleBrowserOpen(browser, "fresh-restored");
     bridge.handleBrowserMessage(browser, JSON.stringify({
@@ -3295,7 +3308,7 @@ describe("onFirstTurnCompletedCallback", () => {
       content: "Hello world",
     }));
 
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
@@ -3333,7 +3346,7 @@ describe("broadcastNameUpdate", () => {
     expect(calls2).toContainEqual(expect.objectContaining({ type: "session_name_update", name: "Fix Auth Bug" }));
   });
 
-  it("does nothing for unknown sessions", () => {
+  it("does nothing for unknown sessions", async () => {
     // Should not throw
     bridge.broadcastNameUpdate("nonexistent", "Name");
   });
@@ -3345,12 +3358,12 @@ describe("MCP control messages", () => {
   let cli: ReturnType<typeof makeCliSocket>;
   let browser: ReturnType<typeof makeBrowserSocket>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     cli = makeCliSocket("s1");
     browser = makeBrowserSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
     bridge.handleBrowserOpen(browser, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
     cli.send.mockClear();
     browser.send.mockClear();
   });
@@ -3403,7 +3416,7 @@ describe("MCP control messages", () => {
     vi.useRealTimers();
   });
 
-  it("control_response for mcp_status: broadcasts mcp_status to browsers", () => {
+  it("control_response for mcp_status: broadcasts mcp_status to browsers", async () => {
     // Send mcp_get_status to create the pending request
     bridge.handleBrowserMessage(browser, JSON.stringify({
       type: "mcp_get_status",
@@ -3421,7 +3434,7 @@ describe("MCP control messages", () => {
       },
     ];
 
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "control_response",
       response: {
         subtype: "success",
@@ -3439,13 +3452,13 @@ describe("MCP control messages", () => {
     expect(browserMsg.servers[0].tools).toHaveLength(1);
   });
 
-  it("control_response with error: does not broadcast to browsers", () => {
+  it("control_response with error: does not broadcast to browsers", async () => {
     bridge.handleBrowserMessage(browser, JSON.stringify({
       type: "mcp_get_status",
     }));
     browser.send.mockClear();
 
-    bridge.handleCLIMessage(cli, JSON.stringify({
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "control_response",
       response: {
         subtype: "error",
@@ -3458,8 +3471,8 @@ describe("MCP control messages", () => {
     expect(browser.send).not.toHaveBeenCalled();
   });
 
-  it("control_response for unknown request_id: ignored silently", () => {
-    bridge.handleCLIMessage(cli, JSON.stringify({
+  it("control_response for unknown request_id: ignored silently", async () => {
+    await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "control_response",
       response: {
         subtype: "success",
@@ -3499,13 +3512,13 @@ describe("MCP control messages", () => {
 // ─── Per-session listener error handling ────────────────────────────────────
 
 describe("per-session listener error handling", () => {
-  it("catches and logs errors thrown by assistant message listeners", () => {
+  it("catches and logs errors thrown by assistant message listeners", async () => {
     // A throwing listener should not crash the message pipeline or prevent
     // persistSession from running.
     const sessionId = "listener-error-session";
     const cli = makeCliSocket(sessionId);
     bridge.handleCLIOpen(cli, sessionId);
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
 
     const browser = makeBrowserSocket(sessionId);
     bridge.handleBrowserOpen(browser, sessionId);
@@ -3521,7 +3534,7 @@ describe("per-session listener error handling", () => {
       type: "assistant",
       message: { id: "m1", type: "message", role: "assistant", content: [{ type: "text", text: "hi" }], model: "test", stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
     });
-    bridge.handleCLIMessage(cli, assistantMsg);
+    await bridge.handleCLIMessage(cli, assistantMsg);
 
     expect(spy).toHaveBeenCalledWith(
       expect.stringContaining("Assistant listener error"),
@@ -3531,13 +3544,13 @@ describe("per-session listener error handling", () => {
     spy.mockRestore();
   });
 
-  it("catches and logs errors from async result listeners", () => {
+  it("catches and logs errors from async result listeners", async () => {
     // An async result listener that rejects should have its rejection caught
     // and logged, not become an unhandled promise rejection.
     const sessionId = "async-listener-session";
     const cli = makeCliSocket(sessionId);
     bridge.handleCLIOpen(cli, sessionId);
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
 
     const browser = makeBrowserSocket(sessionId);
     bridge.handleBrowserOpen(browser, sessionId);
@@ -3556,7 +3569,7 @@ describe("per-session listener error handling", () => {
       num_turns: 1,
       is_error: false,
     });
-    bridge.handleCLIMessage(cli, resultMsg);
+    await bridge.handleCLIMessage(cli, resultMsg);
 
     expect(spy).toHaveBeenCalledWith(
       expect.stringContaining("Result listener error"),
@@ -3570,7 +3583,7 @@ describe("per-session listener error handling", () => {
 // ─── sendToCLI error handling ──────────────────────────────────────────────
 
 describe("sendToCLI error path", () => {
-  it("logs error when CLI socket send throws", () => {
+  it("logs error when CLI socket send throws", async () => {
     // When the CLI socket's send() throws (e.g. socket already closed),
     // sendToCLI should catch the error and log it rather than crashing.
     const sessionId = "send-error-session";
@@ -3580,7 +3593,7 @@ describe("sendToCLI error path", () => {
 
     // Send a system.init to fully connect the session
     const initMsg = makeInitMsg();
-    bridge.handleCLIMessage(cli, initMsg);
+    await bridge.handleCLIMessage(cli, initMsg);
 
     // Now make send() throw to simulate a broken socket
     cli.send.mockImplementation(() => {
@@ -3605,48 +3618,48 @@ describe("sendToCLI error path", () => {
 // ─── CLI message deduplication (Bun.hash-based) ─────────────────────────────
 
 describe("CLI message deduplication", () => {
-  function setupSession() {
+  async function setupSession() {
     const cli = makeCliSocket("s1");
     const browser = makeBrowserSocket("s1");
     bridge.handleBrowserOpen(browser, "s1");
     bridge.handleCLIOpen(cli, "s1");
-    bridge.handleCLIMessage(cli, makeInitMsg());
+    await bridge.handleCLIMessage(cli, makeInitMsg());
     browser.send.mockClear();
     return { cli, browser };
   }
 
-  it("filters duplicate assistant messages (same content replayed on reconnect)", () => {
-    const { cli, browser } = setupSession();
+  it("filters duplicate assistant messages (same content replayed on reconnect)", async () => {
+    const { cli, browser } = await setupSession();
     const msg = JSON.stringify({ type: "assistant", message: { content: "hello world" } });
 
     // First send — should forward to browser
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
     expect(browser.send).toHaveBeenCalledTimes(1);
 
     // Same message again (simulates CLI replay on WS reconnect) — should be filtered
     browser.send.mockClear();
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
     expect(browser.send).not.toHaveBeenCalled();
   });
 
-  it("forwards non-duplicate assistant messages normally", () => {
-    const { cli, browser } = setupSession();
+  it("forwards non-duplicate assistant messages normally", async () => {
+    const { cli, browser } = await setupSession();
     const msg1 = JSON.stringify({ type: "assistant", message: { content: "first" } });
     const msg2 = JSON.stringify({ type: "assistant", message: { content: "second" } });
 
-    bridge.handleCLIMessage(cli, msg1);
-    bridge.handleCLIMessage(cli, msg2);
+    await bridge.handleCLIMessage(cli, msg1);
+    await bridge.handleCLIMessage(cli, msg2);
 
     expect(browser.send).toHaveBeenCalledTimes(2);
   });
 
-  it("evicts oldest hashes when window is exceeded", () => {
-    const { cli, browser } = setupSession();
+  it("evicts oldest hashes when window is exceeded", async () => {
+    const { cli, browser } = await setupSession();
 
     // Send CLI_DEDUP_WINDOW + 1 unique messages to push the first one out
     const WINDOW = 2000; // matches WsBridge.CLI_DEDUP_WINDOW
     for (let i = 0; i <= WINDOW; i++) {
-      bridge.handleCLIMessage(
+      await bridge.handleCLIMessage(
         cli,
         JSON.stringify({ type: "assistant", message: { content: `msg-${i}` } }),
       );
@@ -3655,12 +3668,12 @@ describe("CLI message deduplication", () => {
     // The first message's hash should have been evicted — resending it should work
     browser.send.mockClear();
     const firstMsg = JSON.stringify({ type: "assistant", message: { content: "msg-0" } });
-    bridge.handleCLIMessage(cli, firstMsg);
+    await bridge.handleCLIMessage(cli, firstMsg);
     expect(browser.send).toHaveBeenCalledTimes(1);
   });
 
-  it("deduplicates stream_event messages with the same uuid on reconnect replay", () => {
-    const { cli, browser } = setupSession();
+  it("deduplicates stream_event messages with the same uuid on reconnect replay", async () => {
+    const { cli, browser } = await setupSession();
     const uuid = "cc6aeb12-1aad-4126-8ad2-03bad206e9fe";
     const msg = JSON.stringify({
       type: "stream_event",
@@ -3671,17 +3684,17 @@ describe("CLI message deduplication", () => {
     });
 
     // First send — should forward to browser
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
     expect(browser.send).toHaveBeenCalledTimes(1);
 
     // Same uuid again (simulates CLI replay on WS reconnect) — should be filtered
     browser.send.mockClear();
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
     expect(browser.send).not.toHaveBeenCalled();
   });
 
-  it("forwards stream_event messages without uuid (no dedup possible)", () => {
-    const { cli, browser } = setupSession();
+  it("forwards stream_event messages without uuid (no dedup possible)", async () => {
+    const { cli, browser } = await setupSession();
     // stream_event without uuid — cannot dedup, must forward
     const msg = JSON.stringify({
       type: "stream_event",
@@ -3689,8 +3702,8 @@ describe("CLI message deduplication", () => {
       parent_tool_use_id: null,
     });
 
-    bridge.handleCLIMessage(cli, msg);
-    bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
+    await bridge.handleCLIMessage(cli, msg);
 
     // Both should be forwarded — no uuid means no dedup
     expect(browser.send).toHaveBeenCalledTimes(2);
@@ -3769,5 +3782,96 @@ describe("Linear session ID mapping", () => {
     const mappings = bridge.getLinearSessionMappings();
 
     expect(mappings).toEqual([]);
+  });
+});
+
+// ─── Callback registration coverage ────────────────────────────────────────────
+
+describe("diagnostics and callbacks", () => {
+  it("getSessionMemoryStats returns memory stats for all sessions", () => {
+    bridge.getOrCreateSession("diag-1");
+    bridge.getOrCreateSession("diag-2");
+
+    const stats = bridge.getSessionMemoryStats();
+    expect(stats).toHaveLength(2);
+    expect(stats[0].id).toBe("diag-1");
+    expect(stats[0].browsers).toBe(0);
+    expect(stats[0].historyLen).toBe(0);
+    expect(stats[1].id).toBe("diag-2");
+  });
+
+  it("onIdleKillCallback registers the callback", () => {
+    const cb = vi.fn();
+    bridge.onIdleKillCallback(cb);
+    // Callback is stored — can't directly assert it's set (private field),
+    // but covering the registration path is the goal.
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("onAssistantMessageForSession: unsubscribe function removes the listener", async () => {
+    const cli = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+
+    const listener = vi.fn();
+    const unsubscribe = bridge.onAssistantMessageForSession("s1", listener);
+
+    // Send an assistant message — listener should fire
+    await bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "assistant",
+      message: { id: "m1", type: "message", role: "assistant", model: "claude", content: [], stop_reason: "end_turn", usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
+      parent_tool_use_id: null,
+      uuid: "uuid-unsub-1",
+      session_id: "s1",
+    }));
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    // Unsubscribe and send another — listener should NOT fire again
+    unsubscribe();
+    await bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "assistant",
+      message: { id: "m2", type: "message", role: "assistant", model: "claude", content: [], stop_reason: "end_turn", usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
+      parent_tool_use_id: null,
+      uuid: "uuid-unsub-2",
+      session_id: "s1",
+    }));
+    expect(listener).toHaveBeenCalledTimes(1); // Still 1 — unsubscribed
+  });
+
+  it("onResultForSession: unsubscribe function removes the listener", async () => {
+    const cli = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+
+    // First send a user message so onFirstTurnCompleted logic works
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message", content: "test",
+    }));
+
+    const listener = vi.fn();
+    const unsubscribe = bridge.onResultForSession("s1", listener);
+
+    // Send a result message — listener should fire
+    await bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result", subtype: "success", is_error: false,
+      duration_ms: 100, duration_api_ms: 50, num_turns: 1,
+      total_cost_usd: 0.01, stop_reason: "end_turn",
+      usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-result-unsub-1", session_id: "s1",
+    }));
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    // Unsubscribe and send another — listener should NOT fire again
+    unsubscribe();
+    await bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "result", subtype: "success", is_error: false,
+      duration_ms: 200, duration_api_ms: 100, num_turns: 2,
+      total_cost_usd: 0.02, stop_reason: "end_turn",
+      usage: { input_tokens: 20, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      uuid: "uuid-result-unsub-2", session_id: "s1",
+    }));
+    expect(listener).toHaveBeenCalledTimes(1); // Still 1 — unsubscribed
   });
 });

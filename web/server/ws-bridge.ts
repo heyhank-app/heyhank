@@ -30,11 +30,25 @@ import type {
 import { makeDefaultState } from "./ws-bridge-types.js";
 export type { SocketData } from "./ws-bridge-types.js";
 import {
-  isDuplicateClientMessage,
-  rememberClientMessage,
   isHistoryBackedEvent,
-  sequenceEvent,
 } from "./ws-bridge-replay.js";
+import { parseNDJSON, isDuplicateCLIMessage } from "./ws-bridge-cli-ingest.js";
+import {
+  parseBrowserMessage,
+  deduplicateBrowserMessage,
+  IDEMPOTENT_BROWSER_MESSAGE_TYPES,
+} from "./ws-bridge-browser-ingest.js";
+import {
+  appendAndPersist,
+  appendHistory as appendHistoryFn,
+  persistSession as persistSessionFn,
+} from "./ws-bridge-persist.js";
+import {
+  broadcastToBrowsers as broadcastToBrowsersFn,
+  sendToBrowser as sendToBrowserFn,
+  sendToCLI as sendToCLIFn,
+  EVENT_BUFFER_LIMIT,
+} from "./ws-bridge-publish.js";
 import { attachCodexAdapterHandlers } from "./ws-bridge-codex.js";
 import {
   handleInterrupt,
@@ -60,8 +74,6 @@ import { getEffectiveAiValidation } from "./ai-validation-settings.js";
 // ─── Bridge ───────────────────────────────────────────────────────────────────
 
 export class WsBridge {
-  private static readonly EVENT_BUFFER_LIMIT = 600;
-  private static readonly MESSAGE_HISTORY_LIMIT = 2000; // cap conversation history per session
   private static readonly PROCESSED_CLIENT_MSG_ID_LIMIT = 1000;
   private static readonly CLI_DEDUP_WINDOW = 2000; // track last N CLI message hashes (includes stream_events)
   private static readonly DISCONNECT_DEBOUNCE_MS = Number(
@@ -69,18 +81,6 @@ export class WsBridge {
   );
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private idleKillTimers = new Map<string, ReturnType<typeof setInterval>>();
-  private static readonly IDEMPOTENT_BROWSER_MESSAGE_TYPES = new Set<string>([
-    "user_message",
-    "permission_response",
-    "interrupt",
-    "set_model",
-    "set_permission_mode",
-    "mcp_get_status",
-    "mcp_toggle",
-    "mcp_reconnect",
-    "mcp_set_servers",
-    "set_ai_validation",
-  ]);
   private sessions = new Map<string, Session>();
   private store: SessionStore | null = null;
   private recorder: RecorderManager | null = null;
@@ -259,20 +259,9 @@ export class WsBridge {
     return count;
   }
 
-  /** Persist a session to disk (debounced). */
+  /** Persist a session to disk (debounced). Delegates to ws-bridge-persist. */
   private persistSession(session: Session): void {
-    if (!this.store) return;
-    this.store.save({
-      id: session.id,
-      state: session.state,
-      messageHistory: session.messageHistory,
-      pendingMessages: session.pendingMessages,
-      pendingPermissions: Array.from(session.pendingPermissions.entries()),
-      eventBuffer: session.eventBuffer,
-      nextEventSeq: session.nextEventSeq,
-      lastAckSeq: session.lastAckSeq,
-      processedClientMessageIds: session.processedClientMessageIds,
-    });
+    persistSessionFn(session, this.store);
   }
 
   private refreshGitInfo(
@@ -494,7 +483,7 @@ export class WsBridge {
     }
   }
 
-  handleCLIMessage(ws: ServerWebSocket<SocketData>, raw: string | Buffer) {
+  async handleCLIMessage(ws: ServerWebSocket<SocketData>, raw: string | Buffer) {
     const data = typeof raw === "string" ? raw : raw.toString("utf-8");
     const sessionId = (ws.data as CLISocketData).sessionId;
     const session = this.sessions.get(sessionId);
@@ -503,8 +492,8 @@ export class WsBridge {
     // Record raw incoming CLI message before any parsing
     this.recorder?.record(sessionId, "in", data, "cli", session.backendType, session.state.cwd);
 
-    // NDJSON: split on newlines, parse each line
-    const lines = data.split("\n").filter((l) => l.trim());
+    // Pipeline: parse NDJSON → dedup → route
+    const lines = parseNDJSON(data);
     for (const line of lines) {
       let msg: CLIMessage;
       try {
@@ -514,36 +503,8 @@ export class WsBridge {
         continue;
       }
 
-      // Deduplicate CLI messages: on WS reconnect, CLI replays in-flight messages.
-      // Use a rolling hash set (like browser-side processedClientMessageIds).
-      // Dedup assistant/result/system by content hash, and stream_event by uuid.
-      // stream_events are the bulk of replay traffic (~1000 per turn) and each
-      // carries a stable uuid that persists across reconnection replays.
-      if (msg.type === "assistant" || msg.type === "result" || msg.type === "system") {
-        const hash = Bun.hash(line).toString(36);
-        if (session.recentCLIMessageHashSet.has(hash)) {
-          continue; // skip duplicate
-        }
-        session.recentCLIMessageHashes.push(hash);
-        session.recentCLIMessageHashSet.add(hash);
-        // Evict oldest entries beyond window
-        while (session.recentCLIMessageHashes.length > WsBridge.CLI_DEDUP_WINDOW) {
-          const old = session.recentCLIMessageHashes.shift()!;
-          session.recentCLIMessageHashSet.delete(old);
-        }
-      } else if (msg.type === "stream_event" && msg.uuid) {
-        if (session.recentCLIMessageHashSet.has(msg.uuid)) {
-          continue; // skip duplicate stream_event
-        }
-        session.recentCLIMessageHashes.push(msg.uuid);
-        session.recentCLIMessageHashSet.add(msg.uuid);
-        while (session.recentCLIMessageHashes.length > WsBridge.CLI_DEDUP_WINDOW) {
-          const old = session.recentCLIMessageHashes.shift()!;
-          session.recentCLIMessageHashSet.delete(old);
-        }
-      }
-
-      this.routeCLIMessage(session, msg);
+      if (isDuplicateCLIMessage(msg, line, session, WsBridge.CLI_DEDUP_WINDOW)) continue;
+      await this.routeCLIMessage(session, msg);
     }
   }
 
@@ -642,13 +603,9 @@ export class WsBridge {
     // Record raw incoming browser message
     this.recorder?.record(sessionId, "in", data, "browser", session.backendType, session.state.cwd);
 
-    let msg: BrowserOutgoingMessage;
-    try {
-      msg = JSON.parse(data);
-    } catch {
-      console.warn(`[ws-bridge] Failed to parse browser message: ${data.substring(0, 200)}`);
-      return;
-    }
+    // Pipeline: parse → route (dedup happens inside routeBrowserMessage)
+    const msg = parseBrowserMessage(data);
+    if (!msg) return;
 
     this.routeBrowserMessage(session, msg, ws);
   }
@@ -765,7 +722,7 @@ export class WsBridge {
 
   // ── CLI message routing ─────────────────────────────────────────────────
 
-  private routeCLIMessage(session: Session, msg: CLIMessage) {
+  private async routeCLIMessage(session: Session, msg: CLIMessage) {
     // Track activity for idle detection (skip keepalives — they don't indicate real work)
     if (msg.type !== "keep_alive") {
       session.lastCliActivityTs = Date.now();
@@ -789,7 +746,7 @@ export class WsBridge {
         break;
 
       case "control_request":
-        this.handleControlRequest(session, msg);
+        await this.handleControlRequest(session, msg);
         break;
 
       case "tool_progress":
@@ -960,12 +917,9 @@ export class WsBridge {
     // Unknown system subtypes are intentionally ignored until we map them.
   }
 
-  /** Append to messageHistory with cap to prevent unbounded memory growth. */
+  /** Append to messageHistory with cap. Delegates to ws-bridge-persist. */
   private appendHistory(session: Session, msg: BrowserIncomingMessage) {
-    session.messageHistory.push(msg);
-    if (session.messageHistory.length > WsBridge.MESSAGE_HISTORY_LIMIT) {
-      session.messageHistory.splice(0, session.messageHistory.length - WsBridge.MESSAGE_HISTORY_LIMIT);
-    }
+    appendHistoryFn(session, msg);
   }
 
   private forwardSystemEvent(
@@ -1205,20 +1159,14 @@ export class WsBridge {
       return;
     }
 
-    if (
-      WsBridge.IDEMPOTENT_BROWSER_MESSAGE_TYPES.has(msg.type)
-      && "client_msg_id" in msg
-      && msg.client_msg_id
-    ) {
-      if (isDuplicateClientMessage(session, msg.client_msg_id)) {
-        return;
-      }
-      rememberClientMessage(
-        session,
-        msg.client_msg_id,
-        WsBridge.PROCESSED_CLIENT_MSG_ID_LIMIT,
-        this.persistSession.bind(this),
-      );
+    if (deduplicateBrowserMessage(
+      msg,
+      IDEMPOTENT_BROWSER_MESSAGE_TYPES,
+      session,
+      WsBridge.PROCESSED_CLIENT_MSG_ID_LIMIT,
+      this.persistSession.bind(this),
+    )) {
+      return;
     }
 
     // For Codex sessions, delegate entirely to the adapter
@@ -1375,24 +1323,10 @@ export class WsBridge {
     this.persistSession(session);
   }
 
-  // ── Transport helpers ───────────────────────────────────────────────────
+  // ── Transport helpers (delegate to ws-bridge-publish) ────────────────────
 
   private sendToCLI(session: Session, ndjson: string) {
-    if (!session.cliSocket) {
-      // Queue the message — CLI might still be starting up.
-      // Don't record here; the message will be recorded when flushed.
-      console.log(`[ws-bridge] CLI not yet connected for session ${session.id}, queuing message`);
-      session.pendingMessages.push(ndjson);
-      return;
-    }
-    // Record raw outgoing CLI message (only when actually sending, not when queuing)
-    this.recorder?.record(session.id, "out", ndjson, "cli", session.backendType, session.state.cwd);
-    try {
-      // NDJSON requires a newline delimiter
-      session.cliSocket.send(ndjson + "\n");
-    } catch (err) {
-      console.error(`[ws-bridge] Failed to send to CLI for session ${session.id}:`, err);
-    }
+    sendToCLIFn(session, ndjson, this.recorder);
   }
 
   /** Push a session name update to all connected browsers for a session. */
@@ -1403,36 +1337,14 @@ export class WsBridge {
   }
 
   private broadcastToBrowsers(session: Session, msg: BrowserIncomingMessage) {
-    // Debug: warn when assistant messages are broadcast to 0 browsers (they may be lost)
-    if (session.browserSockets.size === 0 && (msg.type === "assistant" || msg.type === "stream_event" || msg.type === "result")) {
-      console.log(`[ws-bridge] ⚠ Broadcasting ${msg.type} to 0 browsers for session ${session.id} (stored in history: ${msg.type === "assistant" || msg.type === "result"})`);
-    }
-    const json = JSON.stringify(
-      sequenceEvent(
-        session,
-        msg,
-        WsBridge.EVENT_BUFFER_LIMIT,
-        this.persistSession.bind(this),
-      ),
-    );
-
-    // Record raw outgoing browser message
-    this.recorder?.record(session.id, "out", json, "browser", session.backendType, session.state.cwd);
-
-    for (const ws of session.browserSockets) {
-      try {
-        ws.send(json);
-      } catch {
-        session.browserSockets.delete(ws);
-      }
-    }
+    broadcastToBrowsersFn(session, msg, {
+      eventBufferLimit: EVENT_BUFFER_LIMIT,
+      recorder: this.recorder,
+      persistFn: this.persistSession.bind(this),
+    });
   }
 
   private sendToBrowser(ws: ServerWebSocket<SocketData>, msg: BrowserIncomingMessage) {
-    try {
-      ws.send(JSON.stringify(msg));
-    } catch {
-      // Socket will be cleaned up on close
-    }
+    sendToBrowserFn(ws, msg);
   }
 }
