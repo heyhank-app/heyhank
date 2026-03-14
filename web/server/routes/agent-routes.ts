@@ -130,16 +130,15 @@ export function registerAgentRoutes(
               },
             },
           });
-          // Clear global staging credentials
-          updateSettings({
-            linearOAuthClientId: "",
-            linearOAuthClientSecret: "",
-            linearOAuthWebhookSecret: "",
-            linearOAuthAccessToken: "",
-            linearOAuthRefreshToken: "",
-          });
-          // Use the updated agent for the response
+          // Only clear global staging credentials after a successful agent update
           if (updated) {
+            updateSettings({
+              linearOAuthClientId: "",
+              linearOAuthClientSecret: "",
+              linearOAuthWebhookSecret: "",
+              linearOAuthAccessToken: "",
+              linearOAuthRefreshToken: "",
+            });
             if (updated.enabled && updated.triggers?.schedule?.enabled) {
               agentExecutor?.scheduleAgent(updated);
             }

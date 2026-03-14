@@ -28,7 +28,7 @@ export function migrateLinearCredentialsToAgents(): void {
 
   // Copy credentials to the agent
   const triggers = linearAgent.triggers!;
-  agentStore.updateAgent(linearAgent.id, {
+  const updated = agentStore.updateAgent(linearAgent.id, {
     triggers: {
       ...triggers,
       linear: {
@@ -43,7 +43,12 @@ export function migrateLinearCredentialsToAgents(): void {
     },
   });
 
-  // Clear global credentials
+  // Only clear global credentials after a confirmed successful write
+  if (!updated) {
+    console.error("[linear-migration] Failed to write credentials to agent — global credentials preserved");
+    return;
+  }
+
   updateSettings({
     linearOAuthClientId: "",
     linearOAuthClientSecret: "",

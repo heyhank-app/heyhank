@@ -656,8 +656,10 @@ describe("LinearSection", () => {
     // Toggle search all projects
     fireEvent.click(screen.getByText("Search all projects"));
 
-    // Should show the "type 2 characters" prompt
-    expect(screen.getByText("Type at least 2 characters to search all projects...")).toBeInTheDocument();
+    // Should show the "type 2 characters" prompt (may need a re-render cycle)
+    await waitFor(() => {
+      expect(screen.getByText("Type at least 2 characters to search all projects...")).toBeInTheDocument();
+    });
   });
 
   it("removes selected issue when remove button is clicked in issue badge", async () => {
