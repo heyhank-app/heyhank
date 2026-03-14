@@ -18,8 +18,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
   return {
     id: "test-session",
     backendType: "claude",
-    cliSocket: null,
-    codexAdapter: null,
+    backendAdapter: null,
     browserSockets: new Set(),
     state: {
       session_id: "test-session",
@@ -49,7 +48,6 @@ function makeSession(overrides: Partial<Session> = {}): Session {
       aiValidationAutoDeny: false,
     },
     pendingPermissions: new Map(),
-    pendingControlRequests: new Map(),
     messageHistory: [],
     pendingMessages: [],
     nextEventSeq: 1,
@@ -57,8 +55,6 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     lastAckSeq: 0,
     processedClientMessageIds: [],
     processedClientMessageIdSet: new Set(),
-    recentCLIMessageHashes: [],
-    recentCLIMessageHashSet: new Set(),
     lastCliActivityTs: Date.now(),
     stateMachine: new SessionStateMachine("test-session"),
     ...overrides,

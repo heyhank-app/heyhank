@@ -171,7 +171,7 @@ function createMockBridge() {
     broadcastNameUpdate: vi.fn(),
     broadcastToSession: vi.fn(),
     injectSystemPrompt: vi.fn(),
-    attachCodexAdapter: vi.fn(),
+    attachBackendAdapter: vi.fn(),
   } as any;
 }
 

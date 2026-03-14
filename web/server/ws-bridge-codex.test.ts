@@ -27,8 +27,7 @@ function createMockSession(overrides = {}): Session {
   return {
     id: "test-session",
     backendType: "codex",
-    cliSocket: null,
-    codexAdapter: null,
+    backendAdapter: null,
     browserSockets: new Set(),
     state: {
       session_id: "test-session",
@@ -56,7 +55,6 @@ function createMockSession(overrides = {}): Session {
       total_lines_removed: 0,
     } as SessionState,
     pendingPermissions: new Map(),
-    pendingControlRequests: new Map(),
     messageHistory: [] as BrowserIncomingMessage[],
     pendingMessages: [] as string[],
     nextEventSeq: 0,
@@ -64,8 +62,6 @@ function createMockSession(overrides = {}): Session {
     lastAckSeq: 0,
     processedClientMessageIds: [],
     processedClientMessageIdSet: new Set(),
-    recentCLIMessageHashes: [],
-    recentCLIMessageHashSet: new Set(),
     lastCliActivityTs: Date.now(),
     stateMachine: new SessionStateMachine("test-session"),
     ...overrides,
@@ -838,10 +834,10 @@ describe("attachCodexAdapterHandlers", () => {
 
   it("onDisconnect clears pending permissions and broadcasts cli_disconnected", () => {
     // When the adapter disconnects, all pending permissions should be cancelled
-    // (broadcast permission_cancelled for each), the map cleared, codexAdapter set to null,
+    // (broadcast permission_cancelled for each), the map cleared, backendAdapter set to null,
     // session persisted, and a cli_disconnected message broadcast.
-    // Simulate the real flow: ws-bridge sets session.codexAdapter before calling handlers.
-    session.codexAdapter = adapter as unknown as CodexAdapter;
+    // Simulate the real flow: ws-bridge sets session.backendAdapter before calling handlers.
+    session.backendAdapter = adapter as unknown as CodexAdapter;
     attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
 
     // Add some pending permissions first
@@ -867,8 +863,8 @@ describe("attachCodexAdapterHandlers", () => {
     // Pending permissions should be cleared
     expect(session.pendingPermissions.size).toBe(0);
 
-    // codexAdapter should be nulled out
-    expect(session.codexAdapter).toBeNull();
+    // backendAdapter should be nulled out
+    expect(session.backendAdapter).toBeNull();
 
     // Should broadcast permission_cancelled for each pending permission
     expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(session, {
@@ -891,14 +887,14 @@ describe("attachCodexAdapterHandlers", () => {
   it("onDisconnect with no pending permissions still broadcasts cli_disconnected", () => {
     // Even when there are no pending permissions to cancel, the disconnect handler
     // should still broadcast cli_disconnected and persist.
-    // Simulate the real flow: ws-bridge sets session.codexAdapter before calling handlers.
-    session.codexAdapter = adapter as unknown as CodexAdapter;
+    // Simulate the real flow: ws-bridge sets session.backendAdapter before calling handlers.
+    session.backendAdapter = adapter as unknown as CodexAdapter;
     attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
 
     adapter._trigger("onDisconnect", undefined);
 
     expect(session.pendingPermissions.size).toBe(0);
-    expect(session.codexAdapter).toBeNull();
+    expect(session.backendAdapter).toBeNull();
     expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(session, {
       type: "cli_disconnected",
     });
@@ -906,18 +902,18 @@ describe("attachCodexAdapterHandlers", () => {
   });
 
   it("onDisconnect from stale adapter is ignored when adapter has been replaced", () => {
-    // When a session is relaunched, the new adapter is set on session.codexAdapter
+    // When a session is relaunched, the new adapter is set on session.backendAdapter
     // before the old adapter's disconnect fires. The old adapter's disconnect should
     // be a no-op so it doesn't null out the new adapter.
     const oldAdapter = createMockAdapter();
     const newAdapter = createMockAdapter();
 
     // Simulate: old adapter is attached
-    session.codexAdapter = oldAdapter as unknown as CodexAdapter;
+    session.backendAdapter = oldAdapter as unknown as CodexAdapter;
     attachCodexAdapterHandlers("test-session", session, oldAdapter as unknown as CodexAdapter, deps);
 
     // Simulate: relaunch replaces the adapter
-    session.codexAdapter = newAdapter as unknown as CodexAdapter;
+    session.backendAdapter = newAdapter as unknown as CodexAdapter;
     attachCodexAdapterHandlers("test-session", session, newAdapter as unknown as CodexAdapter, deps);
 
     // Clear broadcast calls from the two cli_connected broadcasts during attach
@@ -926,8 +922,8 @@ describe("attachCodexAdapterHandlers", () => {
     // Old adapter fires disconnect (happens async after kill)
     oldAdapter._trigger("onDisconnect", undefined);
 
-    // session.codexAdapter should still be the NEW adapter, not null
-    expect(session.codexAdapter).toBe(newAdapter);
+    // session.backendAdapter should still be the NEW adapter, not null
+    expect(session.backendAdapter).toBe(newAdapter);
     // No cli_disconnected broadcast should have happened
     expect(deps.broadcastToBrowsers).not.toHaveBeenCalledWith(session, {
       type: "cli_disconnected",
@@ -940,7 +936,7 @@ describe("attachCodexAdapterHandlers", () => {
     const onRelaunchNeeded = vi.fn();
     companionBus.on("session:relaunch-needed", onRelaunchNeeded);
 
-    session.codexAdapter = adapter as unknown as CodexAdapter;
+    session.backendAdapter = adapter as unknown as CodexAdapter;
     // Simulate a connected browser
     const fakeBrowserWs = {} as any;
     session.browserSockets.add(fakeBrowserWs);
@@ -957,7 +953,7 @@ describe("attachCodexAdapterHandlers", () => {
     const onRelaunchNeeded = vi.fn();
     companionBus.on("session:relaunch-needed", onRelaunchNeeded);
 
-    session.codexAdapter = adapter as unknown as CodexAdapter;
+    session.backendAdapter = adapter as unknown as CodexAdapter;
     expect(session.browserSockets.size).toBe(0);
     attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
 
@@ -969,7 +965,7 @@ describe("attachCodexAdapterHandlers", () => {
   it("onDisconnect works safely even with no bus subscribers for relaunch", () => {
     // When no subscriber is listening for session:relaunch-needed, disconnect
     // should still work without errors.
-    session.codexAdapter = adapter as unknown as CodexAdapter;
+    session.backendAdapter = adapter as unknown as CodexAdapter;
     const fakeBrowserWs = {} as any;
     session.browserSockets.add(fakeBrowserWs);
     attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
@@ -977,7 +973,7 @@ describe("attachCodexAdapterHandlers", () => {
     // Should not throw
     adapter._trigger("onDisconnect", undefined);
 
-    expect(session.codexAdapter).toBeNull();
+    expect(session.backendAdapter).toBeNull();
   });
 
   it("stale adapter disconnect does NOT trigger auto-relaunch", () => {
@@ -991,11 +987,11 @@ describe("attachCodexAdapterHandlers", () => {
     const fakeBrowserWs = {} as any;
     session.browserSockets.add(fakeBrowserWs);
 
-    session.codexAdapter = oldAdapter as unknown as CodexAdapter;
+    session.backendAdapter = oldAdapter as unknown as CodexAdapter;
     attachCodexAdapterHandlers("test-session", session, oldAdapter as unknown as CodexAdapter, deps);
 
     // Relaunch replaces the adapter
-    session.codexAdapter = newAdapter as unknown as CodexAdapter;
+    session.backendAdapter = newAdapter as unknown as CodexAdapter;
     attachCodexAdapterHandlers("test-session", session, newAdapter as unknown as CodexAdapter, deps);
     onRelaunchNeeded.mockClear();
 

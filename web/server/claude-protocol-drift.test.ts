@@ -18,14 +18,19 @@ function extractTypeLiterals(tsSource: string): Set<string> {
 }
 
 describe("Claude ws-bridge method drift vs upstream Agent SDK snapshot", () => {
+  /**
+   * CLI message routing now lives in claude-adapter.ts (ClaudeAdapter.handleRawMessage).
+   * This test verifies that the adapter handles all upstream CLI message types.
+   */
   it("keeps handled CLI message types aligned with upstream (or explicit local allowlist)", () => {
-    const bridge = readFile("server/ws-bridge.ts");
+    const adapter = readFile("server/claude-adapter.ts");
     const sdk = readFile("server/protocol/claude-upstream/sdk.d.ts.txt");
 
+    // Extract case "xxx": from the routeCLIMessage switch in claude-adapter.ts
     const handledFromCLI = extractCaseMethods(
-      bridge,
-      "private async routeCLIMessage(session: Session, msg: CLIMessage) {",
-      "private handleSystemMessage(session: Session, msg: CLISystemMessage) {",
+      adapter,
+      "private routeCLIMessage(msg: CLIMessage): void {",
+      "// -- System message handling",
     );
     expect(handledFromCLI.size).toBeGreaterThan(0);
 
@@ -42,8 +47,12 @@ describe("Claude ws-bridge method drift vs upstream Agent SDK snapshot", () => {
     }
   });
 
+  /**
+   * System subtypes (init, status) are now handled in claude-adapter.ts
+   * instead of ws-bridge.ts. This test verifies they are still present.
+   */
   it("keeps system subtypes handled by ws-bridge aligned with upstream", () => {
-    const bridge = readFile("server/ws-bridge.ts");
+    const adapter = readFile("server/claude-adapter.ts");
     const sdk = readFile("server/protocol/claude-upstream/sdk.d.ts.txt");
 
     const upstreamInit = sdk.includes("export declare type SDKSystemMessage = {")
@@ -54,7 +63,7 @@ describe("Claude ws-bridge method drift vs upstream Agent SDK snapshot", () => {
     expect(upstreamInit).toBe(true);
     expect(upstreamStatus).toBe(true);
 
-    expect(bridge).toContain('if (msg.subtype === "init")');
-    expect(bridge).toContain('if (msg.subtype === "status")');
+    expect(adapter).toContain('if (msg.subtype === "init")');
+    expect(adapter).toContain('if (msg.subtype === "status")');
   });
 });

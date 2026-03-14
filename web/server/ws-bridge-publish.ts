@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from "bun";
-import type { BrowserIncomingMessage, BackendType } from "./session-types.js";
+import type { BrowserIncomingMessage } from "./session-types.js";
 import type { Session, SocketData } from "./ws-bridge-types.js";
 import type { RecorderManager } from "./recorder.js";
 import { sequenceEvent } from "./ws-bridge-replay.js";
@@ -77,28 +77,3 @@ export function sendToBrowser(
   }
 }
 
-/**
- * Send an NDJSON message to the CLI process.
- * If the CLI socket is not yet connected, queues the message for later
- * delivery (flushed when CLI connects in handleCLIOpen).
- * Records the raw outgoing message only when actually sending (not when queuing).
- */
-export function sendToCLI(
-  session: Session,
-  ndjson: string,
-  recorder: RecorderManager | null,
-): void {
-  if (!session.cliSocket) {
-    console.log(`[ws-bridge] CLI not yet connected for session ${session.id}, queuing message`);
-    session.pendingMessages.push(ndjson);
-    return;
-  }
-  // Record raw outgoing CLI message
-  recorder?.record(session.id, "out", ndjson, "cli", session.backendType, session.state.cwd);
-  try {
-    // NDJSON requires a newline delimiter
-    session.cliSocket.send(ndjson + "\n");
-  } catch (err) {
-    console.error(`[ws-bridge] Failed to send to CLI for session ${session.id}:`, err);
-  }
-}

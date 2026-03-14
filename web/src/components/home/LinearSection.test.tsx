@@ -421,6 +421,10 @@ describe("LinearSection", () => {
 
   it("filters issues by search query in issue browser", async () => {
     // Verifies the inline search filters the displayed issues.
+    // Uses waitFor with increased timeout because the component re-fetches issues
+    // when selectedConnectionId changes (after connections load), which can cause
+    // a brief "Loading recent issues..." state between the two fetches.
+    // On slower CI runners (e.g. Ubuntu), this race is more likely to surface.
     const issues = [
       { ...sampleIssue, id: "i1", identifier: "ENG-1", title: "Fix login" },
       { ...sampleIssue, id: "i2", identifier: "ENG-2", title: "Add dashboard" },
@@ -440,10 +444,12 @@ describe("LinearSection", () => {
       />,
     );
 
+    // Wait for both ENG-1 and ENG-2 to appear together in the same waitFor
+    // to ensure the final re-fetch (after connectionId is set) has completed.
     await waitFor(() => {
       expect(screen.getByText("ENG-1")).toBeInTheDocument();
-    });
-    expect(screen.getByText("ENG-2")).toBeInTheDocument();
+      expect(screen.getByText("ENG-2")).toBeInTheDocument();
+    }, { timeout: 3000 });
 
     // Filter by "login"
     const searchInput = screen.getByPlaceholderText("Filter issues...");

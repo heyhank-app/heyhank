@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   broadcastToBrowsers,
   sendToBrowser,
-  sendToCLI,
   EVENT_BUFFER_LIMIT,
 } from "./ws-bridge-publish.js";
 import type { Session, SocketData } from "./ws-bridge-types.js";
@@ -19,21 +18,11 @@ function makeMockSocket(sessionId = "test-session") {
   } as unknown as ServerWebSocket<SocketData>;
 }
 
-function makeMockCliSocket(sessionId = "test-session") {
-  return {
-    data: { kind: "cli", sessionId } as SocketData,
-    send: vi.fn(),
-    close: vi.fn(),
-    readyState: 1,
-  } as unknown as ServerWebSocket<SocketData>;
-}
-
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {
     id: "test-session",
     backendType: "claude",
-    cliSocket: null,
-    codexAdapter: null,
+    backendAdapter: null,
     browserSockets: new Set(),
     state: {
       session_id: "test-session",
@@ -63,7 +52,6 @@ function makeSession(overrides: Partial<Session> = {}): Session {
       aiValidationAutoDeny: false,
     },
     pendingPermissions: new Map(),
-    pendingControlRequests: new Map(),
     messageHistory: [],
     pendingMessages: [],
     nextEventSeq: 1,
@@ -71,8 +59,6 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     lastAckSeq: 0,
     processedClientMessageIds: [],
     processedClientMessageIdSet: new Set(),
-    recentCLIMessageHashes: [],
-    recentCLIMessageHashSet: new Set(),
     lastCliActivityTs: Date.now(),
     stateMachine: new SessionStateMachine("test-session"),
     ...overrides,
@@ -236,62 +222,6 @@ describe("sendToBrowser", () => {
 
     // Should not throw
     expect(() => sendToBrowser(ws, { type: "cli_connected" })).not.toThrow();
-  });
-});
-
-// ─── sendToCLI ────────────────────────────────────────────────────────────────
-
-describe("sendToCLI", () => {
-  it("sends NDJSON with newline delimiter", () => {
-    const cliSocket = makeMockCliSocket();
-    const session = makeSession({ cliSocket });
-    const ndjson = '{"type":"user","message":{"role":"user","content":"hello"}}';
-
-    sendToCLI(session, ndjson, null);
-
-    expect(cliSocket.send).toHaveBeenCalledTimes(1);
-    expect(cliSocket.send).toHaveBeenCalledWith(ndjson + "\n");
-  });
-
-  it("queues message when CLI socket is null", () => {
-    const session = makeSession(); // cliSocket is null
-
-    sendToCLI(session, '{"type":"user"}', null);
-
-    expect(session.pendingMessages).toHaveLength(1);
-    expect(session.pendingMessages[0]).toBe('{"type":"user"}');
-  });
-
-  it("records when actually sending, not when queuing", () => {
-    const recorder = { record: vi.fn() };
-
-    // Case 1: queuing (no CLI socket) — should NOT record
-    const sessionA = makeSession();
-    sendToCLI(sessionA, '{"type":"user"}', recorder as any);
-    expect(recorder.record).not.toHaveBeenCalled();
-
-    // Case 2: sending (CLI socket connected) — should record
-    const cliSocket = makeMockCliSocket();
-    const sessionB = makeSession({ cliSocket });
-    sendToCLI(sessionB, '{"type":"user"}', recorder as any);
-    expect(recorder.record).toHaveBeenCalledTimes(1);
-    expect(recorder.record).toHaveBeenCalledWith(
-      "test-session", "out", '{"type":"user"}', "cli", "claude", "/test",
-    );
-  });
-
-  it("queues multiple messages when CLI is not connected", () => {
-    const session = makeSession();
-
-    sendToCLI(session, '{"type":"user","content":"msg1"}', null);
-    sendToCLI(session, '{"type":"user","content":"msg2"}', null);
-    sendToCLI(session, '{"type":"user","content":"msg3"}', null);
-
-    expect(session.pendingMessages).toHaveLength(3);
-    // Verify ordering
-    expect(session.pendingMessages[0]).toContain("msg1");
-    expect(session.pendingMessages[1]).toContain("msg2");
-    expect(session.pendingMessages[2]).toContain("msg3");
   });
 });
 
