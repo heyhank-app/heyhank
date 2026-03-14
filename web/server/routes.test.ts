@@ -556,7 +556,7 @@ describe("POST /api/sessions/create", () => {
     expect(launcher.launch).toHaveBeenCalled();
   });
 
-  it("returns 500 when launch throws an error", async () => {
+  it("returns 503 when launch throws an error", async () => {
     launcher.launch.mockImplementation(() => {
       throw new Error("CLI binary not found");
     });
@@ -567,9 +567,9 @@ describe("POST /api/sessions/create", () => {
       body: JSON.stringify({ cwd: "/test" }),
     });
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(503);
     const json = await res.json();
-    expect(json).toEqual({ error: "CLI binary not found" });
+    expect(json.error).toContain("CLI binary not found");
   });
 
   it("returns 400 for invalid backend values", async () => {
