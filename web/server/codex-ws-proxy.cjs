@@ -127,6 +127,7 @@ function connect() {
     if (!opened) {
       opened = true;
     }
+    const wasReconnect = reconnecting;
     if (reconnecting) {
       log(`Reconnected successfully (attempt ${reconnectAttempt})`);
       reconnecting = false;
@@ -134,6 +135,16 @@ function connect() {
     }
     startHeartbeat();
     flushQueue();
+    // Notify the adapter AFTER flushing any buffered messages so stale Codex
+    // responses from the pre-drop session are delivered before the adapter
+    // rejects all pending calls and cleans up.
+    if (wasReconnect) {
+      const reconnectNotification = JSON.stringify({
+        method: "companion/wsReconnected",
+        params: {},
+      });
+      process.stdout.write(reconnectNotification + "\n");
+    }
   });
 
   ws.on("message", (data) => {

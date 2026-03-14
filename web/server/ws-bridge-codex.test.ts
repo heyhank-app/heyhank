@@ -467,6 +467,35 @@ describe("attachCodexAdapterHandlers", () => {
     expect(deps.persistSession).toHaveBeenCalled();
   });
 
+  it("permission_cancelled removes entry from pendingPermissions", () => {
+    // When the adapter emits permission_cancelled (e.g. after a WS reconnect),
+    // the bridge should remove the corresponding entry from pendingPermissions
+    // so the browser doesn't show a stale approval dialog.
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    // Pre-populate a pending permission
+    session.pendingPermissions.set("perm-stale", {
+      request_id: "perm-stale",
+      tool_name: "Bash",
+      input: { command: "rm -rf /" },
+      description: "Execute: rm -rf /",
+      tool_use_id: "tool-stale",
+      timestamp: Date.now(),
+    });
+
+    adapter._trigger("onBrowserMessage", {
+      type: "permission_cancelled",
+      request_id: "perm-stale",
+    });
+
+    expect(session.pendingPermissions.has("perm-stale")).toBe(false);
+    expect(deps.persistSession).toHaveBeenCalled();
+    expect(deps.broadcastToBrowsers).toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({ type: "permission_cancelled", request_id: "perm-stale" }),
+    );
+  });
+
   // ── broadcast to browsers ───────────────────────────────────────────────
 
   it("all messages are broadcast to browsers", () => {
@@ -1670,6 +1699,102 @@ describe("attachCodexAdapterHandlers", () => {
           timestamp: Date.now(),
         });
       }).not.toThrow();
+    });
+  });
+
+  // ── lastCliActivityTs tracking ──────────────────────────────────────────
+
+  describe("lastCliActivityTs tracking for idle detection", () => {
+    it("updates lastCliActivityTs when adapter emits messages", () => {
+      // Codex sessions route through the adapter, not routeCLIMessage.
+      // Without updating lastCliActivityTs here, the idle kill watchdog
+      // would incorrectly kill active Codex sessions.
+      const initialTs = session.lastCliActivityTs;
+
+      // Advance time — use try/finally to ensure fake timers are restored
+      // even if assertions fail, preventing leaks into subsequent tests.
+      vi.useFakeTimers();
+      try {
+        vi.advanceTimersByTime(5000);
+
+        attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+        // Simulate an assistant message from Codex
+        adapter._trigger("onBrowserMessage", {
+          type: "assistant",
+          message: {
+            id: "msg-1",
+            type: "message",
+            role: "assistant",
+            model: "o4-mini",
+            content: [{ type: "text", text: "Hi" }],
+            stop_reason: "end_turn",
+            usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+          },
+          parent_tool_use_id: null,
+          timestamp: Date.now(),
+        });
+
+        // lastCliActivityTs should have been updated
+        expect(session.lastCliActivityTs).toBeGreaterThan(initialTs);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("updates lastCliActivityTs on result messages", () => {
+      // Result messages (turn completed) should also update activity tracking
+      const oldTs = Date.now() - 60000;
+      session.lastCliActivityTs = oldTs;
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+      adapter._trigger("onBrowserMessage", {
+        type: "result",
+        subtype: "result",
+        data: { result: "Task completed" },
+      });
+
+      expect(session.lastCliActivityTs).toBeGreaterThan(oldTs);
+    });
+
+    it("updates lastCliActivityTs on session_init messages", () => {
+      // Even session_init should count as activity
+      const oldTs = Date.now() - 60000;
+      session.lastCliActivityTs = oldTs;
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+      adapter._trigger("onBrowserMessage", {
+        type: "session_init",
+        session: {
+          session_id: "test-session",
+          backend_type: "codex",
+          model: "o4-mini",
+          cwd: "/tmp",
+          tools: [],
+          permissionMode: "bypassPermissions",
+          claude_code_version: "",
+          mcp_servers: [],
+          agents: [],
+          slash_commands: [],
+          skills: [],
+          total_cost_usd: 0,
+          num_turns: 0,
+          context_used_percent: 0,
+          is_compacting: false,
+          git_branch: "",
+          is_worktree: false,
+          is_containerized: false,
+          repo_root: "",
+          git_ahead: 0,
+          git_behind: 0,
+          total_lines_added: 0,
+          total_lines_removed: 0,
+        },
+      });
+
+      expect(session.lastCliActivityTs).toBeGreaterThan(oldTs);
     });
   });
 });

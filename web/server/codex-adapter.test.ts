@@ -4237,6 +4237,56 @@ describe("StdioTransport RPC timeout", () => {
     await expect(p1).rejects.toThrow("Transport closed");
     await expect(p2).rejects.toThrow("Transport closed");
   });
+
+  it("rejects pending RPC calls when companion/wsReconnected notification arrives", async () => {
+    // When the WS proxy reconnects to Codex, it sends a companion/wsReconnected
+    // notification. Any pending RPC calls should be immediately rejected because
+    // Codex sees the reconnection as a fresh connection and won't respond to old requests.
+    const streams = createStreams();
+    const transport = new StdioTransport(streams.stdin, streams.stdout);
+
+    const p1 = transport.call("method/a", {}, 60000);
+    const p2 = transport.call("method/b", {}, 60000);
+
+    // Simulate the proxy sending the reconnection notification
+    await new Promise((r) => setTimeout(r, 20));
+    streams.pushResponse({ method: "companion/wsReconnected", params: {} });
+
+    await expect(p1).rejects.toThrow("Transport reconnected");
+    await expect(p2).rejects.toThrow("Transport reconnected");
+  });
+
+  it("forwards companion/wsReconnected as notification after rejecting pending calls", async () => {
+    // The reconnection notification should still be delivered to the notification
+    // handler so the adapter can perform its own cleanup.
+    const streams = createStreams();
+    const transport = new StdioTransport(streams.stdin, streams.stdout);
+
+    const notifications: { method: string; params: Record<string, unknown> }[] = [];
+    transport.onNotification((method, params) => {
+      notifications.push({ method, params });
+    });
+
+    // Start a pending call — attach .catch() immediately to prevent
+    // unhandled rejection warnings (the rejection fires synchronously
+    // inside dispatch when the reconnect notification is processed).
+    const p1 = transport.call("method/a", {}, 60000);
+    const p1Result = p1.catch((err: Error) => err);
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Send the reconnection notification
+    streams.pushResponse({ method: "companion/wsReconnected", params: {} });
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Pending call should be rejected
+    const err = await p1Result;
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe("Transport reconnected");
+
+    // Notification should also be delivered to the handler
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].method).toBe("companion/wsReconnected");
+  });
 });
 
 // ─── CodexAdapter user_message timeout error surfacing ────────────────────
@@ -4416,5 +4466,145 @@ describe("CodexAdapter RPC timeout error surfacing", () => {
     expect(errors.length).toBeGreaterThanOrEqual(1);
     const errorMsg = (errors[errors.length - 1] as { message: string }).message;
     expect(errorMsg).toContain("not responding to interrupt");
+  });
+});
+
+// ─── CodexAdapter WS reconnection handling ────────────────────────────────
+
+describe("CodexAdapter WS reconnection handling", () => {
+  it("retries user_message on Transport reconnected error instead of relaunching", async () => {
+    // When turn/start fails with "Transport reconnected" (transient WS drop),
+    // the adapter should retry the message instead of triggering a full relaunch.
+    let notifHandler: ((m: string, p: Record<string, unknown>) => void) | null = null;
+    let callCount = 0;
+
+    const transport: ICodexTransport = {
+      call: vi.fn(async (method: string) => {
+        callCount++;
+        if (method === "initialize") return { userAgent: "codex" };
+        if (method === "thread/start" || method === "thread/create") return { thread: { id: "thr_1" } };
+        if (method === "account/rateLimits/read") return {};
+        if (method === "turn/start") {
+          // First call fails with reconnection error, subsequent calls succeed
+          if (callCount <= 5) { // init calls + first turn/start
+            throw new Error("Transport reconnected");
+          }
+          return { turn: { id: "turn_1" } };
+        }
+        return {};
+      }),
+      notify: vi.fn(async () => {}),
+      respond: vi.fn(async () => {}),
+      onNotification: vi.fn((h) => { notifHandler = h; }),
+      onRequest: vi.fn(),
+      onRawIncoming: vi.fn(),
+      onRawOutgoing: vi.fn(),
+      isConnected: vi.fn(() => true),
+    };
+
+    const disconnectCb = vi.fn();
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(transport, "reconnect-retry-test", { model: "o4-mini", cwd: "/tmp" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+    adapter.onDisconnect(disconnectCb);
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Send a user message — first turn/start will fail with "Transport reconnected"
+    adapter.sendBrowserMessage({ type: "user_message", content: "hello" });
+    await new Promise((r) => setTimeout(r, 150));
+
+    // Should NOT have triggered disconnect/relaunch
+    expect(disconnectCb).not.toHaveBeenCalled();
+
+    // Should have emitted a transient error message
+    const errors = messages.filter((m) => m.type === "error");
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    const errorMsg = (errors[0] as { message: string }).message;
+    expect(errorMsg).toContain("briefly interrupted");
+  });
+
+  it("handleWsReconnected clears pending approvals and resets currentTurnId", async () => {
+    // When the WS proxy reconnects, the adapter should clean up stale
+    // pending state: after reconnection, sending a permission response
+    // for a pre-reconnect request should be silently dropped (no pending
+    // approval entry), and a new user_message should succeed (currentTurnId
+    // was reset, allowing a fresh turn/start).
+    let notifHandler: (m: string, p: Record<string, unknown>) => void;
+    let reqHandler: (m: string, id: number, p: Record<string, unknown>) => void;
+
+    const transport: ICodexTransport = {
+      call: vi.fn(async (method: string) => {
+        if (method === "initialize") return { userAgent: "codex" };
+        if (method === "thread/start") return { thread: { id: "thr_1" } };
+        if (method === "account/rateLimits/read") return {};
+        if (method === "turn/start") return { turn: { id: "turn_1" } };
+        return {};
+      }),
+      notify: vi.fn(async () => {}),
+      respond: vi.fn(async () => {}),
+      onNotification: vi.fn((h: (m: string, p: Record<string, unknown>) => void) => { notifHandler = h; }),
+      onRequest: vi.fn((h: (m: string, id: number, p: Record<string, unknown>) => void) => { reqHandler = h; }),
+      onRawIncoming: vi.fn(),
+      onRawOutgoing: vi.fn(),
+      isConnected: vi.fn(() => true),
+    };
+
+    const disconnectCb = vi.fn();
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(transport, "reconnect-cleanup-test", { model: "o4-mini", cwd: "/tmp" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+    adapter.onDisconnect(disconnectCb);
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Start a turn so we have a currentTurnId
+    adapter.sendBrowserMessage({ type: "user_message", content: "hello" });
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Simulate a pending approval request from Codex before reconnection
+    reqHandler!("item/commandExecution/requestApproval", 42, {
+      command: { command: "ls" },
+      cwd: "/tmp",
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Find the permission request to get its request_id
+    const permReqs = messages.filter((m) => m.type === "permission_request");
+    expect(permReqs.length).toBeGreaterThanOrEqual(1);
+    const permReqId = (permReqs[0] as { request: { request_id: string } }).request.request_id;
+
+    // Trigger the wsReconnected notification
+    notifHandler!("companion/wsReconnected", {});
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Should NOT have triggered full disconnect (this is a transient recovery)
+    expect(disconnectCb).not.toHaveBeenCalled();
+    expect(adapter.isConnected()).toBe(true);
+
+    // Adapter should have emitted permission_cancelled for the stale approval
+    const cancelMsgs = messages.filter((m) => m.type === "permission_cancelled");
+    expect(cancelMsgs.length).toBe(1);
+    expect((cancelMsgs[0] as { request_id: string }).request_id).toBe(permReqId);
+
+    // Sending a permission response for the pre-reconnect request should
+    // be silently dropped (respond should NOT be called for it)
+    const respondBefore = (transport.respond as ReturnType<typeof vi.fn>).mock.calls.length;
+    adapter.sendBrowserMessage({
+      type: "permission_response",
+      request_id: permReqId,
+      behavior: "allow",
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    // respond() should not have been called again — the approval was cleared
+    expect((transport.respond as ReturnType<typeof vi.fn>).mock.calls.length).toBe(respondBefore);
+
+    // A new user_message should succeed — verifying currentTurnId was reset
+    adapter.sendBrowserMessage({ type: "user_message", content: "after reconnect" });
+    await new Promise((r) => setTimeout(r, 50));
+    // turn/start should have been called again (at least 2 times total: init + post-reconnect)
+    const turnStartCalls = (transport.call as ReturnType<typeof vi.fn>).mock.calls
+      .filter((args: unknown[]) => args[0] === "turn/start");
+    expect(turnStartCalls.length).toBeGreaterThanOrEqual(2);
   });
 });

@@ -35,6 +35,11 @@ export function attachCodexAdapterHandlers(
   deps: CodexAttachDeps,
 ): void {
   adapter.onBrowserMessage((msg) => {
+    // Track activity for idle detection — mirrors routeCLIMessage logic for
+    // Claude Code NDJSON. Without this, Codex sessions get incorrectly
+    // idle-killed because lastCliActivityTs is never updated.
+    session.lastCliActivityTs = Date.now();
+
     if (msg.type === "session_init") {
       // Preserve pre-populated commands/skills when adapter sends empty arrays
       // (Codex does not provide its own commands/skills)
@@ -89,6 +94,12 @@ export function attachCodexAdapterHandlers(
       if (hasToolUse) {
         console.log(`[ws-bridge] Broadcasting tool_use assistant to ${session.browserSockets.size} browser(s) for session ${session.id}`);
       }
+    }
+
+    if (msg.type === "permission_cancelled") {
+      const reqId = (msg as { request_id: string }).request_id;
+      session.pendingPermissions.delete(reqId);
+      deps.persistSession(session);
     }
 
     if (msg.type === "permission_request") {

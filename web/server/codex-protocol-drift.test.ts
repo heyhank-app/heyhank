@@ -46,6 +46,9 @@ describe("Codex adapter method drift vs upstream protocol snapshot", () => {
       "item/updated",
       "codex/event/stream_error",
       "codex/event/error",
+      // Companion-internal notification emitted by codex-ws-proxy.cjs on
+      // WebSocket reconnection — not part of the upstream Codex protocol.
+      "companion/wsReconnected",
     ]);
 
     const legacyServerRequests = new Set([
