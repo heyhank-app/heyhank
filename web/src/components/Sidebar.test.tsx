@@ -1220,7 +1220,7 @@ describe("Sidebar", () => {
     // Click the "Archive" confirm button in the warning panel
     // (There are multiple "Archive" texts, find the one in the confirmation panel)
     const archiveConfirmBtn = screen.getAllByText("Archive").find(
-      (el) => el.closest(".bg-amber-500\\/10") !== null,
+      (el) => el.closest(".bg-cc-warning\\/10") !== null,
     );
     expect(archiveConfirmBtn).toBeTruthy();
     fireEvent.click(archiveConfirmBtn!);
@@ -1247,7 +1247,7 @@ describe("Sidebar", () => {
 
     // Click Cancel in the warning panel
     const cancelBtn = screen.getAllByText("Cancel").find(
-      (el) => el.closest(".bg-amber-500\\/10") !== null,
+      (el) => el.closest(".bg-cc-warning\\/10") !== null,
     );
     fireEvent.click(cancelBtn!);
 

@@ -131,6 +131,7 @@ export function Sidebar() {
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [hash, setHash] = useState(() => (typeof window !== "undefined" ? window.location.hash : ""));
   const editInputRef = useRef<HTMLInputElement>(null);
+  const deleteModalRef = useRef<HTMLDivElement>(null);
   const sessions = useStore((s) => s.sessions);
   const sdkSessions = useStore((s) => s.sdkSessions);
   const currentSessionId = useStore((s) => s.currentSessionId);
@@ -288,6 +289,37 @@ export function Sidebar() {
   const cancelDeleteAll = useCallback(() => {
     setConfirmDeleteAll(false);
   }, []);
+
+  // Focus trap for delete confirmation modal
+  useEffect(() => {
+    if (!confirmDeleteId && !confirmDeleteAll) return;
+    // Auto-focus the cancel button on open
+    requestAnimationFrame(() => {
+      deleteModalRef.current?.querySelector<HTMLElement>("button")?.focus();
+    });
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        confirmDeleteAll ? cancelDeleteAll() : cancelDelete();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focusable = deleteModalRef.current?.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable || focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [confirmDeleteId, confirmDeleteAll, cancelDelete, cancelDeleteAll]);
 
   const handleArchiveSession = useCallback(async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
@@ -449,7 +481,7 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="w-full md:w-[260px] h-full flex flex-col bg-cc-sidebar">
+    <aside aria-label="Session sidebar" className="w-full md:w-[260px] h-full flex flex-col bg-cc-sidebar">
       {/* Header */}
       <div className="p-3.5 pb-2">
         <div className="flex items-center gap-2.5">
@@ -480,9 +512,9 @@ export function Sidebar() {
 
       {/* Container archive confirmation */}
       {confirmArchiveId && (
-        <div className="mx-2 mb-1 p-2.5 rounded-[10px] bg-amber-500/10 border border-amber-500/20">
+        <div className="mx-2 mb-1 p-2.5 rounded-[10px] bg-cc-warning/10 border border-cc-warning/20">
           <div className="flex items-start gap-2">
-            <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-amber-500 shrink-0 mt-0.5">
+            <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-cc-warning shrink-0 mt-0.5">
               <path d="M8.982 1.566a1.13 1.13 0 00-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 01-1.1 0L7.1 5.995A.905.905 0 018 5zm.002 6a1 1 0 110 2 1 1 0 010-2z" />
             </svg>
             <div className="flex-1 min-w-0">
@@ -498,7 +530,7 @@ export function Sidebar() {
                 </button>
                 <button
                   onClick={confirmArchive}
-                  className="px-2.5 py-1 text-[11px] font-medium rounded-md bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors cursor-pointer"
+                  className="px-2.5 py-1 text-[11px] font-medium rounded-md bg-cc-error/10 text-cc-error hover:bg-cc-error/20 transition-colors cursor-pointer"
                 >
                   Archive
                 </button>
@@ -532,21 +564,19 @@ export function Sidebar() {
             ))}
 
             {cronSessions.length > 0 && (
-              <div className="mt-2 pt-2">
+              <div className="mt-3 pt-3 border-t border-cc-separator">
                 <button
                   onClick={() => setShowCronSessions(!showCronSessions)}
-                  className="w-full px-3 py-1.5 text-[11px] font-medium text-violet-400 uppercase tracking-wider flex items-center gap-1.5 hover:text-violet-300 transition-colors cursor-pointer"
+                  aria-expanded={showCronSessions}
+                  className="w-full px-2 py-1 text-[11px] font-semibold text-cc-fg/60 uppercase tracking-wide flex items-center gap-1.5 hover:bg-cc-hover rounded-md transition-colors cursor-pointer"
                 >
-                  <svg viewBox="0 0 16 16" fill="currentColor" className={`w-3 h-3 transition-transform ${showCronSessions ? "rotate-90" : ""}`}>
+                  <svg viewBox="0 0 16 16" fill="currentColor" className={`w-2 h-2 text-cc-muted/50 transition-transform duration-150 ${showCronSessions ? "rotate-90" : ""}`}>
                     <path d="M6 4l4 4-4 4" />
-                  </svg>
-                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-60">
-                    <path d="M8 2a6 6 0 100 12A6 6 0 008 2zM0 8a8 8 0 1116 0A8 8 0 010 8zm9-3a1 1 0 10-2 0v3a1 1 0 00.293.707l2 2a1 1 0 001.414-1.414L9 7.586V5z" />
                   </svg>
                   Scheduled Runs ({cronSessions.length})
                 </button>
                 {showCronSessions && (
-                  <div className="space-y-0.5 mt-1">
+                  <div className="mt-0.5">
                     {cronSessions.map((s) => (
                       <SessionItem
                         key={s.id}
@@ -564,21 +594,19 @@ export function Sidebar() {
             )}
 
             {agentSessions.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-cc-border">
+              <div className="mt-3 pt-3 border-t border-cc-separator">
                 <button
                   onClick={() => setShowAgentSessions(!showAgentSessions)}
-                  className="w-full px-3 py-1.5 text-[11px] font-medium text-emerald-400 uppercase tracking-wider flex items-center gap-1.5 hover:text-emerald-300 transition-colors cursor-pointer"
+                  aria-expanded={showAgentSessions}
+                  className="w-full px-2 py-1 text-[11px] font-semibold text-cc-fg/60 uppercase tracking-wide flex items-center gap-1.5 hover:bg-cc-hover rounded-md transition-colors cursor-pointer"
                 >
-                  <svg viewBox="0 0 16 16" fill="currentColor" className={`w-3 h-3 transition-transform ${showAgentSessions ? "rotate-90" : ""}`}>
+                  <svg viewBox="0 0 16 16" fill="currentColor" className={`w-2 h-2 text-cc-muted/50 transition-transform duration-150 ${showAgentSessions ? "rotate-90" : ""}`}>
                     <path d="M6 4l4 4-4 4" />
-                  </svg>
-                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-60">
-                    <path d="M8 1.5a2.5 2.5 0 00-2.5 2.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5S9.38 1.5 8 1.5zM4 8a4 4 0 00-4 4v1.5a.5.5 0 00.5.5h15a.5.5 0 00.5-.5V12a4 4 0 00-4-4H4z" />
                   </svg>
                   Agent Runs ({agentSessions.length})
                 </button>
                 {showAgentSessions && (
-                  <div className="space-y-0.5 mt-1">
+                  <div className="mt-0.5">
                     {agentSessions.map((s) => (
                       <SessionItem
                         key={s.id}
@@ -596,13 +624,14 @@ export function Sidebar() {
             )}
 
             {archivedSessions.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-cc-border/50">
+              <div className="mt-3 pt-3 border-t border-cc-separator">
                 <div className="flex items-center">
                   <button
                     onClick={() => setShowArchived(!showArchived)}
-                    className="flex-1 px-3 py-1.5 text-[11px] font-medium text-cc-muted uppercase tracking-wider flex items-center gap-1.5 hover:text-cc-fg transition-colors cursor-pointer"
+                    aria-expanded={showArchived}
+                    className="flex-1 px-2 py-1 text-[11px] font-semibold text-cc-fg/60 uppercase tracking-wide flex items-center gap-1.5 hover:bg-cc-hover rounded-md transition-colors cursor-pointer"
                   >
-                    <svg viewBox="0 0 16 16" fill="currentColor" className={`w-3 h-3 transition-transform ${showArchived ? "rotate-90" : ""}`}>
+                    <svg viewBox="0 0 16 16" fill="currentColor" className={`w-2 h-2 text-cc-muted/50 transition-transform duration-150 ${showArchived ? "rotate-90" : ""}`}>
                       <path d="M6 4l4 4-4 4" />
                     </svg>
                     Archived ({archivedSessions.length})
@@ -610,7 +639,7 @@ export function Sidebar() {
                   {showArchived && archivedSessions.length > 1 && (
                     <button
                       onClick={handleDeleteAllArchived}
-                      className="px-2 py-1 mr-1 text-[10px] text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-md transition-colors cursor-pointer"
+                      className="px-2 py-0.5 mr-1 text-[10px] text-cc-error/80 hover:text-cc-error hover:bg-cc-error/5 rounded-md transition-colors cursor-pointer"
                       title="Delete all archived sessions"
                     >
                       Delete all
@@ -618,7 +647,7 @@ export function Sidebar() {
                   )}
                 </div>
                 {showArchived && (
-                  <div className="space-y-0.5 mt-1">
+                  <div className="mt-0.5">
                     {archivedSessions.map((s) => (
                       <SessionItem
                         key={s.id}
@@ -658,9 +687,9 @@ export function Sidebar() {
         <nav className="flex flex-col gap-1.5" aria-label="Navigation">
           {NAV_SECTIONS.map((section) => (
             <section key={section.id} className="rounded-lg border border-cc-border/30 bg-cc-card/20 p-0.5">
-              <h3 className="px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-cc-muted/75">
+              <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-cc-muted/75 block">
                 {section.label}
-              </h3>
+              </span>
               <div className="flex flex-col">
                 {section.itemIds.map((itemId) => {
                   const item = NAV_ITEMS_BY_ID.get(itemId);
@@ -708,10 +737,10 @@ export function Sidebar() {
         </nav>
         <div className="mt-1.5 rounded-lg border border-cc-border/30 bg-cc-card/20 px-1.5 py-0.5">
           <div className="flex items-center justify-between">
-            <span className="px-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-cc-muted/75">
+            <span className="px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cc-muted/75">
               Resources
             </span>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-0.5">
               {EXTERNAL_LINKS.map((link) => (
                 <a
                   key={link.label}
@@ -720,7 +749,7 @@ export function Sidebar() {
                   rel="noopener noreferrer"
                   title={link.label}
                   aria-label={`Open ${link.label.toLowerCase()}`}
-                  className="w-7 h-7 rounded-md flex items-center justify-center text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors"
+                  className="w-9 h-9 md:w-7 md:h-7 rounded-md flex items-center justify-center text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors"
                 >
                   <svg viewBox={link.viewBox} fill="currentColor" className="w-3.5 h-3.5">
                     <path d={link.iconPath} />
@@ -739,13 +768,18 @@ export function Sidebar() {
           onClick={confirmDeleteAll ? cancelDeleteAll : cancelDelete}
         >
           <div
+            ref={deleteModalRef}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-dialog-title"
+            aria-describedby="delete-dialog-desc"
             className="mx-4 w-full max-w-[280px] bg-cc-card border border-cc-border rounded-xl shadow-2xl p-5 animate-[menu-appear_150ms_ease-out]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Icon */}
             <div className="flex justify-center mb-3">
-              <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-5 h-5 text-red-400">
+              <div className="w-10 h-10 rounded-full bg-cc-error/10 flex items-center justify-center">
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-5 h-5 text-cc-error">
                   <path d="M5.5 5.5A.5.5 0 016 6v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm2.5 0a.5.5 0 01.5.5v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm3 .5a.5.5 0 00-1 0v6a.5.5 0 001 0V6z" />
                   <path fillRule="evenodd" d="M14.5 3a1 1 0 01-1 1H13v9a2 2 0 01-2 2H5a2 2 0 01-2-2V4h-.5a1 1 0 010-2H6a1 1 0 011-1h2a1 1 0 011 1h3.5a1 1 0 011 1zM4.118 4L4 4.059V13a1 1 0 001 1h6a1 1 0 001-1V4.059L11.882 4H4.118zM6 2h4v1H6V2z" clipRule="evenodd" />
                 </svg>
@@ -753,10 +787,10 @@ export function Sidebar() {
             </div>
 
             {/* Text */}
-            <h3 className="text-[13px] font-semibold text-cc-fg text-center">
+            <p id="delete-dialog-title" className="text-[13px] font-semibold text-cc-fg text-center">
               {confirmDeleteAll ? "Delete all archived?" : "Delete session?"}
-            </h3>
-            <p className="text-[12px] text-cc-muted text-center mt-1.5 leading-relaxed">
+            </p>
+            <p id="delete-dialog-desc" className="text-[12px] text-cc-muted text-center mt-1.5 leading-relaxed">
               {confirmDeleteAll
                 ? `This will permanently delete ${archivedSessions.length} archived session${archivedSessions.length === 1 ? "" : "s"}. This cannot be undone.`
                 : "This will permanently delete this session and its history. This cannot be undone."}
@@ -772,7 +806,7 @@ export function Sidebar() {
               </button>
               <button
                 onClick={confirmDeleteAll ? confirmDeleteAllArchived : confirmDelete}
-                className="flex-1 px-3 py-2 text-[12px] font-medium rounded-lg bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors cursor-pointer"
+                className="flex-1 px-3 py-2 text-[12px] font-medium rounded-lg bg-cc-error/15 text-cc-error hover:bg-cc-error/25 transition-colors cursor-pointer"
               >
                 {confirmDeleteAll ? "Delete all" : "Delete"}
               </button>

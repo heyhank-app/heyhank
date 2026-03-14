@@ -56,13 +56,13 @@ function StatusDot({ status }: { status: DerivedStatus }) {
 function BackendBadge({ type }: { type: "claude" | "codex" }) {
   if (type === "codex") {
     return (
-      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-500 leading-none">
+      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-500 leading-none">
         CX
       </span>
     );
   }
   return (
-    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#5BA8A0]/15 text-[#5BA8A0] leading-none">
+    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-cc-success/15 text-cc-success leading-none">
       CC
     </span>
   );
@@ -100,7 +100,7 @@ export function SessionItem({
   // Show the full cwd path below the session name
   const cwdTail = s.cwd || "";
 
-  // Close menu on click outside or Escape
+  // Close menu on click outside or Escape; arrow-key navigation between menu items
   useEffect(() => {
     if (!menuOpen) return;
     function handleClickOutside(e: MouseEvent | TouchEvent) {
@@ -109,19 +109,54 @@ export function SessionItem({
         menuBtnRef.current && !menuBtnRef.current.contains(e.target as Node)
       ) {
         setMenuOpen(false);
+        menuBtnRef.current?.focus();
       }
     }
-    function handleEscape(e: KeyboardEvent) {
-      if (e.key === "Escape") setMenuOpen(false);
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setMenuOpen(false);
+        menuBtnRef.current?.focus();
+        return;
+      }
+      if (e.key === "Tab") {
+        setMenuOpen(false);
+        // Let native Tab move focus to the next element in sequence
+        return;
+      }
+      // Arrow key navigation within menu — only when focus is inside menu
+      if (
+        (e.key === "ArrowDown" || e.key === "ArrowUp") &&
+        (menuRef.current?.contains(document.activeElement) || menuBtnRef.current === document.activeElement)
+      ) {
+        e.preventDefault();
+        const items = menuRef.current?.querySelectorAll<HTMLElement>("[role='menuitem']");
+        if (!items || items.length === 0) return;
+        const focused = document.activeElement as HTMLElement;
+        const idx = Array.from(items).indexOf(focused);
+        if (e.key === "ArrowDown") {
+          items[idx < items.length - 1 ? idx + 1 : 0].focus();
+        } else {
+          items[idx > 0 ? idx - 1 : items.length - 1].focus();
+        }
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     document.addEventListener("touchstart", handleClickOutside);
-    document.addEventListener("keydown", handleEscape);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("touchstart", handleClickOutside);
-      document.removeEventListener("keydown", handleEscape);
+      document.removeEventListener("keydown", handleKeyDown);
     };
+  }, [menuOpen]);
+
+  // Focus the first menu item when the menu opens
+  useEffect(() => {
+    if (menuOpen) {
+      requestAnimationFrame(() => {
+        menuRef.current?.querySelector<HTMLElement>("[role='menuitem']")?.focus();
+      });
+    }
   }, [menuOpen]);
 
   const handleMenuAction = useCallback((action: () => void) => {
@@ -137,12 +172,26 @@ export function SessionItem({
           e.preventDefault();
           onStartRename(s.id, label);
         }}
-        className={`w-full flex items-center gap-1.5 py-2 pl-1 pr-12 min-h-[44px] rounded-lg transition-colors duration-100 cursor-pointer ${
+        onKeyDown={(e) => {
+          if (e.key === "F2" && !isEditing) {
+            e.preventDefault();
+            onStartRename(s.id, label);
+          }
+        }}
+        className={`w-full flex items-center gap-2 py-2 pl-2.5 pr-12 min-h-[44px] rounded-lg transition-all duration-100 cursor-pointer relative ${
           isActive
             ? "bg-cc-active"
             : "hover:bg-cc-hover"
         }`}
       >
+        {/* Left accent edge for active state */}
+        <span
+          aria-hidden
+          className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-full transition-all duration-150 ${
+            isActive ? "h-5 bg-cc-primary" : "h-0 bg-transparent"
+          }`}
+        />
+
         {/* Status dot */}
         {!isEditing && (
           <StatusDot status={derivedStatus} />
@@ -167,20 +216,20 @@ export function SessionItem({
             onBlur={onConfirmRename}
             onClick={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
-            className="text-[13px] font-medium flex-1 min-w-0 text-cc-fg bg-transparent border border-cc-border rounded px-1.5 py-0.5 outline-none focus:border-cc-primary/50 focus:ring-1 focus:ring-cc-primary/20"
+            className="text-[12.5px] font-medium flex-1 min-w-0 text-cc-fg bg-transparent border border-cc-border rounded-md px-2 py-1 outline-none focus:border-cc-primary/50 focus:ring-1 focus:ring-cc-primary/20"
           />
         ) : (
           <div className="flex-1 min-w-0">
             <span
-              className={`text-[13px] font-medium truncate text-cc-fg leading-snug block ${
-                isRecentlyRenamed ? "animate-name-appear" : ""
-              }`}
+              className={`text-[12.5px] font-medium truncate block leading-snug ${
+                isActive ? "text-cc-fg" : "text-cc-fg/90"
+              } ${isRecentlyRenamed ? "animate-name-appear" : ""}`}
               onAnimationEnd={() => onClearRecentlyRenamed(s.id)}
             >
               {label}
             </span>
             {cwdTail && (
-              <span className="text-[10px] text-cc-muted truncate block leading-tight">
+              <span className="text-[10px] text-cc-muted/70 truncate block leading-tight mt-px">
                 {cwdTail}
               </span>
             )}
@@ -197,8 +246,8 @@ export function SessionItem({
               </span>
             )}
             {s.cronJobId && (
-              <span className="flex items-center px-1 py-0.5 rounded bg-violet-400/10" title="Scheduled">
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 text-violet-400">
+              <span className="flex items-center px-1 py-0.5 rounded bg-cc-primary/10" title="Scheduled">
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 text-cc-primary">
                   <path d="M8 2a6 6 0 100 12A6 6 0 008 2zM0 8a8 8 0 1116 0A8 8 0 010 8zm9-3a1 1 0 10-2 0v3a1 1 0 00.293.707l2 2a1 1 0 001.414-1.414L9 7.586V5z" />
                 </svg>
               </span>
@@ -234,6 +283,8 @@ export function SessionItem({
         className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-100 pointer-events-auto sm:opacity-0 sm:pointer-events-none sm:group-hover:opacity-100 sm:group-hover:pointer-events-auto hover:bg-cc-border text-cc-muted hover:text-cc-fg transition-all cursor-pointer"
         title="Session actions"
         aria-label="Session actions"
+        aria-haspopup="true"
+        aria-expanded={menuOpen}
       >
         <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
           <circle cx="8" cy="3" r="1.5" />
@@ -246,36 +297,61 @@ export function SessionItem({
       {menuOpen && (
         <div
           ref={menuRef}
-          className="absolute right-0 top-full mt-1 w-36 py-1 bg-cc-card border border-cc-border rounded-lg shadow-lg z-10 animate-[menu-appear_150ms_ease-out]"
+          role="menu"
+          aria-label="Session actions"
+          className="absolute right-0 top-full mt-1 w-40 py-1 bg-cc-card border border-cc-border/80 rounded-lg shadow-xl z-10 animate-[menu-appear_150ms_ease-out]"
         >
           {!archived && (
             <button
+              role="menuitem"
+              tabIndex={-1}
               onClick={() => handleMenuAction(() => onStartRename(s.id, label))}
-              className="w-full px-3 py-1.5 text-[12px] text-left text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+              className="w-full px-3 py-1.5 text-[12px] text-left text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-2"
             >
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-muted">
+                <path d="M12.146.854a.5.5 0 00-.707 0L3.714 8.579a.5.5 0 00-.138.242l-.777 3.11a.5.5 0 00.607.607l3.11-.777a.5.5 0 00.242-.138L14.573 3.854a.5.5 0 000-.708L12.146.854z" />
+              </svg>
               Rename
             </button>
           )}
           {archived ? (
             <>
               <button
+                role="menuitem"
+                tabIndex={-1}
                 onClick={(e) => handleMenuAction(() => onUnarchive(e, s.id))}
-                className="w-full px-3 py-1.5 text-[12px] text-left text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+                className="w-full px-3 py-1.5 text-[12px] text-left text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-2"
               >
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-muted">
+                  <path d="M8 4a.5.5 0 01.5.5v3.793l1.854-1.853a.5.5 0 01.707.707l-2.828 2.828a.5.5 0 01-.707 0L4.697 7.147a.5.5 0 01.707-.707L7.5 8.293V4.5A.5.5 0 018 4z" />
+                  <path d="M2 12.5A1.5 1.5 0 003.5 14h9a1.5 1.5 0 001.5-1.5v-2a.5.5 0 00-1 0v2a.5.5 0 01-.5.5h-9a.5.5 0 01-.5-.5v-2a.5.5 0 00-1 0v2z" />
+                </svg>
                 Restore
               </button>
+              <div className="my-1 mx-2 border-t border-cc-border/50" />
               <button
+                role="menuitem"
+                tabIndex={-1}
                 onClick={(e) => handleMenuAction(() => onDelete(e, s.id))}
-                className="w-full px-3 py-1.5 text-[12px] text-left text-red-400 hover:bg-cc-hover transition-colors cursor-pointer"
+                className="w-full px-3 py-1.5 text-[12px] text-left text-cc-error hover:bg-cc-error/5 transition-colors cursor-pointer flex items-center gap-2"
               >
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                  <path d="M5.5 5.5A.5.5 0 016 6v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm2.5 0a.5.5 0 01.5.5v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm3 .5a.5.5 0 00-1 0v6a.5.5 0 001 0V6z" />
+                  <path fillRule="evenodd" d="M14.5 3a1 1 0 01-1 1H13v9a2 2 0 01-2 2H5a2 2 0 01-2-2V4h-.5a1 1 0 010-2H6a1 1 0 011-1h2a1 1 0 011 1h3.5a1 1 0 011 1zM4.118 4L4 4.059V13a1 1 0 001 1h6a1 1 0 001-1V4.059L11.882 4H4.118zM6 2h4v1H6V2z" clipRule="evenodd" />
+                </svg>
                 Delete
               </button>
             </>
           ) : (
             <button
+              role="menuitem"
+              tabIndex={-1}
               onClick={(e) => handleMenuAction(() => onArchive(e, s.id))}
-              className="w-full px-3 py-1.5 text-[12px] text-left text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+              className="w-full px-3 py-1.5 text-[12px] text-left text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-2"
             >
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-muted">
+                <path d="M2 4a1 1 0 011-1h10a1 1 0 011 1v1H2V4zm1 2h10v6a1 1 0 01-1 1H4a1 1 0 01-1-1V6zm3 2a.5.5 0 000 1h4a.5.5 0 000-1H6z" />
+              </svg>
               Archive
             </button>
           )}
