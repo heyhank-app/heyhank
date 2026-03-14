@@ -3,6 +3,7 @@
 
 import type { BrowserIncomingMessage } from "./session-types.js";
 import type { CodexAdapter } from "./codex-adapter.js";
+import type { SessionPhase } from "./session-state-machine.js";
 
 export interface CompanionEventMap {
   // ── Session lifecycle ──────────────────────────────────────────────
@@ -27,6 +28,14 @@ export interface CompanionEventMap {
 
   /** Git info resolved for a session (branch and cwd known). */
   "session:git-info-ready": { sessionId: string; cwd: string; branch: string };
+
+  /** Session phase changed (formal state machine transition). */
+  "session:phase-changed": {
+    sessionId: string;
+    from: SessionPhase;
+    to: SessionPhase;
+    trigger: string;
+  };
 
   // ── Backend integration ────────────────────────────────────────────
 

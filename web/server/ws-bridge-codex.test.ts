@@ -19,6 +19,7 @@ import type { CodexAttachDeps } from "./ws-bridge-codex.js";
 import * as settingsManager from "./settings-manager.js";
 import * as aiValidator from "./ai-validator.js";
 import { companionBus } from "./event-bus.js";
+import { SessionStateMachine } from "./session-state-machine.js";
 
 // ── Mock Factories ──────────────────────────────────────────────────────────
 
@@ -66,6 +67,7 @@ function createMockSession(overrides = {}): Session {
     recentCLIMessageHashes: [],
     recentCLIMessageHashSet: new Set(),
     lastCliActivityTs: Date.now(),
+    stateMachine: new SessionStateMachine("test-session"),
     ...overrides,
   } as Session;
 }

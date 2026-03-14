@@ -5,6 +5,7 @@ import {
   IDEMPOTENT_BROWSER_MESSAGE_TYPES,
 } from "./ws-bridge-browser-ingest.js";
 import type { Session } from "./ws-bridge-types.js";
+import { SessionStateMachine } from "./session-state-machine.js";
 
 function makeDedupSession(): Session {
   return {
@@ -26,6 +27,7 @@ function makeDedupSession(): Session {
     recentCLIMessageHashes: [],
     recentCLIMessageHashSet: new Set(),
     lastCliActivityTs: Date.now(),
+    stateMachine: new SessionStateMachine("test-session"),
   };
 }
 

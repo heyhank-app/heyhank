@@ -1054,18 +1054,19 @@ describe("Browser handlers", () => {
     bridge.handleBrowserOpen(browser, "s1");
     browser.send.mockClear();
 
-    // Ask for replay after seq=1 (cli_connected). Both stream events should replay.
+    // Ask for replay after seq=2 (session_phase + cli_connected). Both stream events should replay.
     bridge.handleBrowserMessage(browser, JSON.stringify({
       type: "session_subscribe",
-      last_seq: 1,
+      last_seq: 2,
     }));
 
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
     const replay = calls.find((c: any) => c.type === "event_replay");
     expect(replay).toBeDefined();
     expect(replay.events).toHaveLength(2);
-    expect(replay.events[0].seq).toBe(2);
+    expect(replay.events[0].seq).toBe(3);
     expect(replay.events[0].message.type).toBe("stream_event");
+    expect(replay.events[1].message.type).toBe("stream_event");
   });
 
   it("session_subscribe: falls back to message_history when last_seq is older than buffer window", async () => {

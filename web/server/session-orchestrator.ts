@@ -167,6 +167,12 @@ export class SessionOrchestrator {
         }
       }
     });
+    companionBus.on("session:exited", ({ sessionId }) => {
+      const session = this.wsBridge.getSession(sessionId);
+      if (session?.stateMachine) {
+        session.stateMachine.transition("terminated", "process_exited");
+      }
+    });
 
     // Start watching PRs when git info is resolved
     companionBus.on("session:git-info-ready", ({ sessionId, cwd, branch }) => {
@@ -589,6 +595,10 @@ export class SessionOrchestrator {
       return { ok: false, error: "Session is archived and cannot be relaunched" };
     }
     this.clearAutoRelaunchCount(sessionId);
+    const session = this.wsBridge.getSession(sessionId);
+    if (session?.stateMachine) {
+      session.stateMachine.transition("starting", "relaunch_initiated");
+    }
     return this.launcher.relaunch(sessionId);
   }
 
@@ -727,6 +737,10 @@ export class SessionOrchestrator {
     if (freshInfo && freshInfo.state !== "starting") {
       this.autoRelaunchCounts.set(sessionId, count + 1);
       console.log(`[orchestrator] Auto-relaunching CLI for session ${sessionId} (attempt ${count + 1}/${MAX_AUTO_RELAUNCHES})`);
+      const session = this.wsBridge.getSession(sessionId);
+      if (session?.stateMachine) {
+        session.stateMachine.transition("starting", "relaunch_initiated");
+      }
       try {
         const result = await this.launcher.relaunch(sessionId);
         if (!result.ok && result.error) {

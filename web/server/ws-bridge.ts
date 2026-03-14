@@ -71,6 +71,7 @@ import { validatePermission } from "./ai-validator.js";
 import { getSettings } from "./settings-manager.js";
 import { getEffectiveAiValidation } from "./ai-validation-settings.js";
 import { companionBus } from "./event-bus.js";
+import { SessionStateMachine } from "./session-state-machine.js";
 
 // ─── Bridge ───────────────────────────────────────────────────────────────────
 
@@ -193,6 +194,7 @@ export class WsBridge {
         recentCLIMessageHashes: [],
         recentCLIMessageHashSet: new Set(),
         lastCliActivityTs: Date.now(),
+        stateMachine: new SessionStateMachine(p.id, "terminated"),
       };
       session.state.backend_type = session.backendType;
       // Resolve git info for restored sessions (may have been persisted without it)
@@ -285,8 +287,10 @@ export class WsBridge {
         recentCLIMessageHashes: [],
         recentCLIMessageHashSet: new Set(),
         lastCliActivityTs: Date.now(),
+        stateMachine: new SessionStateMachine(sessionId),
       };
       this.sessions.set(sessionId, session);
+      this.wireStateMachineListeners(session);
     } else if (backendType) {
       // Only overwrite backendType when explicitly provided (e.g. attachCodexAdapter)
       // Prevents handleBrowserOpen from resetting codex→claude
@@ -335,6 +339,23 @@ export class WsBridge {
     this.sessions.delete(sessionId);
     this.autoNamingAttempted.delete(sessionId);
     this.store?.remove(sessionId);
+  }
+
+  /** Wire state machine transition listener to broadcast phase changes. */
+  private wireStateMachineListeners(session: Session): void {
+    session.stateMachine.onTransition((event) => {
+      companionBus.emit("session:phase-changed", {
+        sessionId: event.sessionId,
+        from: event.from,
+        to: event.to,
+        trigger: event.trigger,
+      });
+      this.broadcastToBrowsers(session, {
+        type: "session_phase",
+        phase: event.to,
+        previousPhase: event.from,
+      });
+    });
   }
 
   /**
@@ -403,6 +424,7 @@ export class WsBridge {
   handleCLIOpen(ws: ServerWebSocket<SocketData>, sessionId: string) {
     const session = this.getOrCreateSession(sessionId);
     session.cliSocket = ws;
+    session.stateMachine.transition("initializing", "cli_ws_open");
     // Cancel any pending disconnect debounce timer — CLI reconnected in time
     if (this.cancelDisconnectTimer(sessionId)) {
       console.log(`[ws-bridge] CLI reconnected for ${sessionId} (disconnect debounce cancelled)`);
@@ -461,6 +483,7 @@ export class WsBridge {
       return;
     }
     session.cliSocket = null;
+    session.stateMachine.transition("reconnecting", "cli_ws_closed");
 
     // Debounce: delay disconnect notification by 15s.
     // CLI cycles its WebSocket every ~30s (close code 1000) and uses exponential
@@ -473,6 +496,7 @@ export class WsBridge {
       this.disconnectTimers.delete(sessionId);
       if (session.cliSocket) return; // CLI reconnected during grace period
       console.log(`[ws-bridge] CLI disconnect confirmed for ${sessionId}`);
+      session.stateMachine.transition("terminated", "disconnect_confirmed");
       this.broadcastToBrowsers(session, { type: "cli_disconnected" });
       for (const [reqId] of session.pendingPermissions) {
         this.broadcastToBrowsers(session, { type: "permission_cancelled", request_id: reqId });
@@ -745,6 +769,7 @@ export class WsBridge {
         type: "session_init",
         session: session.state,
       });
+      session.stateMachine.transition("ready", "system_init");
       this.persistSession(session);
 
       // Flush any messages queued before CLI was initialized (e.g. user sent
@@ -761,6 +786,11 @@ export class WsBridge {
 
     if (msg.subtype === "status") {
       session.state.is_compacting = msg.status === "compacting";
+      if (msg.status === "compacting") {
+        session.stateMachine.transition("compacting", "compaction_started");
+      } else {
+        session.stateMachine.transition("ready", "compaction_ended");
+      }
 
       if (msg.permissionMode) {
         session.state.permissionMode = msg.permissionMode;
@@ -927,6 +957,7 @@ export class WsBridge {
     this.appendHistory(session, browserMsg);
     this.broadcastToBrowsers(session, browserMsg);
     companionBus.emit("message:result", { sessionId: session.id, message: browserMsg });
+    session.stateMachine.transition("ready", "turn_completed");
     this.persistSession(session);
 
     // Trigger auto-naming after the first successful result for this session.
@@ -1004,6 +1035,7 @@ export class WsBridge {
       }
 
       session.pendingPermissions.set(msg.request_id, perm);
+      session.stateMachine.transition("awaiting_permission", "permission_requested");
 
       this.broadcastToBrowsers(session, {
         type: "permission_request",
@@ -1039,6 +1071,7 @@ export class WsBridge {
       },
       this.sendToCLI.bind(this),
     );
+    // permission_resolved transition is performed inside handlePermissionResponse
   }
 
   private handleToolProgress(session: Session, msg: CLIToolProgressMessage) {
@@ -1250,6 +1283,7 @@ export class WsBridge {
       parent_tool_use_id: null,
       session_id: msg.session_id || session.state.session_id || "",
     });
+    session.stateMachine.transition("streaming", "user_message");
     this.sendToCLI(session, ndjson);
     this.persistSession(session);
   }

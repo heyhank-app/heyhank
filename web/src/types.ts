@@ -12,6 +12,7 @@ import type {
 } from "../server/session-types.js";
 
 export type { SessionState, PermissionRequest, AiValidationInfo, ContentBlock, BrowserIncomingMessage, BrowserOutgoingMessage, BackendType, McpServerDetail, McpServerConfig, CreationProgressEvent };
+export type { SessionPhase } from "../server/session-state-machine.js";
 
 export interface ChatMessage {
   id: string;

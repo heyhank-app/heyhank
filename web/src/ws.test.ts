@@ -846,6 +846,80 @@ describe("handleMessage: cli_disconnected/connected", () => {
     expect(useStore.getState().cliConnected.get("s1")).toBe(true);
   });
 });
+// ===========================================================================
+// handleMessage: session_phase
+// ===========================================================================
+describe("handleMessage: session_phase", () => {
+  it("sets cliConnected=true and sessionStatus=idle for ready phase", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({ type: "session_phase", phase: "ready", previousPhase: "initializing" });
+    expect(useStore.getState().cliConnected.get("s1")).toBe(true);
+    expect(useStore.getState().sessionStatus.get("s1")).toBe("idle");
+  });
+
+  it("sets sessionStatus=running for streaming phase", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({ type: "session_phase", phase: "streaming", previousPhase: "ready" });
+    expect(useStore.getState().cliConnected.get("s1")).toBe(true);
+    expect(useStore.getState().sessionStatus.get("s1")).toBe("running");
+  });
+
+  it("sets sessionStatus=compacting for compacting phase", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({ type: "session_phase", phase: "compacting", previousPhase: "ready" });
+    expect(useStore.getState().cliConnected.get("s1")).toBe(true);
+    expect(useStore.getState().sessionStatus.get("s1")).toBe("compacting");
+  });
+
+  it("sets sessionStatus=running for awaiting_permission phase", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({ type: "session_phase", phase: "awaiting_permission", previousPhase: "streaming" });
+    expect(useStore.getState().cliConnected.get("s1")).toBe(true);
+    expect(useStore.getState().sessionStatus.get("s1")).toBe("running");
+  });
+
+  it("sets cliConnected=false for terminated phase", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({ type: "session_phase", phase: "terminated", previousPhase: "reconnecting" });
+    expect(useStore.getState().cliConnected.get("s1")).toBe(false);
+    expect(useStore.getState().sessionStatus.get("s1")).toBeNull();
+  });
+
+  it("sets cliConnected=false for reconnecting phase", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({ type: "session_phase", phase: "reconnecting", previousPhase: "ready" });
+    expect(useStore.getState().cliConnected.get("s1")).toBe(false);
+    expect(useStore.getState().sessionStatus.get("s1")).toBeNull();
+  });
+
+  it("sets cliConnected=false for starting phase", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({ type: "session_phase", phase: "starting", previousPhase: "terminated" });
+    expect(useStore.getState().cliConnected.get("s1")).toBe(false);
+  });
+
+  it("sets cliConnected=false for initializing phase", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({ type: "session_phase", phase: "initializing", previousPhase: "starting" });
+    expect(useStore.getState().cliConnected.get("s1")).toBe(false);
+  });
+});
 
 // ===========================================================================
 // handleMessage: message_history

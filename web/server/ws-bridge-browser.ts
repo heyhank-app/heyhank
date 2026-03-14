@@ -56,6 +56,12 @@ export function handleSessionSubscribe(
     }
     // Send ground-truth status after replay to correct stale streaming state
     sendToBrowser(ws, { type: "status_change", status: inferCliStatus(session) });
+    // Send authoritative session_phase so replayed transient phases don't leave stale cliConnected
+    sendToBrowser(ws, {
+      type: "session_phase",
+      phase: session.stateMachine.phase,
+      previousPhase: session.stateMachine.phase,
+    });
     return;
   }
 
@@ -67,6 +73,12 @@ export function handleSessionSubscribe(
   });
   // Send ground-truth status after replay to correct stale streaming state
   sendToBrowser(ws, { type: "status_change", status: inferCliStatus(session) });
+  // Send authoritative session_phase so replayed transient phases don't leave stale cliConnected
+  sendToBrowser(ws, {
+    type: "session_phase",
+    phase: session.stateMachine.phase,
+    previousPhase: session.stateMachine.phase,
+  });
 }
 
 export function handleSessionAck(
@@ -133,4 +145,6 @@ export function handlePermissionResponse(
     });
     sendToCLI(session, ndjson);
   }
+
+  session.stateMachine.transition("streaming", "permission_resolved");
 }

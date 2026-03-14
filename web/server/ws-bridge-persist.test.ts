@@ -8,6 +8,7 @@ import {
 } from "./ws-bridge-persist.js";
 import type { Session } from "./ws-bridge-types.js";
 import type { BrowserIncomingMessage } from "./session-types.js";
+import { SessionStateMachine } from "./session-state-machine.js";
 import { SessionStore } from "./session-store.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -59,6 +60,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     recentCLIMessageHashes: [],
     recentCLIMessageHashSet: new Set(),
     lastCliActivityTs: Date.now(),
+    stateMachine: new SessionStateMachine("test-session"),
     ...overrides,
   };
 }

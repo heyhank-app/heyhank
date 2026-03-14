@@ -46,6 +46,7 @@ export function attachCodexAdapterHandlers(
       };
       deps.refreshGitInfo(session, { notifyPoller: true });
       deps.persistSession(session);
+      session.stateMachine.transition("ready", "codex_session_init");
     } else if (msg.type === "session_update") {
       const { slash_commands, skills, ...rest } = msg.session;
       session.state = {
@@ -59,6 +60,11 @@ export function attachCodexAdapterHandlers(
       deps.persistSession(session);
     } else if (msg.type === "status_change") {
       session.state.is_compacting = msg.status === "compacting";
+      if (msg.status === "compacting") {
+        session.stateMachine.transition("compacting", "codex_compacting_started");
+      } else {
+        session.stateMachine.transition("ready", "codex_compacting_ended");
+      }
       deps.persistSession(session);
     }
 
@@ -71,6 +77,7 @@ export function attachCodexAdapterHandlers(
       session.messageHistory.push(msg);
       deps.persistSession(session);
       companionBus.emit("message:result", { sessionId, message: msg });
+      session.stateMachine.transition("ready", "codex_turn_completed");
     }
 
     if (msg.type === "assistant") {
@@ -111,6 +118,7 @@ export function attachCodexAdapterHandlers(
 
       session.pendingPermissions.set(perm.request_id, perm);
       deps.persistSession(session);
+      session.stateMachine.transition("awaiting_permission", "codex_permission_requested");
     }
 
     deps.broadcastToBrowsers(session, msg);

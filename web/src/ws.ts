@@ -775,6 +775,23 @@ function handleParsedMessage(
       break;
     }
 
+    case "session_phase": {
+      const phase = data.phase;
+      if (phase === "terminated" || phase === "reconnecting") {
+        store.setCliConnected(sessionId, false);
+        store.setSessionStatus(sessionId, null);
+      } else if (phase === "starting" || phase === "initializing") {
+        store.setCliConnected(sessionId, false);
+      } else {
+        store.setCliConnected(sessionId, true);
+        if (phase === "ready") store.setSessionStatus(sessionId, "idle");
+        else if (phase === "streaming") store.setSessionStatus(sessionId, "running");
+        else if (phase === "compacting") store.setSessionStatus(sessionId, "compacting");
+        else if (phase === "awaiting_permission") store.setSessionStatus(sessionId, "running");
+      }
+      break;
+    }
+
     case "cli_disconnected": {
       store.setCliConnected(sessionId, false);
       store.setSessionStatus(sessionId, null);
