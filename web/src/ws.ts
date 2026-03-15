@@ -10,6 +10,7 @@ const lastSeqBySession = new Map<string, number>();
 const taskCounters = new Map<string, number>();
 const streamingPhaseBySession = new Map<string, "thinking" | "text">();
 const streamingDraftMessageIdBySession = new Map<string, string>();
+const pendingOutgoingBySession = new Map<string, BrowserOutgoingMessage[]>();
 /** Track processed tool_use IDs to prevent duplicate task creation */
 const processedToolUseIds = new Map<string, Set<string>>();
 
@@ -294,6 +295,21 @@ let idCounter = 0;
 let clientMsgCounter = 0;
 function nextId(): string {
   return `msg-${Date.now()}-${++idCounter}`;
+}
+
+function enqueueOutgoing(sessionId: string, msg: BrowserOutgoingMessage) {
+  const queued = pendingOutgoingBySession.get(sessionId) || [];
+  queued.push(msg);
+  pendingOutgoingBySession.set(sessionId, queued);
+}
+
+function flushQueuedOutgoing(sessionId: string, ws: WebSocket) {
+  const queued = pendingOutgoingBySession.get(sessionId);
+  if (!queued?.length || ws.readyState !== WebSocket.OPEN) return;
+  pendingOutgoingBySession.delete(sessionId);
+  for (const msg of queued) {
+    ws.send(JSON.stringify(msg));
+  }
 }
 
 function setStreamingDraftMessage(sessionId: string, content: string) {
@@ -1011,6 +1027,7 @@ export function connectSession(sessionId: string) {
     // proving the subscription succeeded. handleMessage promotes to "connected".
     const lastSeq = getLastSeq(sessionId);
     ws.send(JSON.stringify({ type: "session_subscribe", last_seq: lastSeq }));
+    flushQueuedOutgoing(sessionId, ws);
     // Clear any reconnect timer
     const timer = reconnectTimers.get(sessionId);
     if (timer) {
@@ -1067,6 +1084,7 @@ export function disconnectSession(sessionId: string) {
   streamingPhaseBySession.delete(sessionId);
   streamingDraftMessageIdBySession.delete(sessionId);
   lastSeqBySession.delete(sessionId);
+  pendingOutgoingBySession.delete(sessionId);
 }
 
 export function disconnectAll() {
@@ -1106,7 +1124,8 @@ export function waitForConnection(sessionId: string): Promise<void> {
 export function sendToSession(sessionId: string, msg: BrowserOutgoingMessage) {
   const ws = sockets.get(sessionId);
   let outgoing: BrowserOutgoingMessage = msg;
-  if (IDEMPOTENT_OUTGOING_TYPES.has(msg.type)) {
+  const isIdempotent = IDEMPOTENT_OUTGOING_TYPES.has(msg.type);
+  if (isIdempotent) {
     switch (msg.type) {
       case "user_message":
       case "permission_response":
@@ -1124,8 +1143,14 @@ export function sendToSession(sessionId: string, msg: BrowserOutgoingMessage) {
         break;
     }
   }
+
   if (ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(outgoing));
+    return;
+  }
+
+  if (isIdempotent) {
+    enqueueOutgoing(sessionId, outgoing);
   }
 }
 

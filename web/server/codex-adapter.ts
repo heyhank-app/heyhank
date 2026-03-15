@@ -638,15 +638,16 @@ export class CodexAdapter implements IBackendAdapter {
     // reconnect cycle would otherwise accumulate another copy of the message.
     this.pendingOutgoing.length = 0;
 
-    // If initialization was in progress or had previously failed, re-attempt.
-    // A WS reconnect means the transport is healthy again — a prior transient
-    // failure should not permanently block the session.
-    if (this.initInProgress || this.initFailed) {
-      this.initInProgress = false;
-      this.initialized = false;
-      this.initFailed = false;
-      this.initialize();
+    // After a WS reconnect, Codex requires a fresh initialize/initialized
+    // handshake before accepting turn/start, even if this adapter was already
+    // initialized before the drop.
+    this.initInProgress = false;
+    this.initialized = false;
+    this.initFailed = false;
+    if (!this.options.threadId && this.threadId) {
+      this.options.threadId = this.threadId;
     }
+    this.initialize();
   }
 
   /**
@@ -760,6 +761,12 @@ export class CodexAdapter implements IBackendAdapter {
    */
   private flushPendingOutgoing(): void {
     if (this.pendingOutgoing.length === 0) return;
+    if (!this.initialized || !this.threadId || this.initInProgress) {
+      console.log(
+        `[codex-adapter] Session ${this.sessionId}: init not ready — keeping ${this.pendingOutgoing.length} message(s) queued`,
+      );
+      return;
+    }
     if (!this.transport.isConnected()) {
       console.warn(
         `[codex-adapter] Session ${this.sessionId}: transport disconnected — keeping ${this.pendingOutgoing.length} message(s) queued`,
@@ -993,8 +1000,8 @@ export class CodexAdapter implements IBackendAdapter {
 
       // Flush any messages that were queued during initialization, but only
       // if the transport is still connected (avoids immediate "Transport closed").
-      this.flushPendingOutgoing();
       this.initInProgress = false;
+      this.flushPendingOutgoing();
     } catch (err) {
       // If a WS reconnection was detected mid-init, handleWsReconnected
       // already kicked off a fresh initialize(). Don't reset initInProgress
@@ -1346,6 +1353,11 @@ export class CodexAdapter implements IBackendAdapter {
       case "item/commandExecution/outputDelta":
         // Streaming command output — emit as tool_progress so the browser
         // shows a live elapsed-time indicator while the command runs.
+        this.emitCommandProgress(params);
+        break;
+      case "item/commandExecution/terminalInteraction":
+        // Interactive terminal IO event (stdin prompt/tty exchange). Treat it
+        // as command progress so the UI keeps the command block active.
         this.emitCommandProgress(params);
         break;
       case "item/fileChange/outputDelta":

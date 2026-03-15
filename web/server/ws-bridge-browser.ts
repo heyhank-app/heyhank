@@ -36,16 +36,25 @@ export function handleSessionSubscribe(
   const lastAckSeq = Number.isFinite(lastSeq) ? Math.max(0, Math.floor(lastSeq)) : 0;
   data.lastAckSeq = lastAckSeq;
 
+  if (lastAckSeq === 0 && session.messageHistory.length > 0) {
+    sendToBrowser(ws, {
+      type: "message_history",
+      messages: session.messageHistory,
+    });
+  }
+
   if (session.eventBuffer.length === 0) return;
   if (lastAckSeq >= session.nextEventSeq - 1) return;
 
   const earliest = session.eventBuffer[0]?.seq ?? session.nextEventSeq;
   const hasGap = lastAckSeq > 0 && lastAckSeq < earliest - 1;
   if (hasGap) {
-    sendToBrowser(ws, {
-      type: "message_history",
-      messages: session.messageHistory,
-    });
+    if (session.messageHistory.length > 0) {
+      sendToBrowser(ws, {
+        type: "message_history",
+        messages: session.messageHistory,
+      });
+    }
     const transientMissed = session.eventBuffer
       .filter((evt) => evt.seq > lastAckSeq && !isHistoryBackedEvent(evt.message));
     if (transientMissed.length > 0) {
@@ -65,7 +74,10 @@ export function handleSessionSubscribe(
     return;
   }
 
-  const missed = session.eventBuffer.filter((evt) => evt.seq > lastAckSeq);
+  const sentFullHistory = lastAckSeq === 0 && session.messageHistory.length > 0;
+  const missed = session.eventBuffer.filter(
+    (evt) => evt.seq > lastAckSeq && (!sentFullHistory || !isHistoryBackedEvent(evt.message)),
+  );
   if (missed.length === 0) return;
   sendToBrowser(ws, {
     type: "event_replay",
@@ -98,4 +110,3 @@ export function handleSessionAck(
     persistSession(session);
   }
 }
-

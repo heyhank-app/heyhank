@@ -4147,6 +4147,33 @@ describe("CodexAdapter with ICodexTransport", () => {
     expect(cmdProg!.tool_name).toBe("Bash");
   });
 
+  it("handles item/commandExecution/terminalInteraction without protocol drift", async () => {
+    const { mock, messages } = await initAdapter();
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => {});
+
+    mock.pushNotification("item/started", {
+      item: { id: "cmd-tty", type: "commandExecution", command: "python" },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    mock.pushNotification("item/commandExecution/terminalInteraction", {
+      itemId: "cmd-tty",
+      interaction: { kind: "stdin", text: "input" },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      "protocol-monitor",
+      "Backend protocol drift detected",
+      expect.objectContaining({ messageName: "item/commandExecution/terminalInteraction" }),
+    );
+
+    const progress = messages.filter((m) => m.type === "tool_progress") as Array<{ tool_use_id?: string }>;
+    expect(progress.some((p) => p.tool_use_id === "cmd-tty")).toBe(true);
+
+    warnSpy.mockRestore();
+  });
+
   // ── handleReasoningDelta ──────────────────────────────────────────────
 
   it("accumulates reasoning delta text", async () => {
@@ -4554,6 +4581,7 @@ describe("CodexAdapter RPC timeout error surfacing", () => {
     const transport: ICodexTransport = {
       call: vi.fn(async (method: string) => {
         if (method === "initialize") return { userAgent: "codex" };
+        if (method === "thread/resume") return { thread: { id: "thr_1" } };
         if (method === "thread/start" || method === "thread/create") return { thread: { id: "thr_1" } };
         if (method === "account/rateLimits/read") return {};
         if (method === "turn/start") {
@@ -4595,6 +4623,7 @@ describe("CodexAdapter RPC timeout error surfacing", () => {
     const transport: ICodexTransport = {
       call: vi.fn(async (method: string) => {
         if (method === "initialize") return { userAgent: "codex" };
+        if (method === "thread/resume") return { thread: { id: "thr_1" } };
         if (method === "thread/start" || method === "thread/create") return { thread: { id: "thr_1" } };
         if (method === "account/rateLimits/read") return {};
         if (method === "turn/start") {
@@ -4815,5 +4844,62 @@ describe("CodexAdapter WS reconnection handling", () => {
     const turnStartCalls = (transport.call as ReturnType<typeof vi.fn>).mock.calls
       .filter((args: unknown[]) => args[0] === "turn/start");
     expect(turnStartCalls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("re-initializes Codex after ws reconnect before starting the next turn", async () => {
+    // Regression: after companion/wsReconnected, Codex may reject turn/start
+    // with "Not initialized" unless we run initialize + initialized again.
+    let notifHandler: ((m: string, p: Record<string, unknown>) => void) | null = null;
+    let initializedOnServer = false;
+
+    const transport: ICodexTransport = {
+      call: vi.fn(async (method: string) => {
+        if (method === "initialize") return { userAgent: "codex" };
+        if (method === "thread/start" || method === "thread/create") return { thread: { id: "thr_1" } };
+        if (method === "account/rateLimits/read") return {};
+        if (method === "turn/start") {
+          if (!initializedOnServer) throw new Error("Not initialized");
+          return { turn: { id: "turn_1" } };
+        }
+        return {};
+      }),
+      notify: vi.fn(async (method: string) => {
+        if (method === "initialized") initializedOnServer = true;
+      }),
+      respond: vi.fn(async () => {}),
+      onNotification: vi.fn((h: (m: string, p: Record<string, unknown>) => void) => { notifHandler = h; }),
+      onRequest: vi.fn(),
+      onRawIncoming: vi.fn(),
+      onRawOutgoing: vi.fn(),
+      onParseError: vi.fn(),
+      isConnected: vi.fn(() => true),
+    };
+
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(transport, "reconnect-reinit-test", { model: "o4-mini", cwd: "/tmp" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+
+    await new Promise((r) => setTimeout(r, 100));
+    expect(initializedOnServer).toBe(true);
+
+    // Simulate that server lost initialization state when WS reconnected.
+    initializedOnServer = false;
+    expect(notifHandler).not.toBeNull();
+    notifHandler!("companion/wsReconnected", {});
+    await new Promise((r) => setTimeout(r, 50));
+
+    adapter.sendBrowserMessage({ type: "user_message", content: "after reconnect" });
+    await new Promise((r) => setTimeout(r, 100));
+
+    const errors = messages.filter((m) => m.type === "error") as Array<{ message: string }>;
+    expect(errors.some((e) => e.message.includes("Failed to start turn: Error: Not initialized"))).toBe(false);
+
+    const initializeCalls = (transport.call as ReturnType<typeof vi.fn>).mock.calls
+      .filter((args: unknown[]) => args[0] === "initialize");
+    expect(initializeCalls.length).toBeGreaterThanOrEqual(2);
+
+    const turnStartCalls = (transport.call as ReturnType<typeof vi.fn>).mock.calls
+      .filter((args: unknown[]) => args[0] === "turn/start");
+    expect(turnStartCalls.length).toBeGreaterThanOrEqual(1);
   });
 });

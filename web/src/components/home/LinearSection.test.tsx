@@ -455,8 +455,10 @@ describe("LinearSection", () => {
     const searchInput = screen.getByPlaceholderText("Filter issues...");
     fireEvent.change(searchInput, { target: { value: "login" } });
 
-    expect(screen.getByText("ENG-1")).toBeInTheDocument();
-    expect(screen.queryByText("ENG-2")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("ENG-1")).toBeInTheDocument();
+      expect(screen.queryByText("ENG-2")).not.toBeInTheDocument();
+    }, { timeout: 3000 });
   });
 
   it("shows loading state while fetching recent issues", async () => {

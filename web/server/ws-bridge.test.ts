@@ -1071,6 +1071,94 @@ describe("Browser handlers", () => {
     expect(replay.events[1].message.type).toBe("stream_event");
   });
 
+  it("session_subscribe: sends full message_history on first subscribe even without a replay gap", async () => {
+    // A brand-new browser tab starts with last_seq=0 and needs the persisted
+    // message history, including user messages that are never sequenced in the
+    // event buffer. Without this bootstrap payload, Codex sessions can reopen
+    // without their first user prompt in chat.
+    const session = bridge.getOrCreateSession("s1", "codex");
+    session.messageHistory.push({
+      type: "user_message",
+      id: "user-1",
+      content: "first prompt",
+      timestamp: 1000,
+    });
+    session.messageHistory.push({
+      type: "assistant",
+      message: {
+        id: "assistant-1",
+        type: "message",
+        role: "assistant",
+        model: "gpt-5.4",
+        content: [{ type: "text", text: "reply" }],
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      },
+      parent_tool_use_id: null,
+      timestamp: 2000,
+    });
+    session.eventBuffer.push({
+      seq: 1,
+      message: {
+        type: "assistant",
+        message: {
+          id: "assistant-1",
+          type: "message",
+          role: "assistant",
+          model: "gpt-5.4",
+          content: [{ type: "text", text: "reply" }],
+          stop_reason: "end_turn",
+          usage: {
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+        parent_tool_use_id: null,
+        timestamp: 2000,
+      },
+    });
+    session.eventBuffer.push({
+      seq: 2,
+      message: {
+        type: "stream_event",
+        event: {
+          type: "content_block_delta",
+          delta: { type: "text_delta", text: "stream-only" },
+        },
+        parent_tool_use_id: null,
+      },
+    });
+    session.nextEventSeq = 3;
+
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "session_subscribe",
+      last_seq: 0,
+    }));
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const historyMsg = calls.find((c: any) => c.type === "message_history");
+    expect(historyMsg).toBeDefined();
+    expect(historyMsg.messages).toHaveLength(2);
+    expect(historyMsg.messages.some((m: any) => m.type === "user_message")).toBe(true);
+    expect(historyMsg.messages.some((m: any) => m.type === "assistant")).toBe(true);
+
+    const replayMsg = calls.find((c: any) => c.type === "event_replay");
+    expect(replayMsg).toBeDefined();
+    expect(replayMsg.events).toHaveLength(1);
+    expect(replayMsg.events[0].message.type).toBe("stream_event");
+  });
+
   it("session_subscribe: falls back to message_history when last_seq is older than buffer window", async () => {
     const cli = makeCliSocket("s1");
     bridge.handleCLIOpen(cli, "s1");
