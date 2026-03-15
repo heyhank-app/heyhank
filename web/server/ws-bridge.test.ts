@@ -4213,7 +4213,7 @@ describe("injectSystemPrompt", () => {
 // ─── User message during initialization ──────────────────────────────────────
 
 describe("User message during initializing phase", () => {
-  it("logs a warning but still forwards user_message when session is initializing", () => {
+  it("transitions to streaming and forwards user_message when session is initializing", () => {
     // Simulate a session where the CLI socket has connected (initializing)
     // but the system.init message hasn't arrived yet (so not "ready").
     // The message should still be forwarded to the adapter's internal queue
@@ -4241,8 +4241,8 @@ describe("User message during initializing phase", () => {
     const userMsgs = session.messageHistory.filter((m) => m.type === "user_message");
     expect(userMsgs.length).toBe(1);
 
-    // State machine should still be in initializing — the invalid transition
-    // is logged as a warning but doesn't block message delivery.
-    expect(session.stateMachine.phase).toBe("initializing");
+    // State machine transitions to streaming — the adapter queues the
+    // message internally until the backend is ready.
+    expect(session.stateMachine.phase).toBe("streaming");
   });
 });

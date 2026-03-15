@@ -45,11 +45,11 @@ export const VALID_TRANSITIONS: ReadonlyMap<
 > = new Map([
   [
     "starting",
-    new Set<SessionPhase>(["initializing", "reconnecting", "terminated"]),
+    new Set<SessionPhase>(["initializing", "streaming", "reconnecting", "terminated"]),
   ],
   [
     "initializing",
-    new Set<SessionPhase>(["ready", "reconnecting", "terminated"]),
+    new Set<SessionPhase>(["ready", "streaming", "reconnecting", "terminated"]),
   ],
   [
     "ready",
@@ -64,6 +64,7 @@ export const VALID_TRANSITIONS: ReadonlyMap<
     "streaming",
     new Set<SessionPhase>([
       "ready",
+      "initializing",
       "awaiting_permission",
       "compacting",
       "reconnecting",

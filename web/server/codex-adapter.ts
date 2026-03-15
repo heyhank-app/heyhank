@@ -1411,6 +1411,36 @@ export class CodexAdapter implements IBackendAdapter {
       case "account/rateLimits/updated":
         this.updateRateLimits(params);
         break;
+      // Legacy codex/event/* notifications forwarded by newer Codex runtimes.
+      // token_count is still useful for metrics, but the streaming deltas are
+      // often duplicated by canonical item/* deltas in the same session.
+      // Ignore duplicated legacy streams to avoid double-emitting text.
+      case "codex/event/token_count":
+        this.handleLegacyTokenCount(params);
+        break;
+      case "codex/event/agent_message_delta":
+      case "codex/event/agent_message_content_delta":
+      case "codex/event/reasoning_content_delta":
+      case "codex/event/agent_message":
+      case "codex/event/item_started":
+      case "codex/event/item_completed":
+      case "codex/event/exec_command_begin":
+      case "codex/event/exec_command_output_delta":
+      case "codex/event/exec_command_end":
+      case "codex/event/turn_diff":
+      case "codex/event/terminal_interaction":
+      case "codex/event/patch_apply_begin":
+      case "codex/event/patch_apply_end":
+      case "codex/event/user_message":
+      case "codex/event/task_started":
+      case "codex/event/task_complete":
+      case "codex/event/mcp_startup_complete":
+      case "codex/event/context_compacted":
+      case "codex/event/agent_reasoning":
+      case "codex/event/agent_reasoning_delta":
+      case "codex/event/agent_reasoning_section_break":
+        // Duplicates of canonical v2 events — silently ignore.
+        break;
       case "codex/event/stream_error": {
         const msg = params.msg as { message?: string } | undefined;
         if (msg?.message) {
@@ -2266,12 +2296,12 @@ export class CodexAdapter implements IBackendAdapter {
 
       case "reasoning": {
         const r = item as CodexReasoningItem;
-        const thinkingText = (
+        const raw =
           this.reasoningTextByItemId.get(item.id)
           || this.coerceReasoningText(r.summary)
           || this.coerceReasoningText(r.content)
-          || ""
-        ).trim();
+          || "";
+        const thinkingText = (typeof raw === "string" ? raw : String(raw ?? "")).trim();
 
         if (thinkingText) {
           this.emit({
@@ -2441,6 +2471,36 @@ export class CodexAdapter implements IBackendAdapter {
         session: updates,
       });
     }
+  }
+
+  // ── Legacy codex/event/* helpers ──────────────────────────────────────
+
+  private handleLegacyTokenCount(params: Record<string, unknown>): void {
+    const msg = this.asRecord(params.msg);
+    const info = this.asRecord(msg?.info);
+    if (!info) return;
+
+    const toUsage = (raw: unknown): Record<string, number> => {
+      const usage = this.asRecord(raw);
+      if (!usage) {
+        return { totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 };
+      }
+      return {
+        totalTokens: Number(usage.total_tokens || 0),
+        inputTokens: Number(usage.input_tokens || 0),
+        cachedInputTokens: Number(usage.cached_input_tokens || 0),
+        outputTokens: Number(usage.output_tokens || 0),
+        reasoningOutputTokens: Number(usage.reasoning_output_tokens || 0),
+      };
+    };
+
+    this.handleTokenUsageUpdated({
+      tokenUsage: {
+        total: toUsage(info.total_token_usage),
+        last: toUsage(info.last_token_usage),
+        modelContextWindow: Number(info.model_context_window || 0),
+      },
+    });
   }
 
   // ── Command progress tracking ─────────────────────────────────────────

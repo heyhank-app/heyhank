@@ -61,17 +61,21 @@ describe("SessionStateMachine", () => {
       expect(machine.phase).toBe(to);
     }
 
-    // starting -> initializing, reconnecting, terminated
+    // starting -> initializing, streaming, reconnecting, terminated
     it("starting -> initializing", () =>
       expectValidTransition("starting", "initializing"));
+    it("starting -> streaming", () =>
+      expectValidTransition("starting", "streaming"));
     it("starting -> reconnecting", () =>
       expectValidTransition("starting", "reconnecting"));
     it("starting -> terminated", () =>
       expectValidTransition("starting", "terminated"));
 
-    // initializing -> ready, reconnecting, terminated
+    // initializing -> ready, streaming, reconnecting, terminated
     it("initializing -> ready", () =>
       expectValidTransition("initializing", "ready"));
+    it("initializing -> streaming", () =>
+      expectValidTransition("initializing", "streaming"));
     it("initializing -> reconnecting", () =>
       expectValidTransition("initializing", "reconnecting"));
     it("initializing -> terminated", () =>
@@ -87,9 +91,11 @@ describe("SessionStateMachine", () => {
     it("ready -> terminated", () =>
       expectValidTransition("ready", "terminated"));
 
-    // streaming -> ready, awaiting_permission, compacting, reconnecting, terminated
+    // streaming -> ready, initializing, awaiting_permission, compacting, reconnecting, terminated
     it("streaming -> ready", () =>
       expectValidTransition("streaming", "ready"));
+    it("streaming -> initializing", () =>
+      expectValidTransition("streaming", "initializing"));
     it("streaming -> awaiting_permission", () =>
       expectValidTransition("streaming", "awaiting_permission"));
     it("streaming -> compacting", () =>
@@ -156,8 +162,6 @@ describe("SessionStateMachine", () => {
       warnSpy.mockRestore();
     }
 
-    it("starting -> streaming is blocked", () =>
-      expectBlockedTransition("starting", "streaming"));
     it("starting -> ready is blocked", () =>
       expectBlockedTransition("starting", "ready"));
     it("terminated -> ready is blocked", () =>
@@ -387,8 +391,8 @@ describe("SessionStateMachine", () => {
       const listener = vi.fn();
       sm.onTransition(listener);
 
-      // starting -> streaming is blocked
-      sm.transition("streaming", "invalid");
+      // starting -> ready is blocked
+      sm.transition("ready", "invalid");
 
       expect(listener).not.toHaveBeenCalled();
       warnSpy.mockRestore();
@@ -426,9 +430,9 @@ describe("SessionStateMachine", () => {
   describe("forceState", () => {
     it("sets state without validation", () => {
       // forceState should allow setting to any phase, even if the transition
-      // would normally be blocked (e.g. starting -> streaming).
-      sm.forceState("streaming");
-      expect(sm.phase).toBe("streaming");
+      // would normally be blocked (e.g. starting -> awaiting_permission).
+      sm.forceState("awaiting_permission");
+      expect(sm.phase).toBe("awaiting_permission");
     });
 
     it("does not call listeners", () => {
@@ -553,6 +557,27 @@ describe("SessionStateMachine", () => {
         expect(typeof event.timestamp).toBe("number");
         expect(event.timestamp).toBeGreaterThan(0);
       }
+    });
+
+    it("handles early user message: starting -> streaming -> initializing -> ready", () => {
+      // When a user sends a message before the CLI connects, the session
+      // transitions starting -> streaming. When the CLI later connects,
+      // it goes streaming -> initializing, then proceeds normally.
+      const earlyMsg = new SessionStateMachine("early-msg", "starting");
+      const events: SessionTransitionEvent[] = [];
+      earlyMsg.onTransition((e) => events.push(e));
+
+      expect(earlyMsg.transition("streaming", "user_message")).toBe(true);
+      expect(earlyMsg.transition("initializing", "cli_ws_open")).toBe(true);
+      expect(earlyMsg.transition("ready", "system_init")).toBe(true);
+      expect(earlyMsg.transition("streaming", "user_message")).toBe(true);
+
+      expect(events.map((e) => `${e.from}->${e.to}`)).toEqual([
+        "starting->streaming",
+        "streaming->initializing",
+        "initializing->ready",
+        "ready->streaming",
+      ]);
     });
   });
 

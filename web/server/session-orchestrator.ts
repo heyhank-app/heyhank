@@ -123,6 +123,9 @@ export class SessionOrchestrator {
   // Auto-relaunch state
   private relaunchingSet = new Set<string>();
   private autoRelaunchCounts = new Map<string, number>();
+  // Sessions that have already been notified about relaunch exhaustion.
+  // Prevents repeated "keeps crashing" warnings for dead sessions.
+  private relaunchExhaustedNotified = new Set<string>();
 
   // Idempotency guard for initialize()
   private _initialized = false;
@@ -666,6 +669,7 @@ export class SessionOrchestrator {
     this.launcher.removeSession(sessionId);
     this.wsBridge.closeSession(sessionId);
     this.autoRelaunchCounts.delete(sessionId);
+    this.relaunchExhaustedNotified.delete(sessionId);
     this.relaunchingSet.delete(sessionId);
     return { ok: true, worktree: worktreeResult };
   }
@@ -682,6 +686,7 @@ export class SessionOrchestrator {
 
   clearAutoRelaunchCount(sessionId: string): void {
     this.autoRelaunchCounts.delete(sessionId);
+    this.relaunchExhaustedNotified.delete(sessionId);
   }
 
   // ── Event registration ─────────────────────────────────────────────────────
@@ -714,6 +719,11 @@ export class SessionOrchestrator {
     const info = this.launcher.getSession(sessionId);
     if (info?.archived) return;
 
+    // If we've already notified the user about relaunch exhaustion, bail out
+    // silently. Without this, every reconnect event from a dead session
+    // (e.g. deleted container) re-logs the "limit reached" warning endlessly.
+    if (this.relaunchExhaustedNotified.has(sessionId)) return;
+
     this.relaunchingSet.add(sessionId);
 
     await new Promise((r) => setTimeout(r, RELAUNCH_GRACE_MS));
@@ -734,6 +744,7 @@ export class SessionOrchestrator {
         type: "error",
         message: "Session keeps crashing. Please relaunch manually.",
       });
+      this.relaunchExhaustedNotified.add(sessionId);
       this.relaunchingSet.delete(sessionId);
       return;
     }
@@ -753,6 +764,7 @@ export class SessionOrchestrator {
         } else if (result.ok) {
           metricsCollector.recordRelaunchSucceeded();
           this.autoRelaunchCounts.delete(sessionId);
+          this.relaunchExhaustedNotified.delete(sessionId);
         }
         // ok=false without error: keep count to preserve the retry budget
       } finally {
