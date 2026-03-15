@@ -3778,6 +3778,21 @@ describe("CodexAdapter with ICodexTransport", () => {
     spy.mockRestore();
   });
 
+  it("handles thread/status/changed without unhandled-notification noise", async () => {
+    const { mock, messages } = await initAdapter();
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mock.pushNotification("thread/status/changed", {
+      threadId: "thr_init",
+      status: { type: "idle" },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const statusMsgs = messages.filter((m) => m.type === "status_change") as Array<{ status: string | null }>;
+    expect(statusMsgs.some((m) => m.status === null)).toBe(true);
+    expect(spy).not.toHaveBeenCalledWith(expect.stringContaining("Unhandled notification: thread/status/changed"));
+    spy.mockRestore();
+  });
+
   // ── Request handler coverage ──────────────────────────────────────────
 
   it("responds to auth token refresh request with error", async () => {
@@ -4005,6 +4020,7 @@ describe("CodexAdapter with ICodexTransport", () => {
   it("accumulates reasoning delta text", async () => {
     // item/reasoning/delta should accumulate reasoning text
     const { mock, messages } = await initAdapter();
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     // Start a reasoning item first
     mock.pushNotification("item/started", {
@@ -4029,6 +4045,33 @@ describe("CodexAdapter with ICodexTransport", () => {
     // No assertion on messages specifically, just verifying the code paths execute
     // without errors (coverage is the goal)
     expect(true).toBe(true);
+    expect(spy).not.toHaveBeenCalledWith(
+      expect.stringContaining("Unhandled notification: item/reasoning/delta"),
+    );
+    spy.mockRestore();
+  });
+
+  it("coerces non-string reasoning payloads without crashing", async () => {
+    const { mock, messages } = await initAdapter();
+
+    // Codex can return structured arrays/objects for summary/content.
+    mock.pushNotification("item/completed", {
+      item: {
+        id: "reason-structured",
+        type: "reasoning",
+        summary: [{ text: "alpha" }],
+        content: [{ summary: "beta" }],
+      },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const assistantMsgs = messages.filter((m) => m.type === "assistant") as Array<{
+      message: { content: Array<{ type: string; thinking?: string }> };
+    }>;
+    const thinking = assistantMsgs
+      .flatMap((m) => m.message.content)
+      .find((b) => b.type === "thinking");
+    expect(thinking?.thinking).toContain("alpha");
   });
 
   // ── Unhandled item types in item/started and item/completed ───────────

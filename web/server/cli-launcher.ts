@@ -28,8 +28,13 @@ function isCodexWsTransportEnabled(): boolean {
 }
 
 /** Find a free TCP port in the given range by attempting to listen on each. */
-async function findFreePort(start = 4500, end = 4600): Promise<number> {
+async function findFreePort(
+  start = 4500,
+  end = 4600,
+  isReserved?: (port: number) => boolean,
+): Promise<number> {
   for (let port = start; port <= end; port++) {
+    if (isReserved?.(port)) continue;
     try {
       const server = Bun.listen({
         hostname: "127.0.0.1",
@@ -174,6 +179,8 @@ export class CliLauncher {
   private processes = new Map<string, Subprocess>();
   /** Sidecar Node proxy processes used by Codex WebSocket transport. */
   private codexWsProxies = new Map<string, Subprocess>();
+  /** Host-mode Codex WS listen ports currently reserved by active sessions. */
+  private claimedCodexWsPorts = new Set<number>();
   /** Runtime-only env vars per session (kept out of persisted launcher state). */
   private sessionEnvs = new Map<string, Record<string, string>>();
   private port: number;
@@ -198,6 +205,18 @@ export class CliLauncher {
     if (!this.store) return;
     const data = Array.from(this.sessions.values());
     this.store.saveLauncher(data);
+  }
+
+  private claimCodexWsPort(port: number): void {
+    this.claimedCodexWsPorts.add(port);
+  }
+
+  private releaseCodexWsPort(info: SdkSessionInfo | undefined): void {
+    if (!info || info.containerId) return;
+    if (typeof info.codexWsPort !== "number") return;
+    this.claimedCodexWsPorts.delete(info.codexWsPort);
+    info.codexWsPort = undefined;
+    info.codexWsUrl = undefined;
   }
 
   /**
@@ -246,6 +265,16 @@ export class CliLauncher {
       } else {
         // Already exited
         this.sessions.set(info.sessionId, info);
+      }
+
+      // Avoid reusing ports already owned by recovered host-mode Codex sessions.
+      if (
+        info.backendType === "codex"
+        && !info.containerId
+        && info.state !== "exited"
+        && typeof info.codexWsPort === "number"
+      ) {
+        this.claimCodexWsPort(info.codexWsPort);
       }
     }
     if (recovered > 0) {
@@ -345,6 +374,9 @@ export class CliLauncher {
       // Process from a previous server instance — kill by PID
       try { process.kill(info.pid, "SIGTERM"); } catch {}
     }
+
+    // Release any host-mode Codex port claim before picking a new one.
+    this.releaseCodexWsPort(info);
 
     // Pre-flight validation for containerized sessions
     if (info.containerId) {
@@ -701,7 +733,14 @@ export class CliLauncher {
       proxyConnectPort = mappedPort;
     } else {
       try {
-        proxyConnectPort = await findFreePort(4500, 4600);
+        proxyConnectPort = await findFreePort(
+          4500,
+          4600,
+          (port) => this.claimedCodexWsPorts.has(port),
+        );
+        this.claimCodexWsPort(proxyConnectPort);
+        // Set immediately after claiming so any downstream failure can release it.
+        info.codexWsPort = proxyConnectPort;
       } catch (err) {
         console.error(`[cli-launcher] Failed to find free port for Codex WS: ${err}`);
         info.state = "exited";
@@ -802,7 +841,9 @@ export class CliLauncher {
 
     // Store WS metadata
     const wsUrl = `ws://127.0.0.1:${proxyConnectPort}`;
-    info.codexWsPort = proxyConnectPort;
+    if (typeof info.codexWsPort !== "number") {
+      info.codexWsPort = proxyConnectPort;
+    }
     info.codexWsUrl = wsUrl;
 
     // Connect to Codex app-server through a Node helper process that uses the
@@ -864,6 +905,7 @@ export class CliLauncher {
         session.state = "exited";
         session.exitCode = 1;
         session.cliSessionId = undefined;
+        this.releaseCodexWsPort(session);
       }
       this.persistState();
     });
@@ -890,6 +932,7 @@ export class CliLauncher {
       if (session) {
         session.state = "exited";
         session.exitCode = exitCode;
+        this.releaseCodexWsPort(session);
       }
       this.processes.delete(sessionId);
       this.codexWsProxies.delete(sessionId);
@@ -1132,6 +1175,7 @@ export class CliLauncher {
     if (session) {
       session.state = "exited";
       session.exitCode = -1;
+      this.releaseCodexWsPort(session);
     }
     this.processes.delete(sessionId);
     this.persistState();
@@ -1175,6 +1219,7 @@ export class CliLauncher {
    * Remove a session from the internal map (after kill or cleanup).
    */
   removeSession(sessionId: string) {
+    this.releaseCodexWsPort(this.sessions.get(sessionId));
     this.sessions.delete(sessionId);
     this.processes.delete(sessionId);
     this.codexWsProxies.delete(sessionId);
@@ -1189,6 +1234,7 @@ export class CliLauncher {
     let pruned = 0;
     for (const [id, session] of this.sessions) {
       if (session.state === "exited") {
+        this.releaseCodexWsPort(session);
         this.sessions.delete(id);
         this.sessionEnvs.delete(id);
         this.codexWsProxies.delete(id);

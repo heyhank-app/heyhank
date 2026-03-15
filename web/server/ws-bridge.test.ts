@@ -1632,6 +1632,62 @@ describe("Browser message routing", () => {
     expect(queued.content).toBe("queued message");
   });
 
+  it("user_message: re-queues when backend send fails despite adapter connected", () => {
+    const session = bridge.getSession("s1")!;
+    session.backendAdapter = {
+      isConnected: () => true,
+      send: () => false,
+      disconnect: async () => {},
+      onBrowserMessage: () => {},
+      onSessionMeta: () => {},
+      onDisconnect: () => {},
+    } as any;
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "retry this",
+    }));
+
+    expect(session.pendingMessages).toHaveLength(1);
+    const queued = JSON.parse(session.pendingMessages[0]);
+    expect(queued.type).toBe("user_message");
+    expect(queued.content).toBe("retry this");
+  });
+
+  it("permission_response: does not re-queue when backend send fails", async () => {
+    await bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "control_request",
+      request_id: "req-no-requeue",
+      request: {
+        subtype: "can_use_tool",
+        tool_name: "Bash",
+        input: { command: "echo hi" },
+        tool_use_id: "tu-no-requeue",
+      },
+    }));
+
+    const session = bridge.getSession("s1")!;
+    const send = vi.fn(() => false);
+    session.backendAdapter = {
+      isConnected: () => true,
+      send,
+      disconnect: async () => {},
+      onBrowserMessage: () => {},
+      onSessionMeta: () => {},
+      onDisconnect: () => {},
+    } as any;
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "permission_response",
+      request_id: "req-no-requeue",
+      behavior: "allow",
+    }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(session.pendingPermissions.has("req-no-requeue")).toBe(false);
+    expect(session.pendingMessages).toHaveLength(0);
+  });
+
   it("user_message: deduplicates repeated client_msg_id", () => {
     const payload = {
       type: "user_message",

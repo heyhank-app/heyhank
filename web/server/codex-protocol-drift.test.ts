@@ -44,6 +44,12 @@ describe("Codex adapter method drift vs upstream protocol snapshot", () => {
 
     const legacyNotifications = new Set([
       "item/updated",
+      // Legacy alias still observed in recordings; upstream snapshot currently
+      // models the same payload under item/reasoning/textDelta.
+      "item/reasoning/delta",
+      // Status notification observed in production logs but not yet present in
+      // the pinned upstream snapshot files.
+      "thread/status/changed",
       "codex/event/stream_error",
       "codex/event/error",
       // Companion-internal notification emitted by codex-ws-proxy.cjs on

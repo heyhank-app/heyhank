@@ -1315,6 +1315,7 @@ export class CodexAdapter implements IBackendAdapter {
         // Streaming file change output. Same as above.
         break;
       case "item/reasoning/textDelta":
+      case "item/reasoning/delta":
       case "item/reasoning/summaryTextDelta":
       case "item/reasoning/summaryPartAdded":
         this.handleReasoningDelta(params);
@@ -1359,6 +1360,9 @@ export class CodexAdapter implements IBackendAdapter {
         break;
       case "thread/started":
         // Thread started after init — nothing to emit.
+        break;
+      case "thread/status/changed":
+        this.handleThreadStatusChanged(params);
         break;
       case "thread/tokenUsage/updated":
         this.handleTokenUsageUpdated(params);
@@ -1812,15 +1816,16 @@ export class CodexAdapter implements IBackendAdapter {
 
       case "reasoning": {
         const r = item as CodexReasoningItem;
-        this.reasoningTextByItemId.set(item.id, r.summary || r.content || "");
+        const initialThinking = this.coerceReasoningText(r.summary) || this.coerceReasoningText(r.content);
+        this.reasoningTextByItemId.set(item.id, initialThinking);
         // Emit as thinking content block
-        if (r.summary || r.content) {
+        if (initialThinking) {
           this.emit({
             type: "stream_event",
             event: {
               type: "content_block_start",
               index: 0,
-              content_block: { type: "thinking", thinking: r.summary || r.content || "" },
+              content_block: { type: "thinking", thinking: initialThinking },
             },
             parent_tool_use_id: null,
           });
@@ -1902,6 +1907,19 @@ export class CodexAdapter implements IBackendAdapter {
     const toolUseId = `codex-plan-${turnId}-${nextCount}`;
 
     this.emitToolUseTracked(toolUseId, "TodoWrite", { todos });
+  }
+
+  private handleThreadStatusChanged(params: Record<string, unknown>): void {
+    const raw = params.status;
+    const statusRaw = typeof raw === "string"
+      ? raw
+      : (raw && typeof raw === "object" && typeof (raw as Record<string, unknown>).type === "string")
+        ? ((raw as Record<string, unknown>).type as string)
+        : null;
+    const status = statusRaw === "running" || statusRaw === "compacting"
+      ? statusRaw
+      : null;
+    this.emit({ type: "status_change", status });
   }
 
   private extractPlanTodos(params: Record<string, unknown>, turnId: string): PlanTodo[] {
@@ -2009,6 +2027,21 @@ export class CodexAdapter implements IBackendAdapter {
       }
     }
     return null;
+  }
+
+  private coerceReasoningText(value: unknown): string {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) {
+      return value
+        .map((entry) => this.coerceReasoningText(entry))
+        .filter(Boolean)
+        .join("\n");
+    }
+    if (value && typeof value === "object") {
+      const obj = value as Record<string, unknown>;
+      return this.firstString(obj, ["text", "content", "summary"]) || "";
+    }
+    return "";
   }
 
   private normalizePlanStatus(statusRaw: string | null): "pending" | "in_progress" | "completed" {
@@ -2184,8 +2217,8 @@ export class CodexAdapter implements IBackendAdapter {
         const r = item as CodexReasoningItem;
         const thinkingText = (
           this.reasoningTextByItemId.get(item.id)
-          || r.summary
-          || r.content
+          || this.coerceReasoningText(r.summary)
+          || this.coerceReasoningText(r.content)
           || ""
         ).trim();
 

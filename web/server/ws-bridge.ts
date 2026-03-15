@@ -54,6 +54,14 @@ import { log } from "./logger.js";
 
 // ─── Bridge ───────────────────────────────────────────────────────────────────
 
+const RETRYABLE_BACKEND_MESSAGE_TYPES = new Set<BrowserOutgoingMessage["type"]>([
+  "user_message",
+  "mcp_get_status",
+  "mcp_toggle",
+  "mcp_reconnect",
+  "mcp_set_servers",
+]);
+
 export class WsBridge {
   private static readonly PROCESSED_CLIENT_MSG_ID_LIMIT = 1000;
   private static readonly DISCONNECT_DEBOUNCE_MS = Number(
@@ -1065,7 +1073,14 @@ export class WsBridge {
     // For Claude: adapter may exist but WS is disconnected (CLI cycling). Queue at
     // bridge level so handleCLIOpen flushes via adapter.send() after reconnect.
     if (session.backendAdapter?.isConnected()) {
-      session.backendAdapter.send(msg);
+      const sent = session.backendAdapter.send(msg);
+      // Codex can be "adapter-connected" while its underlying transport is in a
+      // transient disconnected state. If send rejects retryable messages, keep
+      // them queued so they can be flushed after reconnect/relaunch.
+      if (!sent && RETRYABLE_BACKEND_MESSAGE_TYPES.has(msg.type)) {
+        console.log(`[ws-bridge] Backend send failed for session ${session.id}, re-queuing ${msg.type}`);
+        session.pendingMessages.push(JSON.stringify(msg));
+      }
     } else {
       // Adapter not yet attached or transport disconnected — queue for when it reconnects
       console.log(`[ws-bridge] Backend not connected for session ${session.id}, queuing ${msg.type}`);

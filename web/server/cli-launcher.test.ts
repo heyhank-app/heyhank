@@ -943,6 +943,27 @@ describe("codex websocket launcher", () => {
     expect(onAdapter.mock.calls[0][0]).toBe("test-session-id");
   });
 
+  it("skips already-claimed ws ports when selecting Codex host listen port", async () => {
+    process.env.COMPANION_CODEX_TRANSPORT = "ws";
+    mockResolveBinary.mockReturnValue("/opt/fake/codex");
+    (launcher as any).claimedCodexWsPorts.add(4500);
+
+    const codexProc = createMockProc(2101);
+    const { proc: proxyProc } = createPendingCodexWsProxyProc(2102);
+    mockSpawn.mockReturnValueOnce(codexProc).mockReturnValueOnce(proxyProc);
+
+    launcher.launch({
+      backendType: "codex",
+      cwd: "/tmp/project",
+      codexSandbox: "workspace-write",
+    });
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const [codexCmd] = mockSpawn.mock.calls[0];
+    expect(codexCmd).toContain("ws://127.0.0.1:4501");
+  });
+
   it("passes custom connect and pong timeouts from env vars to the ws proxy", async () => {
     // When COMPANION_CODEX_WS_CONNECT_TIMEOUT_MS and COMPANION_CODEX_PONG_TIMEOUT_MS
     // are set, those values should be forwarded as argv[3] and argv[4] to the proxy.
