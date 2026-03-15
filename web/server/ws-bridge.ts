@@ -605,23 +605,8 @@ export class WsBridge {
     // a CLI WebSocket, so handleCLIOpen never runs to flush the queue).
     // For Claude backends, handleCLIOpen handles this after attachWebSocket.
     if (!(adapter instanceof ClaudeAdapter) && session.pendingMessages.length > 0) {
-      log.info("ws-bridge", "Flushing queued messages on adapter attach", {
-        sessionId,
-        count: session.pendingMessages.length,
-      });
-      const queued = session.pendingMessages.splice(0);
-      for (const raw of queued) {
-        try {
-          const queuedMsg = JSON.parse(raw) as BrowserOutgoingMessage;
-          adapter.send(queuedMsg);
-        } catch {
-          log.warn("ws-bridge", "Failed to parse queued message during flush", {
-            sessionId,
-            backendType: session.backendType,
-            rawPreview: raw.substring(0, 100),
-          });
-        }
-      }
+      this.flushQueuedBrowserMessages(session, adapter, "adapter_attach");
+      this.persistSession(session);
     }
 
     // Broadcast cli_connected
@@ -1092,6 +1077,17 @@ export class WsBridge {
     // For Claude: adapter may exist but WS is disconnected (CLI cycling). Queue at
     // bridge level so handleCLIOpen flushes via adapter.send() after reconnect.
     if (session.backendAdapter?.isConnected()) {
+      if (session.pendingMessages.length > 0) {
+        this.flushQueuedBrowserMessages(session, session.backendAdapter, "backend_connected_send");
+        // Preserve FIFO ordering: if flush was interrupted and left pending
+        // messages, queue this incoming message behind them instead of sending
+        // it immediately (which could overtake older queued work).
+        if (session.pendingMessages.length > 0) {
+          session.pendingMessages.push(JSON.stringify(msg));
+          this.persistSession(session);
+          return;
+        }
+      }
       const sent = session.backendAdapter.send(msg);
       // Codex can be "adapter-connected" while its underlying transport is in a
       // transient disconnected state. If send rejects retryable messages, keep
@@ -1103,6 +1099,7 @@ export class WsBridge {
         });
         session.pendingMessages.push(JSON.stringify(msg));
       }
+      this.persistSession(session);
     } else {
       // Adapter not yet attached or transport disconnected — queue for when it reconnects
       log.info("ws-bridge", "Backend not connected, queuing message", {
@@ -1110,6 +1107,7 @@ export class WsBridge {
         messageType: msg.type,
       });
       session.pendingMessages.push(JSON.stringify(msg));
+      this.persistSession(session);
     }
   }
 
@@ -1132,5 +1130,59 @@ export class WsBridge {
 
   private sendToBrowser(ws: ServerWebSocket<SocketData>, msg: BrowserIncomingMessage) {
     sendToBrowserFn(ws, msg);
+  }
+
+  /**
+   * Flush queued browser-originated messages to an attached backend adapter.
+   * Keeps ordering and re-queues retryable messages if dispatch fails.
+   */
+  private flushQueuedBrowserMessages(session: Session, adapter: IBackendAdapter, reason: string): void {
+    if (session.pendingMessages.length === 0) return;
+
+    log.info("ws-bridge", "Flushing queued messages", {
+      sessionId: session.id,
+      backendType: session.backendType,
+      reason,
+      count: session.pendingMessages.length,
+    });
+
+    const queued = session.pendingMessages.splice(0);
+    for (let i = 0; i < queued.length; i++) {
+      const raw = queued[i];
+      let queuedMsg: BrowserOutgoingMessage;
+      try {
+        queuedMsg = JSON.parse(raw) as BrowserOutgoingMessage;
+      } catch {
+        log.warn("ws-bridge", "Failed to parse queued message during flush", {
+          sessionId: session.id,
+          backendType: session.backendType,
+          rawPreview: raw.substring(0, 100),
+        });
+        continue;
+      }
+
+      const sent = adapter.send(queuedMsg);
+      if (!sent && RETRYABLE_BACKEND_MESSAGE_TYPES.has(queuedMsg.type)) {
+        const remaining = queued.slice(i);
+        session.pendingMessages = remaining.concat(session.pendingMessages);
+        log.warn("ws-bridge", "Queued message flush interrupted, re-queued remaining messages", {
+          sessionId: session.id,
+          backendType: session.backendType,
+          reason,
+          failedMessageType: queuedMsg.type,
+          remaining: remaining.length,
+        });
+        break;
+      }
+
+      if (!sent) {
+        log.warn("ws-bridge", "Dropping non-retryable queued message after flush failure", {
+          sessionId: session.id,
+          backendType: session.backendType,
+          reason,
+          failedMessageType: queuedMsg.type,
+        });
+      }
+    }
   }
 }

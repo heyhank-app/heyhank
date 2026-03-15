@@ -1749,6 +1749,81 @@ describe("Browser message routing", () => {
     expect(queued.content).toBe("retry this");
   });
 
+  it("flushes bridge-queued messages once backend becomes connected", () => {
+    const browser = makeBrowserSocket("codex-s1");
+    bridge.handleBrowserOpen(browser, "codex-s1");
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "hello queued before connect",
+    }));
+
+    const session = bridge.getSession("codex-s1")!;
+    expect(session.pendingMessages).toHaveLength(1);
+
+    let connected = false;
+    const send = vi.fn((msg: any) => connected);
+    const adapter = {
+      isConnected: () => connected,
+      send,
+      disconnect: async () => {},
+      onBrowserMessage: () => {},
+      onSessionMeta: () => {},
+      onDisconnect: () => {},
+      onInitError: () => {},
+    };
+
+    bridge.attachBackendAdapter("codex-s1", adapter as any, "codex");
+
+    // Initial attach flush is attempted but backend still disconnected,
+    // so the queued message must remain pending.
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(session.pendingMessages).toHaveLength(1);
+
+    connected = true;
+    bridge.handleBrowserMessage(browser, JSON.stringify({ type: "mcp_get_status" }));
+
+    // Queued user message flushes first, then current message is dispatched.
+    expect(session.pendingMessages).toHaveLength(0);
+    expect(send).toHaveBeenCalledTimes(3);
+    const messageTypes = send.mock.calls.map(([msg]: [any]) => msg.type);
+    expect(messageTypes).toEqual(["user_message", "user_message", "mcp_get_status"]);
+  });
+
+  it("preserves FIFO when queued flush is interrupted before sending current message", () => {
+    const session = bridge.getSession("s1")!;
+    session.pendingMessages.push(JSON.stringify({
+      type: "user_message",
+      content: "older queued",
+    }));
+
+    const send = vi.fn((msg: any) => {
+      if (msg.type === "user_message" && msg.content === "older queued" && send.mock.calls.length === 1) {
+        return false;
+      }
+      return true;
+    });
+
+    session.backendAdapter = {
+      isConnected: () => true,
+      send,
+      disconnect: async () => {},
+      onBrowserMessage: () => {},
+      onSessionMeta: () => {},
+      onDisconnect: () => {},
+    } as any;
+
+    // First dispatch tries to flush the older queued message, fails, and must
+    // queue the current message instead of sending it out-of-order.
+    bridge.handleBrowserMessage(browser, JSON.stringify({ type: "mcp_get_status" }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0]).toMatchObject({ type: "user_message", content: "older queued" });
+    expect(session.pendingMessages).toHaveLength(2);
+    expect(JSON.parse(session.pendingMessages[0])).toMatchObject({ type: "user_message", content: "older queued" });
+    expect(JSON.parse(session.pendingMessages[1])).toMatchObject({ type: "mcp_get_status" });
+  });
+
   it("permission_response: does not re-queue when backend send fails", async () => {
     await bridge.handleCLIMessage(cli, JSON.stringify({
       type: "control_request",
