@@ -22,7 +22,7 @@ function shouldReconnectSession(sessionId: string): boolean {
   const sdkSession = store.sdkSessions.find((s) => s.sessionId === sessionId);
   if (sdkSession) return !sdkSession.archived;
   // Fallback for freshly-created sessions that may not be in sdkSessions yet.
-  return store.currentSessionId === sessionId || store.sessions.has(sessionId);
+  return store.currentSessionId === sessionId;
 }
 
 function getReconnectCandidates(): string[] {
@@ -32,7 +32,6 @@ function getReconnectCandidates(): string[] {
     if (!s.archived) ids.add(s.sessionId);
   }
   if (store.currentSessionId) ids.add(store.currentSessionId);
-  for (const id of store.sessions.keys()) ids.add(id);
   return Array.from(ids);
 }
 
@@ -59,6 +58,7 @@ if (typeof document !== "undefined") {
       pageHidden = false;
       // Page is visible again — reconnect all known active sessions.
       for (const sessionId of getReconnectCandidates()) {
+        // Re-check in case sdkSessions changed after candidate collection.
         if (!shouldReconnectSession(sessionId)) continue;
         const ws = sockets.get(sessionId);
         if (!isSocketUsable(ws)) {

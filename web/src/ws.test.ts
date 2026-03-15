@@ -143,6 +143,8 @@ describe("connectSession", () => {
     wsModule.sendToSession("s1", { type: "interrupt" });
     expect(second.send).toHaveBeenCalled();
   });
+
+
   it("sends session_subscribe with last_seq on open", () => {
     localStorage.setItem("companion:last-seq:s1", "12");
     wsModule.connectSession("s1");
