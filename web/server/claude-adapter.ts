@@ -41,6 +41,7 @@ import type { PendingControlRequest } from "./ws-bridge-types.js";
 import type { RecorderManager } from "./recorder.js";
 import { parseNDJSON, isDuplicateCLIMessage } from "./ws-bridge-cli-ingest.js";
 import type { CLIDedupState } from "./ws-bridge-cli-ingest.js";
+import { reportProtocolDrift } from "./protocol-monitor.js";
 
 // --- Constants ----------------------------------------------------------------
 
@@ -80,6 +81,8 @@ export class ClaudeAdapter implements IBackendAdapter {
 
   /** Whether the CLI has sent the init message (system.init). */
   private initialized = false;
+  private protocolDriftSeen = new Set<string>();
+  private parseErrorSeen = new Set<string>();
 
   constructor(
     sessionId: string,
@@ -186,8 +189,17 @@ export class ClaudeAdapter implements IBackendAdapter {
       try {
         msg = JSON.parse(line);
       } catch {
-        console.warn(
-          `[claude-adapter] Failed to parse CLI message: ${line.substring(0, 200)}`,
+        reportProtocolDrift(
+          this.parseErrorSeen,
+          {
+            backend: "claude",
+            sessionId: this.sessionId,
+            direction: "incoming",
+            messageKind: "parse_error",
+            messageName: "ndjson",
+            rawPreview: line,
+          },
+          (message) => this.browserMessageCb?.({ type: "error", message }),
         );
         continue;
       }
@@ -436,7 +448,18 @@ export class ClaudeAdapter implements IBackendAdapter {
         break;
 
       default:
-        // Forward unknown messages as-is for debugging
+        reportProtocolDrift(
+          this.protocolDriftSeen,
+          {
+            backend: "claude",
+            sessionId: this.sessionId,
+            direction: "incoming",
+            messageKind: "message",
+            messageName: (msg as { type?: string }).type || "unknown",
+            rawPreview: JSON.stringify(msg),
+          },
+          (message) => this.browserMessageCb?.({ type: "error", message }),
+        );
         break;
     }
   }

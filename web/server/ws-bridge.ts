@@ -597,7 +597,7 @@ export class WsBridge {
 
     // ── onInitError (optional) ───────────────────────────────────────────
     adapter.onInitError?.((error) => {
-      console.error(`[ws-bridge] Backend init error for session ${sessionId}: ${error}`);
+      log.error("ws-bridge", "Backend init error", { sessionId, error });
       this.broadcastToBrowsers(session, { type: "error", message: error });
     });
 
@@ -605,21 +605,31 @@ export class WsBridge {
     // a CLI WebSocket, so handleCLIOpen never runs to flush the queue).
     // For Claude backends, handleCLIOpen handles this after attachWebSocket.
     if (!(adapter instanceof ClaudeAdapter) && session.pendingMessages.length > 0) {
-      console.log(`[ws-bridge] Flushing ${session.pendingMessages.length} queued message(s) on adapter attach for session ${sessionId}`);
+      log.info("ws-bridge", "Flushing queued messages on adapter attach", {
+        sessionId,
+        count: session.pendingMessages.length,
+      });
       const queued = session.pendingMessages.splice(0);
       for (const raw of queued) {
         try {
           const queuedMsg = JSON.parse(raw) as BrowserOutgoingMessage;
           adapter.send(queuedMsg);
         } catch {
-          console.warn(`[ws-bridge] Failed to parse queued message for ${session.backendType}: ${raw.substring(0, 100)}`);
+          log.warn("ws-bridge", "Failed to parse queued message during flush", {
+            sessionId,
+            backendType: session.backendType,
+            rawPreview: raw.substring(0, 100),
+          });
         }
       }
     }
 
     // Broadcast cli_connected
     this.broadcastToBrowsers(session, { type: "cli_connected" });
-    console.log(`[ws-bridge] Backend adapter attached for session ${sessionId} (type: ${session.backendType})`);
+    log.info("ws-bridge", "Backend adapter attached", {
+      sessionId,
+      backendType: session.backendType,
+    });
   }
 
   /** AI validation for permission requests — shared by Claude and Codex paths. */
@@ -1051,7 +1061,16 @@ export class WsBridge {
         timestamp: ts,
         id: `user-${ts}-${this.userMsgCounter++}`,
       });
-      session.stateMachine.transition("streaming", "user_message");
+      const transitioned = session.stateMachine.transition("streaming", "user_message");
+      if (!transitioned) {
+        // Session not ready yet (e.g. still initializing). Log a warning so
+        // protocol drift is visible, but still forward the message — the
+        // backend adapter has its own internal queue for pre-init messages.
+        log.warn("ws-bridge", "Session not ready for user message, forwarding to adapter queue", {
+          sessionId: session.id,
+          phase: session.stateMachine.phase,
+        });
+      }
       this.persistSession(session);
     }
 
@@ -1078,12 +1097,18 @@ export class WsBridge {
       // transient disconnected state. If send rejects retryable messages, keep
       // them queued so they can be flushed after reconnect/relaunch.
       if (!sent && RETRYABLE_BACKEND_MESSAGE_TYPES.has(msg.type)) {
-        console.log(`[ws-bridge] Backend send failed for session ${session.id}, re-queuing ${msg.type}`);
+        log.warn("ws-bridge", "Backend send failed, re-queuing", {
+          sessionId: session.id,
+          messageType: msg.type,
+        });
         session.pendingMessages.push(JSON.stringify(msg));
       }
     } else {
       // Adapter not yet attached or transport disconnected — queue for when it reconnects
-      console.log(`[ws-bridge] Backend not connected for session ${session.id}, queuing ${msg.type}`);
+      log.info("ws-bridge", "Backend not connected, queuing message", {
+        sessionId: session.id,
+        messageType: msg.type,
+      });
       session.pendingMessages.push(JSON.stringify(msg));
     }
   }

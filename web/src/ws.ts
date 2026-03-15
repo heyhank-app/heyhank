@@ -489,6 +489,7 @@ function handleMessage(sessionId: string, event: MessageEvent) {
   try {
     data = JSON.parse(event.data);
   } catch {
+    console.warn(`[ws] Failed to parse incoming message for session ${sessionId}:`, event.data?.substring?.(0, 120));
     return;
   }
 

@@ -1570,8 +1570,15 @@ describe("CLI message routing", () => {
 
     // Should not throw (async — just await it directly)
     await bridge.handleCLIMessage(cli, raw);
-    // keep_alive is silently consumed, so no broadcast
-    expect(browser.send).not.toHaveBeenCalled();
+    // Parse errors now surface as error messages to the browser,
+    // but keep_alive is still silently consumed. Only the parse error
+    // should reach the browser.
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const errorMsgs = calls.filter((c: any) => c.type === "error");
+    expect(errorMsgs.length).toBe(1);
+    expect(errorMsgs[0].message).toContain("parse_error");
+    // No keep_alive should have been broadcast
+    expect(calls.filter((c: any) => c.type === "keep_alive").length).toBe(0);
   });
 });
 
@@ -4200,5 +4207,42 @@ describe("injectSystemPrompt", () => {
   it("is a no-op for nonexistent session", () => {
     // Should log an error but not throw.
     expect(() => bridge.injectSystemPrompt("nonexistent", "prompt")).not.toThrow();
+  });
+});
+
+// ─── User message during initialization ──────────────────────────────────────
+
+describe("User message during initializing phase", () => {
+  it("logs a warning but still forwards user_message when session is initializing", () => {
+    // Simulate a session where the CLI socket has connected (initializing)
+    // but the system.init message hasn't arrived yet (so not "ready").
+    // The message should still be forwarded to the adapter's internal queue
+    // rather than being dropped, so the user doesn't have to resend.
+    const cli = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+
+    // Session should be in "initializing" phase after CLI connects
+    const session = bridge.getSession("s1")!;
+    expect(session.stateMachine.phase).toBe("initializing");
+
+    // Send a user message while still initializing
+    cli.send.mockClear();
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "Hello while initializing",
+    }));
+
+    // The message IS forwarded to the CLI adapter (which queues internally)
+    expect(cli.send).toHaveBeenCalledTimes(1);
+
+    // The message should be in the history (user typed it)
+    const userMsgs = session.messageHistory.filter((m) => m.type === "user_message");
+    expect(userMsgs.length).toBe(1);
+
+    // State machine should still be in initializing — the invalid transition
+    // is logged as a warning but doesn't block message delivery.
+    expect(session.stateMachine.phase).toBe("initializing");
   });
 });

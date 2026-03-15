@@ -34,6 +34,7 @@ vi.mock("./settings-manager.js", () => ({
 }));
 
 import { ClaudeAdapter } from "./claude-adapter.js";
+import { log } from "./logger.js";
 
 // ─── Mock socket factory ────────────────────────────────────────────────────
 
@@ -211,6 +212,71 @@ afterAll(() => {
   console.log = noop;
   console.warn = noop;
   console.error = noop;
+});
+
+describe("Protocol drift handling", () => {
+  it("logs and surfaces unknown Claude message types", () => {
+    const spy = vi.spyOn(log, "warn").mockImplementation(() => {});
+
+    adapter.handleRawMessage(`${JSON.stringify({ type: "brand_new_message", payload: { x: 1 } })}\n`);
+
+    expect(spy).toHaveBeenCalledWith(
+      "protocol-monitor",
+      "Backend protocol drift detected",
+      expect.objectContaining({
+        backend: "claude",
+        sessionId: "sess-1",
+        direction: "incoming",
+        messageKind: "message",
+        messageName: "brand_new_message",
+      }),
+    );
+    expect(browserMessageCb).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "error",
+        message: expect.stringContaining("brand_new_message"),
+      }),
+    );
+
+    spy.mockRestore();
+  });
+
+  it("deduplicates repeated Claude parse-error drift logs", () => {
+    const spy = vi.spyOn(log, "warn").mockImplementation(() => {});
+
+    adapter.handleRawMessage("not-json\nstill-not-json\n");
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(
+      "protocol-monitor",
+      "Backend protocol drift detected",
+      expect.objectContaining({
+        backend: "claude",
+        sessionId: "sess-1",
+        messageKind: "parse_error",
+        messageName: "ndjson",
+      }),
+    );
+
+    spy.mockRestore();
+  });
+
+  it("surfaces parse errors to the browser as error messages", () => {
+    // Parse errors should notify the browser so the user sees something
+    // instead of a silent failure.
+    const spy = vi.spyOn(log, "warn").mockImplementation(() => {});
+
+    adapter.handleRawMessage("{{broken-json}}\n");
+
+    expect(browserMessageCb).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "error",
+        message: expect.stringContaining("parse_error"),
+      }),
+    );
+
+    spy.mockRestore();
+  });
 });
 
 // ─── Connection lifecycle ───────────────────────────────────────────────────
@@ -712,11 +778,15 @@ describe("handleRawMessage() — incoming CLI message routing", () => {
   it("malformed JSON lines are skipped without crashing", () => {
     // If a line in the NDJSON cannot be parsed, it should be skipped
     // and subsequent valid lines should still be processed.
+    // The parse error also surfaces as an error message to the browser.
+    const spy = vi.spyOn(log, "warn").mockImplementation(() => {});
     const raw = "not json\n" + makeAssistantMsg();
     adapter.handleRawMessage(raw);
-    // Only the valid assistant message should have been processed
-    expect(browserMessageCb).toHaveBeenCalledOnce();
-    expect(browserMessageCb.mock.calls[0][0].type).toBe("assistant");
+    // Parse error surfaced + valid assistant message processed
+    const calls = browserMessageCb.mock.calls.map((args: any[]) => args[0].type);
+    expect(calls).toContain("error");
+    expect(calls).toContain("assistant");
+    spy.mockRestore();
   });
 });
 

@@ -22,6 +22,8 @@ import type {
   McpServerConfig,
 } from "./session-types.js";
 import type { RecorderManager } from "./recorder.js";
+import { reportProtocolDrift } from "./protocol-monitor.js";
+import { log } from "./logger.js";
 
 // ─── Codex JSON-RPC Types ─────────────────────────────────────────────────────
 
@@ -146,6 +148,7 @@ export interface ICodexTransport {
   onRequest(handler: (method: string, id: number, params: Record<string, unknown>) => void): void;
   onRawIncoming(cb: (line: string) => void): void;
   onRawOutgoing(cb: (data: string) => void): void;
+  onParseError(cb: (message: string) => void): void;
   isConnected(): boolean;
 }
 
@@ -190,13 +193,16 @@ export class StdioTransport implements ICodexTransport {
   private requestHandler: ((method: string, id: number, params: Record<string, unknown>) => void) | null = null;
   private rawInCb: ((line: string) => void) | null = null;
   private rawOutCb: ((data: string) => void) | null = null;
+  private parseErrorCb: ((message: string) => void) | null = null;
   private writer: WritableStreamDefaultWriter<Uint8Array>;
   private connected = true;
   private buffer = "";
+  private protocolDriftSeen = new Set<string>();
 
   constructor(
     stdin: WritableStream<Uint8Array> | { write(data: Uint8Array): number },
     stdout: ReadableStream<Uint8Array>,
+    private readonly sessionId = "unknown",
   ) {
     // Handle both Bun subprocess stdin types
     let writable: WritableStream<Uint8Array>;
@@ -228,7 +234,10 @@ export class StdioTransport implements ICodexTransport {
         this.processBuffer();
       }
     } catch (err) {
-      console.error("[codex-adapter] stdout reader error:", err);
+      log.error("codex-adapter", "stdout reader error", {
+        sessionId: this.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       this.connected = false;
       // Clear all pending RPC timers and reject promises so callers don't
@@ -260,7 +269,18 @@ export class StdioTransport implements ICodexTransport {
       try {
         msg = JSON.parse(trimmed);
       } catch {
-        console.warn("[codex-adapter] Failed to parse JSON-RPC:", trimmed.substring(0, 200));
+        reportProtocolDrift(
+          this.protocolDriftSeen,
+          {
+            backend: "codex",
+            sessionId: this.sessionId,
+            direction: "incoming",
+            messageKind: "parse_error",
+            messageName: "json-rpc",
+            rawPreview: trimmed,
+          },
+          (message) => this.parseErrorCb?.(message),
+        );
         continue;
       }
 
@@ -378,6 +398,11 @@ export class StdioTransport implements ICodexTransport {
     this.rawOutCb = cb;
   }
 
+  /** Register callback for parse error messages to surface to the browser. */
+  onParseError(cb: (message: string) => void): void {
+    this.parseErrorCb = cb;
+  }
+
   private async writeRaw(data: string): Promise<void> {
     if (!this.connected) {
       throw new Error("Transport closed");
@@ -463,6 +488,7 @@ export class CodexAdapter implements IBackendAdapter {
     secondary: { usedPercent: number; windowDurationMins: number; resetsAt: number } | null;
   } | null = null;
   private static readonly DYNAMIC_TOOL_CALL_TIMEOUT_MS = 120_000;
+  private protocolDriftSeen = new Set<string>();
 
   private getExecutionCwd(): string {
     return this.options.executionCwd || this.options.cwd || "";
@@ -500,6 +526,7 @@ export class CodexAdapter implements IBackendAdapter {
       this.transport = new StdioTransport(
         stdin as WritableStream<Uint8Array> | { write(data: Uint8Array): number },
         stdout as ReadableStream<Uint8Array>,
+        this.sessionId,
       );
 
       // Monitor process exit — when using a subprocess directly,
@@ -543,6 +570,11 @@ export class CodexAdapter implements IBackendAdapter {
         recorder.record(sessionId, "out", data.trimEnd(), "cli", "codex", cwd);
       });
     }
+
+    // Surface transport-level parse errors to the browser
+    this.transport.onParseError((message) => {
+      this.browserMessageCb?.({ type: "error", message });
+    });
 
     // Start initialization
     this.initialize();
@@ -659,6 +691,11 @@ export class CodexAdapter implements IBackendAdapter {
         recorder.record(this.sessionId, "out", data.trimEnd(), "cli", "codex", cwd);
       });
     }
+
+    // Re-wire parse error surfacing
+    this.transport.onParseError((message) => {
+      this.browserMessageCb?.({ type: "error", message });
+    });
 
     // Re-run initialization (which will resume the thread if threadId is set)
     this.initialize();
@@ -1393,14 +1430,20 @@ export class CodexAdapter implements IBackendAdapter {
         this.handleWsReconnected();
         break;
       default:
-        // Unknown notification, log for debugging
-        if (!method.startsWith("account/") && !method.startsWith("codex/event/")) {
-          console.log(`[codex-adapter] Unhandled notification: ${method}`);
-        }
+        this.reportProtocolDrift("notification", method, { payload: params });
         break;
     }
     } catch (err) {
-      console.error(`[codex-adapter] Error handling notification ${method}:`, err);
+      log.error("codex-adapter", `Error handling notification ${method}`, {
+        sessionId: this.sessionId,
+        method,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      this.browserMessageCb?.({
+        type: "error",
+        message: `Codex notification handler crashed on "${method}". Companion may need an update.`,
+      });
     }
   }
 
@@ -1439,13 +1482,21 @@ export class CodexAdapter implements IBackendAdapter {
           this.transport.respond(id, { error: "not supported" });
           break;
         default:
-          console.log(`[codex-adapter] Unhandled request: ${method}`);
-          // Auto-accept unknown requests
-          this.transport.respond(id, { decision: "accept" });
+          this.reportProtocolDrift("request", method, { payload: params, blockedForSafety: true });
+          this.transport.respond(id, { error: `Unsupported Codex request method: ${method}` });
           break;
       }
     } catch (err) {
-      console.error(`[codex-adapter] Error handling request ${method}:`, err);
+      log.error("codex-adapter", `Error handling request ${method}`, {
+        sessionId: this.sessionId,
+        method,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      this.browserMessageCb?.({
+        type: "error",
+        message: `Codex request handler crashed on "${method}". Companion may need an update.`,
+      });
     }
   }
 
@@ -2411,6 +2462,27 @@ export class CodexAdapter implements IBackendAdapter {
 
   private emit(msg: BrowserIncomingMessage): void {
     this.browserMessageCb?.(msg);
+  }
+
+  private reportProtocolDrift(
+    messageKind: "notification" | "request",
+    messageName: string,
+    options?: { payload?: Record<string, unknown>; blockedForSafety?: boolean },
+  ): void {
+    reportProtocolDrift(
+      this.protocolDriftSeen,
+      {
+        backend: "codex",
+        sessionId: this.sessionId,
+        direction: "incoming",
+        messageKind,
+        messageName,
+        keys: options?.payload ? Object.keys(options.payload) : undefined,
+        rawPreview: options?.payload ? JSON.stringify(options.payload) : undefined,
+        blockedForSafety: options?.blockedForSafety,
+      },
+      (message) => this.emit({ type: "error", message }),
+    );
   }
 
   private getParentToolUseIdForThread(threadId?: string): string | null {
