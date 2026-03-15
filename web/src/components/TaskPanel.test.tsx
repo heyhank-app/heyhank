@@ -133,6 +133,8 @@ const mockApi = vi.mocked(api);
 beforeEach(() => {
   vi.clearAllMocks();
   resetStore();
+  // Clear PanelSection collapse state persisted in localStorage
+  localStorage.removeItem("cc-panel-collapsed");
 });
 
 describe("TaskPanel", () => {
@@ -504,7 +506,7 @@ describe("TasksSection (Claude Code sessions)", () => {
     });
     render(<TaskPanel sessionId="s1" />);
     expect(screen.getByText("Tasks")).toBeInTheDocument();
-    expect(screen.getByText("No tasks yet")).toBeInTheDocument();
+    expect(screen.getByText("Tasks will appear here as the agent works")).toBeInTheDocument();
   });
 
   it("renders task list with correct completed count", () => {
@@ -606,17 +608,19 @@ describe("GitBranchSection", () => {
       sessions: new Map([["s1", { backend_type: "claude", git_branch: "feat/my-feature" }]]),
     });
     render(<TaskPanel sessionId="s1" />);
-    expect(screen.getByText("Branch")).toBeInTheDocument();
+    expect(screen.getByText("Git Branch")).toBeInTheDocument();
     expect(screen.getByText("feat/my-feature")).toBeInTheDocument();
   });
 
-  it("renders nothing when no branch info is available", () => {
-    // No git_branch means the section should not appear
+  it("renders nothing inside branch section when no branch info is available", () => {
+    // No git_branch means the section content should be empty (header still renders)
     resetStore({
       sessions: new Map([["s1", { backend_type: "claude" }]]),
     });
     render(<TaskPanel sessionId="s1" />);
-    expect(screen.queryByText("Branch")).not.toBeInTheDocument();
+    // The PanelSection header "Git Branch" renders, but no branch name appears
+    expect(screen.getByText("Git Branch")).toBeInTheDocument();
+    expect(screen.queryByText("feat/my-feature")).not.toBeInTheDocument();
   });
 
   it("shows ahead and behind counts", () => {
@@ -1372,5 +1376,166 @@ describe("TaskPanel accessibility", () => {
     const { container } = render(<GitHubPRDisplay pr={pr} />);
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+});
+
+describe("PanelSection — collapsible behavior", () => {
+  it("renders section headers with aria-expanded for all visible sections", () => {
+    // Each section rendered via SectionWithBadge should have an aria-expanded header
+    resetStore({
+      sessions: new Map([["s1", { backend_type: "claude" }]]),
+    });
+    render(<TaskPanel sessionId="s1" />);
+    const expandedButtons = screen.getAllByRole("button", { expanded: true });
+    // At least some section headers should be expanded by default
+    expect(expandedButtons.length).toBeGreaterThan(0);
+  });
+
+  it("collapses a section when its header is clicked", () => {
+    // Clicking a PanelSection header should toggle aria-expanded to false
+    resetStore({
+      sessions: new Map([["s1", { backend_type: "claude" }]]),
+    });
+    render(<TaskPanel sessionId="s1" />);
+    // Find the "Tasks" section header button
+    const tasksHeader = screen.getByText("Tasks").closest("button");
+    expect(tasksHeader).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(tasksHeader!);
+    expect(tasksHeader).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("re-expands a collapsed section when header is clicked again", () => {
+    // Double-clicking should return to expanded state
+    resetStore({
+      sessions: new Map([["s1", { backend_type: "claude" }]]),
+    });
+    render(<TaskPanel sessionId="s1" />);
+    const tasksHeader = screen.getByText("Tasks").closest("button");
+    fireEvent.click(tasksHeader!); // collapse
+    expect(tasksHeader).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(tasksHeader!); // re-expand
+    expect(tasksHeader).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("renders chevron icon in section headers", () => {
+    // Each PanelSection header should have an aria-hidden chevron SVG
+    resetStore({
+      sessions: new Map([["s1", { backend_type: "claude" }]]),
+    });
+    const { container } = render(<TaskPanel sessionId="s1" />);
+    // Chevron SVGs have aria-hidden="true"
+    const chevrons = container.querySelectorAll("svg[aria-hidden='true']");
+    expect(chevrons.length).toBeGreaterThan(0);
+  });
+});
+
+describe("ProgressMeter — accessibility attributes", () => {
+  it("renders progress bars with role=meter and aria attributes", async () => {
+    // Usage bars should have role="meter" for accessibility
+    mockApi.getSessionUsageLimits.mockResolvedValueOnce({
+      five_hour: { utilization: 50, resets_at: null },
+      seven_day: null,
+      extra_usage: null,
+    });
+    resetStore({
+      sessions: new Map([["s1", { backend_type: "claude" }]]),
+    });
+    render(<TaskPanel sessionId="s1" />);
+    await screen.findByText("5h Limit");
+    const meter = screen.getByRole("meter");
+    expect(meter).toHaveAttribute("aria-valuenow", "50");
+    expect(meter).toHaveAttribute("aria-valuemin", "0");
+    expect(meter).toHaveAttribute("aria-valuemax", "100");
+  });
+});
+
+describe("LinearIssueSection — comments and labels rendering", () => {
+  const mockLinearIssue = {
+    id: "issue-1",
+    identifier: "ENG-123",
+    title: "Fix login bug",
+    description: "Users cannot log in",
+    url: "https://linear.app/team/ENG-123",
+    branchName: "fix/login-bug",
+    priorityLabel: "High",
+    stateName: "In Progress",
+    stateType: "started",
+    teamName: "Engineering",
+    teamKey: "ENG",
+    teamId: "team-1",
+  };
+
+  it("renders comments when available", async () => {
+    // Comments section should show recent comments after async fetch
+    mockApi.getLinkedLinearIssue.mockResolvedValue({
+      issue: mockLinearIssue,
+      comments: [
+        { id: "c1", body: "Looks good!", createdAt: new Date().toISOString(), userName: "Alice" },
+        { id: "c2", body: "Please fix the tests", createdAt: new Date().toISOString(), userName: "Bob" },
+      ],
+      assignee: null,
+      labels: [],
+    });
+    resetStore({
+      sessions: new Map([["s1", { backend_type: "claude" }]]),
+      linkedLinearIssues: new Map([["s1", mockLinearIssue]]),
+    });
+    render(<TaskPanel sessionId="s1" />);
+    expect(await screen.findByText("Comments")).toBeInTheDocument();
+    expect(screen.getByText("Looks good!")).toBeInTheDocument();
+    expect(screen.getByText("Please fix the tests")).toBeInTheDocument();
+  });
+
+  it("renders labels when available", async () => {
+    // Labels should display with their colors after async fetch
+    mockApi.getLinkedLinearIssue.mockResolvedValue({
+      issue: mockLinearIssue,
+      comments: [],
+      assignee: null,
+      labels: [
+        { id: "l1", name: "Bug", color: "#e53e3e" },
+        { id: "l2", name: "Priority", color: "#ed8936" },
+      ],
+    });
+    resetStore({
+      sessions: new Map([["s1", { backend_type: "claude" }]]),
+      linkedLinearIssues: new Map([["s1", mockLinearIssue]]),
+    });
+    render(<TaskPanel sessionId="s1" />);
+    expect(await screen.findByText("Bug")).toBeInTheDocument();
+    expect(screen.getByText("Priority")).toBeInTheDocument();
+  });
+
+  it("renders assignee when available", async () => {
+    // Assignee name should appear in metadata row after async fetch
+    mockApi.getLinkedLinearIssue.mockResolvedValue({
+      issue: mockLinearIssue,
+      comments: [],
+      assignee: { name: "Jane Doe" },
+      labels: [],
+    });
+    resetStore({
+      sessions: new Map([["s1", { backend_type: "claude" }]]),
+      linkedLinearIssues: new Map([["s1", mockLinearIssue]]),
+    });
+    render(<TaskPanel sessionId="s1" />);
+    expect(await screen.findByText("@ Jane Doe")).toBeInTheDocument();
+  });
+
+  it("calls api.unlinkLinearIssue when unlink button is clicked", () => {
+    // Clicking the unlink button should call the unlink API
+    mockApi.getLinkedLinearIssue.mockResolvedValue({
+      issue: mockLinearIssue,
+      comments: [],
+      assignee: null,
+      labels: [],
+    });
+    resetStore({
+      sessions: new Map([["s1", { backend_type: "claude" }]]),
+      linkedLinearIssues: new Map([["s1", mockLinearIssue]]),
+    });
+    render(<TaskPanel sessionId="s1" />);
+    fireEvent.click(screen.getByTitle("Unlink issue"));
+    expect(mockApi.unlinkLinearIssue).toHaveBeenCalledWith("s1");
   });
 });

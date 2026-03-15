@@ -203,7 +203,7 @@ function AddServerForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="my-mcp-server"
-          className="w-full text-[12px] bg-cc-bg-secondary border border-cc-border rounded px-2 py-1.5 text-cc-fg placeholder:text-cc-muted/40 focus:outline-none focus:border-cc-accent"
+          className="w-full text-[12px] bg-cc-input-bg border border-cc-border rounded px-2 py-1.5 text-cc-fg placeholder:text-cc-muted/40 focus:outline-none focus:border-cc-primary"
         />
       </div>
 
@@ -220,7 +220,7 @@ function AddServerForm({
               onClick={() => setServerType(t)}
               className={`text-[11px] px-2 py-1 rounded-md border transition-colors cursor-pointer ${
                 serverType === t
-                  ? "border-cc-accent text-cc-accent bg-cc-accent/10"
+                  ? "border-cc-primary text-cc-primary bg-cc-primary/10"
                   : "border-cc-border text-cc-muted hover:text-cc-fg hover:border-cc-muted"
               }`}
             >
@@ -242,7 +242,7 @@ function AddServerForm({
               value={command}
               onChange={(e) => setCommand(e.target.value)}
               placeholder="npx -y @modelcontextprotocol/server-memory"
-              className="w-full text-[12px] bg-cc-bg-secondary border border-cc-border rounded px-2 py-1.5 text-cc-fg placeholder:text-cc-muted/40 font-mono focus:outline-none focus:border-cc-accent"
+              className="w-full text-[12px] bg-cc-input-bg border border-cc-border rounded px-2 py-1.5 text-cc-fg placeholder:text-cc-muted/40 font-mono focus:outline-none focus:border-cc-primary"
             />
           </div>
           <div>
@@ -254,7 +254,7 @@ function AddServerForm({
               value={args}
               onChange={(e) => setArgs(e.target.value)}
               placeholder="--port 3000"
-              className="w-full text-[12px] bg-cc-bg-secondary border border-cc-border rounded px-2 py-1.5 text-cc-fg placeholder:text-cc-muted/40 font-mono focus:outline-none focus:border-cc-accent"
+              className="w-full text-[12px] bg-cc-input-bg border border-cc-border rounded px-2 py-1.5 text-cc-fg placeholder:text-cc-muted/40 font-mono focus:outline-none focus:border-cc-primary"
             />
           </div>
         </>
@@ -271,7 +271,7 @@ function AddServerForm({
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="http://localhost:3000/mcp"
-            className="w-full text-[12px] bg-cc-bg-secondary border border-cc-border rounded px-2 py-1.5 text-cc-fg placeholder:text-cc-muted/40 font-mono focus:outline-none focus:border-cc-accent"
+            className="w-full text-[12px] bg-cc-input-bg border border-cc-border rounded px-2 py-1.5 text-cc-fg placeholder:text-cc-muted/40 font-mono focus:outline-none focus:border-cc-primary"
           />
         </div>
       )}
@@ -283,7 +283,7 @@ function AddServerForm({
           disabled={!canSubmit}
           className={`flex-1 text-[11px] font-medium py-1.5 rounded-md transition-colors ${
             canSubmit
-              ? "bg-cc-accent text-white hover:bg-cc-accent/90 cursor-pointer"
+              ? "bg-cc-primary text-white hover:bg-cc-primary-hover cursor-pointer"
               : "bg-cc-hover text-cc-muted cursor-not-allowed"
           }`}
         >
@@ -410,7 +410,7 @@ export function McpSection({ sessionId }: { sessionId: string }) {
             {cliConnected && (
               <button
                 onClick={() => setShowAddForm(true)}
-                className="text-cc-accent hover:underline cursor-pointer"
+                className="text-cc-primary hover:underline cursor-pointer"
               >
                 Add one
               </button>

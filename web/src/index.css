@@ -37,6 +37,8 @@
   --color-cc-warning: #b7791f;
   --color-cc-sidebar-footer: #edece5;
   --color-cc-separator: rgba(31,30,29,0.10);
+  --color-cc-info: #2b6cb0;
+  --color-cc-merged: #805ad5;
 }
 
 @keyframes fadeSlideIn {
@@ -125,13 +127,16 @@
 .accordion-panel {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 200ms ease-out, opacity 150ms ease-out;
+  transition: grid-template-rows 200ms ease-out, opacity 150ms ease-out, visibility 0s 200ms;
   opacity: 0;
+  visibility: hidden;
 }
 
 .accordion-panel[data-open="true"] {
   grid-template-rows: 1fr;
   opacity: 1;
+  visibility: visible;
+  transition: grid-template-rows 200ms ease-out, opacity 150ms ease-out, visibility 0s;
 }
 
 .accordion-panel > .accordion-inner {
@@ -159,6 +164,8 @@
   --color-cc-warning: #f6e05e;
   --color-cc-sidebar-footer: #141413;
   --color-cc-separator: rgba(222,220,209,0.08);
+  --color-cc-info: #63b3ed;
+  --color-cc-merged: #b794f4;
 }
 
 /* Scrollbar styling — desktop only.

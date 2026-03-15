@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback, useRef, type ComponentType } from "react";
+import { useEffect, useState, useCallback, useRef, type ComponentType, type ReactNode } from "react";
 import { useStore } from "../store.js";
 import { api, type UsageLimits, type GitHubPRInfo, type LinearIssue, type LinearComment } from "../api.js";
-import type { TaskItem } from "../types.js";
+import type { TaskItem, SdkSessionInfo } from "../types.js";
 import { McpSection } from "./McpPanel.js";
 import { LinearLogo } from "./LinearLogo.js";
 import { ClaudeConfigBrowser } from "./ClaudeConfigBrowser.js";
@@ -14,11 +14,152 @@ import { SectionErrorBoundary } from "./SectionErrorBoundary.js";
 const EMPTY_TASKS: TaskItem[] = [];
 const COUNTDOWN_REFRESH_MS = 30_000;
 
+/** Shared SDK session Map — rebuilt only when the sdkSessions array reference changes. */
+let _cachedSdkArr: unknown = null;
+let _cachedSdkMap: Map<string, SdkSessionInfo> = new Map();
+
+function getSdkMap(sdkSessions: SdkSessionInfo[]): Map<string, SdkSessionInfo> {
+  if (sdkSessions !== _cachedSdkArr) {
+    _cachedSdkArr = sdkSessions;
+    _cachedSdkMap = new Map(sdkSessions.map((s) => [s.sessionId, s]));
+  }
+  return _cachedSdkMap;
+}
+
+/** O(1) SDK session lookup via a shared Map that is rebuilt once per store change. */
+function useSdkSession(sessionId: string): SdkSessionInfo | undefined {
+  return useStore(
+    useCallback(
+      (s) => getSdkMap(s.sdkSessions).get(sessionId),
+      [sessionId],
+    ),
+  );
+}
+
+// ─── PanelSection — collapsible wrapper for every context section ────────────
+
+const COLLAPSED_KEY = "cc-panel-collapsed";
+
+function getInitialCollapsed(): Set<string> {
+  try {
+    const stored = localStorage.getItem(COLLAPSED_KEY);
+    if (stored) return new Set(JSON.parse(stored));
+  } catch { /* ignore */ }
+  return new Set();
+}
+
+function persistCollapsed(set: Set<string>) {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...set]));
+  } catch { /* ignore */ }
+}
+
+/** Shared collapsible section wrapper. Uses CSS grid-template-rows for smooth animation. */
+function PanelSection({
+  id,
+  label,
+  badge,
+  defaultOpen = true,
+  children,
+}: {
+  id: string;
+  label: string;
+  badge?: ReactNode;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [collapsed, setCollapsed] = useState(() => {
+    const set = getInitialCollapsed();
+    return set.has(id) ? true : !defaultOpen;
+  });
+
+  // Persist collapse state as a side-effect (pure updater, I/O in effect)
+  const isInitialMount = useRef(true);
+  useEffect(() => {
+    if (isInitialMount.current) { isInitialMount.current = false; return; }
+    const set = getInitialCollapsed();
+    if (collapsed) set.add(id); else set.delete(id);
+    persistCollapsed(set);
+  }, [collapsed, id]);
+
+  const toggle = useCallback(() => {
+    setCollapsed((prev) => !prev);
+  }, []);
+
+  return (
+    <div className="border-t border-cc-separator first:border-t-0">
+      <button
+        onClick={toggle}
+        aria-expanded={!collapsed}
+        className="w-full flex items-center gap-1.5 px-4 py-2 text-left hover:bg-cc-hover/50 transition-colors cursor-pointer"
+      >
+        <svg
+          viewBox="0 0 16 16"
+          fill="currentColor"
+          aria-hidden
+          className={`w-2.5 h-2.5 text-cc-muted/60 shrink-0 transition-transform duration-150 ${collapsed ? "" : "rotate-90"}`}
+        >
+          <path d="M6 4l4 4-4 4" />
+        </svg>
+        <span className="text-[11px] font-semibold text-cc-muted uppercase tracking-wider flex-1 truncate">
+          {label}
+        </span>
+        {badge && <span className="shrink-0">{badge}</span>}
+      </button>
+      <div
+        className="accordion-panel"
+        data-open={!collapsed ? "true" : "false"}
+      >
+        <div className="accordion-inner">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Shared progress meter ──────────────────────────────────────────────────
+
 function barColor(pct: number): string {
   if (pct > 80) return "bg-cc-error";
   if (pct > 50) return "bg-cc-warning";
   return "bg-cc-primary";
 }
+
+function barLevel(pct: number): string {
+  if (pct > 80) return "critical";
+  if (pct > 50) return "elevated";
+  return "normal";
+}
+
+function ProgressMeter({ label, pct, detail }: { label: string; pct: number; detail?: string }) {
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-cc-muted uppercase tracking-wider">{label}</span>
+        <span className="text-[11px] text-cc-muted tabular-nums">
+          {Math.round(pct)}%
+          {detail && <span className="ml-1 text-cc-muted">({detail})</span>}
+        </span>
+      </div>
+      <div
+        role="meter"
+        aria-label={`${label} usage — ${barLevel(pct)}`}
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        className="w-full h-1.5 rounded-full bg-cc-hover overflow-hidden"
+      >
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${barColor(pct)}`}
+          style={{ width: `${Math.min(pct, 100)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─── Usage Limits (Claude) ──────────────────────────────────────────────────
 
 function UsageLimitsSection({ sessionId }: { sessionId: string }) {
   const [limits, setLimits] = useState<UsageLimits | null>(null);
@@ -32,7 +173,6 @@ function UsageLimitsSection({ sessionId }: { sessionId: string }) {
     }
   }, [sessionId]);
 
-  // Single interval: fetch every 60s, tick every 30s for countdown refresh
   const fetchTickRef = useRef(0);
   useEffect(() => {
     fetchLimits();
@@ -41,7 +181,6 @@ function UsageLimitsSection({ sessionId }: { sessionId: string }) {
       if (fetchTickRef.current % 2 === 0) {
         fetchLimits();
       } else {
-        // Force re-render to refresh "resets in" countdown display
         setLimits((prev) => (prev ? { ...prev } : null));
       }
     }, COUNTDOWN_REFRESH_MS);
@@ -57,80 +196,41 @@ function UsageLimitsSection({ sessionId }: { sessionId: string }) {
   if (!has5h && !has7d && !hasExtra) return null;
 
   return (
-    <div className="shrink-0 px-4 py-3 space-y-2.5">
-      {/* 5-hour limit */}
+    <div className="shrink-0 px-4 py-2.5 space-y-2">
       {limits.five_hour && (
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-cc-muted uppercase tracking-wider">
-              5h Limit
-            </span>
-            <span className="text-[11px] text-cc-muted tabular-nums">
-              {limits.five_hour.utilization}%
-              {limits.five_hour.resets_at && (
-                <span className="ml-1 text-cc-muted">
-                  ({formatResetTime(limits.five_hour.resets_at)})
-                </span>
-              )}
-            </span>
-          </div>
-          <div className="w-full h-1.5 rounded-full bg-cc-hover overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${barColor(limits.five_hour.utilization)}`}
-              style={{
-                width: `${Math.min(limits.five_hour.utilization, 100)}%`,
-              }}
-            />
-          </div>
-        </div>
+        <ProgressMeter
+          label="5h Limit"
+          pct={limits.five_hour.utilization}
+          detail={limits.five_hour.resets_at ? formatResetTime(limits.five_hour.resets_at) : undefined}
+        />
       )}
-
-      {/* 7-day limit */}
       {limits.seven_day && (
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-cc-muted uppercase tracking-wider">
-              7d Limit
-            </span>
-            <span className="text-[11px] text-cc-muted tabular-nums">
-              {limits.seven_day.utilization}%
-              {limits.seven_day.resets_at && (
-                <span className="ml-1 text-cc-muted">
-                  ({formatResetTime(limits.seven_day.resets_at)})
-                </span>
-              )}
-            </span>
-          </div>
-          <div className="w-full h-1.5 rounded-full bg-cc-hover overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${barColor(limits.seven_day.utilization)}`}
-              style={{
-                width: `${Math.min(limits.seven_day.utilization, 100)}%`,
-              }}
-            />
-          </div>
-        </div>
+        <ProgressMeter
+          label="7d Limit"
+          pct={limits.seven_day.utilization}
+          detail={limits.seven_day.resets_at ? formatResetTime(limits.seven_day.resets_at) : undefined}
+        />
       )}
-
-      {/* Extra usage (only if 5h/7d not available) */}
       {hasExtra && limits.extra_usage && (
         <div className="space-y-1">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] text-cc-muted uppercase tracking-wider">
-              Extra
-            </span>
+            <span className="text-[11px] text-cc-muted uppercase tracking-wider">Extra</span>
             <span className="text-[11px] text-cc-muted tabular-nums">
-              ${limits.extra_usage.used_credits.toFixed(2)} / $
-              {limits.extra_usage.monthly_limit}
+              ${limits.extra_usage.used_credits.toFixed(2)} / ${limits.extra_usage.monthly_limit}
             </span>
           </div>
           {limits.extra_usage.utilization !== null && (
-            <div className="w-full h-1.5 rounded-full bg-cc-hover overflow-hidden">
+            <div
+              role="meter"
+              aria-label={`Extra usage — ${barLevel(limits.extra_usage.utilization)}`}
+              aria-valuenow={Math.round(limits.extra_usage.utilization)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              className="w-full h-1.5 rounded-full bg-cc-hover overflow-hidden"
+            >
               <div
                 className={`h-full rounded-full transition-all duration-500 ${barColor(limits.extra_usage.utilization)}`}
-                style={{
-                  width: `${Math.min(limits.extra_usage.utilization, 100)}%`,
-                }}
+                style={{ width: `${Math.min(limits.extra_usage.utilization, 100)}%` }}
               />
             </div>
           )}
@@ -140,12 +240,11 @@ function UsageLimitsSection({ sessionId }: { sessionId: string }) {
   );
 }
 
-// ─── Codex Rate Limits ───────────────────────────────────────────────────────
+// ─── Codex Rate Limits ──────────────────────────────────────────────────────
 
 function CodexRateLimitsSection({ sessionId }: { sessionId: string }) {
   const rateLimits = useStore((s) => s.sessions.get(sessionId)?.codex_rate_limits);
 
-  // Tick for countdown refresh
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!rateLimits) return;
@@ -158,70 +257,37 @@ function CodexRateLimitsSection({ sessionId }: { sessionId: string }) {
   if (!primary && !secondary) return null;
 
   return (
-    <div className="shrink-0 px-4 py-3 space-y-2.5">
+    <div className="shrink-0 px-4 py-2.5 space-y-2">
       {primary && (
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-cc-muted uppercase tracking-wider">
-              {formatWindowDuration(primary.windowDurationMins)} Limit
-            </span>
-            <span className="text-[11px] text-cc-muted tabular-nums">
-              {Math.round(primary.usedPercent)}%
-              {primary.resetsAt > 0 && (
-                <span className="ml-1">
-                  ({formatCodexResetTime(primary.resetsAt)})
-                </span>
-              )}
-            </span>
-          </div>
-          <div className="w-full h-1.5 rounded-full bg-cc-hover overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${barColor(primary.usedPercent)}`}
-              style={{ width: `${Math.min(primary.usedPercent, 100)}%` }}
-            />
-          </div>
-        </div>
+        <ProgressMeter
+          label={`${formatWindowDuration(primary.windowDurationMins)} Limit`}
+          pct={primary.usedPercent}
+          detail={primary.resetsAt > 0 ? formatCodexResetTime(primary.resetsAt) : undefined}
+        />
       )}
       {secondary && (
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-cc-muted uppercase tracking-wider">
-              {formatWindowDuration(secondary.windowDurationMins)} Limit
-            </span>
-            <span className="text-[11px] text-cc-muted tabular-nums">
-              {Math.round(secondary.usedPercent)}%
-              {secondary.resetsAt > 0 && (
-                <span className="ml-1">
-                  ({formatCodexResetTime(secondary.resetsAt)})
-                </span>
-              )}
-            </span>
-          </div>
-          <div className="w-full h-1.5 rounded-full bg-cc-hover overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${barColor(secondary.usedPercent)}`}
-              style={{ width: `${Math.min(secondary.usedPercent, 100)}%` }}
-            />
-          </div>
-        </div>
+        <ProgressMeter
+          label={`${formatWindowDuration(secondary.windowDurationMins)} Limit`}
+          pct={secondary.usedPercent}
+          detail={secondary.resetsAt > 0 ? formatCodexResetTime(secondary.resetsAt) : undefined}
+        />
       )}
     </div>
   );
 }
 
-// ─── Codex Token Details ─────────────────────────────────────────────────────
+// ─── Codex Token Details ────────────────────────────────────────────────────
 
 function CodexTokenDetailsSection({ sessionId }: { sessionId: string }) {
   const details = useStore((s) => s.sessions.get(sessionId)?.codex_token_details);
-  // Use the server-computed context percentage (input+output / contextWindow, capped 0-100)
   const contextPct = useStore((s) => s.sessions.get(sessionId)?.context_used_percent ?? 0);
 
   if (!details) return null;
 
   return (
-    <div className="shrink-0 px-4 py-3 space-y-2">
+    <div className="shrink-0 px-4 py-2.5 space-y-2">
       <span className="text-[11px] text-cc-muted uppercase tracking-wider">Tokens</span>
-      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
         <div className="flex items-center justify-between">
           <span className="text-[11px] text-cc-muted">Input</span>
           <span className="text-[11px] text-cc-fg tabular-nums font-medium">{formatTokenCount(details.inputTokens)}</span>
@@ -244,30 +310,19 @@ function CodexTokenDetailsSection({ sessionId }: { sessionId: string }) {
         )}
       </div>
       {details.modelContextWindow > 0 && (
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-cc-muted">Context</span>
-            <span className="text-[11px] text-cc-muted tabular-nums">{contextPct}%</span>
-          </div>
-          <div className="w-full h-1.5 rounded-full bg-cc-hover overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${barColor(contextPct)}`}
-              style={{ width: `${Math.min(contextPct, 100)}%` }}
-            />
-          </div>
-        </div>
+        <ProgressMeter label="Context" pct={contextPct} />
       )}
     </div>
   );
 }
 
-// ─── GitHub PR Status ────────────────────────────────────────────────────────
+// ─── GitHub PR Status ───────────────────────────────────────────────────────
 
 function prStatePill(state: GitHubPRInfo["state"], isDraft: boolean) {
   if (isDraft) return { label: "Draft", cls: "text-cc-muted bg-cc-hover" };
   switch (state) {
     case "OPEN": return { label: "Open", cls: "text-cc-success bg-cc-success/10" };
-    case "MERGED": return { label: "Merged", cls: "text-purple-400 bg-purple-400/10" };
+    case "MERGED": return { label: "Merged", cls: "text-cc-merged bg-cc-merged/10" };
     case "CLOSED": return { label: "Closed", cls: "text-cc-error bg-cc-error/10" };
   }
 }
@@ -277,8 +332,8 @@ export function GitHubPRDisplay({ pr }: { pr: GitHubPRInfo }) {
   const { checksSummary: cs, reviewThreads: rt } = pr;
 
   return (
-    <div className="shrink-0 px-4 py-3 space-y-2">
-      {/* Row 1: PR number + state pill */}
+    <div className="shrink-0 px-4 py-2.5 space-y-1.5">
+      {/* PR number + state pill */}
       <div className="flex items-center gap-1.5">
         <a
           href={pr.url}
@@ -293,14 +348,14 @@ export function GitHubPRDisplay({ pr }: { pr: GitHubPRInfo }) {
         </span>
       </div>
 
-      {/* Row 2: Title */}
+      {/* Title */}
       <p className="text-[11px] text-cc-muted truncate" title={pr.title}>
         {pr.title}
       </p>
 
-      {/* Row 3: CI Checks */}
+      {/* CI Checks */}
       {cs.total > 0 && (
-        <div className="flex items-center gap-2 text-[11px]">
+        <div className="flex items-center gap-2 text-[11px]" aria-label={`CI checks: ${cs.success} passed, ${cs.failure} failing, ${cs.pending} pending`}>
           {cs.failure > 0 ? (
             <>
               <span className="flex items-center gap-1 text-cc-error">
@@ -340,7 +395,7 @@ export function GitHubPRDisplay({ pr }: { pr: GitHubPRInfo }) {
         </div>
       )}
 
-      {/* Row 4: Review + unresolved comments */}
+      {/* Review + unresolved comments */}
       <div className="flex items-center gap-2 text-[11px]">
         {pr.reviewDecision === "APPROVED" && (
           <span className="flex items-center gap-1 text-cc-success">
@@ -376,10 +431,10 @@ export function GitHubPRDisplay({ pr }: { pr: GitHubPRInfo }) {
         )}
       </div>
 
-      {/* Row 5: Diff stats */}
+      {/* Diff stats — using design tokens */}
       <div className="flex items-center gap-1.5 text-[10px] text-cc-muted">
-        <span className="text-green-500">+{pr.additions}</span>
-        <span className="text-red-400">-{pr.deletions}</span>
+        <span className="text-cc-success">+{pr.additions}</span>
+        <span className="text-cc-error">-{pr.deletions}</span>
         <span>&middot; {pr.changedFiles} files</span>
       </div>
     </div>
@@ -388,13 +443,12 @@ export function GitHubPRDisplay({ pr }: { pr: GitHubPRInfo }) {
 
 function GitHubPRSection({ sessionId }: { sessionId: string }) {
   const session = useStore((s) => s.sessions.get(sessionId));
-  const sdk = useStore((s) => s.sdkSessions.find((x) => x.sessionId === sessionId));
+  const sdk = useSdkSession(sessionId);
   const prStatus = useStore((s) => s.prStatus.get(sessionId));
 
   const cwd = session?.cwd || sdk?.cwd;
   const branch = session?.git_branch || sdk?.gitBranch;
 
-  // One-time REST fallback on mount if no pushed data yet
   useEffect(() => {
     if (prStatus || !cwd || !branch) return;
     api.getPRStatus(cwd, branch).then((data) => {
@@ -407,7 +461,7 @@ function GitHubPRSection({ sessionId }: { sessionId: string }) {
   return <GitHubPRDisplay pr={prStatus.pr} />;
 }
 
-// ─── Linear Issue Section ────────────────────────────────────────────────────
+// ─── Linear Issue Section ───────────────────────────────────────────────────
 
 const LINEAR_POLL_INTERVAL = 60_000;
 
@@ -418,7 +472,7 @@ function linearStatePill(stateType: string, stateName: string) {
     case "cancelled":
       return { label: stateName || "Cancelled", cls: "text-cc-muted bg-cc-hover" };
     case "started":
-      return { label: stateName || "In Progress", cls: "text-blue-400 bg-blue-400/10" };
+      return { label: stateName || "In Progress", cls: "text-cc-info bg-cc-info/10" };
     case "unstarted":
       return { label: stateName || "Todo", cls: "text-cc-muted bg-cc-hover" };
     case "backlog":
@@ -442,7 +496,6 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
   const [searching, setSearching] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Load stored linked issue from server on mount
   useEffect(() => {
     api.getLinkedLinearIssue(sessionId).then((data) => {
       if (data.issue) {
@@ -451,7 +504,6 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
     }).catch(() => {});
   }, [sessionId]);
 
-  // Fetch fresh data from Linear periodically
   const fetchIssueDetails = useCallback(async () => {
     if (!linkedIssue) return;
     try {
@@ -477,7 +529,6 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
     return () => clearInterval(id);
   }, [fetchIssueDetails, linkedIssue]);
 
-  // Search debounce
   useEffect(() => {
     if (!showSearch) return;
     const q = searchQuery.trim();
@@ -496,7 +547,6 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
     return () => { active = false; clearTimeout(timer); };
   }, [searchQuery, showSearch]);
 
-  // Focus search input when search opens
   useEffect(() => {
     if (showSearch) {
       setTimeout(() => searchInputRef.current?.focus(), 50);
@@ -545,7 +595,7 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
   // No linked issue — show "Link" button or search
   if (!linkedIssue) {
     return (
-      <div className="shrink-0 px-4 py-3">
+      <div className="shrink-0 px-4 py-2.5">
         {!showSearch ? (
           <button
             onClick={() => setShowSearch(true)}
@@ -569,7 +619,8 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
               />
               <button
                 onClick={() => { setShowSearch(false); setSearchQuery(""); setSearchResults([]); }}
-                className="text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                aria-label="Close search"
+                className="w-7 h-7 flex items-center justify-center rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
               >
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
                   <path d="M4 4l8 8M12 4l-8 8" />
@@ -607,13 +658,12 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
     );
   }
 
-  // Linked issue display
   const pill = linearStatePill(linkedIssue.stateType, linkedIssue.stateName);
 
   return (
     <div className="shrink-0">
       {/* Header: identifier + state pill + unlink */}
-      <div className="px-4 py-3 space-y-2">
+      <div className="px-4 py-2.5 space-y-1.5">
         <div className="flex items-center gap-1.5">
           <LinearLogo className="w-3.5 h-3.5 text-cc-muted shrink-0" />
           <a
@@ -629,8 +679,9 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
           </span>
           <button
             onClick={handleUnlink}
-            className="ml-auto flex items-center justify-center w-5 h-5 rounded text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+            className="ml-auto flex items-center justify-center w-7 h-7 rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
             title="Unlink issue"
+            aria-label="Unlink issue"
           >
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3">
               <path d="M4 4l8 8M12 4l-8 8" />
@@ -739,7 +790,8 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
         <button
           onClick={handleSendComment}
           disabled={!commentText.trim() || sendingComment}
-          className="flex items-center justify-center w-6 h-6 rounded text-cc-primary disabled:text-cc-muted cursor-pointer disabled:cursor-not-allowed transition-colors"
+          aria-label="Send comment"
+          className="flex items-center justify-center w-7 h-7 rounded-md text-cc-primary disabled:text-cc-muted cursor-pointer disabled:cursor-not-allowed transition-colors"
           title="Send comment"
         >
           <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
@@ -751,12 +803,12 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
   );
 }
 
-// ─── Extracted Section Components ─────────────────────────────────────────────
+// ─── Extracted Section Components ───────────────────────────────────────────
 
 /** Wrapper that renders the correct usage/rate-limit component based on backend type */
 function UsageLimitsRenderer({ sessionId }: { sessionId: string }) {
   const session = useStore((s) => s.sessions.get(sessionId));
-  const sdk = useStore((s) => s.sdkSessions.find((x) => x.sessionId === sessionId));
+  const sdk = useSdkSession(sessionId);
   const isCodex = (session?.backend_type || sdk?.backendType) === "codex";
 
   if (isCodex) {
@@ -770,10 +822,10 @@ function UsageLimitsRenderer({ sessionId }: { sessionId: string }) {
   return <UsageLimitsSection sessionId={sessionId} />;
 }
 
-/** Git branch info — extracted from inline JSX in TaskPanel */
+/** Git branch info */
 function GitBranchSection({ sessionId }: { sessionId: string }) {
   const session = useStore((s) => s.sessions.get(sessionId));
-  const sdk = useStore((s) => s.sdkSessions.find((x) => x.sessionId === sessionId));
+  const sdk = useSdkSession(sessionId);
 
   const branch = session?.git_branch || sdk?.gitBranch;
   const branchAhead = session?.git_ahead || 0;
@@ -785,30 +837,43 @@ function GitBranchSection({ sessionId }: { sessionId: string }) {
   if (!branch) return null;
 
   return (
-    <div className="shrink-0 px-4 py-3 space-y-2">
+    <div className="shrink-0 px-4 py-2.5 space-y-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] text-cc-muted uppercase tracking-wider">
-          Branch
-        </span>
+        <p className="text-xs font-mono-code text-cc-fg truncate" title={branch}>
+          {branch}
+        </p>
         {session?.is_containerized && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">container</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-cc-info/10 text-cc-info shrink-0 ml-2">container</span>
         )}
       </div>
-      <p className="text-xs font-mono-code text-cc-fg truncate" title={branch}>
-        {branch}
-      </p>
       {(branchAhead > 0 || branchBehind > 0 || lineAdds > 0 || lineRemoves > 0) && (
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 text-[11px]">
-            {branchAhead > 0 && <span className="text-green-500">{branchAhead}&#8593;</span>}
-            {branchBehind > 0 && <span className="text-cc-warning">{branchBehind}&#8595;</span>}
-            {lineAdds > 0 && <span className="text-green-500">+{lineAdds}</span>}
-            {lineRemoves > 0 && <span className="text-red-400">-{lineRemoves}</span>}
+            {branchAhead > 0 && (
+              <span className="text-cc-success">
+                {branchAhead}&#8593;<span className="sr-only"> commits ahead</span>
+              </span>
+            )}
+            {branchBehind > 0 && (
+              <span className="text-cc-warning">
+                {branchBehind}&#8595;<span className="sr-only"> commits behind</span>
+              </span>
+            )}
+            {lineAdds > 0 && (
+              <span className="text-cc-success">
+                +{lineAdds}<span className="sr-only"> lines added</span>
+              </span>
+            )}
+            {lineRemoves > 0 && (
+              <span className="text-cc-error">
+                -{lineRemoves}<span className="sr-only"> lines removed</span>
+              </span>
+            )}
           </div>
           {branchBehind > 0 && branchCwd && (
             <button
               type="button"
-              className="text-[11px] font-medium text-cc-warning hover:text-amber-400 transition-colors cursor-pointer"
+              className="text-[11px] font-medium text-cc-warning hover:text-cc-warning/80 transition-colors cursor-pointer"
               onClick={() => {
                 api.gitPull(branchCwd).then((r) => {
                   useStore.getState().updateSession(sessionId, {
@@ -833,42 +898,27 @@ function GitBranchSection({ sessionId }: { sessionId: string }) {
 function TasksSection({ sessionId }: { sessionId: string }) {
   const tasks = useStore((s) => s.sessionTasks.get(sessionId) || EMPTY_TASKS);
   const session = useStore((s) => s.sessions.get(sessionId));
-  const sdk = useStore((s) => s.sdkSessions.find((x) => x.sessionId === sessionId));
+  const sdk = useSdkSession(sessionId);
   const isCodex = (session?.backend_type || sdk?.backendType) === "codex";
 
   if (!session || isCodex) return null;
 
-  const completedCount = tasks.filter((t) => t.status === "completed").length;
-
   return (
-    <>
-      {/* Task section header */}
-      <div className="px-4 py-2.5 flex items-center justify-between">
-        <span className="text-[13px] font-semibold text-cc-fg">Tasks</span>
-        {tasks.length > 0 && (
-          <span className="text-[11px] text-cc-muted tabular-nums">
-            {completedCount}/{tasks.length}
-          </span>
-        )}
-      </div>
-
-      {/* Task list */}
-      <div className="px-3 py-2">
-        {tasks.length === 0 ? (
-          <p className="text-xs text-cc-muted text-center py-8">No tasks yet</p>
-        ) : (
-          <div className="space-y-0.5">
-            {tasks.map((task) => (
-              <TaskRow key={task.id} task={task} />
-            ))}
-          </div>
-        )}
-      </div>
-    </>
+    <div className="px-3 py-2">
+      {tasks.length === 0 ? (
+        <p className="text-[11px] text-cc-muted text-center py-6">Tasks will appear here as the agent works</p>
+      ) : (
+        <div className="space-y-0.5">
+          {tasks.map((task) => (
+            <TaskRow key={task.id} task={task} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
-// ─── Section Component Map ───────────────────────────────────────────────────
+// ─── Section Component Map ──────────────────────────────────────────────────
 
 const SECTION_COMPONENTS: Record<string, ComponentType<{ sessionId: string }>> = {
   "usage-limits": UsageLimitsRenderer,
@@ -879,7 +929,24 @@ const SECTION_COMPONENTS: Record<string, ComponentType<{ sessionId: string }>> =
   "tasks": TasksSection,
 };
 
-// ─── Panel Config View ───────────────────────────────────────────────────────
+// ─── Section Badge Helpers ──────────────────────────────────────────────────
+
+/** Returns a badge ReactNode for a section, if applicable */
+function useSectionBadge(sectionId: string, sessionId: string): ReactNode {
+  const tasks = useStore((s) => s.sessionTasks.get(sessionId) || EMPTY_TASKS);
+
+  if (sectionId === "tasks" && tasks.length > 0) {
+    const completedCount = tasks.filter((t) => t.status === "completed").length;
+    return (
+      <span className="text-[10px] text-cc-muted tabular-nums">
+        {completedCount}/{tasks.length}
+      </span>
+    );
+  }
+  return null;
+}
+
+// ─── Panel Config View ──────────────────────────────────────────────────────
 
 function TaskPanelConfigView({ isCodex }: { isCodex: boolean }) {
   const config = useStore((s) => s.taskPanelConfig);
@@ -891,7 +958,6 @@ function TaskPanelConfigView({ isCodex }: { isCodex: boolean }) {
 
   const backendFilter = isCodex ? "codex" : "claude";
 
-  // Only show sections applicable to the current backend
   const applicableOrder = config.order.filter((id) => {
     const def = SECTION_DEFINITIONS.find((d) => d.id === id);
     if (!def) return false;
@@ -975,7 +1041,7 @@ function TaskPanelConfigView({ isCodex }: { isCodex: boolean }) {
       </div>
 
       {/* Footer buttons */}
-      <div className="shrink-0 px-3 py-2.5 flex items-center justify-between">
+      <div className="shrink-0 px-3 py-2.5 flex items-center justify-between border-t border-cc-separator">
         <button
           onClick={() => resetTaskPanelConfig()}
           className="text-[11px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
@@ -995,13 +1061,34 @@ function TaskPanelConfigView({ isCodex }: { isCodex: boolean }) {
   );
 }
 
-// ─── Task Panel ──────────────────────────────────────────────────────────────
+// ─── Section content wrapper with badge extraction ──────────────────────────
+
+function SectionWithBadge({
+  sectionId,
+  sessionId,
+  children,
+}: {
+  sectionId: string;
+  sessionId: string;
+  children: ReactNode;
+}) {
+  const label = SECTION_DEFINITIONS.find((d) => d.id === sectionId)?.label ?? sectionId;
+  const badge = useSectionBadge(sectionId, sessionId);
+
+  return (
+    <PanelSection id={sectionId} label={label} badge={badge}>
+      {children}
+    </PanelSection>
+  );
+}
+
+// ─── Task Panel ─────────────────────────────────────────────────────────────
 
 export { CodexRateLimitsSection, CodexTokenDetailsSection };
 
 export function TaskPanel({ sessionId }: { sessionId: string }) {
   const session = useStore((s) => s.sessions.get(sessionId));
-  const sdk = useStore((s) => s.sdkSessions.find((x) => x.sessionId === sessionId));
+  const sdk = useSdkSession(sessionId);
   const taskPanelOpen = useStore((s) => s.taskPanelOpen);
   const setTaskPanelOpen = useStore((s) => s.setTaskPanelOpen);
   const configMode = useStore((s) => s.taskPanelConfigMode);
@@ -1012,7 +1099,6 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
   const isCodex = (session?.backend_type || sdk?.backendType) === "codex";
   const backendFilter = isCodex ? "codex" : "claude";
 
-  // Filter and order sections based on config + backend compatibility
   const applicableSections = config.order.filter((sectionId) => {
     const def = SECTION_DEFINITIONS.find((d) => d.id === sectionId);
     if (!def) return false;
@@ -1021,12 +1107,15 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
   });
 
   return (
-    <aside className="w-full lg:w-[320px] h-full flex flex-col overflow-hidden bg-cc-card">
+    <aside
+      aria-label="Session context"
+      className="w-full lg:w-[320px] h-full flex flex-col overflow-hidden bg-cc-card"
+    >
       {/* Header */}
-      <div className="shrink-0 h-11 flex items-center justify-between px-4 bg-cc-card">
-        <span className="text-sm font-semibold text-cc-fg tracking-tight">
+      <div className="shrink-0 h-11 flex items-center justify-between px-4 bg-cc-card border-b border-cc-separator">
+        <h2 className="text-sm font-semibold text-cc-fg tracking-tight">
           {configMode ? "Panel Settings" : "Context"}
-        </span>
+        </h2>
         <button
           onClick={() => {
             if (configMode) {
@@ -1061,17 +1150,18 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
               .map((sectionId) => {
                 const Component = SECTION_COMPONENTS[sectionId];
                 if (!Component) return null;
-                const label = SECTION_DEFINITIONS.find((d) => d.id === sectionId)?.label;
                 return (
-                  <SectionErrorBoundary key={sectionId} label={label}>
-                    <Component sessionId={sessionId} />
-                  </SectionErrorBoundary>
+                  <SectionWithBadge key={sectionId} sectionId={sectionId} sessionId={sessionId}>
+                    <SectionErrorBoundary label={SECTION_DEFINITIONS.find((d) => d.id === sectionId)?.label}>
+                      <Component sessionId={sessionId} />
+                    </SectionErrorBoundary>
+                  </SectionWithBadge>
                 );
               })}
           </div>
 
           {/* Settings button at bottom */}
-          <div className="shrink-0 px-4 py-2 pb-safe">
+          <div className="shrink-0 px-4 py-2 pb-safe border-t border-cc-separator">
             <button
               onClick={() => useStore.getState().setTaskPanelConfigMode(true)}
               className="flex items-center gap-1.5 text-[11px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
@@ -1106,6 +1196,7 @@ function TaskRow({ task }: { task: TaskItem }) {
               className="w-4 h-4 text-cc-primary animate-spin"
               viewBox="0 0 16 16"
               fill="none"
+              aria-hidden
             >
               <circle
                 cx="8"
@@ -1123,6 +1214,7 @@ function TaskRow({ task }: { task: TaskItem }) {
               viewBox="0 0 16 16"
               fill="currentColor"
               className="w-4 h-4 text-cc-success"
+              aria-hidden
             >
               <path
                 fillRule="evenodd"
@@ -1135,6 +1227,7 @@ function TaskRow({ task }: { task: TaskItem }) {
               viewBox="0 0 16 16"
               fill="none"
               className="w-4 h-4 text-cc-muted"
+              aria-hidden
             >
               <circle
                 cx="8"
@@ -1145,6 +1238,9 @@ function TaskRow({ task }: { task: TaskItem }) {
               />
             </svg>
           )}
+          <span className="sr-only">
+            {isInProgress ? "In progress" : isCompleted ? "Completed" : "Pending"}
+          </span>
         </span>
 
         {/* Subject — allow wrapping */}
@@ -1167,7 +1263,7 @@ function TaskRow({ task }: { task: TaskItem }) {
       {/* Blocked by */}
       {task.blockedBy && task.blockedBy.length > 0 && (
         <p className="mt-1 ml-6 text-[11px] text-cc-muted flex items-center gap-1">
-          <svg viewBox="0 0 16 16" fill="none" className="w-3 h-3 shrink-0">
+          <svg viewBox="0 0 16 16" fill="none" className="w-3 h-3 shrink-0" aria-hidden>
             <circle
               cx="8"
               cy="8"
