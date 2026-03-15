@@ -23,6 +23,7 @@ import { COMPANION_HOME } from "./paths.js";
 import { TerminalManager } from "./terminal-manager.js";
 import { PRPoller } from "./pr-poller.js";
 import { RecorderManager } from "./recorder.js";
+import { initLogFile, closeLogFile } from "./logger.js";
 import { CronScheduler } from "./cron-scheduler.js";
 import { AgentExecutor } from "./agent-executor.js";
 import { SessionOrchestrator } from "./session-orchestrator.js";
@@ -95,6 +96,12 @@ orchestrator.initialize();
 console.log(`[server] Session persistence: ${sessionStore.directory}`);
 if (recorder.isGloballyEnabled()) {
   console.log(`[server] Recording enabled (dir: ${recorder.getRecordingsDir()}, max: ${recorder.getMaxLines()} lines)`);
+}
+
+// ── Log file persistence — writes all log output to ~/.companion/logs/ ───────
+const logFileWriter = initLogFile();
+if (logFileWriter) {
+  console.log(`[server] Log file enabled (dir: ${logFileWriter.getLogsDir()}, max: ${logFileWriter.getMaxLines()} lines, file: ${logFileWriter.filePath})`);
 }
 
 const app = new Hono();
@@ -381,6 +388,7 @@ function gracefulShutdown() {
   console.log("[server] Persisting container state before shutdown...");
   containerManager.persistState(CONTAINER_STATE_PATH);
   cleanupTailscaleFunnel(port);
+  closeLogFile();
   process.exit(0);
 }
 process.on("SIGTERM", gracefulShutdown);
