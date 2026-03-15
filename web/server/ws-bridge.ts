@@ -49,6 +49,8 @@ import { validatePermission } from "./ai-validator.js";
 import { getEffectiveAiValidation } from "./ai-validation-settings.js";
 import { companionBus } from "./event-bus.js";
 import { SessionStateMachine } from "./session-state-machine.js";
+import { metricsCollector } from "./metrics-collector.js";
+import { log } from "./logger.js";
 
 // ─── Bridge ───────────────────────────────────────────────────────────────────
 
@@ -287,6 +289,15 @@ export class WsBridge {
     }));
   }
 
+  /** Return current phase for each session (for metrics gauges). */
+  getSessionPhases(): Map<string, import("./session-state-machine.js").SessionPhase> {
+    const phases = new Map<string, import("./session-state-machine.js").SessionPhase>();
+    for (const [id, session] of this.sessions) {
+      phases.set(id, session.stateMachine.phase);
+    }
+    return phases;
+  }
+
   getCodexRateLimits(sessionId: string) {
     const session = this.sessions.get(sessionId);
     return session?.backendAdapter?.getRateLimits?.() ?? null;
@@ -378,6 +389,7 @@ export class WsBridge {
     adapter.onBrowserMessage((msg) => {
       // Track activity for idle detection
       session.lastCliActivityTs = Date.now();
+      metricsCollector.recordMessageProcessed(msg.type);
 
       // -- session_init: merge into session state, broadcast, persist -----
       if (msg.type === "session_init") {
@@ -482,6 +494,7 @@ export class WsBridge {
       // -- permission_request: AI validation, add to pending ---------------
       if (msg.type === "permission_request") {
         const perm = msg.request;
+        metricsCollector.recordPermissionRequested(perm.request_id, session.id);
 
         // AI Validation Mode: evaluate the tool call before showing to user
         const aiSettings = getEffectiveAiValidation(session.state);
@@ -622,6 +635,7 @@ export class WsBridge {
 
     // Auto-approve safe tools
     if (result.verdict === "safe" && aiSettings.autoApprove) {
+      metricsCollector.recordPermissionResolved(perm.request_id, "allow", true);
       this.broadcastToBrowsers(session, {
         type: "permission_auto_resolved",
         request: perm,
@@ -639,6 +653,7 @@ export class WsBridge {
 
     // Auto-deny dangerous tools
     if (result.verdict === "dangerous" && aiSettings.autoDeny) {
+      metricsCollector.recordPermissionResolved(perm.request_id, "deny", true);
       this.broadcastToBrowsers(session, {
         type: "permission_auto_resolved",
         request: perm,
@@ -674,6 +689,7 @@ export class WsBridge {
   // ── CLI WebSocket handlers ──────────────────────────────────────────────
 
   handleCLIOpen(ws: ServerWebSocket<SocketData>, sessionId: string) {
+    metricsCollector.recordWsConnection("cli", "open");
     const session = this.getOrCreateSession(sessionId);
 
     // Create or retrieve ClaudeAdapter for this session
@@ -700,9 +716,9 @@ export class WsBridge {
 
     // Cancel any pending disconnect debounce timer — CLI reconnected in time
     if (this.cancelDisconnectTimer(sessionId)) {
-      console.log(`[ws-bridge] CLI reconnected for ${sessionId} (disconnect debounce cancelled)`);
+      log.info("ws-bridge", "CLI reconnected (debounce cancelled)", { sessionId });
     } else {
-      console.log(`[ws-bridge] CLI connected for session ${sessionId}`);
+      log.info("ws-bridge", "CLI connected", { sessionId });
     }
 
     // Attach the raw WebSocket to the adapter (flushes pending NDJSON)
@@ -749,6 +765,7 @@ export class WsBridge {
   }
 
   handleCLIClose(ws: ServerWebSocket<SocketData>) {
+    metricsCollector.recordWsConnection("cli", "close");
     const sessionId = (ws.data as CLISocketData).sessionId;
     const session = this.sessions.get(sessionId);
     if (!session) return;
@@ -770,7 +787,7 @@ export class WsBridge {
       this.disconnectTimers.delete(sessionId);
       // Check if CLI reconnected during grace period
       if (session.backendAdapter?.isConnected()) return;
-      console.log(`[ws-bridge] CLI disconnect confirmed for ${sessionId}`);
+      log.warn("ws-bridge", "CLI disconnect confirmed", { sessionId });
       session.stateMachine.transition("terminated", "disconnect_confirmed");
       this.broadcastToBrowsers(session, { type: "cli_disconnected" });
       for (const [reqId] of session.pendingPermissions) {
@@ -783,12 +800,13 @@ export class WsBridge {
   // ── Browser WebSocket handlers ──────────────────────────────────────────
 
   handleBrowserOpen(ws: ServerWebSocket<SocketData>, sessionId: string) {
+    metricsCollector.recordWsConnection("browser", "open");
     const session = this.getOrCreateSession(sessionId);
     const browserData = ws.data as BrowserSocketData;
     browserData.subscribed = false;
     browserData.lastAckSeq = 0;
     session.browserSockets.add(ws);
-    console.log(`[ws-bridge] Browser connected for session ${sessionId} (${session.browserSockets.size} browsers)`);
+    log.info("ws-bridge", "Browser connected", { sessionId, browsers: session.browserSockets.size });
 
     // Cancel idle kill watchdog — a browser is back
     this.stopIdleKillWatchdog(sessionId);
@@ -890,12 +908,13 @@ export class WsBridge {
   }
 
   handleBrowserClose(ws: ServerWebSocket<SocketData>) {
+    metricsCollector.recordWsConnection("browser", "close");
     const sessionId = (ws.data as BrowserSocketData).sessionId;
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
     session.browserSockets.delete(ws);
-    console.log(`[ws-bridge] Browser disconnected for session ${sessionId} (${session.browserSockets.size} browsers)`);
+    log.info("ws-bridge", "Browser disconnected", { sessionId, browsers: session.browserSockets.size });
 
     // Start idle kill watchdog when last browser disconnects
     if (session.browserSockets.size === 0 && !this.idleKillTimers.has(sessionId)) {
@@ -1016,6 +1035,7 @@ export class WsBridge {
 
     // -- user_message: store in history before delegating to adapter ------
     if (msg.type === "user_message") {
+      metricsCollector.recordTurnStarted(session.id);
       const ts = Date.now();
       this.appendHistory(session, {
         type: "user_message",
@@ -1029,6 +1049,7 @@ export class WsBridge {
 
     // -- permission_response: populate updatedInput fallback from pending, then remove -------
     if (msg.type === "permission_response") {
+      metricsCollector.recordPermissionResolved(msg.request_id, msg.behavior as "allow" | "deny", false);
       const pending = session.pendingPermissions.get(msg.request_id);
       // When the browser sends allow without updated_input, use the original tool input
       // as a fallback. This matches the pre-adapter behavior.

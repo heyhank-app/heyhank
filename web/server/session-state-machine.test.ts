@@ -148,10 +148,11 @@ describe("SessionStateMachine", () => {
       const result = machine.transition(to, `blocked-${from}->${to}`);
       expect(result).toBe(false);
       expect(machine.phase).toBe(from);
-      // A warning should be logged for blocked transitions
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining(`${from} -> ${to}`),
-      );
+      // Structured logger outputs the transition details; verify they appear
+      expect(warnSpy).toHaveBeenCalled();
+      const warnOutput = warnSpy.mock.calls[0][0] as string;
+      expect(warnOutput).toContain(from);
+      expect(warnOutput).toContain(to);
       warnSpy.mockRestore();
     }
 

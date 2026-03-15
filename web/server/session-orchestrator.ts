@@ -21,6 +21,8 @@ import { discoverCommandsAndSkills } from "./commands-discovery.js";
 import { getSettings } from "./settings-manager.js";
 import { generateSessionTitle } from "./auto-namer.js";
 import { companionBus } from "./event-bus.js";
+import { metricsCollector } from "./metrics-collector.js";
+import { log } from "./logger.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -188,9 +190,7 @@ export class SessionOrchestrator {
     companionBus.on("session:idle-kill", async ({ sessionId }) => {
       const info = this.launcher.getSession(sessionId);
       if (!info || info.archived) return;
-      console.log(
-        `[orchestrator] Idle-killing CLI for session ${sessionId} (no browsers, no activity)`,
-      );
+      log.info("orchestrator", "Idle-killing session", { sessionId, reason: "no browsers, no activity" });
       await this.killSession(sessionId);
     });
 
@@ -569,10 +569,13 @@ export class SessionOrchestrator {
 
       if (onProgress) await onProgress("launching_cli", "Session started", "done");
 
+      metricsCollector.recordSessionCreated(backend);
+      metricsCollector.recordSessionSpawned(session.sessionId);
+
       return { ok: true, session };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.error("[orchestrator] Failed to create session:", msg);
+      log.error("orchestrator", "Failed to create session", { error: msg });
       return { ok: false, error: msg, status: 500 };
     }
   }
@@ -725,7 +728,8 @@ export class SessionOrchestrator {
 
     const count = this.autoRelaunchCounts.get(sessionId) ?? 0;
     if (count >= MAX_AUTO_RELAUNCHES) {
-      console.warn(`[orchestrator] Auto-relaunch limit (${MAX_AUTO_RELAUNCHES}) reached for session ${sessionId}, giving up`);
+      metricsCollector.recordRelaunchExhausted();
+      log.warn("orchestrator", "Auto-relaunch limit reached", { sessionId, maxAttempts: MAX_AUTO_RELAUNCHES });
       this.wsBridge.broadcastToSession(sessionId, {
         type: "error",
         message: "Session keeps crashing. Please relaunch manually.",
@@ -736,7 +740,8 @@ export class SessionOrchestrator {
 
     if (freshInfo && freshInfo.state !== "starting") {
       this.autoRelaunchCounts.set(sessionId, count + 1);
-      console.log(`[orchestrator] Auto-relaunching CLI for session ${sessionId} (attempt ${count + 1}/${MAX_AUTO_RELAUNCHES})`);
+      metricsCollector.recordRelaunchAttempted();
+      log.info("orchestrator", "Auto-relaunching CLI", { sessionId, attempt: count + 1, maxAttempts: MAX_AUTO_RELAUNCHES });
       const session = this.wsBridge.getSession(sessionId);
       if (session?.stateMachine) {
         session.stateMachine.transition("starting", "relaunch_initiated");
@@ -746,6 +751,7 @@ export class SessionOrchestrator {
         if (!result.ok && result.error) {
           this.wsBridge.broadcastToSession(sessionId, { type: "error", message: result.error });
         } else if (result.ok) {
+          metricsCollector.recordRelaunchSucceeded();
           this.autoRelaunchCounts.delete(sessionId);
         }
         // ok=false without error: keep count to preserve the retry budget

@@ -24,6 +24,7 @@ import { registerEnvRoutes } from "./routes/env-routes.js";
 import { registerSandboxRoutes } from "./routes/sandbox-routes.js";
 import { registerCronRoutes } from "./routes/cron-routes.js";
 import { registerAgentRoutes } from "./routes/agent-routes.js";
+import { registerMetricsRoutes } from "./routes/metrics-routes.js";
 import { registerLinearAgentWebhookRoute, registerLinearAgentProtectedRoutes } from "./routes/linear-agent-routes.js";
 import { registerPromptRoutes } from "./routes/prompt-routes.js";
 import { registerSettingsRoutes } from "./routes/settings-routes.js";
@@ -1263,6 +1264,7 @@ export function createRoutes(
   registerSkillRoutes(api);
   registerCronRoutes(api, cronScheduler);
   registerAgentRoutes(api, agentExecutor);
+  registerMetricsRoutes(api, { gaugeProvider: wsBridge });
 
   return api;
 }
