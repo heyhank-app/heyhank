@@ -13,6 +13,29 @@ const streamingDraftMessageIdBySession = new Map<string, string>();
 /** Track processed tool_use IDs to prevent duplicate task creation */
 const processedToolUseIds = new Map<string, Set<string>>();
 
+function isSocketUsable(ws: WebSocket | undefined): boolean {
+  return !!ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
+}
+
+function shouldReconnectSession(sessionId: string): boolean {
+  const store = useStore.getState();
+  const sdkSession = store.sdkSessions.find((s) => s.sessionId === sessionId);
+  if (sdkSession) return !sdkSession.archived;
+  // Fallback for freshly-created sessions that may not be in sdkSessions yet.
+  return store.currentSessionId === sessionId || store.sessions.has(sessionId);
+}
+
+function getReconnectCandidates(): string[] {
+  const store = useStore.getState();
+  const ids = new Set<string>();
+  for (const s of store.sdkSessions) {
+    if (!s.archived) ids.add(s.sessionId);
+  }
+  if (store.currentSessionId) ids.add(store.currentSessionId);
+  for (const id of store.sessions.keys()) ids.add(id);
+  return Array.from(ids);
+}
+
 // ── Page visibility handling ─────────────────────────────────────────────────
 // Mobile browsers (Android Chrome, iOS Safari) aggressively kill WebSocket
 // connections when the page is backgrounded. Without this handler, the frontend
@@ -34,11 +57,16 @@ if (typeof document !== "undefined") {
       }
     } else {
       pageHidden = false;
-      // Page is visible again — reconnect all active sessions
-      const store = useStore.getState();
-      for (const s of store.sdkSessions) {
-        if (!s.archived && !sockets.has(s.sessionId)) {
-          connectSession(s.sessionId);
+      // Page is visible again — reconnect all known active sessions.
+      for (const sessionId of getReconnectCandidates()) {
+        if (!shouldReconnectSession(sessionId)) continue;
+        const ws = sockets.get(sessionId);
+        if (!isSocketUsable(ws)) {
+          if (ws) {
+            try { ws.close(); } catch {}
+            sockets.delete(sessionId);
+          }
+          connectSession(sessionId);
         }
       }
     }
@@ -964,7 +992,12 @@ function handleParsedMessage(
 }
 
 export function connectSession(sessionId: string) {
-  if (sockets.has(sessionId)) return;
+  const existing = sockets.get(sessionId);
+  if (isSocketUsable(existing)) return;
+  if (existing) {
+    try { existing.close(); } catch {}
+    sockets.delete(sessionId);
+  }
 
   const store = useStore.getState();
   store.setConnectionStatus(sessionId, "connecting");
@@ -1008,12 +1041,7 @@ function scheduleReconnect(sessionId: string) {
     reconnectTimers.delete(sessionId);
     // Re-check visibility — page may have been hidden during the delay
     if (pageHidden) return;
-    const store = useStore.getState();
-    // Reconnect any active (non-archived) session
-    const sdkSession = store.sdkSessions.find((s) => s.sessionId === sessionId);
-    if (sdkSession && !sdkSession.archived) {
-      connectSession(sessionId);
-    }
+    if (shouldReconnectSession(sessionId)) connectSession(sessionId);
   }, WS_RECONNECT_DELAY_MS);
   reconnectTimers.set(sessionId, timer);
 }

@@ -18,13 +18,21 @@ const mockWsClose = vi.fn();
 let wsInstances: Array<{ onopen?: (() => void) | null; onclose?: (() => void) | null; onerror?: (() => void) | null; onmessage?: ((e: any) => void) | null }> = [];
 
 class MockWebSocket {
+  static OPEN = 1;
+  static CLOSED = 3;
+  static CONNECTING = 0;
+  static CLOSING = 2;
+  OPEN = 1;
+  CLOSED = 3;
+  CONNECTING = 0;
+  CLOSING = 2;
   send = mockWsSend;
   close = mockWsClose;
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
   onmessage: ((e: any) => void) | null = null;
-  readyState = 1;
+  readyState = MockWebSocket.OPEN;
   constructor() {
     wsInstances.push(this);
   }
@@ -170,5 +178,30 @@ describe("RC9: visibility-aware reconnection", () => {
     for (const fn of visibilityListeners) fn();
 
     expect(wsInstances).toHaveLength(1); // no reconnect
+  });
+
+  it("visibilitychange → visible reconnects current session even if sdkSessions is stale", async () => {
+    const { useStore } = await import("./store.js");
+
+    // Simulate stale sdkSessions list that doesn't include the current session.
+    useStore.setState({
+      currentSessionId: "test-1",
+      sdkSessions: [],
+    });
+
+    connectSession("test-1");
+    expect(wsInstances).toHaveLength(1);
+
+    // Hidden + close: no reconnect while hidden
+    Object.defineProperty(document, "hidden", { value: true, configurable: true });
+    for (const fn of visibilityListeners) fn();
+    wsInstances[0].onclose?.();
+    vi.advanceTimersByTime(5_000);
+    expect(wsInstances).toHaveLength(1);
+
+    // Visible: should reconnect from currentSessionId fallback.
+    Object.defineProperty(document, "hidden", { value: false, configurable: true });
+    for (const fn of visibilityListeners) fn();
+    expect(wsInstances).toHaveLength(2);
   });
 });

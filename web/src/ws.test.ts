@@ -116,6 +116,17 @@ describe("connectSession", () => {
     expect(lastWs).toBe(first);
   });
 
+  it("replaces a stale closed socket for the same session", () => {
+    wsModule.connectSession("s1");
+    const first = lastWs;
+    first.readyState = MockWebSocket.CLOSED;
+
+    wsModule.connectSession("s1");
+
+    expect(lastWs).not.toBe(first);
+    expect(first.close).toHaveBeenCalled();
+  });
+
   it("sends session_subscribe with last_seq on open", () => {
     localStorage.setItem("companion:last-seq:s1", "12");
     wsModule.connectSession("s1");
