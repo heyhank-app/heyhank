@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import type { ProcessItem, ProcessStatus, SystemProcess } from "../types.js";
 
@@ -482,20 +482,28 @@ describe("ProcessPanel system processes", () => {
 
   it("expands system process to show full command", async () => {
     // Clicking command name should expand to show full command line
+    const fullCommand = "node ./server.js --port 3000 --verbose";
+    resetStore({
+      sessions: new Map([["s1", { cwd: "/repo/app" }]]),
+    });
     mockGetSystemProcesses.mockResolvedValue({
       ok: true,
-      processes: [makeSystemProcess({ fullCommand: "node ./server.js --port 3000 --verbose" })],
+      processes: [makeSystemProcess({ cwd: "/repo/app", fullCommand })],
     });
     render(<ProcessPanel sessionId="s1" />);
 
-    await expandSystemGroup();
-
     await waitFor(() => {
-      expect(screen.getByText("server.js")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Kill system process 1234" })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("server.js"));
-    expect(screen.getByText("node ./server.js --port 3000 --verbose")).toBeInTheDocument();
+    const killButton = screen.getByRole("button", { name: "Kill system process 1234" });
+    const row = killButton.closest("[data-testid='system-process-row']");
+    expect(row).not.toBeNull();
+    const rowButtons = within(row as HTMLElement).getAllByRole("button");
+    const expandButton = rowButtons.find((btn) => btn !== killButton);
+    expect(expandButton).toBeDefined();
+    fireEvent.click(expandButton!);
+    expect(screen.getByText(fullCommand)).toBeInTheDocument();
   });
 
   it("polls for system processes on the interval", async () => {
