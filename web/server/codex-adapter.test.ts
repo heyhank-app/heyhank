@@ -3268,6 +3268,21 @@ describe("CodexAdapter with ICodexTransport", () => {
     expect(disconnectCb).toHaveBeenCalledTimes(1);
   });
 
+  it("cleanupAndDisconnect fires disconnectCb only once on double invocation", () => {
+    // When both proc.exited and handleTransportClose race, the disconnectFired
+    // guard must prevent disconnectCb from firing more than once.
+    const mock = createMockTransport();
+    const adapter = new CodexAdapter(mock.transport, "test-double-disconnect", { model: "o4-mini" });
+    const disconnectCb = vi.fn();
+    adapter.onDisconnect(disconnectCb);
+
+    // Simulate both transport close and proc.exited firing
+    adapter.handleTransportClose();
+    adapter.handleTransportClose(); // second call should be a no-op
+
+    expect(disconnectCb).toHaveBeenCalledTimes(1);
+  });
+
   it("emits session_init after successful initialization via transport", async () => {
     const mock = createMockTransport();
     const messages: BrowserIncomingMessage[] = [];
@@ -4759,6 +4774,60 @@ describe("CodexAdapter WS reconnection handling", () => {
     expect(errors.length).toBeGreaterThanOrEqual(1);
     const errorMsg = (errors[0] as { message: string }).message;
     expect(errorMsg).toContain("briefly interrupted");
+  });
+
+  it("fires disconnectCb after exhausting MAX_RECONNECT_RETRIES consecutive Transport reconnected errors", async () => {
+    // MAX_RECONNECT_RETRIES is 5, so the 6th consecutive "Transport reconnected"
+    // error should trigger cleanupAndDisconnect (relaunch) instead of retrying.
+    const MAX_RETRIES = 5;
+    let turnStartCallCount = 0;
+
+    const transport: ICodexTransport = {
+      call: vi.fn(async (method: string) => {
+        if (method === "initialize") return { userAgent: "codex" };
+        if (method === "thread/start" || method === "thread/create") return { thread: { id: "thr_1" } };
+        if (method === "account/rateLimits/read") return {};
+        if (method === "turn/start") {
+          turnStartCallCount++;
+          // Always fail with "Transport reconnected" to exhaust the budget
+          throw new Error("Transport reconnected");
+        }
+        return {};
+      }),
+      notify: vi.fn(async () => {}),
+      respond: vi.fn(async () => {}),
+      onNotification: vi.fn(),
+      onRequest: vi.fn(),
+      onRawIncoming: vi.fn(),
+      onRawOutgoing: vi.fn(),
+      onParseError: vi.fn(),
+      isConnected: vi.fn(() => true),
+    };
+
+    const disconnectCb = vi.fn();
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(transport, "retry-exhaust-test", { model: "o4-mini", cwd: "/tmp" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+    adapter.onDisconnect(disconnectCb);
+
+    // Wait for initialization to complete
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Send a user message — each retry re-queues via flushPendingOutgoing, so
+    // a single sendBrowserMessage will cascade through all retries.
+    adapter.sendBrowserMessage({ type: "user_message", content: "hello" });
+
+    // Allow enough time for all retries to cascade (each retry is async)
+    await new Promise((r) => setTimeout(r, 500));
+
+    // After MAX_RETRIES + 1 consecutive failures, disconnectCb should fire
+    expect(turnStartCallCount).toBe(MAX_RETRIES + 1);
+    expect(disconnectCb).toHaveBeenCalledTimes(1);
+
+    // The final error should mention "multiple reconnects" / relaunching
+    const errors = messages.filter((m) => m.type === "error");
+    const relaunchError = errors.find((e) => (e as { message: string }).message.includes("multiple reconnects"));
+    expect(relaunchError).toBeDefined();
   });
 
   it("handleWsReconnected clears pending approvals and resets currentTurnId", async () => {

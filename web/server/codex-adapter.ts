@@ -432,6 +432,8 @@ export class CodexAdapter implements IBackendAdapter {
   private initialized = false;
   private initFailed = false;
   private initInProgress = false;
+  /** Guard against multiple cleanupAndDisconnect() calls firing disconnectCb twice. */
+  private disconnectFired = false;
 
   // Streaming accumulator for agent messages
   private streamingText = "";
@@ -466,7 +468,7 @@ export class CodexAdapter implements IBackendAdapter {
   private pendingOutgoing: BrowserOutgoingMessage[] = [];
   /** Number of consecutive reconnect-retries for the current user message. */
   private reconnectRetryCount = 0;
-  private static readonly MAX_RECONNECT_RETRIES = 2;
+  private static readonly MAX_RECONNECT_RETRIES = 5;
 
   // Pending approval requests (Codex sends these as JSON-RPC requests with an id)
   private pendingApprovals = new Map<string, number>(); // request_id -> JSON-RPC id
@@ -546,13 +548,7 @@ export class CodexAdapter implements IBackendAdapter {
       }
 
       proc.exited.then(() => {
-        this.connected = false;
-        for (const pending of this.pendingDynamicToolCalls.values()) {
-          clearTimeout(pending.timeout);
-        }
-        this.pendingDynamicToolCalls.clear();
-        this.pendingExitPlanModeRequests.clear();
-        this.disconnectCb?.();
+        this.cleanupAndDisconnect();
       });
     }
 
@@ -661,7 +657,10 @@ export class CodexAdapter implements IBackendAdapter {
     }
     this.pendingDynamicToolCalls.clear();
     this.pendingExitPlanModeRequests.clear();
-    this.disconnectCb?.();
+    if (!this.disconnectFired) {
+      this.disconnectFired = true;
+      this.disconnectCb?.();
+    }
   }
 
   /**
@@ -676,6 +675,7 @@ export class CodexAdapter implements IBackendAdapter {
     this.initialized = false;
     this.initFailed = false;
     this.initInProgress = false;
+    this.disconnectFired = false;
 
     // Re-wire handlers on the new transport
     this.transport.onNotification((method, params) => this.handleNotification(method, params));
