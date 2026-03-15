@@ -1108,6 +1108,11 @@ describe("HomePage", () => {
     render(<HomePage />);
     await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
 
+    // Before opening the panel, API should not have been called yet.
+    // The accordion keeps elements in the DOM but inert, so this guard
+    // ensures the useEffect gating on showBranchingControls is exercised.
+    expect(mockApi.discoverClaudeSessions).not.toHaveBeenCalled();
+
     // Open the branching controls panel
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /branch from session/i }));
@@ -1479,6 +1484,46 @@ describe("HomePage", () => {
       await waitFor(() => {
         expect(screen.getByTitle("Image error: pull failed")).toBeInTheDocument();
       });
+    });
+  });
+
+  // ─── Onboarding tip ──────────────────────────────────────────────────────────
+
+  describe("onboarding tip", () => {
+    it("renders the onboarding tip when cc-onboarding-dismissed is not set", async () => {
+      // First-time users should see the onboarding tip explaining
+      // Workspace, Runtime, and Resume sections.
+      render(<HomePage />);
+      await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+      expect(screen.getByText(/sets where your code lives/)).toBeInTheDocument();
+    });
+
+    it("does not render the tip when cc-onboarding-dismissed is already set", async () => {
+      // Returning users who have previously dismissed the tip should
+      // not see it again; the localStorage flag gates initial state.
+      localStorage.setItem("cc-onboarding-dismissed", "true");
+      render(<HomePage />);
+      await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+      expect(screen.queryByText(/sets where your code lives/)).not.toBeInTheDocument();
+    });
+
+    it("dismisses the tip and persists to localStorage on click", async () => {
+      // Clicking the dismiss button should hide the tip and write
+      // the cc-onboarding-dismissed flag to localStorage so it stays
+      // hidden across sessions.
+      render(<HomePage />);
+      await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+      expect(screen.getByText(/sets where your code lives/)).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText("Dismiss onboarding tip"));
+      });
+
+      expect(screen.queryByText(/sets where your code lives/)).not.toBeInTheDocument();
+      expect(localStorage.getItem("cc-onboarding-dismissed")).toBe("true");
     });
   });
 });

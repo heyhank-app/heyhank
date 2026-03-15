@@ -112,6 +112,9 @@ export function HomePage() {
   const [linearConfigured, setLinearConfigured] = useState(false);
   const [selectedLinearIssue, setSelectedLinearIssue] = useState<LinearIssue | null>(null);
   const [selectedLinearConnectionId, setSelectedLinearConnectionId] = useState<string | null>(null);
+  const [showOnboardingTip, setShowOnboardingTip] = useState(
+    () => localStorage.getItem("cc-onboarding-dismissed") !== "true",
+  );
 
   const MODELS = dynamicModels || getModelsForBackend(backend);
   const MODES = getModesForBackend(backend);
@@ -911,8 +914,11 @@ export function HomePage() {
                 style={{ minHeight: "100px", maxHeight: "200px" }}
               />
 
+              {/* Separator */}
+              <div className="mx-3 border-t border-cc-border/40" />
+
               {/* Bottom toolbar */}
-              <div className="flex items-center justify-between px-3 pb-3">
+              <div className="flex items-center justify-between px-3 py-2.5">
                 {/* Left: mode dropdown */}
                 <div className="relative" ref={modeDropdownRef}>
                   <button
@@ -979,498 +985,561 @@ export function HomePage() {
               </div>
             </div>
 
-            {/* Below-card selectors */}
-          <div className="flex items-center gap-1 sm:gap-2 mt-2 sm:mt-3 px-1 flex-wrap">
-          {/* Backend toggle */}
-          {backends.length > 1 && (
-            <div className="flex items-center bg-cc-hover/50 rounded-lg p-0.5">
-              {backends.map((b) => (
-                <button
-                  key={b.id}
-                  onClick={() => b.available && switchBackend(b.id as BackendType)}
-                  disabled={!b.available}
-                  title={b.available ? b.name : `${b.name} CLI not found in PATH`}
-                  className={`flex items-center gap-1 px-2.5 py-2 text-xs rounded-md transition-colors ${
-                    !b.available
-                      ? "text-cc-muted/40 cursor-not-allowed"
-                      : backend === b.id
-                        ? "bg-cc-card text-cc-fg font-medium shadow-sm cursor-pointer"
-                        : "text-cc-muted hover:text-cc-fg cursor-pointer"
-                  }`}
-                >
-                  {b.name}
-                  {!b.available && (
-                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3 text-cc-error/60">
-                      <circle cx="8" cy="8" r="6" />
-                      <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" />
-                    </svg>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
+            {/* Below-card selectors — grouped */}
+            <div className="mt-2 sm:mt-3 px-1 space-y-2">
 
-          {/* Folder selector */}
-          <div>
-            <button
-              onClick={() => setShowFolderPicker(true)}
-              className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
-            >
-              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
-                <path d="M1 3.5A1.5 1.5 0 012.5 2h3.379a1.5 1.5 0 011.06.44l.622.621a.5.5 0 00.353.146H13.5A1.5 1.5 0 0115 4.707V12.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" />
-              </svg>
-              <span className="max-w-[120px] sm:max-w-[200px] truncate font-mono-code">{dirLabel}</span>
-              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
-                <path d="M4 6l4 4 4-4" />
-              </svg>
-            </button>
-            {showFolderPicker && (
-              <FolderPicker
-                initialPath={cwd || ""}
-                onSelect={(path) => { setCwd(path); }}
-                onClose={() => setShowFolderPicker(false)}
-              />
-            )}
-          </div>
-
-          {/* Branch picker + worktree toggle */}
-          <BranchPicker
-            cwd={cwd}
-            gitRepoInfo={gitRepoInfo}
-            selectedBranch={selectedBranch}
-            isNewBranch={isNewBranch}
-            useWorktree={useWorktree}
-            onBranchChange={handleBranchChange}
-            onWorktreeChange={setUseWorktree}
-            onBranchesLoaded={handleBranchesLoaded}
-          />
-
-          {/* Environment selector */}
-          <div className="relative" ref={envDropdownRef}>
-            <button
-              onClick={() => {
-                if (!showEnvDropdown) {
-                  api.listEnvs().then(setEnvs).catch(() => {});
-                }
-                setShowEnvDropdown(!showEnvDropdown);
-              }}
-              aria-expanded={showEnvDropdown}
-              className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
-            >
-              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
-                <path d="M8 1a2 2 0 012 2v1h2a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h2V3a2 2 0 012-2zm0 1.5a.5.5 0 00-.5.5v1h1V3a.5.5 0 00-.5-.5zM4 5.5a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V6a.5.5 0 00-.5-.5H4z" />
-              </svg>
-              <span className="max-w-[120px] truncate">
-                {selectedEnv ? envs.find((e) => e.slug === selectedEnv)?.name || "Env" : "No env"}
-              </span>
-              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
-                <path d="M4 6l4 4 4-4" />
-              </svg>
-            </button>
-            {showEnvDropdown && (
-              <div className="absolute left-0 bottom-full mb-1 w-56 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
-                <button
-                  onClick={() => {
-                    setSelectedEnv("");
-                    localStorage.setItem("cc-selected-env", "");
-                    setShowEnvDropdown(false);
-                  }}
-                  className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
-                    !selectedEnv ? "text-cc-primary font-medium" : "text-cc-fg"
-                  }`}
-                >
-                  No environment
-                </button>
-                {envs.map((env) => (
-                  <button
-                    key={env.slug}
-                    onClick={() => {
-                      setSelectedEnv(env.slug);
-                      localStorage.setItem("cc-selected-env", env.slug);
-                      setShowEnvDropdown(false);
-                    }}
-                    className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-1 ${
-                      env.slug === selectedEnv ? "text-cc-primary font-medium" : "text-cc-fg"
-                    }`}
-                  >
-                    <span className="truncate">{env.name}</span>
-                    <span className="text-cc-muted ml-auto shrink-0">
-                      {Object.keys(env.variables).length} var{Object.keys(env.variables).length !== 1 ? "s" : ""}
-                    </span>
-                  </button>
-                ))}
-                <div className="border-t border-cc-border mt-1 pt-1">
-                  <button
-                    onClick={() => {
-                      setShowEnvManager(true);
-                      setShowEnvDropdown(false);
-                    }}
-                    className="w-full px-3 py-2 text-xs text-left text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
-                  >
-                    Manage environments...
-                  </button>
+              {/* Backend toggle */}
+              {backends.length > 1 && (
+                <div className="flex items-center bg-cc-hover/50 rounded-lg p-0.5 w-fit">
+                  {backends.map((b) => (
+                    <button
+                      key={b.id}
+                      onClick={() => b.available && switchBackend(b.id as BackendType)}
+                      disabled={!b.available}
+                      title={b.available ? b.name : `${b.name} CLI not found in PATH`}
+                      className={`flex items-center gap-1 px-2.5 min-h-[44px] sm:min-h-0 sm:py-2 text-xs rounded-md transition-colors ${
+                        !b.available
+                          ? "text-cc-muted/40 cursor-not-allowed"
+                          : backend === b.id
+                            ? "bg-cc-card text-cc-fg font-medium shadow-sm cursor-pointer"
+                            : "text-cc-muted hover:text-cc-fg cursor-pointer"
+                      }`}
+                    >
+                      {b.name}
+                      {!b.available && (
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3 text-cc-error/60">
+                          <circle cx="8" cy="8" r="6" />
+                          <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
                 </div>
-              </div>
-            )}
-          </div>
-
-          {/* Sandbox selector */}
-          <div className="relative" ref={sandboxDropdownRef}>
-            <button
-              onClick={() => {
-                if (!showSandboxDropdown) {
-                  api.listSandboxes().then(setSandboxes).catch(() => {});
-                }
-                setShowSandboxDropdown(!showSandboxDropdown);
-              }}
-              aria-expanded={showSandboxDropdown}
-              className={`flex items-center gap-1.5 px-2.5 py-2 text-xs rounded-md transition-colors cursor-pointer ${
-                sandboxEnabled
-                  ? "text-cc-primary bg-cc-primary/10 hover:bg-cc-primary/15"
-                  : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
-              }`}
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5 opacity-70">
-                <rect x="2" y="4" width="12" height="10" rx="1.5" />
-                <path d="M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4" />
-              </svg>
-              <span className="max-w-[120px] truncate">
-                {sandboxEnabled
-                  ? (selectedSandbox ? sandboxes.find((s) => s.slug === selectedSandbox)?.name || "Sandbox" : "Sandbox")
-                  : "Sandbox"}
-              </span>
-              {sandboxEnabled && sandboxImageState && sandboxImageState.status !== "idle" && (
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    sandboxImageState.status === "ready"
-                      ? "bg-green-500"
-                      : sandboxImageState.status === "pulling"
-                        ? "bg-amber-500 animate-pulse"
-                        : "bg-cc-error"
-                  }`}
-                  title={
-                    sandboxImageState.status === "ready"
-                      ? "Docker image ready"
-                      : sandboxImageState.status === "pulling"
-                        ? "Pulling Docker image..."
-                        : `Image error: ${sandboxImageState.error || "unknown"}`
-                  }
-                />
               )}
-              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
-                <path d="M4 6l4 4 4-4" />
-              </svg>
-            </button>
-            {showSandboxDropdown && (
-              <div className="absolute left-0 bottom-full mb-1 w-56 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
-                <button
-                  onClick={() => {
-                    setSandboxEnabled(false);
-                    localStorage.setItem("cc-sandbox-enabled", "false");
-                    setShowSandboxDropdown(false);
-                  }}
-                  className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
-                    !sandboxEnabled ? "text-cc-primary font-medium" : "text-cc-fg"
-                  }`}
-                >
-                  Off
-                </button>
-                <div className="border-t border-cc-border my-0.5" />
-                <button
-                  onClick={() => {
-                    setSandboxEnabled(true);
-                    localStorage.setItem("cc-sandbox-enabled", "true");
-                    setSelectedSandbox("");
-                    localStorage.setItem("cc-selected-sandbox", "");
-                    setShowSandboxDropdown(false);
-                  }}
-                  className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
-                    sandboxEnabled && !selectedSandbox ? "text-cc-primary font-medium" : "text-cc-fg"
-                  }`}
-                >
-                  Default (the-companion:latest)
-                </button>
-                {sandboxes.map((sb) => (
-                  <button
-                    key={sb.slug}
-                    onClick={() => {
-                      setSandboxEnabled(true);
-                      localStorage.setItem("cc-sandbox-enabled", "true");
-                      setSelectedSandbox(sb.slug);
-                      localStorage.setItem("cc-selected-sandbox", sb.slug);
-                      setShowSandboxDropdown(false);
-                    }}
-                    className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-1 ${
-                      sandboxEnabled && sb.slug === selectedSandbox ? "text-cc-primary font-medium" : "text-cc-fg"
-                    }`}
-                  >
-                    <span className="truncate">{sb.name}</span>
-                  </button>
-                ))}
-                <div className="border-t border-cc-border mt-1 pt-1">
-                  <a
-                    href="#/sandboxes"
-                    className="block w-full px-3 py-2 text-xs text-left text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
-                    onClick={() => setShowSandboxDropdown(false)}
-                  >
-                    Manage sandboxes...
-                  </a>
-                </div>
-              </div>
-            )}
-          </div>
 
-          {/* Model selector */}
-          <div className="relative" ref={modelDropdownRef}>
-            <button
-              onClick={() => setShowModelDropdown(!showModelDropdown)}
-              aria-expanded={showModelDropdown}
-              className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
-            >
-              <span>{selectedModel.icon}</span>
-              <span>{selectedModel.label}</span>
-              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
-                <path d="M4 6l4 4 4-4" />
-              </svg>
-            </button>
-            {showModelDropdown && (
-              <div className="absolute left-0 bottom-full mb-1 w-48 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1">
-                {MODELS.map((m) => (
-                  <button
-                    key={m.value}
-                    onClick={() => { setModel(m.value); setShowModelDropdown(false); }}
-                    className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-2 ${
-                      m.value === model ? "text-cc-primary font-medium" : "text-cc-fg"
-                    }`}
-                  >
-                    <span>{m.icon}</span>
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Branch from prior session (Claude only) */}
-          {backend === "claude" && (
-            <button
-              type="button"
-              onClick={() => setShowBranchingControls((v) => !v)}
-              className={`flex items-center gap-1.5 px-2.5 py-2 text-xs rounded-md transition-colors cursor-pointer ${
-                showBranchingControls
-                  ? "text-cc-primary bg-cc-primary/10 hover:bg-cc-primary/15"
-                  : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
-              }`}
-              aria-expanded={showBranchingControls}
-              aria-controls="branch-from-session-panel"
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5 opacity-70">
-                <path d="M5 3.5a2 2 0 110 4 2 2 0 010-4zm6 5a2 2 0 110 4 2 2 0 010-4z" />
-                <path d="M7 5.5h2.5A1.5 1.5 0 0111 7v1" strokeLinecap="round" />
-              </svg>
-              Branch from session
-            </button>
-          )}
-            </div>
-
-            {backend === "claude" && showBranchingControls && (
-              <div
-                id="branch-from-session-panel"
-                className="mt-2 px-3 py-2.5 rounded-lg border border-cc-border bg-cc-card/50 space-y-2"
-              >
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => void loadResumeCandidates()}
-                    disabled={resumeCandidatesLoading}
-                    className="px-2 py-1 rounded-md text-[11px] bg-cc-hover text-cc-muted hover:text-cc-fg transition-colors disabled:opacity-60 cursor-pointer"
-                  >
-                    {resumeCandidatesLoading ? "Refreshing..." : "Refresh detected sessions"}
-                  </button>
-                  {resumeCandidates.length > 0 && (
-                    <span className="text-[11px] text-cc-muted">
-                      Showing {visibleResumeCandidates.length} of {filteredActiveResumeCandidates.length}{" "}
-                      {normalizedResumeSearchQuery
-                        ? "matching"
-                        : (showingRecentOnly ? "recent" : "detected")} Claude session{filteredActiveResumeCandidates.length !== 1 ? "s" : ""}.
-                    </span>
-                  )}
-                  {!showOlderResumeCandidates && hiddenOlderResumeCount > 0 && recentResumeCandidates.length > 0 && (
+              {/* ── Workspace group: Folder + Branch/Worktree ── */}
+              <section className="rounded-lg border border-cc-border/30 bg-cc-card/20 p-0.5">
+                <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-cc-muted/75 block">
+                  Workspace
+                </span>
+                <div className="flex flex-col sm:flex-row sm:items-center">
+                  {/* Folder selector */}
+                  <div>
                     <button
-                      type="button"
-                      onClick={() => {
-                        setShowOlderResumeCandidates(true);
-                        setVisibleResumeCandidateRows(INITIAL_VISIBLE_SESSION_ROWS);
-                      }}
-                      className="px-2 py-1 rounded-md text-[11px] bg-cc-hover text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                      onClick={() => setShowFolderPicker(true)}
+                      className="flex items-center gap-1.5 px-2.5 min-h-[44px] sm:min-h-0 sm:py-2 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
                     >
-                      Include older ({hiddenOlderResumeCount})
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
+                        <path d="M1 3.5A1.5 1.5 0 012.5 2h3.379a1.5 1.5 0 011.06.44l.622.621a.5.5 0 00.353.146H13.5A1.5 1.5 0 0115 4.707V12.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" />
+                      </svg>
+                      <span className="max-w-[120px] sm:max-w-[200px] truncate font-mono-code">{dirLabel}</span>
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
+                        <path d="M4 6l4 4 4-4" />
+                      </svg>
                     </button>
-                  )}
-                  {showOlderResumeCandidates && recentResumeCandidates.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowOlderResumeCandidates(false);
-                        setVisibleResumeCandidateRows(INITIAL_VISIBLE_SESSION_ROWS);
-                      }}
-                      className="px-2 py-1 rounded-md text-[11px] bg-cc-hover text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
-                    >
-                      Recent only
-                    </button>
-                  )}
-                </div>
-                <label className="block">
-                  <span className="sr-only">Search sessions</span>
-                  <div className="relative">
-                    <svg
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      className="w-3.5 h-3.5 text-cc-muted absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                    >
-                      <circle cx="7" cy="7" r="4.25" />
-                      <path d="M10.25 10.25L14 14" strokeLinecap="round" />
-                    </svg>
-                    <input
-                      type="text"
-                      value={resumeSearchQuery}
-                      onChange={(e) => setResumeSearchQuery(e.target.value)}
-                      placeholder="Search sessions, branch, folder, or ID"
-                      className="w-full bg-cc-card border border-cc-border rounded-md pl-8 pr-2.5 py-1.5 text-xs text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 focus:border-cc-primary/40"
-                    />
+                    {showFolderPicker && (
+                      <FolderPicker
+                        initialPath={cwd || ""}
+                        onSelect={(path) => { setCwd(path); }}
+                        onClose={() => setShowFolderPicker(false)}
+                      />
+                    )}
                   </div>
-                </label>
-                <p className="text-[11px] text-cc-muted">
-                  <span className="font-medium text-cc-fg">Fork</span> opens a new session that leaves the original untouched.
-                  <span className="mx-1">•</span>
-                  <span className="font-medium text-cc-fg">Continue</span> opens from the same linear thread.
-                </p>
-                {resumeCandidatesError && (
-                  <p className="text-[11px] text-cc-error">{resumeCandidatesError}</p>
-                )}
-                {!resumeCandidatesLoading && !resumeCandidatesError && filteredActiveResumeCandidates.length === 0 && (
-                  <p className="text-[11px] text-cc-muted">
-                    {normalizedResumeSearchQuery
-                      ? "No sessions match this search."
-                      : "No Claude sessions detected yet."}
-                  </p>
-                )}
-                {visibleResumeCandidates.length > 0 && (
-                  <div className="rounded-md border border-cc-border overflow-hidden bg-cc-card/50">
-                    <div className="hidden sm:grid sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.7fr)_auto] px-2.5 py-1.5 border-b border-cc-border text-[10px] uppercase tracking-wider text-cc-muted">
-                      <span>Session</span>
-                      <span>Project</span>
-                      <span>Branch</span>
-                      <span>Last active</span>
-                      <span className="text-right">Action</span>
-                    </div>
-                    <div className="divide-y divide-cc-border/50">
-                      {visibleResumeCandidates.map((candidate) => {
-                        const title = getResumeCandidateTitle(candidate);
-                        const project = getResumeCandidateProject(candidate.cwd);
-                        const sourceLabel = candidate.source === "companion" ? "Companion" : "Claude";
-                        const selected = trimmedResumeSessionAt === candidate.resumeSessionId;
-                        return (
-                          <div
-                            key={`${candidate.resumeSessionId}-row-${candidate.sessionId}`}
-                            className="px-2.5 py-2.5 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.7fr)_auto] sm:items-center"
+
+                  {/* Branch picker + worktree toggle */}
+                  <BranchPicker
+                    cwd={cwd}
+                    gitRepoInfo={gitRepoInfo}
+                    selectedBranch={selectedBranch}
+                    isNewBranch={isNewBranch}
+                    useWorktree={useWorktree}
+                    onBranchChange={handleBranchChange}
+                    onWorktreeChange={setUseWorktree}
+                    onBranchesLoaded={handleBranchesLoaded}
+                  />
+                </div>
+              </section>
+
+              {/* ── Runtime group: Model + Env + Sandbox ── */}
+              <section className="rounded-lg border border-cc-border/30 bg-cc-card/20 p-0.5">
+                <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-cc-muted/75 block">
+                  Runtime
+                </span>
+                <div className="flex flex-col sm:flex-row sm:items-center">
+                  {/* Model selector */}
+                  <div className="relative" ref={modelDropdownRef}>
+                    <button
+                      onClick={() => setShowModelDropdown(!showModelDropdown)}
+                      aria-expanded={showModelDropdown}
+                      className="flex items-center gap-1.5 px-2.5 min-h-[44px] sm:min-h-0 sm:py-2 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
+                    >
+                      <span>{selectedModel.icon}</span>
+                      <span>{selectedModel.label}</span>
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
+                        <path d="M4 6l4 4 4-4" />
+                      </svg>
+                    </button>
+                    {showModelDropdown && (
+                      <div className="absolute left-0 bottom-full mb-1 w-48 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1">
+                        {MODELS.map((m) => (
+                          <button
+                            key={m.value}
+                            onClick={() => { setModel(m.value); setShowModelDropdown(false); }}
+                            className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-2 ${
+                              m.value === model ? "text-cc-primary font-medium" : "text-cc-fg"
+                            }`}
                           >
-                            <div className="min-w-0">
-                              <p className={`text-xs truncate ${selected ? "text-cc-primary font-medium" : "text-cc-fg"}`}>
-                                {title}
-                              </p>
-                              <div className="mt-0.5 flex items-center gap-1.5 text-[10px]">
-                                <span className="font-mono-code text-cc-muted">{shortSessionId(candidate.resumeSessionId)}</span>
-                                <span className="px-1 py-0.5 rounded bg-cc-hover text-cc-muted">{sourceLabel}</span>
-                              </div>
-                            </div>
-                            <div className="min-w-0 text-[11px] text-cc-muted sm:font-mono-code truncate" title={candidate.cwd}>
-                              <div className="truncate">{project}</div>
-                              <div className="mt-0.5 text-[10px] text-cc-muted/70 truncate" title={candidate.cwd}>
-                                {formatPathTail(candidate.cwd)}
-                              </div>
-                            </div>
-                            <div className="text-[11px] text-cc-muted sm:font-mono-code truncate">
-                              {candidate.gitBranch || "—"}
-                            </div>
-                            <div className="text-[11px] text-cc-muted">
-                              {formatTimeAgo(candidate.createdAt)}
-                            </div>
-                            <div className="sm:text-right flex gap-1.5 sm:justify-end">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setResumeSessionAt(candidate.resumeSessionId);
-                                  setForkSession(true);
-                                  void handleOpenBranchedSession(candidate, true);
-                                }}
-                                aria-label={`Fork and open ${title}`}
-                                className={`px-2 py-1 rounded-md text-[11px] border transition-colors cursor-pointer ${
-                                  selected && forkSession
-                                    ? "border-cc-primary/40 bg-cc-primary/10 text-cc-primary"
-                                    : "border-cc-border bg-cc-card text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
-                                }`}
-                                title={`Fork and open now\n${candidate.cwd}${candidate.gitBranch ? ` (${candidate.gitBranch})` : ""}\n${candidate.resumeSessionId}`}
-                              >
-                                Fork
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setResumeSessionAt(candidate.resumeSessionId);
-                                  setForkSession(false);
-                                  void handleOpenBranchedSession(candidate, false);
-                                }}
-                                aria-label={`Continue and open ${title}`}
-                                className={`px-2 py-1 rounded-md text-[11px] border transition-colors cursor-pointer ${
-                                  selected && !forkSession
-                                    ? "border-cc-primary/40 bg-cc-primary/10 text-cc-primary"
-                                    : "border-cc-border bg-cc-card text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
-                                }`}
-                                title={`Continue and open now\n${candidate.resumeSessionId}`}
-                              >
-                                Continue
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {hasMoreResumeCandidates && (
-                      <div className="px-2.5 py-2 border-t border-cc-border bg-cc-card/40">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setVisibleResumeCandidateRows((count) =>
-                              Math.min(count + LOAD_MORE_SESSION_ROWS, filteredActiveResumeCandidates.length)
-                            )}
-                          className="px-2 py-1 rounded-md text-[11px] bg-cc-hover text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
-                        >
-                          Load more ({filteredActiveResumeCandidates.length - visibleResumeCandidateRows} remaining)
-                        </button>
+                            <span>{m.icon}</span>
+                            {m.label}
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>
-                )}
-                <p className="text-[11px] text-cc-muted">
-                  Fork/Continue opens the session immediately, then you can type directly in chat.
-                  Send from Home still starts a normal new session with your typed prompt.
-                </p>
-              </div>
-            )}
-          </div>
 
-          <LinearSection
-            cwd={cwd}
-            gitRepoInfo={gitRepoInfo}
-            linearConfigured={linearConfigured}
-            selectedLinearIssue={selectedLinearIssue}
-            onIssueSelect={handleIssueSelect}
-            onBranchFromIssue={handleBranchFromIssue}
-            onConnectionSelect={setSelectedLinearConnectionId}
-          />
+                  {/* Environment selector */}
+                  <div className="relative" ref={envDropdownRef}>
+                    <button
+                      onClick={() => {
+                        if (!showEnvDropdown) {
+                          api.listEnvs().then(setEnvs).catch(() => {});
+                        }
+                        setShowEnvDropdown(!showEnvDropdown);
+                      }}
+                      aria-expanded={showEnvDropdown}
+                      className="flex items-center gap-1.5 px-2.5 min-h-[44px] sm:min-h-0 sm:py-2 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
+                    >
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
+                        <path d="M8 1a2 2 0 012 2v1h2a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h2V3a2 2 0 012-2zm0 1.5a.5.5 0 00-.5.5v1h1V3a.5.5 0 00-.5-.5zM4 5.5a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V6a.5.5 0 00-.5-.5H4z" />
+                      </svg>
+                      <span className="max-w-[120px] truncate">
+                        {selectedEnv ? envs.find((e) => e.slug === selectedEnv)?.name || "Env" : "No env"}
+                      </span>
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
+                        <path d="M4 6l4 4 4-4" />
+                      </svg>
+                    </button>
+                    {showEnvDropdown && (
+                      <div className="absolute left-0 bottom-full mb-1 w-56 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
+                        <button
+                          onClick={() => {
+                            setSelectedEnv("");
+                            localStorage.setItem("cc-selected-env", "");
+                            setShowEnvDropdown(false);
+                          }}
+                          className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
+                            !selectedEnv ? "text-cc-primary font-medium" : "text-cc-fg"
+                          }`}
+                        >
+                          No environment
+                        </button>
+                        {envs.map((env) => (
+                          <button
+                            key={env.slug}
+                            onClick={() => {
+                              setSelectedEnv(env.slug);
+                              localStorage.setItem("cc-selected-env", env.slug);
+                              setShowEnvDropdown(false);
+                            }}
+                            className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-1 ${
+                              env.slug === selectedEnv ? "text-cc-primary font-medium" : "text-cc-fg"
+                            }`}
+                          >
+                            <span className="truncate">{env.name}</span>
+                            <span className="text-cc-muted ml-auto shrink-0">
+                              {Object.keys(env.variables).length} var{Object.keys(env.variables).length !== 1 ? "s" : ""}
+                            </span>
+                          </button>
+                        ))}
+                        <div className="border-t border-cc-border mt-1 pt-1">
+                          <button
+                            onClick={() => {
+                              setShowEnvManager(true);
+                              setShowEnvDropdown(false);
+                            }}
+                            className="w-full px-3 py-2 text-xs text-left text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+                          >
+                            Manage environments...
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Sandbox selector */}
+                  <div className="relative" ref={sandboxDropdownRef}>
+                    <button
+                      onClick={() => {
+                        if (!showSandboxDropdown) {
+                          api.listSandboxes().then(setSandboxes).catch(() => {});
+                        }
+                        setShowSandboxDropdown(!showSandboxDropdown);
+                      }}
+                      aria-expanded={showSandboxDropdown}
+                      className={`flex items-center gap-1.5 px-2.5 min-h-[44px] sm:min-h-0 sm:py-2 text-xs rounded-md transition-colors cursor-pointer ${
+                        sandboxEnabled
+                          ? "text-cc-primary bg-cc-primary/10 hover:bg-cc-primary/15"
+                          : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+                      }`}
+                    >
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5 opacity-70">
+                        <rect x="2" y="4" width="12" height="10" rx="1.5" />
+                        <path d="M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4" />
+                      </svg>
+                      <span className="max-w-[120px] truncate">
+                        {sandboxEnabled
+                          ? (selectedSandbox ? sandboxes.find((s) => s.slug === selectedSandbox)?.name || "Sandbox" : "Sandbox")
+                          : "Sandbox"}
+                      </span>
+                      {sandboxEnabled && sandboxImageState && sandboxImageState.status !== "idle" && (
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            sandboxImageState.status === "ready"
+                              ? "bg-green-500"
+                              : sandboxImageState.status === "pulling"
+                                ? "bg-amber-500 animate-pulse"
+                                : "bg-cc-error"
+                          }`}
+                          title={
+                            sandboxImageState.status === "ready"
+                              ? "Docker image ready"
+                              : sandboxImageState.status === "pulling"
+                                ? "Pulling Docker image..."
+                                : `Image error: ${sandboxImageState.error || "unknown"}`
+                          }
+                        />
+                      )}
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
+                        <path d="M4 6l4 4 4-4" />
+                      </svg>
+                    </button>
+                    {showSandboxDropdown && (
+                      <div className="absolute left-0 bottom-full mb-1 w-56 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
+                        <button
+                          onClick={() => {
+                            setSandboxEnabled(false);
+                            localStorage.setItem("cc-sandbox-enabled", "false");
+                            setShowSandboxDropdown(false);
+                          }}
+                          className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
+                            !sandboxEnabled ? "text-cc-primary font-medium" : "text-cc-fg"
+                          }`}
+                        >
+                          Off
+                        </button>
+                        <div className="border-t border-cc-border my-0.5" />
+                        <button
+                          onClick={() => {
+                            setSandboxEnabled(true);
+                            localStorage.setItem("cc-sandbox-enabled", "true");
+                            setSelectedSandbox("");
+                            localStorage.setItem("cc-selected-sandbox", "");
+                            setShowSandboxDropdown(false);
+                          }}
+                          className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
+                            sandboxEnabled && !selectedSandbox ? "text-cc-primary font-medium" : "text-cc-fg"
+                          }`}
+                        >
+                          Default (the-companion:latest)
+                        </button>
+                        {sandboxes.map((sb) => (
+                          <button
+                            key={sb.slug}
+                            onClick={() => {
+                              setSandboxEnabled(true);
+                              localStorage.setItem("cc-sandbox-enabled", "true");
+                              setSelectedSandbox(sb.slug);
+                              localStorage.setItem("cc-selected-sandbox", sb.slug);
+                              setShowSandboxDropdown(false);
+                            }}
+                            className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-1 ${
+                              sandboxEnabled && sb.slug === selectedSandbox ? "text-cc-primary font-medium" : "text-cc-fg"
+                            }`}
+                          >
+                            <span className="truncate">{sb.name}</span>
+                          </button>
+                        ))}
+                        <div className="border-t border-cc-border mt-1 pt-1">
+                          <a
+                            href="#/sandboxes"
+                            className="block w-full px-3 py-2 text-xs text-left text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+                            onClick={() => setShowSandboxDropdown(false)}
+                          >
+                            Manage sandboxes...
+                          </a>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              {/* ── Resume group: Branch from session (Claude only) ── */}
+              {backend === "claude" && (
+                <section className="rounded-lg border border-cc-border/30 bg-cc-card/20 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowBranchingControls((v) => !v)}
+                    className={`w-full flex items-center gap-1.5 px-2 min-h-[44px] sm:min-h-0 sm:py-2 text-xs rounded-md transition-colors cursor-pointer ${
+                      showBranchingControls
+                        ? "text-cc-primary"
+                        : "text-cc-muted hover:text-cc-fg"
+                    }`}
+                    aria-expanded={showBranchingControls}
+                    aria-controls="branch-from-session-panel"
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5 opacity-70">
+                      <path d="M5 3.5a2 2 0 110 4 2 2 0 010-4zm6 5a2 2 0 110 4 2 2 0 010-4z" />
+                      <path d="M7 5.5h2.5A1.5 1.5 0 0111 7v1" strokeLinecap="round" />
+                    </svg>
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em]">
+                      Resume
+                    </span>
+                    <span className="text-cc-muted font-normal normal-case tracking-normal">
+                      Branch from session
+                    </span>
+                    <svg
+                      viewBox="0 0 16 16"
+                      fill="currentColor"
+                      className={`w-3 h-3 opacity-50 ml-auto transition-transform ${showBranchingControls ? "rotate-180" : ""}`}
+                    >
+                      <path d="M4 6l4 4 4-4" />
+                    </svg>
+                  </button>
+
+                  {/* Accordion panel for branch-from-session */}
+                  <div
+                    className="accordion-panel"
+                    data-open={showBranchingControls ? "true" : "false"}
+                  >
+                    <div className="accordion-inner" inert={!showBranchingControls || undefined}>
+                      <div
+                        id="branch-from-session-panel"
+                        className="px-2 py-2 space-y-2"
+                      >
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => void loadResumeCandidates()}
+                            disabled={resumeCandidatesLoading}
+                            className="px-2 py-1 rounded-md text-[11px] bg-cc-hover text-cc-muted hover:text-cc-fg transition-colors disabled:opacity-60 cursor-pointer"
+                          >
+                            {resumeCandidatesLoading ? "Refreshing..." : "Refresh detected sessions"}
+                          </button>
+                          {resumeCandidates.length > 0 && (
+                            <span className="text-[11px] text-cc-muted">
+                              Showing {visibleResumeCandidates.length} of {filteredActiveResumeCandidates.length}{" "}
+                              {normalizedResumeSearchQuery
+                                ? "matching"
+                                : (showingRecentOnly ? "recent" : "detected")} Claude session{filteredActiveResumeCandidates.length !== 1 ? "s" : ""}.
+                            </span>
+                          )}
+                          {!showOlderResumeCandidates && hiddenOlderResumeCount > 0 && recentResumeCandidates.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowOlderResumeCandidates(true);
+                                setVisibleResumeCandidateRows(INITIAL_VISIBLE_SESSION_ROWS);
+                              }}
+                              className="px-2 py-1 rounded-md text-[11px] bg-cc-hover text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                            >
+                              Include older ({hiddenOlderResumeCount})
+                            </button>
+                          )}
+                          {showOlderResumeCandidates && recentResumeCandidates.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowOlderResumeCandidates(false);
+                                setVisibleResumeCandidateRows(INITIAL_VISIBLE_SESSION_ROWS);
+                              }}
+                              className="px-2 py-1 rounded-md text-[11px] bg-cc-hover text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                            >
+                              Recent only
+                            </button>
+                          )}
+                        </div>
+                        <label className="block">
+                          <span className="sr-only">Search sessions</span>
+                          <div className="relative">
+                            <svg
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              className="w-3.5 h-3.5 text-cc-muted absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                            >
+                              <circle cx="7" cy="7" r="4.25" />
+                              <path d="M10.25 10.25L14 14" strokeLinecap="round" />
+                            </svg>
+                            <input
+                              type="text"
+                              value={resumeSearchQuery}
+                              onChange={(e) => setResumeSearchQuery(e.target.value)}
+                              placeholder="Search sessions, branch, folder, or ID"
+                              className="w-full bg-cc-card border border-cc-border rounded-md pl-8 pr-2.5 py-1.5 text-xs text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 focus:border-cc-primary/40"
+                            />
+                          </div>
+                        </label>
+                        <p className="text-[11px] text-cc-muted">
+                          <span className="font-medium text-cc-fg">Fork</span> opens a new session that leaves the original untouched.
+                          <span className="mx-1">•</span>
+                          <span className="font-medium text-cc-fg">Continue</span> opens from the same linear thread.
+                        </p>
+                        {resumeCandidatesError && (
+                          <p className="text-[11px] text-cc-error">{resumeCandidatesError}</p>
+                        )}
+                        {!resumeCandidatesLoading && !resumeCandidatesError && filteredActiveResumeCandidates.length === 0 && (
+                          <p className="text-[11px] text-cc-muted">
+                            {normalizedResumeSearchQuery
+                              ? "No sessions match this search."
+                              : "No Claude sessions detected yet."}
+                          </p>
+                        )}
+                        {visibleResumeCandidates.length > 0 && (
+                          <div className="rounded-md border border-cc-border overflow-hidden bg-cc-card/50">
+                            <div className="hidden sm:grid sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.7fr)_auto] px-2.5 py-1.5 border-b border-cc-border text-[10px] uppercase tracking-wider text-cc-muted">
+                              <span>Session</span>
+                              <span>Project</span>
+                              <span>Branch</span>
+                              <span>Last active</span>
+                              <span className="text-right">Action</span>
+                            </div>
+                            <div className="divide-y divide-cc-border/50">
+                              {visibleResumeCandidates.map((candidate) => {
+                                const title = getResumeCandidateTitle(candidate);
+                                const project = getResumeCandidateProject(candidate.cwd);
+                                const sourceLabel = candidate.source === "companion" ? "Companion" : "Claude";
+                                const selected = trimmedResumeSessionAt === candidate.resumeSessionId;
+                                return (
+                                  <div
+                                    key={`${candidate.resumeSessionId}-row-${candidate.sessionId}`}
+                                    className="px-2.5 py-2.5 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.7fr)_auto] sm:items-center"
+                                  >
+                                    <div className="min-w-0">
+                                      <p className={`text-xs truncate ${selected ? "text-cc-primary font-medium" : "text-cc-fg"}`}>
+                                        {title}
+                                      </p>
+                                      <div className="mt-0.5 flex items-center gap-1.5 text-[10px]">
+                                        <span className="font-mono-code text-cc-muted">{shortSessionId(candidate.resumeSessionId)}</span>
+                                        <span className="px-1 py-0.5 rounded bg-cc-hover text-cc-muted">{sourceLabel}</span>
+                                      </div>
+                                    </div>
+                                    <div className="min-w-0 text-[11px] text-cc-muted sm:font-mono-code truncate" title={candidate.cwd}>
+                                      <div className="truncate">{project}</div>
+                                      <div className="mt-0.5 text-[10px] text-cc-muted/70 truncate" title={candidate.cwd}>
+                                        {formatPathTail(candidate.cwd)}
+                                      </div>
+                                    </div>
+                                    <div className="text-[11px] text-cc-muted sm:font-mono-code truncate">
+                                      {candidate.gitBranch || "\u2014"}
+                                    </div>
+                                    <div className="text-[11px] text-cc-muted">
+                                      {formatTimeAgo(candidate.createdAt)}
+                                    </div>
+                                    <div className="sm:text-right flex gap-1.5 sm:justify-end">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setResumeSessionAt(candidate.resumeSessionId);
+                                          setForkSession(true);
+                                          void handleOpenBranchedSession(candidate, true);
+                                        }}
+                                        aria-label={`Fork and open ${title}`}
+                                        className={`px-2 py-1 rounded-md text-[11px] border transition-colors cursor-pointer ${
+                                          selected && forkSession
+                                            ? "border-cc-primary/40 bg-cc-primary/10 text-cc-primary"
+                                            : "border-cc-border bg-cc-card text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+                                        }`}
+                                        title={`Fork and open now\n${candidate.cwd}${candidate.gitBranch ? ` (${candidate.gitBranch})` : ""}\n${candidate.resumeSessionId}`}
+                                      >
+                                        Fork
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setResumeSessionAt(candidate.resumeSessionId);
+                                          setForkSession(false);
+                                          void handleOpenBranchedSession(candidate, false);
+                                        }}
+                                        aria-label={`Continue and open ${title}`}
+                                        className={`px-2 py-1 rounded-md text-[11px] border transition-colors cursor-pointer ${
+                                          selected && !forkSession
+                                            ? "border-cc-primary/40 bg-cc-primary/10 text-cc-primary"
+                                            : "border-cc-border bg-cc-card text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+                                        }`}
+                                        title={`Continue and open now\n${candidate.resumeSessionId}`}
+                                      >
+                                        Continue
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {hasMoreResumeCandidates && (
+                              <div className="px-2.5 py-2 border-t border-cc-border bg-cc-card/40">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setVisibleResumeCandidateRows((count) =>
+                                      Math.min(count + LOAD_MORE_SESSION_ROWS, filteredActiveResumeCandidates.length)
+                                    )}
+                                  className="px-2 py-1 rounded-md text-[11px] bg-cc-hover text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                                >
+                                  Load more ({filteredActiveResumeCandidates.length - visibleResumeCandidateRows} remaining)
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <p className="text-[11px] text-cc-muted">
+                          Fork/Continue opens the session immediately, then you can type directly in chat.
+                          Send from Home still starts a normal new session with your typed prompt.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              {/* Onboarding tip — shown once for new users */}
+              {showOnboardingTip && (
+                <div className="flex items-start gap-2 px-2 py-2 rounded-lg bg-cc-primary/5 border border-cc-primary/10 text-[11px] text-cc-muted">
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 text-cc-primary/60 shrink-0 mt-0.5">
+                    <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8zm6.5-.25A.75.75 0 017.25 7h1a.75.75 0 01.75.75v2.75h.25a.75.75 0 010 1.5h-2a.75.75 0 010-1.5h.25v-2h-.25a.75.75 0 01-.75-.75zM8 6a1 1 0 110-2 1 1 0 010 2z" />
+                  </svg>
+                  <span className="flex-1">
+                    <strong className="text-cc-fg">Workspace</strong> sets where your code lives.{" "}
+                    <strong className="text-cc-fg">Runtime</strong> configures how the session runs.{" "}
+                    <strong className="text-cc-fg">Resume</strong> lets you fork or continue a previous Claude session.
+                  </span>
+                  <button
+                    onClick={() => {
+                      setShowOnboardingTip(false);
+                      localStorage.setItem("cc-onboarding-dismissed", "true");
+                    }}
+                    className="shrink-0 w-5 h-5 flex items-center justify-center rounded text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                    aria-label="Dismiss onboarding tip"
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
+                      <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </div>
+              )}
+
+              <LinearSection
+                cwd={cwd}
+                gitRepoInfo={gitRepoInfo}
+                linearConfigured={linearConfigured}
+                selectedLinearIssue={selectedLinearIssue}
+                onIssueSelect={handleIssueSelect}
+                onBranchFromIssue={handleBranchFromIssue}
+                onConnectionSelect={setSelectedLinearConnectionId}
+              />
+            </div>
+          </div>
         </div>
 
         {/* Branch behind remote warning */}
