@@ -825,12 +825,12 @@ export function HomePage() {
   const canSend = text.trim().length > 0 && !sending;
 
   return (
-    <div className="flex-1 h-full flex items-start justify-center px-3 sm:px-4 pt-6 sm:pt-8 pb-6 pb-safe overflow-y-auto overscroll-y-contain">
-      <div className="w-full max-w-2xl">
-        {/* Logo + Title */}
-        <div className="flex flex-col items-center justify-center mb-3 sm:mb-4">
-          <img src={logoSrc} alt="The Companion" className="w-16 h-16 sm:w-20 sm:h-20 mb-2.5" />
-          <h1 className="text-2xl sm:text-[2rem] font-semibold tracking-tight text-cc-fg">
+    <div className="flex-1 h-full flex flex-col items-center px-3 sm:px-6 pb-6 pb-safe overflow-y-auto overscroll-y-contain">
+      <div className="w-full max-w-[720px] my-auto">
+        {/* Logo + Title — minimal, centered */}
+        <div className="flex flex-col items-center mb-6 sm:mb-10">
+          <img src={logoSrc} alt="The Companion" className="w-10 h-10 sm:w-12 sm:h-12 mb-3" />
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-cc-fg">
             The Companion
           </h1>
         </div>
@@ -869,454 +869,427 @@ export function HomePage() {
           aria-label="Attach images"
         />
 
-        <div className="grid grid-cols-1 gap-3 sm:gap-4 items-start">
-          <div>
-            {/* Input card */}
-            <div className="relative bg-cc-card border border-cc-border rounded-[14px] shadow-sm">
-              <MentionMenu
-                open={mention.mentionMenuOpen}
-                loading={mention.promptsLoading}
-                prompts={mention.filteredPrompts}
-                selectedIndex={mention.mentionMenuIndex}
-                onSelect={handleSelectPrompt}
-                menuRef={mention.mentionMenuRef}
-                className="absolute left-2 right-2 bottom-full mb-1"
-              />
-              {selectedLinearIssue && (
-                <div className="px-3 pt-3">
-                  <div className="inline-flex max-w-full items-center gap-2 rounded-md border border-cc-border bg-cc-hover/60 px-2.5 py-1.5 text-[11px] text-cc-muted">
-                    <span className="shrink-0">Linear</span>
-                    <span className="font-mono-code shrink-0">{selectedLinearIssue.identifier}</span>
-                    <span className="truncate">{selectedLinearIssue.title}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleIssueSelect(null)}
-                      className="shrink-0 rounded px-1 text-cc-muted hover:text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
-                      title="Remove Linear issue"
-                    >
-                      ×
-                    </button>
-                  </div>
-                </div>
-              )}
-              <textarea
-                ref={textareaRef}
-                value={text}
-                onChange={handleInput}
-                onKeyDown={handleKeyDown}
-                onClick={syncCaret}
-                onKeyUp={syncCaret}
-                onPaste={handlePaste}
-                aria-label="Task description"
-              placeholder="Fix a bug, build a feature, refactor code..."
-                rows={4}
-                className="w-full px-4 pt-4 pb-2 text-base sm:text-sm bg-transparent resize-none focus:outline-none text-cc-fg font-sans-ui placeholder:text-cc-muted overflow-y-auto"
-                style={{ minHeight: "100px", maxHeight: "200px" }}
-              />
-
-              {/* Separator */}
-              <div className="mx-3 border-t border-cc-border/40" />
-
-              {/* Bottom toolbar */}
-              <div className="flex items-center justify-between px-3 py-2.5">
-                {/* Left: mode dropdown */}
-                <div className="relative" ref={modeDropdownRef}>
-                  <button
-                    onClick={() => setShowModeDropdown(!showModeDropdown)}
-                    aria-expanded={showModeDropdown}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-cc-muted hover:text-cc-fg rounded-lg hover:bg-cc-hover transition-colors cursor-pointer"
-                  >
-                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
-                      <path d="M2 4h12M2 8h8M2 12h10" strokeLinecap="round" />
-                    </svg>
-                    {selectedMode.label}
-                    <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
-                      <path d="M4 6l4 4 4-4" />
-                    </svg>
-                  </button>
-                  {showModeDropdown && (
-                    <div className="absolute left-0 bottom-full mb-1 w-40 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
-                      {MODES.map((m) => (
-                        <button
-                          key={m.value}
-                          onClick={() => { setMode(m.value); setShowModeDropdown(false); }}
-                          className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
-                            m.value === mode ? "text-cc-primary font-medium" : "text-cc-fg"
-                          }`}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Right: image placeholder + send */}
-                <div className="flex items-center gap-1.5">
-                  {/* Image upload */}
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center justify-center w-8 h-8 rounded-lg text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
-                    title="Upload image"
-                  >
-                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
-                      <rect x="2" y="2" width="12" height="12" rx="2" />
-                      <circle cx="5.5" cy="5.5" r="1" fill="currentColor" stroke="none" />
-                      <path d="M2 11l3-3 2 2 3-4 4 5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </button>
-
-                  {/* Send button */}
-                  <button
-                    onClick={handleSend}
-                    disabled={!canSend}
-                    className={`flex items-center justify-center w-10 h-10 rounded-full transition-colors ${
-                      canSend
-                        ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
-                        : "bg-cc-hover text-cc-muted cursor-not-allowed"
-                    }`}
-                    title="Send message"
-                  >
-                    <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
-                      <path d="M3 2l11 6-11 6V9.5l7-1.5-7-1.5V2z" />
-                    </svg>
-                  </button>
-                </div>
+        {/* Main input card — the hero element */}
+        <div className="relative bg-cc-card border border-cc-border rounded-2xl shadow-sm">
+          <MentionMenu
+            open={mention.mentionMenuOpen}
+            loading={mention.promptsLoading}
+            prompts={mention.filteredPrompts}
+            selectedIndex={mention.mentionMenuIndex}
+            onSelect={handleSelectPrompt}
+            menuRef={mention.mentionMenuRef}
+            className="absolute left-2 right-2 bottom-full mb-1"
+          />
+          {selectedLinearIssue && (
+            <div className="px-4 pt-3">
+              <div className="inline-flex max-w-full items-center gap-2 rounded-md border border-cc-border bg-cc-hover/60 px-2.5 py-1.5 text-[11px] text-cc-muted">
+                <span className="shrink-0">Linear</span>
+                <span className="font-mono-code shrink-0">{selectedLinearIssue.identifier}</span>
+                <span className="truncate">{selectedLinearIssue.title}</span>
+                <button
+                  type="button"
+                  onClick={() => handleIssueSelect(null)}
+                  className="shrink-0 rounded px-1 text-cc-muted hover:text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
+                  title="Remove Linear issue"
+                >
+                  ×
+                </button>
               </div>
             </div>
+          )}
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            onClick={syncCaret}
+            onKeyUp={syncCaret}
+            onPaste={handlePaste}
+            aria-label="Task description"
+            placeholder="Fix a bug, build a feature, refactor code..."
+            rows={3}
+            className="w-full px-4 sm:px-5 pt-4 pb-2 text-[15px] sm:text-sm bg-transparent resize-none focus:outline-none text-cc-fg font-sans-ui placeholder:text-cc-muted/70 overflow-y-auto"
+            style={{ minHeight: "80px", maxHeight: "200px" }}
+          />
 
-            {/* Below-card selectors — grouped */}
-            <div className="mt-2 sm:mt-3 px-1 space-y-2">
-
-              {/* Backend toggle */}
-              {backends.length > 1 && (
-                <div className="flex items-center bg-cc-hover/50 rounded-lg p-0.5 w-fit">
-                  {backends.map((b) => (
+          {/* ── Toolbar: all controls in one bar ── */}
+          <div className="flex items-center gap-1 px-2.5 sm:px-3 py-2 flex-wrap">
+            {/* Model selector */}
+            <div className="relative" ref={modelDropdownRef}>
+              <button
+                onClick={() => setShowModelDropdown(!showModelDropdown)}
+                aria-expanded={showModelDropdown}
+                className="flex items-center gap-1 px-2 py-1 text-[11px] sm:text-xs text-cc-muted hover:text-cc-fg rounded-lg hover:bg-cc-hover transition-colors cursor-pointer"
+              >
+                <span>{selectedModel.icon}</span>
+                <span>{selectedModel.label}</span>
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 opacity-40">
+                  <path d="M4 6l4 4 4-4" />
+                </svg>
+              </button>
+              {showModelDropdown && (
+                <div className="absolute left-0 bottom-full mb-1 w-48 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1">
+                  {MODELS.map((m) => (
                     <button
-                      key={b.id}
-                      onClick={() => b.available && switchBackend(b.id as BackendType)}
-                      disabled={!b.available}
-                      title={b.available ? b.name : `${b.name} CLI not found in PATH`}
-                      className={`flex items-center gap-1 px-2.5 min-h-[44px] sm:min-h-0 sm:py-2 text-xs rounded-md transition-colors ${
-                        !b.available
-                          ? "text-cc-muted/40 cursor-not-allowed"
-                          : backend === b.id
-                            ? "bg-cc-card text-cc-fg font-medium shadow-sm cursor-pointer"
-                            : "text-cc-muted hover:text-cc-fg cursor-pointer"
+                      key={m.value}
+                      onClick={() => { setModel(m.value); setShowModelDropdown(false); }}
+                      className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-2 ${
+                        m.value === model ? "text-cc-primary font-medium" : "text-cc-fg"
                       }`}
                     >
-                      {b.name}
-                      {!b.available && (
-                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3 text-cc-error/60">
-                          <circle cx="8" cy="8" r="6" />
-                          <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" />
-                        </svg>
-                      )}
+                      <span>{m.icon}</span>
+                      {m.label}
                     </button>
                   ))}
                 </div>
               )}
+            </div>
 
-              {/* ── Workspace group: Folder + Branch/Worktree ── */}
-              <section className="rounded-lg border border-cc-border/30 bg-cc-card/20 p-0.5">
-                <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-cc-muted/75 block">
-                  Workspace
-                </span>
-                <div className="flex flex-col sm:flex-row sm:items-center">
-                  {/* Folder selector */}
-                  <div>
+            {/* Mode dropdown */}
+            <div className="relative" ref={modeDropdownRef}>
+              <button
+                onClick={() => setShowModeDropdown(!showModeDropdown)}
+                aria-expanded={showModeDropdown}
+                className="flex items-center gap-1 px-2 py-1 text-[11px] sm:text-xs text-cc-muted hover:text-cc-fg rounded-lg hover:bg-cc-hover transition-colors cursor-pointer"
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3">
+                  <path d="M2 4h12M2 8h8M2 12h10" strokeLinecap="round" />
+                </svg>
+                {selectedMode.label}
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 opacity-40">
+                  <path d="M4 6l4 4 4-4" />
+                </svg>
+              </button>
+              {showModeDropdown && (
+                <div className="absolute left-0 bottom-full mb-1 w-40 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
+                  {MODES.map((m) => (
                     <button
-                      onClick={() => setShowFolderPicker(true)}
-                      className="flex items-center gap-1.5 px-2.5 min-h-[44px] sm:min-h-0 sm:py-2 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
-                    >
-                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
-                        <path d="M1 3.5A1.5 1.5 0 012.5 2h3.379a1.5 1.5 0 011.06.44l.622.621a.5.5 0 00.353.146H13.5A1.5 1.5 0 0115 4.707V12.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" />
-                      </svg>
-                      <span className="max-w-[120px] sm:max-w-[200px] truncate font-mono-code">{dirLabel}</span>
-                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
-                        <path d="M4 6l4 4 4-4" />
-                      </svg>
-                    </button>
-                    {showFolderPicker && (
-                      <FolderPicker
-                        initialPath={cwd || ""}
-                        onSelect={(path) => { setCwd(path); }}
-                        onClose={() => setShowFolderPicker(false)}
-                      />
-                    )}
-                  </div>
-
-                  {/* Branch picker + worktree toggle */}
-                  <BranchPicker
-                    cwd={cwd}
-                    gitRepoInfo={gitRepoInfo}
-                    selectedBranch={selectedBranch}
-                    isNewBranch={isNewBranch}
-                    useWorktree={useWorktree}
-                    onBranchChange={handleBranchChange}
-                    onWorktreeChange={setUseWorktree}
-                    onBranchesLoaded={handleBranchesLoaded}
-                  />
-                </div>
-              </section>
-
-              {/* ── Runtime group: Model + Env + Sandbox ── */}
-              <section className="rounded-lg border border-cc-border/30 bg-cc-card/20 p-0.5">
-                <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-cc-muted/75 block">
-                  Runtime
-                </span>
-                <div className="flex flex-col sm:flex-row sm:items-center">
-                  {/* Model selector */}
-                  <div className="relative" ref={modelDropdownRef}>
-                    <button
-                      onClick={() => setShowModelDropdown(!showModelDropdown)}
-                      aria-expanded={showModelDropdown}
-                      className="flex items-center gap-1.5 px-2.5 min-h-[44px] sm:min-h-0 sm:py-2 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
-                    >
-                      <span>{selectedModel.icon}</span>
-                      <span>{selectedModel.label}</span>
-                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
-                        <path d="M4 6l4 4 4-4" />
-                      </svg>
-                    </button>
-                    {showModelDropdown && (
-                      <div className="absolute left-0 bottom-full mb-1 w-48 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1">
-                        {MODELS.map((m) => (
-                          <button
-                            key={m.value}
-                            onClick={() => { setModel(m.value); setShowModelDropdown(false); }}
-                            className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-2 ${
-                              m.value === model ? "text-cc-primary font-medium" : "text-cc-fg"
-                            }`}
-                          >
-                            <span>{m.icon}</span>
-                            {m.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Environment selector */}
-                  <div className="relative" ref={envDropdownRef}>
-                    <button
-                      onClick={() => {
-                        if (!showEnvDropdown) {
-                          api.listEnvs().then(setEnvs).catch(() => {});
-                        }
-                        setShowEnvDropdown(!showEnvDropdown);
-                      }}
-                      aria-expanded={showEnvDropdown}
-                      className="flex items-center gap-1.5 px-2.5 min-h-[44px] sm:min-h-0 sm:py-2 text-xs text-cc-muted hover:text-cc-fg rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
-                    >
-                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
-                        <path d="M8 1a2 2 0 012 2v1h2a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h2V3a2 2 0 012-2zm0 1.5a.5.5 0 00-.5.5v1h1V3a.5.5 0 00-.5-.5zM4 5.5a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V6a.5.5 0 00-.5-.5H4z" />
-                      </svg>
-                      <span className="max-w-[120px] truncate">
-                        {selectedEnv ? envs.find((e) => e.slug === selectedEnv)?.name || "Env" : "No env"}
-                      </span>
-                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
-                        <path d="M4 6l4 4 4-4" />
-                      </svg>
-                    </button>
-                    {showEnvDropdown && (
-                      <div className="absolute left-0 bottom-full mb-1 w-56 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
-                        <button
-                          onClick={() => {
-                            setSelectedEnv("");
-                            localStorage.setItem("cc-selected-env", "");
-                            setShowEnvDropdown(false);
-                          }}
-                          className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
-                            !selectedEnv ? "text-cc-primary font-medium" : "text-cc-fg"
-                          }`}
-                        >
-                          No environment
-                        </button>
-                        {envs.map((env) => (
-                          <button
-                            key={env.slug}
-                            onClick={() => {
-                              setSelectedEnv(env.slug);
-                              localStorage.setItem("cc-selected-env", env.slug);
-                              setShowEnvDropdown(false);
-                            }}
-                            className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-1 ${
-                              env.slug === selectedEnv ? "text-cc-primary font-medium" : "text-cc-fg"
-                            }`}
-                          >
-                            <span className="truncate">{env.name}</span>
-                            <span className="text-cc-muted ml-auto shrink-0">
-                              {Object.keys(env.variables).length} var{Object.keys(env.variables).length !== 1 ? "s" : ""}
-                            </span>
-                          </button>
-                        ))}
-                        <div className="border-t border-cc-border mt-1 pt-1">
-                          <button
-                            onClick={() => {
-                              setShowEnvManager(true);
-                              setShowEnvDropdown(false);
-                            }}
-                            className="w-full px-3 py-2 text-xs text-left text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
-                          >
-                            Manage environments...
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Sandbox selector */}
-                  <div className="relative" ref={sandboxDropdownRef}>
-                    <button
-                      onClick={() => {
-                        if (!showSandboxDropdown) {
-                          api.listSandboxes().then(setSandboxes).catch(() => {});
-                        }
-                        setShowSandboxDropdown(!showSandboxDropdown);
-                      }}
-                      aria-expanded={showSandboxDropdown}
-                      className={`flex items-center gap-1.5 px-2.5 min-h-[44px] sm:min-h-0 sm:py-2 text-xs rounded-md transition-colors cursor-pointer ${
-                        sandboxEnabled
-                          ? "text-cc-primary bg-cc-primary/10 hover:bg-cc-primary/15"
-                          : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+                      key={m.value}
+                      onClick={() => { setMode(m.value); setShowModeDropdown(false); }}
+                      className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
+                        m.value === mode ? "text-cc-primary font-medium" : "text-cc-fg"
                       }`}
                     >
-                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5 opacity-70">
-                        <rect x="2" y="4" width="12" height="10" rx="1.5" />
-                        <path d="M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4" />
-                      </svg>
-                      <span className="max-w-[120px] truncate">
-                        {sandboxEnabled
-                          ? (selectedSandbox ? sandboxes.find((s) => s.slug === selectedSandbox)?.name || "Sandbox" : "Sandbox")
-                          : "Sandbox"}
-                      </span>
-                      {sandboxEnabled && sandboxImageState && sandboxImageState.status !== "idle" && (
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            sandboxImageState.status === "ready"
-                              ? "bg-green-500"
-                              : sandboxImageState.status === "pulling"
-                                ? "bg-amber-500 animate-pulse"
-                                : "bg-cc-error"
-                          }`}
-                          title={
-                            sandboxImageState.status === "ready"
-                              ? "Docker image ready"
-                              : sandboxImageState.status === "pulling"
-                                ? "Pulling Docker image..."
-                                : `Image error: ${sandboxImageState.error || "unknown"}`
-                          }
-                        />
-                      )}
-                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
-                        <path d="M4 6l4 4 4-4" />
-                      </svg>
+                      {m.label}
                     </button>
-                    {showSandboxDropdown && (
-                      <div className="absolute left-0 bottom-full mb-1 w-56 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
-                        <button
-                          onClick={() => {
-                            setSandboxEnabled(false);
-                            localStorage.setItem("cc-sandbox-enabled", "false");
-                            setShowSandboxDropdown(false);
-                          }}
-                          className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
-                            !sandboxEnabled ? "text-cc-primary font-medium" : "text-cc-fg"
-                          }`}
-                        >
-                          Off
-                        </button>
-                        <div className="border-t border-cc-border my-0.5" />
-                        <button
-                          onClick={() => {
-                            setSandboxEnabled(true);
-                            localStorage.setItem("cc-sandbox-enabled", "true");
-                            setSelectedSandbox("");
-                            localStorage.setItem("cc-selected-sandbox", "");
-                            setShowSandboxDropdown(false);
-                          }}
-                          className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
-                            sandboxEnabled && !selectedSandbox ? "text-cc-primary font-medium" : "text-cc-fg"
-                          }`}
-                        >
-                          Default (the-companion:latest)
-                        </button>
-                        {sandboxes.map((sb) => (
-                          <button
-                            key={sb.slug}
-                            onClick={() => {
-                              setSandboxEnabled(true);
-                              localStorage.setItem("cc-sandbox-enabled", "true");
-                              setSelectedSandbox(sb.slug);
-                              localStorage.setItem("cc-selected-sandbox", sb.slug);
-                              setShowSandboxDropdown(false);
-                            }}
-                            className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-1 ${
-                              sandboxEnabled && sb.slug === selectedSandbox ? "text-cc-primary font-medium" : "text-cc-fg"
-                            }`}
-                          >
-                            <span className="truncate">{sb.name}</span>
-                          </button>
-                        ))}
-                        <div className="border-t border-cc-border mt-1 pt-1">
-                          <a
-                            href="#/sandboxes"
-                            className="block w-full px-3 py-2 text-xs text-left text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
-                            onClick={() => setShowSandboxDropdown(false)}
-                          >
-                            Manage sandboxes...
-                          </a>
-                        </div>
-                      </div>
-                    )}
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Separator dot */}
+            <span className="w-0.5 h-0.5 rounded-full bg-cc-muted/30 mx-0.5 hidden sm:block" />
+
+            {/* Folder selector */}
+            <div>
+              <button
+                onClick={() => setShowFolderPicker(true)}
+                className="flex items-center gap-1 px-2 py-1 text-[11px] sm:text-xs text-cc-muted hover:text-cc-fg rounded-lg hover:bg-cc-hover transition-colors cursor-pointer"
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
+                  <path d="M1 3.5A1.5 1.5 0 012.5 2h3.379a1.5 1.5 0 011.06.44l.622.621a.5.5 0 00.353.146H13.5A1.5 1.5 0 0115 4.707V12.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" />
+                </svg>
+                <span className="max-w-[80px] sm:max-w-[140px] truncate font-mono-code">{dirLabel}</span>
+              </button>
+              {showFolderPicker && (
+                <FolderPicker
+                  initialPath={cwd || ""}
+                  onSelect={(path) => { setCwd(path); }}
+                  onClose={() => setShowFolderPicker(false)}
+                />
+              )}
+            </div>
+
+            {/* Branch picker */}
+            <BranchPicker
+              cwd={cwd}
+              gitRepoInfo={gitRepoInfo}
+              selectedBranch={selectedBranch}
+              isNewBranch={isNewBranch}
+              useWorktree={useWorktree}
+              onBranchChange={handleBranchChange}
+              onWorktreeChange={setUseWorktree}
+              onBranchesLoaded={handleBranchesLoaded}
+            />
+
+            {/* Separator dot */}
+            <span className="w-0.5 h-0.5 rounded-full bg-cc-muted/30 mx-0.5 hidden sm:block" />
+
+            {/* Environment selector */}
+            <div className="relative" ref={envDropdownRef}>
+              <button
+                onClick={() => {
+                  if (!showEnvDropdown) {
+                    api.listEnvs().then(setEnvs).catch(() => {});
+                  }
+                  setShowEnvDropdown(!showEnvDropdown);
+                }}
+                aria-expanded={showEnvDropdown}
+                className="flex items-center gap-1 px-2 py-1 text-[11px] sm:text-xs text-cc-muted hover:text-cc-fg rounded-lg hover:bg-cc-hover transition-colors cursor-pointer"
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-50">
+                  <path d="M8 1a2 2 0 012 2v1h2a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h2V3a2 2 0 012-2zm0 1.5a.5.5 0 00-.5.5v1h1V3a.5.5 0 00-.5-.5zM4 5.5a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V6a.5.5 0 00-.5-.5H4z" />
+                </svg>
+                <span className="max-w-[80px] sm:max-w-[100px] truncate">
+                  {selectedEnv ? envs.find((e) => e.slug === selectedEnv)?.name || "Env" : "No env"}
+                </span>
+              </button>
+              {showEnvDropdown && (
+                <div className="absolute left-0 bottom-full mb-1 w-56 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
+                  <button
+                    onClick={() => {
+                      setSelectedEnv("");
+                      localStorage.setItem("cc-selected-env", "");
+                      setShowEnvDropdown(false);
+                    }}
+                    className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
+                      !selectedEnv ? "text-cc-primary font-medium" : "text-cc-fg"
+                    }`}
+                  >
+                    No environment
+                  </button>
+                  {envs.map((env) => (
+                    <button
+                      key={env.slug}
+                      onClick={() => {
+                        setSelectedEnv(env.slug);
+                        localStorage.setItem("cc-selected-env", env.slug);
+                        setShowEnvDropdown(false);
+                      }}
+                      className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-1 ${
+                        env.slug === selectedEnv ? "text-cc-primary font-medium" : "text-cc-fg"
+                      }`}
+                    >
+                      <span className="truncate">{env.name}</span>
+                      <span className="text-cc-muted ml-auto shrink-0">
+                        {Object.keys(env.variables).length} var{Object.keys(env.variables).length !== 1 ? "s" : ""}
+                      </span>
+                    </button>
+                  ))}
+                  <div className="border-t border-cc-border mt-1 pt-1">
+                    <button
+                      onClick={() => {
+                        setShowEnvManager(true);
+                        setShowEnvDropdown(false);
+                      }}
+                      className="w-full px-3 py-2 text-xs text-left text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+                    >
+                      Manage environments...
+                    </button>
                   </div>
                 </div>
-              </section>
+              )}
+            </div>
 
-              {/* ── Resume group: Branch from session (Claude only) ── */}
-              {backend === "claude" && (
-                <section className="rounded-lg border border-cc-border/30 bg-cc-card/20 p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setShowBranchingControls((v) => !v)}
-                    className={`w-full flex items-center gap-1.5 px-2 min-h-[44px] sm:min-h-0 sm:py-2 text-xs rounded-md transition-colors cursor-pointer ${
-                      showBranchingControls
-                        ? "text-cc-primary"
-                        : "text-cc-muted hover:text-cc-fg"
+            {/* Sandbox selector */}
+            <div className="relative" ref={sandboxDropdownRef}>
+              <button
+                onClick={() => {
+                  if (!showSandboxDropdown) {
+                    api.listSandboxes().then(setSandboxes).catch(() => {});
+                  }
+                  setShowSandboxDropdown(!showSandboxDropdown);
+                }}
+                aria-expanded={showSandboxDropdown}
+                className={`flex items-center gap-1 px-2 py-1 text-[11px] sm:text-xs rounded-lg transition-colors cursor-pointer ${
+                  sandboxEnabled
+                    ? "text-cc-primary bg-cc-primary/8 hover:bg-cc-primary/12"
+                    : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+                }`}
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3 opacity-60">
+                  <rect x="2" y="4" width="12" height="10" rx="1.5" />
+                  <path d="M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4" />
+                </svg>
+                <span className="max-w-[80px] sm:max-w-[100px] truncate">
+                  {sandboxEnabled
+                    ? (selectedSandbox ? sandboxes.find((s) => s.slug === selectedSandbox)?.name || "Sandbox" : "Sandbox")
+                    : "Sandbox"}
+                </span>
+                {sandboxEnabled && sandboxImageState && sandboxImageState.status !== "idle" && (
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      sandboxImageState.status === "ready"
+                        ? "bg-green-500"
+                        : sandboxImageState.status === "pulling"
+                          ? "bg-amber-500 animate-pulse"
+                          : "bg-cc-error"
                     }`}
-                    aria-expanded={showBranchingControls}
-                    aria-controls="branch-from-session-panel"
+                    title={
+                      sandboxImageState.status === "ready"
+                        ? "Docker image ready"
+                        : sandboxImageState.status === "pulling"
+                          ? "Pulling Docker image..."
+                          : `Image error: ${sandboxImageState.error || "unknown"}`
+                    }
+                  />
+                )}
+              </button>
+              {showSandboxDropdown && (
+                <div className="absolute left-0 bottom-full mb-1 w-56 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
+                  <button
+                    onClick={() => {
+                      setSandboxEnabled(false);
+                      localStorage.setItem("cc-sandbox-enabled", "false");
+                      setShowSandboxDropdown(false);
+                    }}
+                    className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
+                      !sandboxEnabled ? "text-cc-primary font-medium" : "text-cc-fg"
+                    }`}
                   >
-                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5 opacity-70">
-                      <path d="M5 3.5a2 2 0 110 4 2 2 0 010-4zm6 5a2 2 0 110 4 2 2 0 010-4z" />
-                      <path d="M7 5.5h2.5A1.5 1.5 0 0111 7v1" strokeLinecap="round" />
-                    </svg>
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em]">
-                      Resume
-                    </span>
-                    <span className="text-cc-muted font-normal normal-case tracking-normal">
-                      Branch from session
-                    </span>
-                    <svg
-                      viewBox="0 0 16 16"
-                      fill="currentColor"
-                      className={`w-3 h-3 opacity-50 ml-auto transition-transform ${showBranchingControls ? "rotate-180" : ""}`}
-                    >
-                      <path d="M4 6l4 4 4-4" />
-                    </svg>
+                    Off
                   </button>
-
-                  {/* Accordion panel for branch-from-session */}
-                  <div
-                    className="accordion-panel"
-                    data-open={showBranchingControls ? "true" : "false"}
+                  <div className="border-t border-cc-border my-0.5" />
+                  <button
+                    onClick={() => {
+                      setSandboxEnabled(true);
+                      localStorage.setItem("cc-sandbox-enabled", "true");
+                      setSelectedSandbox("");
+                      localStorage.setItem("cc-selected-sandbox", "");
+                      setShowSandboxDropdown(false);
+                    }}
+                    className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
+                      sandboxEnabled && !selectedSandbox ? "text-cc-primary font-medium" : "text-cc-fg"
+                    }`}
                   >
-                    <div className="accordion-inner" inert={!showBranchingControls || undefined}>
-                      <div
-                        id="branch-from-session-panel"
-                        className="px-2 py-2 space-y-2"
-                      >
+                    Default (the-companion:latest)
+                  </button>
+                  {sandboxes.map((sb) => (
+                    <button
+                      key={sb.slug}
+                      onClick={() => {
+                        setSandboxEnabled(true);
+                        localStorage.setItem("cc-sandbox-enabled", "true");
+                        setSelectedSandbox(sb.slug);
+                        localStorage.setItem("cc-selected-sandbox", sb.slug);
+                        setShowSandboxDropdown(false);
+                      }}
+                      className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-1 ${
+                        sandboxEnabled && sb.slug === selectedSandbox ? "text-cc-primary font-medium" : "text-cc-fg"
+                      }`}
+                    >
+                      <span className="truncate">{sb.name}</span>
+                    </button>
+                  ))}
+                  <div className="border-t border-cc-border mt-1 pt-1">
+                    <a
+                      href="#/sandboxes"
+                      className="block w-full px-3 py-2 text-xs text-left text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+                      onClick={() => setShowSandboxDropdown(false)}
+                    >
+                      Manage sandboxes...
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Spacer pushes action buttons to the right */}
+            <div className="flex-1" />
+
+            {/* Image upload */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center justify-center w-7 h-7 rounded-lg text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+              title="Upload image"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
+                <rect x="2" y="2" width="12" height="12" rx="2" />
+                <circle cx="5.5" cy="5.5" r="1" fill="currentColor" stroke="none" />
+                <path d="M2 11l3-3 2 2 3-4 4 5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+
+            {/* Send button */}
+            <button
+              onClick={handleSend}
+              disabled={!canSend}
+              className={`flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full transition-colors ${
+                canSend
+                  ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+                  : "bg-cc-hover text-cc-muted cursor-not-allowed"
+              }`}
+              title="Send message"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                <path d="M3 2l11 6-11 6V9.5l7-1.5-7-1.5V2z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* ── Below-card controls ── */}
+        <div className="mt-3 sm:mt-4 space-y-2">
+
+          {/* Backend toggle */}
+          {backends.length > 1 && (
+            <div className="flex items-center justify-center">
+              <div className="flex items-center bg-cc-hover/50 rounded-lg p-0.5">
+                {backends.map((b) => (
+                  <button
+                    key={b.id}
+                    onClick={() => b.available && switchBackend(b.id as BackendType)}
+                    disabled={!b.available}
+                    title={b.available ? b.name : `${b.name} CLI not found in PATH`}
+                    className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-md transition-colors ${
+                      !b.available
+                        ? "text-cc-muted/40 cursor-not-allowed"
+                        : backend === b.id
+                          ? "bg-cc-card text-cc-fg font-medium shadow-sm cursor-pointer"
+                          : "text-cc-muted hover:text-cc-fg cursor-pointer"
+                    }`}
+                  >
+                    {b.name}
+                    {!b.available && (
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3 text-cc-error/60">
+                        <circle cx="8" cy="8" r="6" />
+                        <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" />
+                      </svg>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Resume: Branch from session (Claude only) ── */}
+          {backend === "claude" && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowBranchingControls((v) => !v)}
+                className={`mx-auto flex items-center gap-1.5 px-2 py-1 text-[11px] sm:text-xs rounded-md transition-colors cursor-pointer ${
+                  showBranchingControls
+                    ? "text-cc-primary"
+                    : "text-cc-muted hover:text-cc-fg"
+                }`}
+                aria-expanded={showBranchingControls}
+                aria-controls="branch-from-session-panel"
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5 opacity-60">
+                  <path d="M5 3.5a2 2 0 110 4 2 2 0 010-4zm6 5a2 2 0 110 4 2 2 0 010-4z" />
+                  <path d="M7 5.5h2.5A1.5 1.5 0 0111 7v1" strokeLinecap="round" />
+                </svg>
+                Branch from session
+                <svg
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                  className={`w-3 h-3 opacity-40 transition-transform ${showBranchingControls ? "rotate-180" : ""}`}
+                >
+                  <path d="M4 6l4 4 4-4" />
+                </svg>
+              </button>
+
+              {/* Accordion panel for branch-from-session */}
+              <div
+                className="accordion-panel"
+                data-open={showBranchingControls ? "true" : "false"}
+              >
+                <div className="accordion-inner" inert={!showBranchingControls || undefined}>
+                  <div
+                    id="branch-from-session-panel"
+                    className="mt-2 px-1 sm:px-2 py-2 space-y-2 rounded-xl border border-cc-border/20 bg-cc-card/30"
+                  >
                         <div className="flex flex-wrap items-center gap-1.5">
                           <button
                             type="button"
@@ -1414,7 +1387,7 @@ export function HomePage() {
                                 return (
                                   <div
                                     key={`${candidate.resumeSessionId}-row-${candidate.sessionId}`}
-                                    className="px-2.5 py-2.5 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.7fr)_auto] sm:items-center"
+                                    className="px-2 py-2 sm:px-2.5 sm:py-2.5 grid grid-cols-1 gap-1.5 sm:gap-2 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.7fr)_auto] sm:items-center"
                                   >
                                     <div className="min-w-0">
                                       <p className={`text-xs truncate ${selected ? "text-cc-primary font-medium" : "text-cc-fg"}`}>
@@ -1500,47 +1473,48 @@ export function HomePage() {
                       </div>
                     </div>
                   </div>
-                </section>
-              )}
-
-              {/* Onboarding tip — shown once for new users */}
-              {showOnboardingTip && (
-                <div className="flex items-start gap-2 px-2 py-2 rounded-lg bg-cc-primary/5 border border-cc-primary/10 text-[11px] text-cc-muted">
-                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 text-cc-primary/60 shrink-0 mt-0.5">
-                    <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8zm6.5-.25A.75.75 0 017.25 7h1a.75.75 0 01.75.75v2.75h.25a.75.75 0 010 1.5h-2a.75.75 0 010-1.5h.25v-2h-.25a.75.75 0 01-.75-.75zM8 6a1 1 0 110-2 1 1 0 010 2z" />
-                  </svg>
-                  <span className="flex-1">
-                    <strong className="text-cc-fg">Workspace</strong> sets where your code lives.{" "}
-                    <strong className="text-cc-fg">Runtime</strong> configures how the session runs.{" "}
-                    <strong className="text-cc-fg">Resume</strong> lets you fork or continue a previous Claude session.
-                  </span>
-                  <button
-                    onClick={() => {
-                      setShowOnboardingTip(false);
-                      localStorage.setItem("cc-onboarding-dismissed", "true");
-                    }}
-                    className="shrink-0 w-5 h-5 flex items-center justify-center rounded text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
-                    aria-label="Dismiss onboarding tip"
-                  >
-                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
-                      <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
-                    </svg>
-                  </button>
                 </div>
-              )}
+            )}
 
-              <LinearSection
-                cwd={cwd}
-                gitRepoInfo={gitRepoInfo}
-                linearConfigured={linearConfigured}
-                selectedLinearIssue={selectedLinearIssue}
-                onIssueSelect={handleIssueSelect}
-                onBranchFromIssue={handleBranchFromIssue}
-                onConnectionSelect={setSelectedLinearConnectionId}
-              />
-            </div>
+
+
+            {/* Onboarding tip — shown once for new users */}
+            {showOnboardingTip && (
+              <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-cc-primary/5 border border-cc-primary/10 text-[11px] text-cc-muted">
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 text-cc-primary/60 shrink-0 mt-0.5">
+                  <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8zm6.5-.25A.75.75 0 017.25 7h1a.75.75 0 01.75.75v2.75h.25a.75.75 0 010 1.5h-2a.75.75 0 010-1.5h.25v-2h-.25a.75.75 0 01-.75-.75zM8 6a1 1 0 110-2 1 1 0 010 2z" />
+                </svg>
+                <span className="flex-1">
+                  The toolbar sets where your code lives, which model to use, and how the session runs.
+                  {backend === "claude" && (
+                    <>{" "}<strong className="text-cc-fg">Branch from session</strong> below lets you fork or continue a previous Claude session.</>
+                  )}
+                </span>
+                <button
+                  onClick={() => {
+                    setShowOnboardingTip(false);
+                    localStorage.setItem("cc-onboarding-dismissed", "true");
+                  }}
+                  className="shrink-0 w-5 h-5 flex items-center justify-center rounded text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                  aria-label="Dismiss onboarding tip"
+                >
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
+                    <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
+            )}
+
+            <LinearSection
+              cwd={cwd}
+              gitRepoInfo={gitRepoInfo}
+              linearConfigured={linearConfigured}
+              selectedLinearIssue={selectedLinearIssue}
+              onIssueSelect={handleIssueSelect}
+              onBranchFromIssue={handleBranchFromIssue}
+              onConnectionSelect={setSelectedLinearConnectionId}
+            />
           </div>
-        </div>
 
         {/* Branch behind remote warning */}
         {pullPrompt && (
@@ -1560,7 +1534,7 @@ export function HomePage() {
                     {pullError}
                   </div>
                 )}
-                <div className="flex gap-2 mt-2.5">
+                <div className="flex flex-wrap gap-2 mt-2.5">
                   <button
                     onClick={handleCancelPull}
                     disabled={pulling}
