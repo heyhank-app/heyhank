@@ -826,7 +826,9 @@ export function HomePage() {
 
   return (
     <div className="flex-1 h-full flex flex-col items-center px-3 sm:px-6 pb-6 pb-safe overflow-y-auto overscroll-y-contain">
-      <div className="w-full max-w-[720px] my-auto">
+      {/* Fixed-height spacer — pushes content to ~20% from top, content grows downward only */}
+      <div className="shrink-0 h-[12vh] sm:h-[18vh]" />
+      <div className="w-full max-w-[720px]">
         {/* Logo + Title — minimal, centered */}
         <div className="flex flex-col items-center mb-6 sm:mb-10">
           <img src={logoSrc} alt="The Companion" className="w-10 h-10 sm:w-12 sm:h-12 mb-3" />
@@ -834,29 +836,6 @@ export function HomePage() {
             The Companion
           </h1>
         </div>
-
-        {/* Image thumbnails */}
-        {images.length > 0 && (
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
-            {images.map((img, i) => (
-              <div key={i} className="relative group">
-                <img
-                  src={`data:${img.mediaType};base64,${img.base64}`}
-                  alt={img.name}
-                  className="w-12 h-12 rounded-lg object-cover border border-cc-border"
-                />
-                <button
-                  onClick={() => removeImage(i)}
-                  className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-cc-error text-white flex items-center justify-center text-[10px] opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity cursor-pointer"
-                >
-                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5">
-                    <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
-                  </svg>
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
 
         {/* Hidden file input */}
         <input
@@ -880,21 +859,41 @@ export function HomePage() {
             menuRef={mention.mentionMenuRef}
             className="absolute left-2 right-2 bottom-full mb-1"
           />
-          {selectedLinearIssue && (
-            <div className="px-4 pt-3">
-              <div className="inline-flex max-w-full items-center gap-2 rounded-md border border-cc-border bg-cc-hover/60 px-2.5 py-1.5 text-[11px] text-cc-muted">
-                <span className="shrink-0">Linear</span>
-                <span className="font-mono-code shrink-0">{selectedLinearIssue.identifier}</span>
-                <span className="truncate">{selectedLinearIssue.title}</span>
-                <button
-                  type="button"
-                  onClick={() => handleIssueSelect(null)}
-                  className="shrink-0 rounded px-1 text-cc-muted hover:text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
-                  title="Remove Linear issue"
-                >
-                  ×
-                </button>
-              </div>
+          {/* Context badges (Linear issue, images) — inside card to avoid external shift */}
+          {(selectedLinearIssue || images.length > 0) && (
+            <div className="flex items-center gap-2 px-4 pt-3 flex-wrap">
+              {selectedLinearIssue && (
+                <div className="inline-flex max-w-full items-center gap-2 rounded-md border border-cc-border bg-cc-hover/60 px-2.5 py-1.5 text-[11px] text-cc-muted">
+                  <span className="shrink-0">Linear</span>
+                  <span className="font-mono-code shrink-0">{selectedLinearIssue.identifier}</span>
+                  <span className="truncate">{selectedLinearIssue.title}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleIssueSelect(null)}
+                    className="shrink-0 rounded px-1 text-cc-muted hover:text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
+                    title="Remove Linear issue"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+              {images.map((img, i) => (
+                <div key={i} className="relative group">
+                  <img
+                    src={`data:${img.mediaType};base64,${img.base64}`}
+                    alt={img.name}
+                    className="w-10 h-10 rounded-lg object-cover border border-cc-border"
+                  />
+                  <button
+                    onClick={() => removeImage(i)}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-cc-error text-white flex items-center justify-center text-[10px] opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity cursor-pointer"
+                  >
+                    <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5">
+                      <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
             </div>
           )}
           <textarea
