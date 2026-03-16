@@ -1246,6 +1246,54 @@ export function Playground() {
           </div>
         </Section>
 
+        <Section
+          title="Interesting Events"
+          description="Event summaries that are worth surfacing in the chat feed"
+        >
+          <div className="space-y-4 max-w-3xl">
+            <Card label="Context compacted">
+              <MessageBubble
+                message={{
+                  id: "event-compact",
+                  role: "system",
+                  content: "Context compacted (auto, pre-tokens: 182344).",
+                  timestamp: Date.now(),
+                }}
+              />
+            </Card>
+            <Card label="Background task completed">
+              <MessageBubble
+                message={{
+                  id: "event-task",
+                  role: "system",
+                  content: "Task completed: a1b2c3d. Build finished successfully.",
+                  timestamp: Date.now(),
+                }}
+              />
+            </Card>
+            <Card label="Files persisted">
+              <MessageBubble
+                message={{
+                  id: "event-files",
+                  role: "system",
+                  content: "Persisted 3 file(s).",
+                  timestamp: Date.now(),
+                }}
+              />
+            </Card>
+            <Card label="Hook outcome">
+              <MessageBubble
+                message={{
+                  id: "event-hook",
+                  role: "system",
+                  content: "Hook success: lint (post_tool_use) (exit 0).",
+                  timestamp: Date.now(),
+                }}
+              />
+            </Card>
+          </div>
+        </Section>
+
         {/* ─── Task Panel ──────────────────────────────── */}
         <Section
           title="Tasks"

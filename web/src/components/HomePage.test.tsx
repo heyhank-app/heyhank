@@ -54,6 +54,7 @@ vi.mock("../store.js", () => {
 
 vi.mock("../ws.js", () => ({
   connectSession: vi.fn(),
+  createClientMessageId: vi.fn(() => "test-client-msg-id"),
   waitForConnection: vi.fn().mockResolvedValue(undefined),
   sendToSession: vi.fn(),
   disconnectSession: vi.fn(),

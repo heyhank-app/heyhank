@@ -1857,6 +1857,87 @@ describe("Browser message routing", () => {
     expect(messageTypes).toEqual(["user_message", "user_message", "mcp_get_status"]);
   });
 
+  it("flushes bridge-queued messages when codex session init marks the adapter connected", () => {
+    const browser = makeBrowserSocket("codex-init-flush");
+    bridge.handleBrowserOpen(browser, "codex-init-flush");
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "flush me after codex init",
+    }));
+
+    const session = bridge.getSession("codex-init-flush")!;
+    expect(session.pendingMessages).toHaveLength(1);
+
+    let onBrowserMessage: ((msg: any) => void) | undefined;
+    let onSessionMeta: ((meta: any) => void) | undefined;
+    const send = vi.fn(() => connected);
+    let connected = false;
+    const adapter = {
+      isConnected: () => connected,
+      send,
+      disconnect: async () => {},
+      onBrowserMessage: (cb: (msg: any) => void) => {
+        onBrowserMessage = cb;
+      },
+      onSessionMeta: (cb: (meta: any) => void) => {
+        onSessionMeta = cb;
+      },
+      onDisconnect: () => {},
+      onInitError: () => {},
+    };
+
+    bridge.attachBackendAdapter("codex-init-flush", adapter as any, "codex");
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(session.pendingMessages).toHaveLength(1);
+
+    connected = true;
+    onSessionMeta?.({
+      cliSessionId: "thr-codex-init-flush",
+      model: "gpt-5.4",
+      cwd: "/test",
+    });
+    onBrowserMessage?.({
+      type: "session_init",
+      session: {
+        session_id: "codex-init-flush",
+        backend_type: "codex",
+        model: "gpt-5.4",
+        cwd: "/test",
+        tools: [],
+        permissionMode: "bypassPermissions",
+        claude_code_version: "",
+        mcp_servers: [],
+        agents: [],
+        slash_commands: [],
+        skills: [],
+        total_cost_usd: 0,
+        num_turns: 0,
+        context_used_percent: 0,
+        is_compacting: false,
+        git_branch: "",
+        is_worktree: false,
+        is_containerized: false,
+        repo_root: "",
+        git_ahead: 0,
+        git_behind: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+      },
+    });
+
+    expect(send).toHaveBeenCalledTimes(2);
+    const flushedCall = (send.mock.calls as any[][])[1];
+    const flushedArg = flushedCall?.[0];
+    expect(flushedCall).toBeDefined();
+    expect(flushedArg).toMatchObject({
+      type: "user_message",
+      content: "flush me after codex init",
+    });
+    expect(session.pendingMessages).toHaveLength(0);
+  });
+
   it("preserves FIFO when queued flush is interrupted before sending current message", () => {
     const session = bridge.getSession("s1")!;
     session.pendingMessages.push(JSON.stringify({

@@ -386,6 +386,10 @@ function nextClientMsgId(): string {
   return `cmsg-${Date.now()}-${++clientMsgCounter}`;
 }
 
+export function createClientMessageId(): string {
+  return nextClientMsgId();
+}
+
 const IDEMPOTENT_OUTGOING_TYPES = new Set<BrowserOutgoingMessage["type"]>([
   "user_message",
   "permission_response",
@@ -761,6 +765,16 @@ function handleParsedMessage(
         role: "system",
         content: data.summary,
         timestamp: Date.now(),
+      });
+      break;
+    }
+
+    case "user_message": {
+      store.appendMessage(sessionId, {
+        id: data.id || nextId(),
+        role: "user",
+        content: data.content,
+        timestamp: data.timestamp || Date.now(),
       });
       break;
     }

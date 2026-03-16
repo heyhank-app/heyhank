@@ -225,6 +225,56 @@ describe("sendToSession", () => {
   });
 });
 
+describe("handleMessage: user_message", () => {
+  it("appends live user_message events from the server", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({
+      type: "user_message",
+      id: "cmsg-live-1",
+      content: "server-backed prompt",
+      timestamp: 1000,
+    });
+
+    expect(useStore.getState().messages.get("s1")).toEqual([
+      expect.objectContaining({
+        id: "cmsg-live-1",
+        role: "user",
+        content: "server-backed prompt",
+        timestamp: 1000,
+      }),
+    ]);
+  });
+
+  it("deduplicates optimistic user messages when the server echoes the same id", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    useStore.getState().appendMessage("s1", {
+      id: "cmsg-optimistic-1",
+      role: "user",
+      content: "optimistic first prompt",
+      timestamp: 1000,
+    });
+
+    fireMessage({
+      type: "user_message",
+      id: "cmsg-optimistic-1",
+      content: "optimistic first prompt",
+      timestamp: 1000,
+    });
+
+    const messages = useStore.getState().messages.get("s1")!;
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      id: "cmsg-optimistic-1",
+      role: "user",
+      content: "optimistic first prompt",
+    });
+  });
+});
+
 // ===========================================================================
 // disconnectSession
 // ===========================================================================

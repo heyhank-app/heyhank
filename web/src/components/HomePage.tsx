@@ -12,7 +12,7 @@ import {
   type ImagePullState,
   type LinearIssue,
 } from "../api.js";
-import { connectSession, waitForConnection, sendToSession } from "../ws.js";
+import { connectSession, createClientMessageId, waitForConnection, sendToSession } from "../ws.js";
 import { disconnectSession } from "../ws.js";
 import { generateUniqueSessionName } from "../utils/names.js";
 import { getRecentDirs, addRecentDir } from "../utils/recent-dirs.js";
@@ -28,8 +28,6 @@ import { MentionMenu } from "./MentionMenu.js";
 import { useMentionMenu } from "../utils/use-mention-menu.js";
 import type { SavedPrompt } from "../api.js";
 import type { SdkSessionInfo } from "../types.js";
-
-let idCounter = 0;
 
 type ResumeCandidate = {
   resumeSessionId: string;
@@ -697,6 +695,7 @@ export function HomePage() {
       const trimmedMsg = msg.trim();
       if (trimmedMsg.length > 0) {
         const initialMessage = buildInitialMessage(trimmedMsg);
+        const clientMsgId = createClientMessageId();
 
         // Send message
         sendToSession(sessionId, {
@@ -704,11 +703,12 @@ export function HomePage() {
           content: initialMessage,
           session_id: sessionId,
           images: images.length > 0 ? images.map((img) => ({ media_type: img.mediaType, data: img.base64 })) : undefined,
+          client_msg_id: clientMsgId,
         });
 
         // Add user message to store
         useStore.getState().appendMessage(sessionId, {
-          id: `user-${Date.now()}-${++idCounter}`,
+          id: clientMsgId,
           role: "user",
           content: initialMessage,
           images: images.length > 0 ? images.map((img) => ({ media_type: img.mediaType, data: img.base64 })) : undefined,

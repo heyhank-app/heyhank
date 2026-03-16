@@ -438,6 +438,9 @@ export class WsBridge {
         };
         this.refreshGitInfo(session, { notifyPoller: true });
         this.persistSession(session);
+        if (session.pendingMessages.length > 0 && adapter.isConnected()) {
+          this.flushQueuedBrowserMessages(session, adapter, "backend_session_update");
+        }
       }
 
       // -- status_change: update compacting flag ---------------------------
@@ -454,6 +457,16 @@ export class WsBridge {
           session.state.permissionMode = permMode;
         }
         this.persistSession(session);
+      }
+
+      if (msg.type === "user_message") {
+        const alreadyPersisted = msg.id
+          ? session.messageHistory.some((entry) => entry.type === "user_message" && entry.id === msg.id)
+          : false;
+        if (!alreadyPersisted) {
+          this.appendHistory(session, msg);
+          this.persistSession(session);
+        }
       }
 
       // -- assistant: append to history, notify listeners ------------------
@@ -567,6 +580,9 @@ export class WsBridge {
       session.state.backend_type = session.backendType;
       this.refreshGitInfo(session, { broadcastUpdate: true, notifyPoller: true });
       this.persistSession(session);
+      if (session.pendingMessages.length > 0 && adapter.isConnected()) {
+        this.flushQueuedBrowserMessages(session, adapter, "backend_session_meta");
+      }
     });
 
     // ── onDisconnect — handle transport disconnection ────────────────────
@@ -1045,12 +1061,13 @@ export class WsBridge {
     if (msg.type === "user_message") {
       metricsCollector.recordTurnStarted(session.id);
       const ts = Date.now();
-      this.appendHistory(session, {
+      const userMessage: BrowserIncomingMessage = {
         type: "user_message",
         content: msg.content,
         timestamp: ts,
-        id: `user-${ts}-${this.userMsgCounter++}`,
-      });
+        id: msg.client_msg_id || `user-${ts}-${this.userMsgCounter++}`,
+      };
+      this.appendHistory(session, userMessage);
       const transitioned = session.stateMachine.transition("streaming", "user_message");
       if (!transitioned) {
         // Session not ready yet (e.g. still initializing). Log a warning so
@@ -1062,6 +1079,7 @@ export class WsBridge {
         });
       }
       this.persistSession(session);
+      this.broadcastToBrowsers(session, userMessage);
     }
 
     // -- permission_response: populate updatedInput fallback from pending, then remove -------

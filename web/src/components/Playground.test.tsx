@@ -32,5 +32,10 @@ describe("Playground", () => {
     // Subagent playground demo should show Codex-specific metadata presentation.
     expect(screen.getByText("sender: thr_main")).toBeTruthy();
     expect(screen.getByText("thr_sub_1")).toBeTruthy();
+
+    // Interesting event states should be represented in the playground.
+    expect(screen.getByText("Interesting Events")).toBeTruthy();
+    expect(screen.getByText("Context compacted (auto, pre-tokens: 182344).")).toBeTruthy();
+    expect(screen.getByText("Hook success: lint (post_tool_use) (exit 0).")).toBeTruthy();
   });
 });

@@ -22,6 +22,7 @@ vi.mock("../utils/image.js", () => ({
 
 vi.mock("../ws.js", () => ({
   sendToSession: (...args: unknown[]) => mockSendToSession(...args),
+  createClientMessageId: () => "test-client-msg-id",
 }));
 
 vi.mock("../api.js", () => ({

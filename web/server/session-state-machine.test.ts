@@ -125,11 +125,15 @@ describe("SessionStateMachine", () => {
     it("compacting -> terminated", () =>
       expectValidTransition("compacting", "terminated"));
 
-    // reconnecting -> initializing, starting, terminated
+    // reconnecting -> initializing, starting, ready, streaming, terminated
     it("reconnecting -> initializing", () =>
       expectValidTransition("reconnecting", "initializing"));
     it("reconnecting -> starting", () =>
       expectValidTransition("reconnecting", "starting"));
+    it("reconnecting -> ready", () =>
+      expectValidTransition("reconnecting", "ready"));
+    it("reconnecting -> streaming", () =>
+      expectValidTransition("reconnecting", "streaming"));
     it("reconnecting -> terminated", () =>
       expectValidTransition("reconnecting", "terminated"));
 
@@ -168,10 +172,8 @@ describe("SessionStateMachine", () => {
       expectBlockedTransition("terminated", "ready"));
     it("terminated -> streaming is blocked", () =>
       expectBlockedTransition("terminated", "streaming"));
-    it("reconnecting -> ready is blocked", () =>
-      expectBlockedTransition("reconnecting", "ready"));
-    it("reconnecting -> streaming is blocked", () =>
-      expectBlockedTransition("reconnecting", "streaming"));
+    // reconnecting -> ready and reconnecting -> streaming are now valid
+    // transitions (needed for Codex adapter WS reconnect recovery).
     it("ready -> initializing is blocked", () =>
       expectBlockedTransition("ready", "initializing"));
     it("awaiting_permission -> compacting is blocked", () =>
