@@ -44,7 +44,10 @@ export function attachCodexAdapterHandlers(
     if (msg.type === "session_init") {
       // Preserve pre-populated commands/skills when adapter sends empty arrays
       // (Codex does not provide its own commands/skills)
-      const { slash_commands, skills, ...rest } = msg.session;
+      // Exclude session_id: the adapter may report its own internal session ID
+      // which differs from the Companion's session ID.  Allowing it to overwrite
+      // session.state.session_id causes duplicate sidebar entries.
+      const { slash_commands, skills, session_id: _cliSessionId, ...rest } = msg.session;
       session.state = {
         ...session.state,
         ...rest,
@@ -56,7 +59,8 @@ export function attachCodexAdapterHandlers(
       deps.persistSession(session);
       session.stateMachine.transition("ready", "codex_session_init");
     } else if (msg.type === "session_update") {
-      const { slash_commands, skills, ...rest } = msg.session;
+      // Exclude session_id — same rationale as session_init above.
+      const { slash_commands, skills, session_id: _cliSessionId, ...rest } = msg.session;
       session.state = {
         ...session.state,
         ...rest,

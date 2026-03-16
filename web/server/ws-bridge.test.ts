@@ -480,6 +480,73 @@ describe("CLI handlers", () => {
     expect(callback).toHaveBeenCalledWith("s1", "cli-internal-id");
   });
 
+  it("handleCLIMessage: system.init preserves Companion session_id (does not overwrite with CLI internal ID)", async () => {
+    // Regression test for duplicate sidebar entries bug.
+    // The CLI sends its own internal session_id in the system.init message.
+    // The bridge must NOT allow this to overwrite session.state.session_id
+    // (which is the Companion's session ID used by the browser as a Map key).
+    // If overwritten, the browser adds the session under the CLI's ID while
+    // the sdkSessions poll uses the Companion's ID — creating two entries.
+    mockExecSync.mockImplementation(() => {
+      throw new Error("not a git repo");
+    });
+
+    const cli = makeCliSocket("s1");
+    const browser = makeBrowserSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    browser.send.mockClear();
+
+    // CLI reports a different session_id than the Companion's "s1"
+    await bridge.handleCLIMessage(cli, makeInitMsg({ session_id: "cli-internal-uuid-abc123" }));
+
+    const session = bridge.getSession("s1")!;
+    // session.state.session_id must remain the Companion's ID
+    expect(session.state.session_id).toBe("s1");
+
+    // The broadcast to the browser must also use the Companion's ID
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+    const initCall = calls.find((c: any) => c.type === "session_init");
+    expect(initCall).toBeDefined();
+    expect(initCall.session.session_id).toBe("s1");
+  });
+
+  it("handleCLIMessage: session_update preserves Companion session_id (does not overwrite with CLI internal ID)", async () => {
+    // Regression test: after session_init lands, a subsequent session_update
+    // from the adapter must NOT overwrite session.state.session_id with the
+    // CLI's internal ID.  This mirrors the session_init regression test above.
+    mockExecSync.mockImplementation(() => {
+      throw new Error("not a git repo");
+    });
+
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+
+    // First, send session_init to get the session into ready state
+    await bridge.handleCLIMessage(cli, makeInitMsg({ session_id: "cli-internal-uuid-abc123" }));
+
+    const session = bridge.getSession("s1")!;
+    expect(session.state.session_id).toBe("s1"); // sanity check after init
+
+    // Now simulate a session_update with a different session_id coming through
+    // the adapter pipeline.  We invoke the adapter's browserMessageCb directly
+    // because the Claude adapter does not natively emit session_update — this
+    // path is exercised by the Codex adapter in production.
+    const adapter = session.backendAdapter as any;
+    adapter.browserMessageCb({
+      type: "session_update",
+      session: {
+        session_id: "cli-internal-uuid-abc123",
+        model: "claude-opus-4-6",
+      },
+    });
+
+    // session.state.session_id must still be the Companion's ID
+    expect(session.state.session_id).toBe("s1");
+    // The model update should still have been applied
+    expect(session.state.model).toBe("claude-opus-4-6");
+  });
+
   it("handleCLIMessage: updates state from init (model, cwd, tools, permissionMode)", async () => {
     mockExecSync.mockImplementation(() => {
       throw new Error("not a git repo");

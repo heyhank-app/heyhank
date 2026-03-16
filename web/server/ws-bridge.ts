@@ -401,7 +401,11 @@ export class WsBridge {
 
       // -- session_init: merge into session state, broadcast, persist -----
       if (msg.type === "session_init") {
-        const { slash_commands, skills, ...rest } = msg.session;
+        // Exclude session_id from the spread: the CLI reports its own internal
+        // session ID which differs from the Companion's session ID.  Allowing
+        // it to overwrite session.state.session_id causes the browser to key
+        // the session under the wrong ID, producing duplicate sidebar entries.
+        const { slash_commands, skills, session_id: _cliSessionId, ...rest } = msg.session;
         // For containerized sessions, the CLI reports /workspace as its cwd.
         // Keep the host path (set by markContainerized()) for correct project grouping.
         const cwdOverride = session.state.is_containerized ? { cwd: session.state.cwd } : {};
@@ -423,7 +427,8 @@ export class WsBridge {
 
       // -- session_update: merge into session state, persist ---------------
       if (msg.type === "session_update") {
-        const { slash_commands, skills, ...rest } = msg.session;
+        // Exclude session_id — same rationale as session_init above.
+        const { slash_commands, skills, session_id: _cliSessionId, ...rest } = msg.session;
         session.state = {
           ...session.state,
           ...rest,
