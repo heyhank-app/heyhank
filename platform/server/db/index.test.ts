@@ -8,18 +8,21 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
  * ensures each test starts with a fresh singleton.
  */
 
-// Mock @neondatabase/serverless to avoid real HTTP calls.
-vi.mock("@neondatabase/serverless", () => ({
-  neon: vi.fn(() => vi.fn()),
+// Mock end() so we can verify closeDb() drains the pool.
+const mockEnd = vi.fn(async () => {});
+// Mock postgres to avoid real TCP connections.
+vi.mock("postgres", () => ({
+  default: vi.fn(() => Object.assign(vi.fn(), { end: mockEnd })),
 }));
 
-// Mock drizzle-orm/neon-http to return a fake db instance.
-vi.mock("drizzle-orm/neon-http", () => ({
+// Mock drizzle-orm/postgres-js to return a fake db instance.
+vi.mock("drizzle-orm/postgres-js", () => ({
   drizzle: vi.fn(() => ({ __drizzle: true })),
 }));
 
 async function freshImport() {
   vi.resetModules();
+  mockEnd.mockClear();
   return import("./index.js");
 }
 
@@ -55,5 +58,28 @@ describe("getDb", () => {
     const db1 = getDb();
     const db2 = getDb();
     expect(db1).toBe(db2);
+  });
+
+  it("closeDb drains the connection pool and resets the singleton", async () => {
+    process.env.DATABASE_URL = "postgres://localhost/test";
+    const { getDb, closeDb } = await freshImport();
+
+    // Initialise the singleton so the sql client is created
+    getDb();
+    expect(mockEnd).not.toHaveBeenCalled();
+
+    await closeDb();
+    expect(mockEnd).toHaveBeenCalledOnce();
+
+    // After closing, getDb() creates a fresh connection
+    getDb();
+    expect(mockEnd).toHaveBeenCalledOnce(); // still 1 — no extra end() call
+  });
+
+  it("closeDb is a no-op when no connection exists", async () => {
+    const { closeDb } = await freshImport();
+    // Should not throw when called without prior getDb()
+    await closeDb();
+    expect(mockEnd).not.toHaveBeenCalled();
   });
 });
