@@ -41,6 +41,7 @@ vi.mock("../store.js", () => ({
       streamingOutputTokens: mockStoreValues.streamingOutputTokens ?? new Map(),
       sessionStatus: mockStoreValues.sessionStatus ?? new Map(),
       toolProgress: mockStoreValues.toolProgress ?? new Map(),
+      toolActivity: mockStoreValues.toolActivity ?? new Map(),
       chatTabReentryTickBySession:
         mockStoreValues.chatTabReentryTickBySession ?? new Map(),
       sdkSessions: mockStoreValues.sdkSessions ?? [],
@@ -109,6 +110,7 @@ function resetStore() {
   mockStoreValues.streamingOutputTokens = new Map();
   mockStoreValues.sessionStatus = new Map();
   mockStoreValues.toolProgress = new Map();
+  mockStoreValues.toolActivity = new Map();
   mockStoreValues.chatTabReentryTickBySession = new Map();
   mockStoreValues.sdkSessions = [];
 }
@@ -279,7 +281,7 @@ describe("MessageFeed - generation stats bar", () => {
 
     render(<MessageFeed sessionId={sid} />);
 
-    expect(screen.getByText("Generating...")).toBeTruthy();
+    expect(screen.getByText("Generating")).toBeTruthy();
   });
 
   it("does not render stats bar when session is idle", () => {
@@ -289,7 +291,7 @@ describe("MessageFeed - generation stats bar", () => {
 
     render(<MessageFeed sessionId={sid} />);
 
-    expect(screen.queryByText("Generating...")).toBeNull();
+    expect(screen.queryByText("Generating")).toBeNull();
   });
 
   it("shows output tokens in stats bar when available", () => {
@@ -301,7 +303,7 @@ describe("MessageFeed - generation stats bar", () => {
 
     render(<MessageFeed sessionId={sid} />);
 
-    expect(screen.getByText("Generating...")).toBeTruthy();
+    expect(screen.getByText("Generating")).toBeTruthy();
     // Should show "2.5k" token count
     expect(screen.getByText(/2\.5k/)).toBeTruthy();
   });
@@ -729,9 +731,8 @@ describe("MessageFeed - subagent grouping", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /spawn_agent/i }));
 
-    expect(screen.getByText("2 running")).toBeTruthy();
-    expect(screen.getByText("sender: thr_main")).toBeTruthy();
-    expect(screen.getByText("receivers: 2")).toBeTruthy();
+    // After expanding, participant details are shown inline
+    expect(screen.getByText(/sender: thr_main/)).toBeTruthy();
     expect(screen.getByText("thr_sub_1")).toBeTruthy();
     expect(screen.getByText("thr_sub_2")).toBeTruthy();
   });

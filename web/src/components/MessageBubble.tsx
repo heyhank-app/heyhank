@@ -19,8 +19,8 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
 
   if (message.role === "user") {
     return (
-      <div className="flex justify-end animate-[fadeSlideIn_0.2s_ease-out]">
-        <div className="max-w-[85%] sm:max-w-[80%] px-3 sm:px-4 py-2.5 rounded-[14px] rounded-br-[4px] bg-cc-user-bubble text-cc-fg">
+      <div className="flex justify-end animate-[userSlideIn_0.3s_ease-out]">
+        <div className="max-w-[85%] sm:max-w-[80%] px-3.5 sm:px-4 py-2.5 rounded-[16px] rounded-br-[6px] user-bubble-gradient text-cc-fg shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
           {message.images && message.images.length > 0 && (
             <div className="flex gap-2 flex-wrap mb-2">
               {message.images.map((img, i) => (
@@ -28,7 +28,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
                   key={i}
                   src={`data:${img.media_type};base64,${img.data}`}
                   alt="attachment"
-                  className="max-w-[150px] sm:max-w-[200px] max-h-[120px] sm:max-h-[150px] rounded-lg object-cover"
+                  className="max-w-[150px] sm:max-w-[200px] max-h-[120px] sm:max-h-[150px] rounded-xl object-cover border border-cc-border/30"
                 />
               ))}
             </div>
@@ -43,7 +43,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
 
   // Assistant message
   return (
-    <div className="animate-[fadeSlideIn_0.2s_ease-out]">
+    <div className="animate-[fadeSlideIn_0.3s_ease-out]">
       <AssistantMessage message={message} />
     </div>
   );
@@ -103,11 +103,17 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   const toolUseById = useMemo(() => mapToolUsesById(blocks), [blocks]);
 
   if (blocks.length === 0 && message.content) {
+    // During streaming thinking phase, render as faded italic inline text
+    const isThinkingPhase = message.isStreaming && message.streamingPhase === "thinking";
     return (
       <div className="flex items-start gap-3">
         <AssistantAvatar />
         <div className="flex-1 min-w-0">
-          <MarkdownContent text={message.content} showCursor={!!message.isStreaming} />
+          {isThinkingPhase ? (
+            <ThinkingBlock text={message.content} />
+          ) : (
+            <MarkdownContent text={message.content} showCursor={!!message.isStreaming} />
+          )}
         </div>
       </div>
     );
@@ -136,10 +142,12 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
 
 function AssistantAvatar() {
   return (
-    <div className="w-6 h-6 rounded-full bg-cc-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-primary">
-        <circle cx="8" cy="8" r="3" />
-      </svg>
+    <div className="w-6 h-6 rounded-full avatar-ring flex items-center justify-center shrink-0 mt-0.5">
+      <div className="avatar-inner w-full h-full rounded-full flex items-center justify-center">
+        <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-primary">
+          <path d="M8 2L10.5 6.5L15 8L10.5 9.5L8 14L5.5 9.5L1 8L5.5 6.5L8 2Z" />
+        </svg>
+      </div>
     </div>
   );
 }
@@ -198,13 +206,20 @@ function MarkdownContent({ text, showCursor = false }: { text: string; showCurso
             if (isBlock) {
               const lang = match?.[1] || "";
               return (
-                <div className="my-2 rounded-lg overflow-hidden border border-cc-border">
+                <div className="my-2.5 rounded-xl overflow-hidden border border-cc-border shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
                   {lang && (
-                    <div className="px-3 py-1.5 bg-cc-code-bg/80 border-b border-cc-border text-[10px] text-cc-muted font-mono-code uppercase tracking-wider">
-                      {lang}
+                    <div className="px-3 py-1.5 bg-cc-code-bg border-b border-cc-border flex items-center gap-2">
+                      <div className="flex gap-1">
+                        <span className="w-2 h-2 rounded-full bg-cc-muted/20" />
+                        <span className="w-2 h-2 rounded-full bg-cc-muted/20" />
+                        <span className="w-2 h-2 rounded-full bg-cc-muted/20" />
+                      </div>
+                      <span className="text-[10px] text-cc-muted/70 font-mono-code uppercase tracking-wider">
+                        {lang}
+                      </span>
                     </div>
                   )}
-                  <pre className="px-2 sm:px-3 py-2 sm:py-2.5 bg-cc-code-bg text-cc-code-fg text-[12px] sm:text-[13px] font-mono-code leading-relaxed overflow-x-auto">
+                  <pre className="px-3 sm:px-4 py-2.5 sm:py-3 bg-cc-code-bg text-cc-code-fg text-[12px] sm:text-[13px] font-mono-code leading-relaxed overflow-x-auto">
                     <code>{children}</code>
                   </pre>
                 </div>
@@ -212,7 +227,7 @@ function MarkdownContent({ text, showCursor = false }: { text: string; showCurso
             }
 
             return (
-              <code className="px-1.5 py-0.5 rounded-md bg-cc-fg/[0.06] text-[13px] font-mono-code text-cc-fg/80">
+              <code className="px-1.5 py-0.5 rounded-md bg-cc-fg/[0.06] text-[12.5px] font-mono-code text-cc-fg/80 border border-cc-border/40">
                 {children}
               </code>
             );
@@ -245,7 +260,7 @@ function MarkdownContent({ text, showCursor = false }: { text: string; showCurso
       {showCursor && (
         <span
           data-testid="assistant-stream-cursor"
-          className="inline-block w-0.5 h-4 bg-cc-primary ml-0.5 align-middle animate-[pulse-dot_0.8s_ease-in-out_infinite]"
+          className="inline-block w-[3px] h-[18px] bg-cc-primary rounded-full ml-0.5 align-middle animate-[pulse-dot_1s_ease-in-out_infinite]"
         />
       )}
     </div>
@@ -280,12 +295,12 @@ function ContentBlockRenderer({
       return <BashResultBlock text={content} isError={isError} />;
     }
     return (
-      <div className={`text-xs font-mono-code rounded-lg px-3 py-2 border ${
-        isError
-          ? "bg-cc-error/5 border-cc-error/20 text-cc-error"
-          : "bg-cc-card border-cc-border text-cc-muted"
-      } max-h-40 overflow-y-auto whitespace-pre-wrap`}>
-        {content}
+      <div className="rounded-lg bg-cc-code-bg overflow-hidden">
+        <pre className={`text-[12px] font-mono-code px-3 py-2 whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto ${
+          isError ? "text-cc-error" : "text-cc-code-fg/60"
+        }`}>
+          {content}
+        </pre>
       </div>
     );
   }
@@ -300,31 +315,25 @@ function BashResultBlock({ text, isError }: { text: string; isError: boolean }) 
   const rendered = showFull || !hasMore ? text : lines.slice(-20).join("\n");
 
   return (
-    <div className={`rounded-lg border ${
-      isError
-        ? "bg-cc-error/5 border-cc-error/20"
-        : "bg-cc-card border-cc-border"
-    }`}>
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-cc-border">
-        <span className={`text-[10px] font-medium ${
-          isError ? "text-cc-error" : "text-cc-muted"
-        }`}>
-          {hasMore && !showFull ? "Output (last 20 lines)" : "Output"}
-        </span>
-        {hasMore && (
-          <button
-            onClick={() => setShowFull(!showFull)}
-            className="text-[10px] text-cc-primary hover:underline cursor-pointer"
-          >
-            {showFull ? "Show tail" : "Show full"}
-          </button>
-        )}
-      </div>
-      <pre className={`text-xs font-mono-code px-3 py-2 whitespace-pre-wrap max-h-60 overflow-y-auto ${
-        isError ? "text-cc-error" : "text-cc-muted"
+    <div className="rounded-lg bg-cc-code-bg overflow-hidden">
+      <pre className={`text-[12px] font-mono-code px-3 py-2 whitespace-pre-wrap leading-relaxed ${
+        isError ? "text-cc-error" : "text-cc-code-fg/60"
       }`}>
         {rendered}
       </pre>
+      {hasMore && (
+        <div className="px-3 pb-1.5 flex items-center justify-between">
+          <span className={`text-[10px] ${isError ? "text-cc-error/50" : "text-cc-muted/40"}`}>
+            {showFull ? `${lines.length} lines` : `last 20 of ${lines.length}`}
+          </span>
+          <button
+            onClick={() => setShowFull(!showFull)}
+            className="text-[10px] text-cc-muted/40 hover:text-cc-muted/70 transition-colors cursor-pointer"
+          >
+            {showFull ? "Show tail" : "Show all"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -335,7 +344,7 @@ function ToolGroupBlock({ name, items }: { name: string; items: ToolGroupItem[] 
   const label = getToolLabel(name);
 
   return (
-    <div className="border border-cc-border rounded-[10px] overflow-hidden bg-cc-card">
+    <div className="border border-cc-border rounded-[10px] overflow-hidden bg-cc-card tool-card">
       <button
         onClick={() => setOpen(!open)}
         className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-cc-hover transition-colors cursor-pointer"
@@ -373,58 +382,40 @@ function ToolGroupBlock({ name, items }: { name: string; items: ToolGroupItem[] 
 
 function ThinkingBlock({ text }: { text: string }) {
   const normalized = text.trim();
-  const preview = normalized.replace(/\s+/g, " ").slice(0, 90);
-  const [open, setOpen] = useState(Boolean(normalized));
+  const [expanded, setExpanded] = useState(false);
+  const lines = normalized.split("\n");
+  const isLong = lines.length > 8 || normalized.length > 600;
+  const displayed = isLong && !expanded
+    ? lines.slice(0, 8).join("\n")
+    : normalized;
 
   return (
-    <div className="border border-cc-border rounded-[12px] overflow-hidden bg-cc-card/70 backdrop-blur-[2px]">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-cc-muted hover:bg-cc-hover/70 transition-colors cursor-pointer"
-      >
-        <svg
-          viewBox="0 0 16 16"
-          fill="currentColor"
-          className={`w-3 h-3 transition-transform ${open ? "rotate-90" : ""}`}
+    <div>
+      <div className="markdown-body text-[13px] text-cc-fg/40 leading-relaxed italic">
+        <Markdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+            ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+            ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+            li: ({ children }) => <li>{children}</li>,
+            code: ({ children }) => (
+              <code className="px-1 py-0.5 rounded bg-cc-fg/[0.03] text-cc-fg/40 font-mono-code text-[12px] not-italic">
+                {children}
+              </code>
+            ),
+          }}
         >
-          <path d="M6 4l4 4-4 4" />
-        </svg>
-        <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-cc-primary/10 text-cc-primary shrink-0">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3">
-            <path d="M8 2.5a3.5 3.5 0 013.5 3.5c0 1.3-.7 2.1-1.4 2.8-.6.6-1.1 1.1-1.1 1.7V11" strokeLinecap="round" />
-            <circle cx="8" cy="13" r="0.7" fill="currentColor" stroke="none" />
-            <path d="M5.3 3.8A3.5 3.5 0 004.5 6c0 1.3.7 2.1 1.4 2.8.6.6 1.1 1.1 1.1 1.7V11" strokeLinecap="round" />
-          </svg>
-        </span>
-        <span className="font-medium text-cc-fg">Reasoning</span>
-        <span className="text-cc-muted/60">{text.length} chars</span>
-        {!open && preview && (
-          <span className="text-cc-muted truncate max-w-[55%]">{preview}</span>
-        )}
-      </button>
-      {open && (
-        <div className="px-3 pb-3 pt-0">
-          <div className="border border-cc-border/70 rounded-lg px-3 py-2 bg-cc-bg/60 max-h-60 overflow-y-auto">
-            <div className="markdown-body text-[13px] text-cc-muted leading-relaxed">
-              <Markdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                  ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
-                  ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
-                  li: ({ children }) => <li>{children}</li>,
-                  code: ({ children }) => (
-                    <code className="px-1.5 py-0.5 rounded-md bg-cc-fg/[0.06] text-cc-fg/80 font-mono-code text-[12px]">
-                      {children}
-                    </code>
-                  ),
-                }}
-              >
-                {normalized || "No thinking text captured."}
-              </Markdown>
-            </div>
-          </div>
-        </div>
+          {displayed || "No thinking text captured."}
+        </Markdown>
+      </div>
+      {isLong && !expanded && (
+        <button
+          onClick={() => setExpanded(true)}
+          className="text-[11px] text-cc-muted/40 hover:text-cc-muted/70 cursor-pointer transition-colors"
+        >
+          Show more
+        </button>
       )}
     </div>
   );

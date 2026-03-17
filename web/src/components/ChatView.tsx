@@ -59,15 +59,16 @@ export function ChatView({ sessionId }: { sessionId: string }) {
     <div className="flex flex-col h-full min-h-0">
       {/* CLI disconnected / reconnecting / error banner */}
       {showCliBanner && (
-        <div className="px-4 py-2 bg-cc-warning/10 border-b border-cc-warning/20 text-center flex items-center justify-center gap-3">
+        <div className="px-4 py-2.5 bg-gradient-to-r from-cc-warning/8 to-cc-warning/4 border-b border-cc-warning/15 flex items-center justify-center gap-3 animate-[fadeSlideIn_0.3s_ease-out]">
           {reconnectError ? (
             <>
+              <span className="w-1.5 h-1.5 rounded-full bg-cc-error shrink-0" />
               <span className="text-xs text-cc-error font-medium">
                 {reconnectError}
               </span>
               <button
                 onClick={handleReconnect}
-                className="text-xs font-medium px-3 py-1.5 rounded-md bg-cc-error/15 hover:bg-cc-error/25 text-cc-error transition-colors cursor-pointer"
+                className="text-xs font-medium px-3 py-1.5 rounded-lg bg-cc-error/12 hover:bg-cc-error/20 text-cc-error transition-all cursor-pointer"
               >
                 Retry
               </button>
@@ -81,12 +82,13 @@ export function ChatView({ sessionId }: { sessionId: string }) {
             </>
           ) : (
             <>
+              <span className="w-1.5 h-1.5 rounded-full bg-cc-warning animate-[pulse-dot_1.5s_ease-in-out_infinite] shrink-0" />
               <span className="text-xs text-cc-warning font-medium">
                 CLI disconnected
               </span>
               <button
                 onClick={handleReconnect}
-                className="text-xs font-medium px-3 py-1.5 rounded-md bg-cc-warning/20 hover:bg-cc-warning/30 text-cc-warning transition-colors cursor-pointer"
+                className="text-xs font-medium px-3 py-1.5 rounded-lg bg-cc-warning/15 hover:bg-cc-warning/25 text-cc-warning transition-all cursor-pointer"
               >
                 Reconnect
               </button>
@@ -97,7 +99,8 @@ export function ChatView({ sessionId }: { sessionId: string }) {
 
       {/* WebSocket disconnected banner */}
       {connStatus === "disconnected" && (
-        <div className="px-4 py-2 bg-cc-warning/10 border-b border-cc-warning/20 text-center">
+        <div className="px-4 py-2.5 bg-gradient-to-r from-cc-warning/8 to-cc-warning/4 border-b border-cc-warning/15 flex items-center justify-center gap-2 animate-[fadeSlideIn_0.3s_ease-out]">
+          <span className="w-3 h-3 rounded-full border-2 border-cc-warning/30 border-t-cc-warning animate-spin" />
           <span className="text-xs text-cc-warning font-medium">
             Reconnecting to session...
           </span>

@@ -168,6 +168,42 @@ describe("Changed files tracking", () => {
   });
 });
 
+// ─── Tool activity ──────────────────────────────────────────────────────────
+
+describe("Tool activity", () => {
+  it("addToolActivity: upserts duplicate toolUseId entries instead of appending", () => {
+    useStore.getState().addToolActivity("s1", {
+      toolUseId: "tool-1",
+      toolName: "Bash",
+      preview: "ls",
+      startedAt: 1000,
+      elapsedSeconds: 1,
+      isError: false,
+    });
+
+    useStore.getState().addToolActivity("s1", {
+      toolUseId: "tool-1",
+      toolName: "Bash",
+      preview: "ls -la",
+      startedAt: 2000,
+      elapsedSeconds: 3,
+      completedAt: 4000,
+      isError: true,
+    });
+
+    const entries = useStore.getState().toolActivity.get("s1")!;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      toolUseId: "tool-1",
+      preview: "ls -la",
+      startedAt: 1000,
+      elapsedSeconds: 3,
+      completedAt: 4000,
+      isError: true,
+    });
+  });
+});
+
 // ─── Process management ──────────────────────────────────────────────────────
 
 describe("Process management", () => {

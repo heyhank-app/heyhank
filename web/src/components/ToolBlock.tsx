@@ -54,15 +54,26 @@ export function ToolBlock({
   input: Record<string, unknown>;
   toolUseId: string;
 }) {
-  const [open, setOpen] = useState(false);
+  // Edit tool opens by default so users can see the diff
+  const [open, setOpen] = useState(name === "Edit");
   const iconType = getToolIcon(name);
   const label = getToolLabel(name);
 
   // Extract the most useful preview
   const preview = getPreview(name, input);
 
+  // Edit gets a special borderless treatment — visual identity without a card
+  if (name === "Edit") {
+    return <EditBlock input={input} />;
+  }
+
+  // Bash gets a terminal-style borderless treatment
+  if (name === "Bash") {
+    return <BashBlock input={input} />;
+  }
+
   return (
-    <div className="border border-cc-border rounded-[10px] overflow-hidden bg-cc-card">
+    <div className="border border-cc-border rounded-[10px] overflow-hidden bg-cc-card tool-card">
       <button
         onClick={() => setOpen(!open)}
         className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-cc-hover transition-colors cursor-pointer"
@@ -70,7 +81,7 @@ export function ToolBlock({
         <svg
           viewBox="0 0 16 16"
           fill="currentColor"
-          className={`w-3 h-3 text-cc-muted transition-transform shrink-0 ${open ? "rotate-90" : ""}`}
+          className={`w-3 h-3 text-cc-muted transition-transform duration-200 shrink-0 ${open ? "rotate-90" : ""}`}
         >
           <path d="M6 4l4 4-4 4" />
         </svg>
@@ -84,12 +95,113 @@ export function ToolBlock({
       </button>
 
       {open && (
-        <div className="px-3 pb-3 pt-0 border-t border-cc-border">
+        <div className="px-3 pb-3 pt-0 border-t border-cc-border/60">
           <div className="mt-2">
             <ToolDetail name={name} input={input} />
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Edit tool — inline diff, no card, no scroll, "show more" for long diffs */
+function EditBlock({ input }: { input: Record<string, unknown> }) {
+  const filePath = String(input.file_path || "");
+  const fileName = filePath ? filePath.split("/").pop() || filePath : "";
+  const oldStr = String(input.old_string || "");
+  const newStr = String(input.new_string || "");
+  const hasDiff = Boolean(oldStr || newStr);
+  const replaceAll = Boolean(input.replace_all);
+  const [expanded, setExpanded] = useState(false);
+  const rawChanges = Array.isArray(input.changes)
+    ? input.changes as Array<{ path?: unknown; kind?: unknown }>
+    : [];
+  const changes = rawChanges
+    .map((c) => ({
+      path: typeof c.path === "string" ? c.path : "",
+      kind: typeof c.kind === "string" ? c.kind : "update",
+    }))
+    .filter((c) => c.path);
+
+  // Estimate if content is tall enough to need truncation
+  const diffLineCount = (oldStr + newStr).split("\n").length;
+  const isTall = diffLineCount > 15;
+
+  return (
+    <div>
+      {/* Single-line header: Edit fileName [all] */}
+      <div className="flex items-center gap-1.5 py-0.5">
+        <span className="text-[11px] font-medium text-emerald-600/70 dark:text-emerald-400/70">Edit</span>
+        {fileName && (
+          <span className="text-[11px] font-mono-code text-cc-fg/70">{fileName}</span>
+        )}
+        {replaceAll && (
+          <span className="text-[9px] uppercase tracking-wider font-semibold text-amber-600/70 dark:text-amber-400/70">all</span>
+        )}
+      </div>
+
+      {/* Diff content — always visible, no toggle */}
+      {hasDiff ? (
+        <div className="relative mt-1">
+          <div className={`overflow-hidden ${isTall && !expanded ? "max-h-[240px]" : ""}`}>
+            <DiffViewer oldText={oldStr} newText={newStr} mode="compact" />
+          </div>
+          {isTall && !expanded && (
+            <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-cc-bg to-transparent pointer-events-none" />
+          )}
+          {isTall && (
+            <button
+              type="button"
+              onClick={() => setExpanded(!expanded)}
+              className="relative z-10 mt-1 text-[11px] text-cc-muted/40 hover:text-cc-muted/70 cursor-pointer transition-colors"
+            >
+              {expanded ? "Show less" : `Show all ${diffLineCount} lines`}
+            </button>
+          )}
+        </div>
+      ) : changes.length > 0 ? (
+        <div className="mt-1 space-y-1">
+          {changes.map((change, i) => {
+            const changeFile = change.path.split("/").pop() || change.path;
+            return (
+              <div key={`${change.path}-${i}`} className="flex items-center gap-2 text-[11px]">
+                <span className={`text-[9px] font-semibold uppercase ${
+                  change.kind === "create" ? "text-emerald-600/70 dark:text-emerald-400/70" :
+                  change.kind === "delete" ? "text-cc-error/70" :
+                  "text-amber-600/70 dark:text-amber-400/70"
+                }`}>
+                  {change.kind}
+                </span>
+                <span className="font-mono-code text-cc-fg/60 truncate">{changeFile}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <pre className="mt-1 text-[11px] text-cc-muted font-mono-code whitespace-pre-wrap leading-relaxed">
+          {JSON.stringify(input, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+/** Bash tool — shows command directly, always visible */
+function BashBlock({ input }: { input: Record<string, unknown> }) {
+  const command = typeof input.command === "string" ? input.command : "";
+  const desc = typeof input.description === "string" ? input.description : "";
+
+  return (
+    <div>
+      {desc && (
+        <div className="text-[11px] text-cc-muted/50 mb-1 italic">{desc}</div>
+      )}
+      <div className="rounded-lg bg-cc-code-bg px-3 py-2 overflow-x-auto">
+        <pre className="text-[12px] font-mono-code text-cc-code-fg leading-relaxed whitespace-pre-wrap break-words">
+          <span className="text-cc-muted/40 select-none">$ </span>{command}
+        </pre>
+      </div>
     </div>
   );
 }

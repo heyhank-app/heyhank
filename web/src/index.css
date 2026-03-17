@@ -42,19 +42,54 @@
 }
 
 @keyframes fadeSlideIn {
-  from {
+  0% {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(6px) scale(0.98);
   }
-  to {
+  60% {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(-1px) scale(1.002);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes userSlideIn {
+  0% {
+    opacity: 0;
+    transform: translateX(8px) scale(0.97);
+  }
+  60% {
+    opacity: 1;
+    transform: translateX(-1px) scale(1.002);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
   }
 }
 
 @keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(0.85); }
+}
+
+@keyframes typing-breathe {
+  0%, 100% { opacity: 0.4; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes gentle-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
 }
 
 @keyframes spin {
@@ -206,6 +241,66 @@
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
+/* ─── Chat-specific refinements ──────────────────────────────────────────── */
+
+/* Subtle inner glow for the composer card on desktop */
+.composer-card {
+  box-shadow: 0 10px 30px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.06);
+  transition: box-shadow 200ms ease, border-color 200ms ease;
+}
+.composer-card:focus-within {
+  box-shadow: 0 12px 36px rgba(0,0,0,0.14), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+/* Thinking block expand/collapse animation */
+.thinking-expand {
+  animation: thinkingReveal 250ms ease-out;
+}
+@keyframes thinkingReveal {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 500px; }
+}
+
+/* Tool block hover lift */
+.tool-card {
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+.tool-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+}
+
+/* Avatar gradient ring */
+.avatar-ring {
+  background: conic-gradient(from 180deg, var(--color-cc-primary), #e8a87c, var(--color-cc-primary));
+  padding: 1.5px;
+}
+.avatar-ring > .avatar-inner {
+  background: var(--color-cc-bg);
+}
+
+/* User bubble subtle gradient */
+.user-bubble-gradient {
+  background: linear-gradient(135deg, var(--color-cc-user-bubble), color-mix(in srgb, var(--color-cc-user-bubble) 85%, var(--color-cc-primary) 15%));
+}
+
+/* Generation stats pulsing bar */
+.stats-glow {
+  position: relative;
+}
+.stats-glow::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--color-cc-primary);
+  opacity: 0.4;
+  animation: typing-breathe 1.5s ease-in-out infinite;
+}
+
 /* Global focus-visible ring — ensures keyboard users always see focus.
    Wrapped in @layer base so Tailwind utilities (e.g. outline-none) can override it. */
 @layer base {
@@ -284,8 +379,19 @@ select {
   color: var(--color-cc-code-fg);
 }
 .diff-compact {
-  max-height: 280px;
-  overflow-y: auto;
+  /* No scroll — parent handles truncation with "show more" */
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+.diff-compact .diff-file-header {
+  display: none;
+}
+.diff-compact .diff-hunk-header {
+  font-size: 10px;
+  opacity: 0.4;
+  padding: 1px 4px;
+  font-style: italic;
 }
 .diff-full {
   overflow-y: auto;

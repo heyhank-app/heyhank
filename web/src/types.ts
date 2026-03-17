@@ -23,6 +23,7 @@ export interface ChatMessage {
   timestamp: number;
   parentToolUseId?: string | null;
   isStreaming?: boolean;
+  streamingPhase?: "thinking" | "text";
   model?: string;
   stopReason?: string | null;
 }

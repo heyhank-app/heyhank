@@ -131,6 +131,14 @@ describe("reset", () => {
     useStore.getState().setStreamingStats("s1", { startedAt: 1, outputTokens: 2 });
     useStore.getState().addPermission("s1", makePermission());
     useStore.getState().addTask("s1", makeTask());
+    useStore.getState().addToolActivity("s1", {
+      toolUseId: "tool-1",
+      toolName: "Bash",
+      preview: "ls",
+      startedAt: 1,
+      elapsedSeconds: 1,
+      isError: false,
+    });
     useStore.getState().setSessionName("s1", "name");
     useStore.getState().markRecentlyRenamed("s1");
     useStore.getState().setConnectionStatus("s1", "connected");
@@ -157,6 +165,7 @@ describe("reset", () => {
     expect(state.sessionStatus.size).toBe(0);
     expect(state.previousPermissionMode.size).toBe(0);
     expect(state.sessionTasks.size).toBe(0);
+    expect(state.toolActivity.size).toBe(0);
     expect(state.sessionNames.size).toBe(0);
     expect(state.recentlyRenamed.size).toBe(0);
     expect(state.mcpServers.size).toBe(0);

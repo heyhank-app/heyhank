@@ -60,6 +60,7 @@ export const useStore = create<AppState>((...args) => ({
       gitChangedFilesCount: new Map(),
       sessionProcesses: new Map(),
       toolProgress: new Map(),
+      toolActivity: new Map(),
       // UI
       taskPanelConfigMode: false,
       editorTabEnabled: false,

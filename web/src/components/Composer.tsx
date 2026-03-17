@@ -374,10 +374,10 @@ export function Composer({ sessionId }: { sessionId: string }) {
         />
 
         {/* Input container: flat separator on mobile, card on desktop */}
-        <div className={`relative overflow-visible transition-colors border-t border-cc-separator sm:border sm:border-cc-border sm:bg-cc-input-bg/95 sm:rounded-[14px] sm:shadow-[0_10px_30px_rgba(0,0,0,0.10)] sm:backdrop-blur-sm ${
+        <div className={`relative overflow-visible transition-all duration-200 border-t border-cc-separator sm:border sm:border-cc-border sm:bg-cc-input-bg/95 sm:rounded-[16px] sm:backdrop-blur-sm composer-card ${
           isPlan
-            ? "sm:border-cc-primary/40"
-            : "sm:focus-within:border-cc-primary/30"
+            ? "sm:border-cc-primary/40 sm:shadow-[0_10px_30px_rgba(217,119,87,0.08)]"
+            : "sm:focus-within:border-cc-primary/25"
         }`}>
           {/* Slash command menu */}
           {slashMenuOpen && filteredCommands.length > 0 && (
@@ -608,9 +608,9 @@ export function Composer({ sessionId }: { sessionId: string }) {
               <button
                 onClick={handleSend}
                 disabled={!canSend}
-                className={`flex items-center justify-center w-10 h-10 rounded-full transition-colors ${
+                className={`flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
                   canSend
-                    ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer shadow-[0_6px_20px_rgba(0,0,0,0.18)]"
+                    ? "bg-cc-primary hover:bg-cc-primary-hover active:scale-95 text-white cursor-pointer shadow-[0_4px_16px_rgba(217,119,87,0.25)]"
                     : "bg-cc-hover text-cc-muted cursor-not-allowed"
                 }`}
                 title="Send message"
@@ -709,9 +709,9 @@ export function Composer({ sessionId }: { sessionId: string }) {
               <button
                 onClick={handleSend}
                 disabled={!canSend}
-                className={`flex items-center justify-center w-9 h-9 rounded-full transition-colors ${
+                className={`flex items-center justify-center w-9 h-9 rounded-full transition-all duration-200 ${
                   canSend
-                    ? "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer shadow-[0_6px_20px_rgba(0,0,0,0.18)]"
+                    ? "bg-cc-primary hover:bg-cc-primary-hover hover:scale-105 text-white cursor-pointer shadow-[0_4px_16px_rgba(217,119,87,0.25)]"
                     : "bg-cc-hover text-cc-muted cursor-not-allowed"
                 }`}
                 title="Send message"
