@@ -5,7 +5,7 @@ interface WizardStepCredentialsProps {
   onNext: () => void;
   onBack: () => void;
   credentialsSaved: boolean;
-  onCredentialsSaved: () => void;
+  onCredentialsSaved: (stagingId: string) => void;
 }
 
 export function WizardStepCredentials({ onNext, onBack, credentialsSaved, onCredentialsSaved }: WizardStepCredentialsProps) {
@@ -30,13 +30,14 @@ export function WizardStepCredentials({ onNext, onBack, credentialsSaved, onCred
     setError("");
 
     try {
-      await api.updateSettings({
-        linearOAuthClientId: trimmedId,
-        linearOAuthClientSecret: trimmedSecret,
-        linearOAuthWebhookSecret: trimmedWebhook,
+      // Create a per-wizard staging slot instead of writing to global settings
+      const result = await api.createLinearStaging({
+        clientId: trimmedId,
+        clientSecret: trimmedSecret,
+        webhookSecret: trimmedWebhook,
       });
       setSaved(true);
-      onCredentialsSaved();
+      onCredentialsSaved(result.stagingId);
       setClientId("");
       setClientSecret("");
       setWebhookSecret("");
@@ -122,7 +123,9 @@ export function WizardStepCredentials({ onNext, onBack, credentialsSaved, onCred
           Back
         </button>
         <div className="flex gap-2">
-          {!saved && (
+          {/* Show Save button when credentials haven't been saved yet, or when the user
+              has typed new values (allowing corrections after the first save) */}
+          {(!saved || (clientId.trim() && clientSecret.trim() && webhookSecret.trim())) && (
             <button
               onClick={handleSave}
               disabled={saving || !clientId.trim() || !clientSecret.trim() || !webhookSecret.trim()}
@@ -132,7 +135,7 @@ export function WizardStepCredentials({ onNext, onBack, credentialsSaved, onCred
                   : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
               }`}
             >
-              {saving ? "Saving..." : "Save Credentials"}
+              {saving ? "Saving..." : saved ? "Update Credentials" : "Save Credentials"}
             </button>
           )}
           {saved && (

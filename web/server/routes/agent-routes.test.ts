@@ -23,9 +23,22 @@ vi.mock("../settings-manager.js", () => ({
   updateSettings: vi.fn(),
 }));
 
+// ─── Mock linear-staging module ──────────────────────────────────────────────
+// Mocked so agent creation tests can control staging slot resolution without
+// touching the filesystem.
+vi.mock("../linear-staging.js", () => ({
+  consumeSlot: vi.fn(() => null),
+  createSlot: vi.fn(),
+  getSlot: vi.fn(() => null),
+  updateSlotTokens: vi.fn(() => false),
+  deleteSlot: vi.fn(() => false),
+  pruneExpired: vi.fn(),
+}));
+
 import { Hono } from "hono";
 import * as agentStore from "../agent-store.js";
 import { getSettings, updateSettings } from "../settings-manager.js";
+import * as staging from "../linear-staging.js";
 import type { AgentConfig } from "../agent-types.js";
 import { registerAgentRoutes } from "./agent-routes.js";
 
@@ -771,6 +784,428 @@ describe("POST /api/agents — Linear credential staging", () => {
     // updateAgent was called (to try to copy creds) but returned null
     expect(agentStore.updateAgent).toHaveBeenCalled();
     // updateSettings must NOT have been called — creds are preserved for retry
+    expect(updateSettings).not.toHaveBeenCalled();
+  });
+});
+
+// ─── POST /api/agents — Priority 1: staging slot ────────────────────────────
+
+describe("POST /api/agents — Priority 1: staging slot (stagingId)", () => {
+  it("resolves Linear credentials from a staging slot when stagingId is provided", async () => {
+    // When the request body includes a stagingId, the route should call
+    // staging.consumeSlot() to retrieve and delete the one-time slot,
+    // then copy the slot's credentials to the newly created agent.
+    const createdAgent = makeAgent({
+      id: "staged-agent",
+      name: "Staged Agent",
+      triggers: { linear: { enabled: true } },
+    });
+    vi.mocked(agentStore.createAgent).mockReturnValue(createdAgent);
+
+    // Simulate a valid staging slot returned by consumeSlot
+    vi.mocked(staging.consumeSlot).mockReturnValue({
+      id: "abc123def456abc123def456abc123de",
+      clientId: "slot-client-id",
+      clientSecret: "slot-client-secret",
+      webhookSecret: "slot-webhook-secret",
+      accessToken: "slot-access-token",
+      refreshToken: "slot-refresh-token",
+      createdAt: Date.now(),
+    });
+
+    // updateAgent returns the agent with credentials merged
+    const updatedAgent = makeAgent({
+      id: "staged-agent",
+      name: "Staged Agent",
+      triggers: {
+        linear: {
+          enabled: true,
+          oauthClientId: "slot-client-id",
+          oauthClientSecret: "slot-client-secret",
+          webhookSecret: "slot-webhook-secret",
+          accessToken: "slot-access-token",
+          refreshToken: "slot-refresh-token",
+        },
+      },
+    });
+    vi.mocked(agentStore.updateAgent).mockReturnValue(updatedAgent);
+
+    const res = await app.request("/api/agents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Staged Agent",
+        prompt: "Handle linear issues",
+        triggers: { linear: { enabled: true } },
+        stagingId: "abc123def456abc123def456abc123de",
+      }),
+    });
+
+    expect(res.status).toBe(201);
+
+    // consumeSlot should have been called with the provided stagingId
+    expect(staging.consumeSlot).toHaveBeenCalledWith("abc123def456abc123def456abc123de");
+
+    // updateAgent should have been called to copy slot credentials to the agent
+    expect(agentStore.updateAgent).toHaveBeenCalledWith("staged-agent", {
+      triggers: {
+        linear: {
+          enabled: true,
+          oauthClientId: "slot-client-id",
+          oauthClientSecret: "slot-client-secret",
+          webhookSecret: "slot-webhook-secret",
+          accessToken: "slot-access-token",
+          refreshToken: "slot-refresh-token",
+        },
+      },
+    });
+
+    // Global settings should NOT be cleared when using a staging slot
+    // (clearing only happens for the backward-compat global staging path)
+    expect(updateSettings).not.toHaveBeenCalled();
+
+    // Response should have sanitized credentials (secrets stripped, boolean flags present)
+    const json = await res.json();
+    expect(json.triggers.linear.hasAccessToken).toBe(true);
+    expect(json.triggers.linear.hasClientSecret).toBe(true);
+    expect(json.triggers.linear.hasWebhookSecret).toBe(true);
+    expect(json.triggers.linear).not.toHaveProperty("oauthClientSecret");
+    expect(json.triggers.linear).not.toHaveProperty("accessToken");
+    expect(json.triggers.linear).not.toHaveProperty("refreshToken");
+    expect(json.triggers.linear).not.toHaveProperty("webhookSecret");
+  });
+
+  it("falls through to global staging when stagingId points to a missing/expired slot", async () => {
+    // When consumeSlot returns null (slot not found or expired), the route should
+    // skip Priority 1 and fall through. Since no cloneFromAgentId is provided either,
+    // it should reach Priority 3 (global staging) and use those credentials.
+    const createdAgent = makeAgent({
+      id: "fallthrough-agent",
+      name: "Fallthrough Agent",
+      triggers: { linear: { enabled: true } },
+    });
+    vi.mocked(agentStore.createAgent).mockReturnValue(createdAgent);
+
+    // consumeSlot returns null — slot is missing or expired
+    vi.mocked(staging.consumeSlot).mockReturnValue(null);
+
+    // Global settings have staged credentials (Priority 3 fallback)
+    vi.mocked(getSettings).mockReturnValue({
+      linearOAuthClientId: "global-client-id",
+      linearOAuthClientSecret: "global-client-secret",
+      linearOAuthWebhookSecret: "global-webhook-secret",
+      linearOAuthAccessToken: "global-access-token",
+      linearOAuthRefreshToken: "global-refresh-token",
+    } as any);
+
+    const updatedAgent = makeAgent({
+      id: "fallthrough-agent",
+      name: "Fallthrough Agent",
+      triggers: {
+        linear: {
+          enabled: true,
+          oauthClientId: "global-client-id",
+          oauthClientSecret: "global-client-secret",
+          webhookSecret: "global-webhook-secret",
+          accessToken: "global-access-token",
+          refreshToken: "global-refresh-token",
+        },
+      },
+    });
+    vi.mocked(agentStore.updateAgent).mockReturnValue(updatedAgent);
+
+    const res = await app.request("/api/agents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Fallthrough Agent",
+        prompt: "Handle linear issues",
+        triggers: { linear: { enabled: true } },
+        stagingId: "expired00000000000000000000000000",
+      }),
+    });
+
+    expect(res.status).toBe(201);
+
+    // consumeSlot was called but returned null
+    expect(staging.consumeSlot).toHaveBeenCalledWith("expired00000000000000000000000000");
+
+    // Since stagingId was provided (even though it failed), global settings
+    // should NOT be cleared — the clearing logic only runs when neither
+    // stagingId nor cloneFromAgentId was in the request body.
+    // However, the global credentials should still be used for the agent.
+    expect(agentStore.updateAgent).toHaveBeenCalledWith("fallthrough-agent", {
+      triggers: {
+        linear: {
+          enabled: true,
+          oauthClientId: "global-client-id",
+          oauthClientSecret: "global-client-secret",
+          webhookSecret: "global-webhook-secret",
+          accessToken: "global-access-token",
+          refreshToken: "global-refresh-token",
+        },
+      },
+    });
+
+    // Global settings should NOT be cleared because body.stagingId was present
+    // (the route only clears when !body.stagingId && !body.cloneFromAgentId)
+    expect(updateSettings).not.toHaveBeenCalled();
+  });
+});
+
+// ─── POST /api/agents — Priority 2: clone from existing agent ───────────────
+
+describe("POST /api/agents — Priority 2: clone from existing agent (cloneFromAgentId)", () => {
+  it("clones Linear credentials from an existing agent when cloneFromAgentId is provided", async () => {
+    // When the request body includes cloneFromAgentId (and no stagingId), the route
+    // should look up the source agent and copy its Linear OAuth credentials.
+    const createdAgent = makeAgent({
+      id: "cloned-agent",
+      name: "Cloned Agent",
+      triggers: { linear: { enabled: true } },
+    });
+    vi.mocked(agentStore.createAgent).mockReturnValue(createdAgent);
+
+    // The source agent has Linear credentials to clone
+    const sourceAgent = makeAgent({
+      id: "source-agent",
+      name: "Source Agent",
+      triggers: {
+        linear: {
+          enabled: true,
+          oauthClientId: "source-client-id",
+          oauthClientSecret: "source-client-secret",
+          webhookSecret: "source-webhook-secret",
+          accessToken: "source-access-token",
+          refreshToken: "source-refresh-token",
+        },
+      },
+    });
+
+    // getAgent is called twice: once internally by the route for the source lookup.
+    // We need it to return the source agent when called with "source-agent".
+    vi.mocked(agentStore.getAgent).mockImplementation((id: string) => {
+      if (id === "source-agent") return sourceAgent;
+      return null;
+    });
+
+    // updateAgent returns the agent with cloned credentials
+    const updatedAgent = makeAgent({
+      id: "cloned-agent",
+      name: "Cloned Agent",
+      triggers: {
+        linear: {
+          enabled: true,
+          oauthClientId: "source-client-id",
+          oauthClientSecret: "source-client-secret",
+          webhookSecret: "source-webhook-secret",
+          accessToken: "source-access-token",
+          refreshToken: "source-refresh-token",
+        },
+      },
+    });
+    vi.mocked(agentStore.updateAgent).mockReturnValue(updatedAgent);
+
+    const res = await app.request("/api/agents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Cloned Agent",
+        prompt: "Handle linear issues",
+        triggers: { linear: { enabled: true } },
+        cloneFromAgentId: "source-agent",
+      }),
+    });
+
+    expect(res.status).toBe(201);
+
+    // consumeSlot should NOT have been called (no stagingId in the request)
+    expect(staging.consumeSlot).not.toHaveBeenCalled();
+
+    // getAgent should have been called with the source agent ID to look up credentials
+    expect(agentStore.getAgent).toHaveBeenCalledWith("source-agent");
+
+    // updateAgent should have been called with the cloned credentials
+    expect(agentStore.updateAgent).toHaveBeenCalledWith("cloned-agent", {
+      triggers: {
+        linear: {
+          enabled: true,
+          oauthClientId: "source-client-id",
+          oauthClientSecret: "source-client-secret",
+          webhookSecret: "source-webhook-secret",
+          accessToken: "source-access-token",
+          refreshToken: "source-refresh-token",
+        },
+      },
+    });
+
+    // Global settings should NOT be cleared when cloning from an agent
+    expect(updateSettings).not.toHaveBeenCalled();
+
+    // Response should have sanitized credentials
+    const json = await res.json();
+    expect(json.triggers.linear.hasAccessToken).toBe(true);
+    expect(json.triggers.linear.hasClientSecret).toBe(true);
+    expect(json.triggers.linear.hasWebhookSecret).toBe(true);
+    expect(json.triggers.linear).not.toHaveProperty("oauthClientSecret");
+    expect(json.triggers.linear).not.toHaveProperty("accessToken");
+  });
+
+  it("falls through to global staging when cloneFromAgentId points to a non-existent agent", async () => {
+    // When the source agent doesn't exist, getAgent returns null, so the clone
+    // path is skipped and the route falls through to Priority 3 (global staging).
+    const createdAgent = makeAgent({
+      id: "clone-fallthrough-agent",
+      name: "Clone Fallthrough Agent",
+      triggers: { linear: { enabled: true } },
+    });
+    vi.mocked(agentStore.createAgent).mockReturnValue(createdAgent);
+
+    // getAgent returns null for the non-existent source agent
+    vi.mocked(agentStore.getAgent).mockReturnValue(null);
+
+    // Global settings have staged credentials (Priority 3 fallback)
+    vi.mocked(getSettings).mockReturnValue({
+      linearOAuthClientId: "global-client-id",
+      linearOAuthClientSecret: "global-client-secret",
+      linearOAuthWebhookSecret: "global-webhook-secret",
+      linearOAuthAccessToken: "global-access-token",
+      linearOAuthRefreshToken: "global-refresh-token",
+    } as any);
+
+    const updatedAgent = makeAgent({
+      id: "clone-fallthrough-agent",
+      name: "Clone Fallthrough Agent",
+      triggers: {
+        linear: {
+          enabled: true,
+          oauthClientId: "global-client-id",
+          oauthClientSecret: "global-client-secret",
+          webhookSecret: "global-webhook-secret",
+          accessToken: "global-access-token",
+          refreshToken: "global-refresh-token",
+        },
+      },
+    });
+    vi.mocked(agentStore.updateAgent).mockReturnValue(updatedAgent);
+
+    const res = await app.request("/api/agents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Clone Fallthrough Agent",
+        prompt: "Handle linear issues",
+        triggers: { linear: { enabled: true } },
+        cloneFromAgentId: "nonexistent-agent",
+      }),
+    });
+
+    expect(res.status).toBe(201);
+
+    // getAgent should have been called to look up the (non-existent) source agent
+    expect(agentStore.getAgent).toHaveBeenCalledWith("nonexistent-agent");
+
+    // updateAgent should have been called with global credentials (Priority 3 fallback)
+    expect(agentStore.updateAgent).toHaveBeenCalledWith("clone-fallthrough-agent", {
+      triggers: {
+        linear: {
+          enabled: true,
+          oauthClientId: "global-client-id",
+          oauthClientSecret: "global-client-secret",
+          webhookSecret: "global-webhook-secret",
+          accessToken: "global-access-token",
+          refreshToken: "global-refresh-token",
+        },
+      },
+    });
+
+    // Global settings should NOT be cleared because body.cloneFromAgentId was present
+    // (the route only clears when !body.stagingId && !body.cloneFromAgentId)
+    expect(updateSettings).not.toHaveBeenCalled();
+
+    // Response should have sanitized credentials
+    const json = await res.json();
+    expect(json.triggers.linear.hasAccessToken).toBe(true);
+    expect(json.triggers.linear.hasClientSecret).toBe(true);
+  });
+
+  it("falls through to global staging when source agent exists but has no Linear credentials", async () => {
+    // Edge case: the source agent exists but has no oauthClientId on its Linear trigger,
+    // so the clone condition (source?.triggers?.linear?.oauthClientId) is falsy.
+    const createdAgent = makeAgent({
+      id: "clone-no-creds-agent",
+      name: "Clone No Creds Agent",
+      triggers: { linear: { enabled: true } },
+    });
+    vi.mocked(agentStore.createAgent).mockReturnValue(createdAgent);
+
+    // Source agent exists but has no Linear credentials
+    const sourceAgentNoCreds = makeAgent({
+      id: "source-no-creds",
+      name: "Source No Creds",
+      triggers: { linear: { enabled: true } },
+    });
+    vi.mocked(agentStore.getAgent).mockImplementation((id: string) => {
+      if (id === "source-no-creds") return sourceAgentNoCreds;
+      return null;
+    });
+
+    // Global settings have staged credentials (Priority 3 fallback)
+    vi.mocked(getSettings).mockReturnValue({
+      linearOAuthClientId: "global-client-id",
+      linearOAuthClientSecret: "global-client-secret",
+      linearOAuthWebhookSecret: "global-webhook-secret",
+      linearOAuthAccessToken: "global-access-token",
+      linearOAuthRefreshToken: "global-refresh-token",
+    } as any);
+
+    const updatedAgent = makeAgent({
+      id: "clone-no-creds-agent",
+      name: "Clone No Creds Agent",
+      triggers: {
+        linear: {
+          enabled: true,
+          oauthClientId: "global-client-id",
+          oauthClientSecret: "global-client-secret",
+          webhookSecret: "global-webhook-secret",
+          accessToken: "global-access-token",
+          refreshToken: "global-refresh-token",
+        },
+      },
+    });
+    vi.mocked(agentStore.updateAgent).mockReturnValue(updatedAgent);
+
+    const res = await app.request("/api/agents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Clone No Creds Agent",
+        prompt: "Handle linear issues",
+        triggers: { linear: { enabled: true } },
+        cloneFromAgentId: "source-no-creds",
+      }),
+    });
+
+    expect(res.status).toBe(201);
+
+    // The route looked up the source agent
+    expect(agentStore.getAgent).toHaveBeenCalledWith("source-no-creds");
+
+    // updateAgent should use global credentials since clone source had none
+    expect(agentStore.updateAgent).toHaveBeenCalledWith("clone-no-creds-agent", {
+      triggers: {
+        linear: {
+          enabled: true,
+          oauthClientId: "global-client-id",
+          oauthClientSecret: "global-client-secret",
+          webhookSecret: "global-webhook-secret",
+          accessToken: "global-access-token",
+          refreshToken: "global-refresh-token",
+        },
+      },
+    });
+
+    // Global settings should NOT be cleared because body.cloneFromAgentId was present
     expect(updateSettings).not.toHaveBeenCalled();
   });
 });

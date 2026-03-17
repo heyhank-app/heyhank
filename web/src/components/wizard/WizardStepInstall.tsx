@@ -6,11 +6,12 @@ interface WizardStepInstallProps {
   onBack: () => void;
   oauthConnected: boolean;
   oauthError: string;
+  stagingId: string | null;
   /** Called before redirecting to Linear so the parent can persist state */
   onBeforeRedirect: () => void;
 }
 
-export function WizardStepInstall({ onNext, onBack, oauthConnected, oauthError, onBeforeRedirect }: WizardStepInstallProps) {
+export function WizardStepInstall({ onNext, onBack, oauthConnected, oauthError, stagingId, onBeforeRedirect }: WizardStepInstallProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(oauthError);
 
@@ -19,7 +20,7 @@ export function WizardStepInstall({ onNext, onBack, oauthConnected, oauthError, 
     setError("");
     try {
       onBeforeRedirect();
-      const result = await api.getLinearOAuthAuthorizeUrl("/#/agents");
+      const result = await api.getLinearOAuthAuthorizeUrl("/#/agents", stagingId || undefined);
       window.open(result.url, "_self");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));

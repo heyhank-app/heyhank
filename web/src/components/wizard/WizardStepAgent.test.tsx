@@ -49,6 +49,8 @@ describe("WizardStepAgent", () => {
   const defaultProps = {
     onNext: vi.fn(),
     onBack: vi.fn(),
+    stagingId: null as string | null,
+    cloneFromAgentId: null as string | null,
   };
 
   // ─── Rendering ──────────────────────────────────────────────────────────────

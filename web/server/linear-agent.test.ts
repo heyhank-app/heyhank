@@ -126,7 +126,7 @@ describe("OAuth state nonce (CSRF protection)", () => {
   });
 
   it("preserves returnTo path in state", () => {
-    const state = generateOAuthState("/#/setup/linear-agent");
+    const state = generateOAuthState({ returnTo: "/#/setup/linear-agent" });
     const result = validateOAuthState(state);
     expect(result).toEqual({ valid: true, returnTo: "/#/setup/linear-agent" });
   });
@@ -135,6 +135,26 @@ describe("OAuth state nonce (CSRF protection)", () => {
     const state = generateOAuthState();
     const result = validateOAuthState(state);
     expect(result).toEqual({ valid: true });
+  });
+
+  it("preserves stagingId in state round-trip", () => {
+    const state = generateOAuthState({ stagingId: "abc123def456" });
+    const result = validateOAuthState(state);
+    expect(result).toEqual({ valid: true, stagingId: "abc123def456" });
+  });
+
+  it("preserves both stagingId and returnTo in state round-trip", () => {
+    const state = generateOAuthState({ stagingId: "slot-42", returnTo: "/#/agents" });
+    const result = validateOAuthState(state);
+    expect(result).toEqual({ valid: true, stagingId: "slot-42", returnTo: "/#/agents" });
+  });
+
+  it("returns stagingId as undefined when not provided", () => {
+    const state = generateOAuthState({ returnTo: "/#/settings" });
+    const result = validateOAuthState(state);
+    expect(result.valid).toBe(true);
+    expect(result.stagingId).toBeUndefined();
+    expect(result.returnTo).toBe("/#/settings");
   });
 });
 

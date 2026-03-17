@@ -36,6 +36,7 @@ describe("WizardStepInstall", () => {
     onBack: vi.fn(),
     oauthConnected: false,
     oauthError: "",
+    stagingId: null as string | null,
     onBeforeRedirect: vi.fn(),
   };
 
@@ -115,7 +116,7 @@ describe("WizardStepInstall", () => {
       });
 
       await waitFor(() => {
-        expect(mockApi.getLinearOAuthAuthorizeUrl).toHaveBeenCalledWith("/#/agents");
+        expect(mockApi.getLinearOAuthAuthorizeUrl).toHaveBeenCalledWith("/#/agents", undefined);
       });
 
       await waitFor(() => {

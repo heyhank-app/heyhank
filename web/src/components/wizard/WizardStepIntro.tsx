@@ -7,77 +7,87 @@ interface WizardStepIntroProps {
 export function WizardStepIntro({ onNext }: WizardStepIntroProps) {
   const publicUrl = useStore((s) => s.publicUrl);
   const baseUrl = publicUrl || window.location.origin;
-
   const hasPublicUrl = !!publicUrl;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold text-cc-fg">Set up the Linear Agent</h2>
-        <p className="mt-1 text-sm text-cc-muted">
-          This wizard will guide you through connecting Linear's Agent Interaction SDK and creating an agent
-          that responds to @mentions in your Linear workspace.
+    <div className="space-y-8">
+      {/* Title area — asymmetric, editorial feel */}
+      <div className="pt-1">
+        <p className="text-[11px] uppercase tracking-widest text-cc-primary font-medium mb-2">Linear Agent Setup</p>
+        <h2 className="text-xl font-semibold text-cc-fg tracking-tight leading-tight">
+          Connect your Linear workspace
+        </h2>
+        <p className="mt-2 text-sm text-cc-muted leading-relaxed max-w-md">
+          This wizard connects the Agent Interaction SDK so your agent can
+          respond to @mentions in Linear issues.
         </p>
       </div>
 
-      {/* Prerequisites */}
-      <div className="space-y-3">
-        <h3 className="text-sm font-medium text-cc-fg">Prerequisites</h3>
-
-        <div className={`flex items-start gap-3 p-3 rounded-lg border ${hasPublicUrl ? "border-cc-success/30 bg-cc-success/5" : "border-cc-warning/30 bg-cc-warning/5"}`}>
-          <div className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${hasPublicUrl ? "bg-cc-success/20 text-cc-success" : "bg-cc-warning/20 text-cc-warning"}`}>
+      {/* Prerequisites — clean vertical list without nested cards */}
+      <div className="space-y-4">
+        {/* Public URL status */}
+        <div className="flex items-start gap-3">
+          <div className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${hasPublicUrl ? "bg-cc-success/15 text-cc-success" : "bg-cc-warning/15 text-cc-warning"}`}>
             {hasPublicUrl ? (
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
               </svg>
             ) : (
-              <span className="text-xs font-bold">!</span>
+              <span className="text-[10px] font-bold">!</span>
             )}
           </div>
           <div className="min-w-0">
-            <p className="text-sm text-cc-fg font-medium">Public URL configured</p>
-            <p className="text-xs text-cc-muted mt-0.5">
+            <p className="text-[13px] text-cc-fg font-medium">Public URL</p>
+            <p className="text-xs text-cc-muted mt-0.5 leading-relaxed">
               {hasPublicUrl
-                ? <>Your public URL is <code className="px-1 py-0.5 rounded bg-cc-hover text-[10px]">{publicUrl}</code></>
-                : <>No public URL set. Linear needs to reach your Companion instance. Configure one in <a href="#/integrations/tailscale" className="text-cc-primary underline">Tailscale settings</a> or <a href="#/settings" className="text-cc-primary underline">General settings</a>.</>
+                ? <><code className="px-1 py-0.5 rounded bg-cc-hover text-[10px] font-mono-code">{publicUrl}</code></>
+                : <>Not set. Linear needs to reach your instance. Configure in <a href="#/integrations/tailscale" className="text-cc-primary hover:underline">Tailscale</a> or <a href="#/settings" className="text-cc-primary hover:underline">Settings</a>.</>
               }
             </p>
           </div>
         </div>
 
-        <div className="flex items-start gap-3 p-3 rounded-lg border border-cc-border bg-cc-card">
+        {/* Divider */}
+        <div className="border-t border-cc-border/50" />
+
+        {/* Setup instructions */}
+        <div className="flex items-start gap-3">
           <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center bg-cc-hover text-cc-muted">
-            <span className="text-xs font-bold">1</span>
+            <span className="text-[10px] font-semibold">1</span>
           </div>
           <div className="min-w-0">
-            <p className="text-sm text-cc-fg font-medium">Create a Linear OAuth app</p>
-            <p className="text-xs text-cc-muted mt-0.5">
-              Go to{" "}
-              <a href="https://linear.app/settings/api" target="_blank" rel="noopener noreferrer" className="text-cc-primary underline">
+            <p className="text-[13px] text-cc-fg font-medium">Create a Linear OAuth app</p>
+            <p className="text-xs text-cc-muted mt-0.5 leading-relaxed">
+              <a href="https://linear.app/settings/api" target="_blank" rel="noopener noreferrer" className="text-cc-primary hover:underline">
                 Linear &rarr; Settings &rarr; API &rarr; OAuth Applications
-              </a>{" "}
-              and create a new app with the following settings:
+              </a>
             </p>
-            <ul className="mt-2 space-y-1.5 text-xs text-cc-muted">
-              <li>Enable <strong className="text-cc-fg">Webhooks</strong> and subscribe to <strong className="text-cc-fg">Agent session events</strong>.</li>
-              <li>Add the scope <code className="px-1 py-0.5 rounded bg-cc-hover">app:mentionable</code>.</li>
-              <li>
-                Set the <strong className="text-cc-fg">Redirect URI</strong> to:{" "}
-                <code className="px-1 py-0.5 rounded bg-cc-hover text-[10px] break-all">{`${baseUrl}/api/linear/oauth/callback`}</code>
-              </li>
-              <li>
-                Set the <strong className="text-cc-fg">Webhook URL</strong> to:{" "}
-                <code className="px-1 py-0.5 rounded bg-cc-hover text-[10px] break-all">{`${baseUrl}/api/linear/agent-webhook`}</code>
-              </li>
-            </ul>
+            <dl className="mt-3 space-y-2.5 text-xs">
+              <div>
+                <dt className="text-cc-muted">Webhooks</dt>
+                <dd className="text-cc-fg mt-0.5">Enable and subscribe to <strong>Agent session events</strong></dd>
+              </div>
+              <div>
+                <dt className="text-cc-muted">Scope</dt>
+                <dd className="mt-0.5"><code className="px-1.5 py-0.5 rounded bg-cc-hover text-cc-fg text-[10px] font-mono-code">app:mentionable</code></dd>
+              </div>
+              <div>
+                <dt className="text-cc-muted">Redirect URI</dt>
+                <dd className="mt-0.5"><code className="px-1.5 py-0.5 rounded bg-cc-hover text-cc-fg text-[10px] font-mono-code break-all">{`${baseUrl}/api/linear/oauth/callback`}</code></dd>
+              </div>
+              <div>
+                <dt className="text-cc-muted">Webhook URL</dt>
+                <dd className="mt-0.5"><code className="px-1.5 py-0.5 rounded bg-cc-hover text-cc-fg text-[10px] font-mono-code break-all">{`${baseUrl}/api/linear/agent-webhook`}</code></dd>
+              </div>
+            </dl>
           </div>
         </div>
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex justify-end pt-1">
         <button
           onClick={onNext}
-          className="px-4 py-2.5 rounded-lg text-sm font-medium bg-cc-primary hover:bg-cc-primary-hover text-white transition-colors cursor-pointer"
+          className="px-5 py-2.5 rounded-lg text-sm font-medium bg-cc-primary hover:bg-cc-primary-hover text-white transition-colors cursor-pointer"
         >
           Next
         </button>

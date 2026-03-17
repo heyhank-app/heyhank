@@ -6,6 +6,10 @@ import { FolderPicker } from "../FolderPicker.js";
 interface WizardStepAgentProps {
   onNext: (agentId: string, agentName: string) => void;
   onBack: () => void;
+  /** Staging slot ID for credentials (new per-wizard flow) */
+  stagingId: string | null;
+  /** Clone credentials from this agent instead of using staging */
+  cloneFromAgentId: string | null;
   /** When set, the wizard edits an existing agent instead of creating one */
   existingAgent?: {
     id: string;
@@ -23,7 +27,7 @@ Read the issue details carefully, then complete the requested task. When done, s
 
 {{input}}`;
 
-export function WizardStepAgent({ onNext, onBack, existingAgent }: WizardStepAgentProps) {
+export function WizardStepAgent({ onNext, onBack, stagingId, cloneFromAgentId, existingAgent }: WizardStepAgentProps) {
   const isEditing = !!existingAgent;
 
   const [name, setName] = useState(existingAgent?.name ?? "Linear Agent");
@@ -74,7 +78,11 @@ export function WizardStepAgent({ onNext, onBack, existingAgent }: WizardStepAge
         await api.updateAgent(existingAgent.id, data);
         onNext(existingAgent.id, name.trim());
       } else {
-        const agent = await api.createAgent(data);
+        const agent = await api.createAgent({
+          ...data,
+          ...(stagingId ? { stagingId } : {}),
+          ...(cloneFromAgentId ? { cloneFromAgentId } : {}),
+        });
         onNext(agent.id, agent.name);
       }
     } catch (e: unknown) {

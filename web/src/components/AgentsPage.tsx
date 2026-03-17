@@ -58,6 +58,8 @@ export function AgentsPage({ route }: Props) {
   const [wizardCreatedAgentId, setWizardCreatedAgentId] = useState<string | null>(null);
   const [wizardLoading, setWizardLoading] = useState(false);
   const [wizardEditingAgent, setWizardEditingAgent] = useState<AgentInfo | null>(null);
+  const [wizardStagingId, setWizardStagingId] = useState<string | null>(null);
+  const [wizardCloneFromAgentId, setWizardCloneFromAgentId] = useState<string | null>(null);
 
   // linearOAuthConfigured is derived from agents list in loadAgents below
 
@@ -175,22 +177,31 @@ export function AgentsPage({ route }: Props) {
       }
     }
 
-    // Check server OAuth status + determine starting step
-    api.getLinearOAuthStatus().then((serverStatus) => {
+    // Restore persisted state from sessionStorage (for OAuth redirect return)
+    let persisted: { step: WizardStep; agentName: string; createdAgentId: string | null; stagingId: string | null } | null = null;
+    try {
+      const raw = sessionStorage.getItem(WIZARD_STORAGE_KEY);
+      if (raw) persisted = JSON.parse(raw);
+    } catch { /* ignore */ }
+
+    // Restore staging ID from persisted state
+    const persistedStagingId = persisted?.stagingId || null;
+    if (persistedStagingId) setWizardStagingId(persistedStagingId);
+
+    // Check OAuth status — use staging slot if available, else global
+    const statusPromise = persistedStagingId
+      ? api.getLinearStagingStatus(persistedStagingId)
+          .then((s) => ({ hasAccessToken: s.hasAccessToken, hasClientId: s.hasClientId, hasClientSecret: s.hasClientSecret, configured: s.hasAccessToken && s.hasClientId }))
+      : api.getLinearOAuthStatus();
+
+    statusPromise.then((serverStatus) => {
       const isConnected = oauthSuccess || serverStatus.hasAccessToken;
-      const hasCreds = serverStatus.configured || (serverStatus.hasClientId && serverStatus.hasClientSecret);
+      const hasCreds = serverStatus.configured || (serverStatus.hasClientId && ("hasClientSecret" in serverStatus ? serverStatus.hasClientSecret : false));
 
       setWizardOauthConnected(isConnected);
       setWizardCredentialsSaved(hasCreds);
       if (oauthErr) setWizardOauthError(oauthErr);
       if (isConnected) setLinearOAuthConfigured(true);
-
-      // Restore persisted state from sessionStorage (for OAuth redirect return)
-      let persisted: { step: WizardStep; agentName: string; createdAgentId: string | null } | null = null;
-      try {
-        const raw = sessionStorage.getItem(WIZARD_STORAGE_KEY);
-        if (raw) persisted = JSON.parse(raw);
-      } catch { /* ignore */ }
 
       if (persisted) {
         if (isConnected && persisted.step <= 3) {
@@ -226,6 +237,8 @@ export function AgentsPage({ route }: Props) {
     setWizardAgentName("");
     setWizardCreatedAgentId(null);
     setWizardEditingAgent(null);
+    setWizardStagingId(null);
+    setWizardCloneFromAgentId(null);
     try { sessionStorage.removeItem(WIZARD_STORAGE_KEY); } catch { /* ignore */ }
   }
 
@@ -249,9 +262,10 @@ export function AgentsPage({ route }: Props) {
         oauthConnected: wizardOauthConnected,
         agentName: wizardAgentName,
         createdAgentId: wizardCreatedAgentId,
+        stagingId: wizardStagingId,
       }));
     } catch { /* ignore */ }
-  }, [wizardCredentialsSaved, wizardOauthConnected, wizardAgentName, wizardCreatedAgentId]);
+  }, [wizardCredentialsSaved, wizardOauthConnected, wizardAgentName, wizardCreatedAgentId, wizardStagingId]);
 
   const handleWizardAgentCreated = useCallback((id: string, name: string) => {
     setWizardCreatedAgentId(id);
@@ -268,13 +282,33 @@ export function AgentsPage({ route }: Props) {
     setWizardOauthError("");
     setWizardAgentName("");
     setWizardCreatedAgentId(null);
+    setWizardStagingId(null);
+    setWizardCloneFromAgentId(null);
     loadAgents();
   }, [loadAgents]);
 
-  const handleWizardAddAnother = useCallback(() => {
+  // "Create Another" with the same OAuth app — clone credentials, skip to agent config
+  const handleWizardAddAnotherSameApp = useCallback(() => {
+    const sourceAgentId = wizardCreatedAgentId;
+    setWizardAgentName("");
+    setWizardEditingAgent(null);
+    setWizardStagingId(null);
+    setWizardCloneFromAgentId(sourceAgentId);
+    setWizardOauthError("");
+    // Skip credentials + install steps, go straight to agent config
+    setWizardCredentialsSaved(true);
+    setWizardOauthConnected(true);
+    setWizardCreatedAgentId(null);
+    setWizardStep(4);
+  }, [wizardCreatedAgentId]);
+
+  // "Create Another" with a different OAuth app — full wizard from scratch
+  const handleWizardAddAnotherNewApp = useCallback(() => {
     setWizardCreatedAgentId(null);
     setWizardAgentName("");
     setWizardEditingAgent(null);
+    setWizardStagingId(null);
+    setWizardCloneFromAgentId(null);
     setWizardCredentialsSaved(false);
     setWizardOauthConnected(false);
     setWizardOauthError("");
@@ -498,7 +532,10 @@ export function AgentsPage({ route }: Props) {
                 onNext={() => setWizardStep(3)}
                 onBack={() => setWizardStep(1)}
                 credentialsSaved={wizardCredentialsSaved}
-                onCredentialsSaved={() => setWizardCredentialsSaved(true)}
+                onCredentialsSaved={(stagingId: string) => {
+                  setWizardCredentialsSaved(true);
+                  setWizardStagingId(stagingId);
+                }}
               />
             )}
             {wizardStep === 3 && (
@@ -507,6 +544,7 @@ export function AgentsPage({ route }: Props) {
                 onBack={() => setWizardStep(2)}
                 oauthConnected={wizardOauthConnected}
                 oauthError={wizardOauthError}
+                stagingId={wizardStagingId}
                 onBeforeRedirect={handleWizardBeforeRedirect}
               />
             )}
@@ -514,6 +552,8 @@ export function AgentsPage({ route }: Props) {
               <WizardStepAgent
                 onNext={handleWizardAgentCreated}
                 onBack={() => setWizardStep(3)}
+                stagingId={wizardStagingId}
+                cloneFromAgentId={wizardCloneFromAgentId}
                 existingAgent={wizardEditingAgent ? {
                   id: wizardEditingAgent.id,
                   name: wizardEditingAgent.name,
@@ -528,7 +568,8 @@ export function AgentsPage({ route }: Props) {
               <WizardStepDone
                 agentName={wizardAgentName}
                 onFinish={handleWizardFinish}
-                onAddAnother={handleWizardAddAnother}
+                onAddAnotherSameApp={handleWizardAddAnotherSameApp}
+                onAddAnotherNewApp={handleWizardAddAnotherNewApp}
               />
             )}
           </div>

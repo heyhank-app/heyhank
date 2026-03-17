@@ -38,6 +38,8 @@ const mockApi = {
   getLinearOAuthStatus: vi.fn(),
   getLinearOAuthAuthorizeUrl: vi.fn(),
   updateSettings: vi.fn(),
+  createLinearStaging: vi.fn(),
+  getLinearStagingStatus: vi.fn(),
 };
 
 vi.mock("../api.js", () => ({
@@ -56,6 +58,8 @@ vi.mock("../api.js", () => ({
     getLinearOAuthStatus: (...args: unknown[]) => mockApi.getLinearOAuthStatus(...args),
     getLinearOAuthAuthorizeUrl: (...args: unknown[]) => mockApi.getLinearOAuthAuthorizeUrl(...args),
     updateSettings: (...args: unknown[]) => mockApi.updateSettings(...args),
+    createLinearStaging: (...args: unknown[]) => mockApi.createLinearStaging(...args),
+    getLinearStagingStatus: (...args: unknown[]) => mockApi.getLinearStagingStatus(...args),
   },
 }));
 
@@ -106,7 +110,7 @@ async function renderAndEnterWizard() {
 
   // Wait for wizard to load (OAuth status check)
   await waitFor(() => {
-    expect(screen.getByText("Linear Agent Setup")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Linear Agent Setup" })).toBeInTheDocument();
   });
 }
 
@@ -118,6 +122,8 @@ beforeEach(() => {
   mockApi.listEnvs.mockResolvedValue([]);
   mockApi.getLinearOAuthStatus.mockResolvedValue(defaultOAuthStatus);
   mockApi.updateSettings.mockResolvedValue({});
+  mockApi.createLinearStaging.mockResolvedValue({ stagingId: "test-staging-id" });
+  mockApi.getLinearStagingStatus.mockResolvedValue({ exists: true, hasAccessToken: false, hasClientId: true });
   mockApi.createAgent.mockResolvedValue({
     id: "linear-agent",
     name: "Linear Agent",
@@ -150,9 +156,8 @@ describe("Linear Agent Wizard in AgentsPage", () => {
   it("shows Step 1 by default when OAuth is not configured", async () => {
     await renderAndEnterWizard();
 
-    // Step 1 content: prerequisites
-    expect(screen.getByText("Set up the Linear Agent")).toBeInTheDocument();
-    expect(screen.getByText("Prerequisites")).toBeInTheDocument();
+    // Step 1 content: intro
+    expect(screen.getByText("Connect your Linear workspace")).toBeInTheDocument();
   });
 
   it("shows Step 3 when credentials are saved but not installed", async () => {
@@ -222,7 +227,7 @@ describe("Linear Agent Wizard in AgentsPage", () => {
     // Go back to step 1
     fireEvent.click(screen.getByText("Back"));
     await waitFor(() => {
-      expect(screen.getByText("Set up the Linear Agent")).toBeInTheDocument();
+      expect(screen.getByText("Connect your Linear workspace")).toBeInTheDocument();
     });
   });
 
@@ -246,10 +251,10 @@ describe("Linear Agent Wizard in AgentsPage", () => {
     fireEvent.click(screen.getByText("Save Credentials"));
 
     await waitFor(() => {
-      expect(mockApi.updateSettings).toHaveBeenCalledWith({
-        linearOAuthClientId: "client-id-123",
-        linearOAuthClientSecret: "client-secret-456",
-        linearOAuthWebhookSecret: "webhook-secret-789",
+      expect(mockApi.createLinearStaging).toHaveBeenCalledWith({
+        clientId: "client-id-123",
+        clientSecret: "client-secret-456",
+        webhookSecret: "webhook-secret-789",
       });
     });
 
@@ -266,7 +271,7 @@ describe("Linear Agent Wizard in AgentsPage", () => {
   });
 
   it("shows error when credentials save fails", async () => {
-    mockApi.updateSettings.mockRejectedValue(new Error("Network error"));
+    mockApi.createLinearStaging.mockRejectedValue(new Error("Network error"));
 
     await renderAndEnterWizard();
 
@@ -370,7 +375,7 @@ describe("Linear Agent Wizard in AgentsPage", () => {
 
     // Should advance to step 5
     await waitFor(() => {
-      expect(screen.getByText("Setup Complete")).toBeInTheDocument();
+      expect(screen.getByText("Linear Agent is live")).toBeInTheDocument();
     });
 
     // Summary should show agent name
@@ -420,7 +425,7 @@ describe("Linear Agent Wizard in AgentsPage", () => {
     fireEvent.click(screen.getByText("Create Agent"));
 
     await waitFor(() => {
-      expect(screen.getByText("Setup Complete")).toBeInTheDocument();
+      expect(screen.getByText("Linear Agent is live")).toBeInTheDocument();
     });
 
     // Click finish — should return to agent list view
@@ -484,13 +489,13 @@ describe("Linear Agent Wizard in AgentsPage", () => {
     await renderAndEnterWizard();
 
     // Should show warning about missing public URL
-    expect(screen.getByText(/No public URL set/)).toBeInTheDocument();
+    expect(screen.getByText(/Not set\./)).toBeInTheDocument();
   });
 
   it("shows green checkmark when public URL is configured", async () => {
     await renderAndEnterWizard();
 
-    expect(screen.getByText("Public URL configured")).toBeInTheDocument();
+    expect(screen.getByText("Public URL")).toBeInTheDocument();
   });
 
   // ─── Entry from IntegrationsPage (hash param) ─────────────────────────────
@@ -502,7 +507,7 @@ describe("Linear Agent Wizard in AgentsPage", () => {
 
     // Should auto-enter the wizard
     await waitFor(() => {
-      expect(screen.getByText("Linear Agent Setup")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Linear Agent Setup" })).toBeInTheDocument();
     });
   });
 });

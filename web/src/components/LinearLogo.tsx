@@ -2,17 +2,34 @@ interface LinearLogoProps {
   className?: string;
 }
 
+/**
+ * Linear brand mark — the stylized "L" formed by diagonal parallel lines.
+ * Based on Linear's actual logo geometry.
+ */
 export function LinearLogo({ className }: LinearLogoProps) {
   return (
     <svg
-      viewBox="0 0 24 24"
+      viewBox="0 0 100 104"
       fill="none"
       aria-hidden="true"
       className={className}
     >
-      <circle cx="12" cy="12" r="10" fill="currentColor" />
-      <path d="M7.2 15.2l6.6-6.6" stroke="white" strokeWidth="2" strokeLinecap="round" />
-      <circle cx="16.4" cy="8.8" r="1.8" fill="white" />
+      <path
+        d="M1.22541 61.5228c-.51174-.7989-.43432-1.7526.24387-2.4308L56.4111 3.93536c.6786-.67858 1.6333-.7555 2.4308-.24384l8.676 5.55638c.9876.63266 1.0994 2.01905.2024 2.91604L11.7007 68.1832c-.897.897-2.28339.7852-2.91605-.2024L1.22541 61.5228z"
+        fill="currentColor"
+      />
+      <path
+        d="M10.3282 73.646c-.69215-.6922-.62695-1.8301.14574-2.4633l10.0851-8.2649c.7722-.6328 1.9083-.5766 2.5354.1253l16.8427 18.8696c.6281.7032.5667 1.8504-.1371 2.5606l-8.2649 8.3441c-.7047.7111-1.8598.7621-2.5605.1133L10.3282 73.646z"
+        fill="currentColor"
+      />
+      <path
+        d="M44.9498 90.6953c-.4357-.7281-.2507-1.6655.4242-2.1538l7.1957-5.2044c.6744-.4878 1.6108-.3706 2.1413.2682l8.8797 10.6885c.5297.6379.4213 1.5907-.2409 2.1184l-5.1045 4.0706c-.6633.5286-1.627.4453-2.1858-.189L44.9498 90.6953z"
+        fill="currentColor"
+      />
+      <path
+        d="M67.3964 96.0665c-.2955-.5872-.0617-1.2949.5209-1.5775l4.2152-2.0447c.5843-.2834 1.2962-.0519 1.5873.5167l3.6174 7.0694c.2914.5693.0659 1.2693-.5028 1.5613l-4.2152 2.1643c-.5704.2929-1.2797.0581-1.5788-.5224L67.3964 96.0665z"
+        fill="currentColor"
+      />
     </svg>
   );
 }

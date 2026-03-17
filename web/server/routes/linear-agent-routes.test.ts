@@ -19,6 +19,14 @@ vi.mock("../agent-store.js", () => ({
   listAgents: vi.fn(),
 }));
 
+// Mock linear-staging module
+vi.mock("../linear-staging.js", () => ({
+  createSlot: vi.fn(),
+  getSlot: vi.fn(),
+  deleteSlot: vi.fn(),
+  updateSlotTokens: vi.fn(),
+}));
+
 // Mock settings-manager
 vi.mock("../settings-manager.js", () => ({
   getSettings: vi.fn().mockReturnValue({
@@ -34,6 +42,7 @@ vi.mock("../settings-manager.js", () => ({
 import * as linearAgent from "../linear-agent.js";
 import * as settingsManager from "../settings-manager.js";
 import * as agentStore from "../agent-store.js";
+import * as staging from "../linear-staging.js";
 import {
   registerLinearAgentWebhookRoute,
   registerLinearAgentProtectedRoutes,
@@ -295,11 +304,11 @@ describe("GET /linear/oauth/authorize-url", () => {
     const body = await res.json();
     expect(body.url).toContain("linear.app/oauth/authorize");
 
-    // getOAuthAuthorizeUrl now receives clientId as first arg
+    // getOAuthAuthorizeUrl receives clientId, redirectUri, and an options object
     expect(linearAgent.getOAuthAuthorizeUrl).toHaveBeenCalledWith(
       "client-id",
       expect.stringContaining("/api/linear/oauth/callback"),
-      undefined,
+      { returnTo: undefined, stagingId: undefined },
     );
   });
 
@@ -367,5 +376,292 @@ describe("POST /linear/oauth/disconnect", () => {
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
     });
+  });
+});
+
+// ─── Staging slot CRUD tests ────────────────────────────────────────────────
+
+describe("POST /linear/oauth/staging", () => {
+  let app: Hono;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ({ app } = createApp());
+  });
+
+  it("creates a staging slot and returns the stagingId", async () => {
+    // createSlot should return a hex ID when given valid credentials
+    vi.mocked(staging.createSlot).mockReturnValue("abcd1234abcd1234abcd1234abcd1234");
+
+    const res = await app.request("/linear/oauth/staging", {
+      method: "POST",
+      body: JSON.stringify({
+        clientId: "my-client-id",
+        clientSecret: "my-client-secret",
+        webhookSecret: "my-webhook-secret",
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.stagingId).toBe("abcd1234abcd1234abcd1234abcd1234");
+
+    // Verify createSlot was called with the provided credentials
+    expect(staging.createSlot).toHaveBeenCalledWith({
+      clientId: "my-client-id",
+      clientSecret: "my-client-secret",
+      webhookSecret: "my-webhook-secret",
+    });
+  });
+
+  it("returns 400 when required fields are missing", async () => {
+    // Missing webhookSecret — should be rejected before createSlot is called
+    const res = await app.request("/linear/oauth/staging", {
+      method: "POST",
+      body: JSON.stringify({
+        clientId: "my-client-id",
+        clientSecret: "my-client-secret",
+        // webhookSecret intentionally omitted
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("required");
+    expect(staging.createSlot).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when all fields are empty strings", async () => {
+    // All fields present but empty — should be rejected after trimming
+    const res = await app.request("/linear/oauth/staging", {
+      method: "POST",
+      body: JSON.stringify({
+        clientId: "  ",
+        clientSecret: "",
+        webhookSecret: "",
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("required");
+    expect(staging.createSlot).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /linear/oauth/staging/:id/status", () => {
+  let app: Hono;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ({ app } = createApp());
+  });
+
+  it("returns full status for an existing staging slot", async () => {
+    // Simulate a slot that has completed OAuth (has accessToken)
+    vi.mocked(staging.getSlot).mockReturnValue({
+      id: "abcd1234abcd1234abcd1234abcd1234",
+      clientId: "my-client-id",
+      clientSecret: "my-client-secret",
+      webhookSecret: "my-webhook-secret",
+      accessToken: "token-abc",
+      refreshToken: "refresh-abc",
+      createdAt: Date.now(),
+    });
+
+    const res = await app.request("/linear/oauth/staging/abcd1234abcd1234abcd1234abcd1234/status");
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.exists).toBe(true);
+    expect(body.hasAccessToken).toBe(true);
+    expect(body.hasClientId).toBe(true);
+    expect(body.hasClientSecret).toBe(true);
+  });
+
+  it("returns exists:false for a non-existent or expired slot", async () => {
+    // getSlot returns null when the slot doesn't exist or has expired
+    vi.mocked(staging.getSlot).mockReturnValue(null);
+
+    const res = await app.request("/linear/oauth/staging/deadbeefdeadbeefdeadbeefdeadbeef/status");
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.exists).toBe(false);
+    expect(body.hasAccessToken).toBe(false);
+    expect(body.hasClientId).toBe(false);
+    expect(body.hasClientSecret).toBe(false);
+  });
+});
+
+describe("DELETE /linear/oauth/staging/:id", () => {
+  let app: Hono;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ({ app } = createApp());
+  });
+
+  it("deletes a staging slot and returns ok", async () => {
+    vi.mocked(staging.deleteSlot).mockReturnValue(true);
+
+    const res = await app.request("/linear/oauth/staging/abcd1234abcd1234abcd1234abcd1234", {
+      method: "DELETE",
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+
+    expect(staging.deleteSlot).toHaveBeenCalledWith("abcd1234abcd1234abcd1234abcd1234");
+  });
+});
+
+// ─── OAuth callback with expired staging slot ───────────────────────────────
+
+describe("GET /linear/oauth/callback — expired staging slot", () => {
+  let app: Hono;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ({ app } = createApp());
+  });
+
+  it("redirects with staging_slot_expired error when staging slot has expired", async () => {
+    // The state nonce is valid and contains a stagingId, but the slot has been
+    // deleted or expired (getSlot returns null). The callback should NOT fall
+    // back to global credentials — it should return an explicit error.
+    vi.mocked(linearAgent.validateOAuthState).mockReturnValue({
+      valid: true,
+      stagingId: "abcd1234abcd1234abcd1234abcd1234",
+      returnTo: "/#/agents",
+    });
+    vi.mocked(staging.getSlot).mockReturnValue(null);
+
+    const res = await app.request(
+      "/linear/oauth/callback?code=auth-code-123&state=valid-state-with-staging",
+    );
+
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location");
+    // Should redirect to the returnTo path with the staging_slot_expired error
+    expect(location).toContain("/#/agents");
+    expect(location).toContain("oauth_error=staging_slot_expired");
+
+    // Token exchange should never be attempted when the staging slot is expired
+    expect(linearAgent.exchangeCodeForTokens).not.toHaveBeenCalled();
+  });
+
+  it("uses staging slot credentials when slot exists", async () => {
+    // When a stagingId is in the state and the slot is still alive, the callback
+    // should use the staging slot's credentials for token exchange and persist
+    // the tokens back to the slot via updateSlotTokens.
+    vi.mocked(linearAgent.validateOAuthState).mockReturnValue({
+      valid: true,
+      stagingId: "abcd1234abcd1234abcd1234abcd1234",
+      returnTo: "/#/agents",
+    });
+    vi.mocked(staging.getSlot).mockReturnValue({
+      id: "abcd1234abcd1234abcd1234abcd1234",
+      clientId: "staging-client-id",
+      clientSecret: "staging-client-secret",
+      webhookSecret: "staging-webhook-secret",
+      accessToken: "",
+      refreshToken: "",
+      createdAt: Date.now(),
+    });
+    vi.mocked(linearAgent.exchangeCodeForTokens).mockResolvedValue({
+      accessToken: "new-staging-access",
+      refreshToken: "new-staging-refresh",
+    });
+
+    const res = await app.request(
+      "/linear/oauth/callback?code=auth-code-456&state=valid-state-with-staging",
+    );
+
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location");
+    expect(location).toContain("/#/agents");
+    expect(location).toContain("oauth_success=true");
+
+    // Should use the staging slot's credentials, not global settings
+    expect(linearAgent.exchangeCodeForTokens).toHaveBeenCalledWith(
+      { clientId: "staging-client-id", clientSecret: "staging-client-secret" },
+      "auth-code-456",
+      expect.stringContaining("/api/linear/oauth/callback"),
+    );
+
+    // Tokens should be persisted to the staging slot, not global settings
+    expect(staging.updateSlotTokens).toHaveBeenCalledWith(
+      "abcd1234abcd1234abcd1234abcd1234",
+      { accessToken: "new-staging-access", refreshToken: "new-staging-refresh" },
+    );
+    // Global settings should NOT be updated
+    expect(settingsManager.updateSettings).not.toHaveBeenCalled();
+  });
+});
+
+// ─── OAuth authorize URL with staging slot ──────────────────────────────────
+
+describe("GET /linear/oauth/authorize-url — with stagingId", () => {
+  let app: Hono;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ({ app } = createApp());
+  });
+
+  it("uses the staging slot's clientId when stagingId is provided", async () => {
+    // When the authorize-url request includes a stagingId, the route should look
+    // up the staging slot and use its clientId instead of the global setting.
+    vi.mocked(staging.getSlot).mockReturnValue({
+      id: "abcd1234abcd1234abcd1234abcd1234",
+      clientId: "staging-oauth-client-id",
+      clientSecret: "staging-oauth-client-secret",
+      webhookSecret: "staging-webhook-secret",
+      accessToken: "",
+      refreshToken: "",
+      createdAt: Date.now(),
+    });
+    vi.mocked(linearAgent.getOAuthAuthorizeUrl).mockReturnValue({
+      url: "https://linear.app/oauth/authorize?client_id=staging-oauth-client-id&state=xyz",
+      state: "xyz",
+    });
+
+    const res = await app.request(
+      "/linear/oauth/authorize-url?stagingId=abcd1234abcd1234abcd1234abcd1234",
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.url).toContain("linear.app/oauth/authorize");
+
+    // getOAuthAuthorizeUrl should receive the staging slot's clientId
+    expect(linearAgent.getOAuthAuthorizeUrl).toHaveBeenCalledWith(
+      "staging-oauth-client-id",
+      expect.stringContaining("/api/linear/oauth/callback"),
+      { returnTo: undefined, stagingId: "abcd1234abcd1234abcd1234abcd1234" },
+    );
+  });
+
+  it("returns 404 when staging slot doesn't exist (expired or deleted)", async () => {
+    // If stagingId is provided but the slot is expired/missing, the endpoint
+    // should return 404 immediately rather than generating a URL that will
+    // fail at callback time with staging_slot_expired.
+    vi.mocked(staging.getSlot).mockReturnValue(null);
+
+    const res = await app.request(
+      "/linear/oauth/authorize-url?stagingId=deadbeefdeadbeefdeadbeefdeadbeef",
+    );
+
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toContain("Staging slot expired");
+
+    // Should not have attempted to generate an authorize URL
+    expect(linearAgent.getOAuthAuthorizeUrl).not.toHaveBeenCalled();
   });
 });

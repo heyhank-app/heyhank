@@ -1908,6 +1908,124 @@ describe("del() error handling", () => {
 });
 
 // ===========================================================================
+// Browser preview API
+// ===========================================================================
+describe("browser preview API", () => {
+  it("navigateBrowser sends POST with url body", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    const result = await api.navigateBrowser("sess-1", "https://example.com");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/sess-1/browser/navigate");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({ url: "https://example.com" });
+    expect(result).toEqual({ ok: true });
+  });
+});
+
+// ===========================================================================
+// Linear OAuth API (Agent Interaction SDK)
+// ===========================================================================
+describe("Linear OAuth API", () => {
+  it("getLinearOAuthStatus sends GET without params when no stagingId", async () => {
+    const data = { configured: true, hasClientId: true, hasClientSecret: true, hasWebhookSecret: true, hasAccessToken: true };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getLinearOAuthStatus();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/oauth/status");
+    expect(result).toEqual(data);
+  });
+
+  it("getLinearOAuthStatus includes stagingId query param", async () => {
+    const data = { configured: false, hasClientId: true, hasClientSecret: true, hasWebhookSecret: false, hasAccessToken: false };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getLinearOAuthStatus("staging-abc");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/oauth/status?stagingId=staging-abc");
+    expect(result).toEqual(data);
+  });
+
+  it("getLinearOAuthAuthorizeUrl sends GET without params", async () => {
+    const data = { url: "https://linear.app/oauth/authorize?client_id=xxx" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getLinearOAuthAuthorizeUrl();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/oauth/authorize-url");
+    expect(result).toEqual(data);
+  });
+
+  it("getLinearOAuthAuthorizeUrl includes returnTo and stagingId params", async () => {
+    const data = { url: "https://linear.app/oauth/authorize?client_id=xxx" };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getLinearOAuthAuthorizeUrl("/#/settings", "staging-xyz");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain("/api/linear/oauth/authorize-url?");
+    expect(url).toContain("returnTo=%2F%23%2Fsettings");
+    expect(url).toContain("stagingId=staging-xyz");
+    expect(result).toEqual(data);
+  });
+
+  it("disconnectLinearOAuth sends POST to /linear/oauth/disconnect", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    const result = await api.disconnectLinearOAuth();
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/oauth/disconnect");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual({ ok: true });
+  });
+});
+
+// ===========================================================================
+// Linear OAuth staging slots API
+// ===========================================================================
+describe("Linear OAuth staging API", () => {
+  it("createLinearStaging sends POST with credentials", async () => {
+    const creds = { clientId: "cid", clientSecret: "csec", webhookSecret: "wsec" };
+    mockFetch.mockResolvedValueOnce(mockResponse({ stagingId: "slot-123" }));
+
+    const result = await api.createLinearStaging(creds);
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/oauth/staging");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual(creds);
+    expect(result).toEqual({ stagingId: "slot-123" });
+  });
+
+  it("getLinearStagingStatus sends GET with encoded id", async () => {
+    const data = { exists: true, hasAccessToken: true, hasClientId: true, hasClientSecret: true };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getLinearStagingStatus("slot-123");
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/oauth/staging/slot-123/status");
+    expect(result).toEqual(data);
+  });
+
+  it("deleteLinearStaging sends DELETE with encoded id", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await api.deleteLinearStaging("slot-123");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/oauth/staging/slot-123");
+    expect(opts.method).toBe("DELETE");
+  });
+});
+
+// ===========================================================================
 // createLinearIssue — covers previously untested one-liner
 // ===========================================================================
 describe("createLinearIssue", () => {

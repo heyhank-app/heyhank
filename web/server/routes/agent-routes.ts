@@ -4,6 +4,7 @@ import * as agentStore from "../agent-store.js";
 import type { AgentExecutor } from "../agent-executor.js";
 import type { AgentConfig, AgentConfigExport } from "../agent-types.js";
 import { getSettings, updateSettings } from "../settings-manager.js";
+import * as staging from "../linear-staging.js";
 
 /** Fields the user can set when creating/updating an agent */
 const EDITABLE_FIELDS = [
@@ -113,32 +114,82 @@ export function registerAgentRoutes(
         enabled: body.enabled ?? true,
       });
 
-      // If this is a Linear agent with no credentials, copy from global staging
+      // If this is a Linear agent with no credentials, resolve from:
+      // 1. Staging slot (new per-wizard flow)
+      // 2. Clone from existing agent
+      // 3. Global staging (backward compat)
       if (agent.triggers?.linear?.enabled && !agent.triggers.linear.oauthClientId) {
-        const settings = getSettings();
-        if (settings.linearOAuthClientId) {
+        let linearCreds: {
+          oauthClientId: string;
+          oauthClientSecret: string;
+          webhookSecret: string;
+          accessToken: string;
+          refreshToken: string;
+        } | null = null;
+
+        // Priority 1: staging slot
+        if (body.stagingId) {
+          const slot = staging.consumeSlot(body.stagingId);
+          if (slot?.clientId) {
+            linearCreds = {
+              oauthClientId: slot.clientId,
+              oauthClientSecret: slot.clientSecret,
+              webhookSecret: slot.webhookSecret,
+              accessToken: slot.accessToken,
+              refreshToken: slot.refreshToken,
+            };
+          }
+        }
+
+        // Priority 2: clone from existing agent
+        if (!linearCreds && body.cloneFromAgentId) {
+          const source = agentStore.getAgent(body.cloneFromAgentId);
+          if (source?.triggers?.linear?.oauthClientId) {
+            linearCreds = {
+              oauthClientId: source.triggers.linear.oauthClientId,
+              oauthClientSecret: source.triggers.linear.oauthClientSecret || "",
+              webhookSecret: source.triggers.linear.webhookSecret || "",
+              accessToken: source.triggers.linear.accessToken || "",
+              refreshToken: source.triggers.linear.refreshToken || "",
+            };
+          }
+        }
+
+        // Priority 3: global staging (backward compat)
+        if (!linearCreds) {
+          const settings = getSettings();
+          if (settings.linearOAuthClientId) {
+            linearCreds = {
+              oauthClientId: settings.linearOAuthClientId,
+              oauthClientSecret: settings.linearOAuthClientSecret,
+              webhookSecret: settings.linearOAuthWebhookSecret,
+              accessToken: settings.linearOAuthAccessToken,
+              refreshToken: settings.linearOAuthRefreshToken,
+            };
+          }
+        }
+
+        if (linearCreds) {
           const updated = agentStore.updateAgent(agent.id, {
             triggers: {
               ...agent.triggers,
               linear: {
                 ...agent.triggers.linear,
-                oauthClientId: settings.linearOAuthClientId,
-                oauthClientSecret: settings.linearOAuthClientSecret,
-                webhookSecret: settings.linearOAuthWebhookSecret,
-                accessToken: settings.linearOAuthAccessToken,
-                refreshToken: settings.linearOAuthRefreshToken,
+                ...linearCreds,
               },
             },
           });
-          // Only clear global staging credentials after a successful agent update
           if (updated) {
-            updateSettings({
-              linearOAuthClientId: "",
-              linearOAuthClientSecret: "",
-              linearOAuthWebhookSecret: "",
-              linearOAuthAccessToken: "",
-              linearOAuthRefreshToken: "",
-            });
+            // Clear global staging if we used it (no stagingId and no clone source)
+            if (!body.stagingId && !body.cloneFromAgentId) {
+              updateSettings({
+                linearOAuthClientId: "",
+                linearOAuthClientSecret: "",
+                linearOAuthWebhookSecret: "",
+                linearOAuthAccessToken: "",
+                linearOAuthRefreshToken: "",
+              });
+            }
             if (updated.enabled && updated.triggers?.schedule?.enabled) {
               agentExecutor?.scheduleAgent(updated);
             }
