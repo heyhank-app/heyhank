@@ -64,6 +64,14 @@ ENV PATH="/root/.cargo/bin:$PATH"
 # get.docker.com installs dockerd, docker CLI, containerd, and docker-compose-plugin
 RUN curl -fsSL https://get.docker.com | sh
 
+# ── Layer 7b: Docker Compose standalone CLI ──────────────────────────────────
+# The plugin (docker compose) is already installed above; this adds the
+# standalone `docker-compose` binary so both invocation styles work.
+RUN COMPOSE_VERSION=$(curl -fsSL https://api.github.com/repos/docker/compose/releases/latest | jq -r .tag_name) \
+    && curl -fsSL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-$(uname -m)" \
+       -o /usr/local/bin/docker-compose \
+    && chmod +x /usr/local/bin/docker-compose
+
 # ── Layer 8: GitHub CLI ──────────────────────────────────────────────────────
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
