@@ -64,6 +64,8 @@ const RETRYABLE_BACKEND_MESSAGE_TYPES = new Set<BrowserOutgoingMessage["type"]>(
 
 export class WsBridge {
   private static readonly PROCESSED_CLIENT_MSG_ID_LIMIT = 1000;
+  /** Maximum number of queued browser→backend messages per session to prevent unbounded memory growth. */
+  private static readonly PENDING_MESSAGES_LIMIT = 200;
   private static readonly DISCONNECT_DEBOUNCE_MS = Number(
     process.env.COMPANION_DISCONNECT_DEBOUNCE_MS || "15000",
   );
@@ -317,6 +319,8 @@ export class WsBridge {
   }
 
   removeSession(sessionId: string) {
+    const session = this.sessions.get(sessionId);
+    session?.unsubscribeStateMachine?.();
     this.cancelDisconnectTimer(sessionId);
     this.stopIdleKillWatchdog(sessionId);
     this.sessions.delete(sessionId);
@@ -326,7 +330,9 @@ export class WsBridge {
 
   /** Wire state machine transition listener to broadcast phase changes. */
   private wireStateMachineListeners(session: Session): void {
-    session.stateMachine.onTransition((event) => {
+    // Unsubscribe any previous listener (e.g. from session restoration) to prevent leaks
+    session.unsubscribeStateMachine?.();
+    session.unsubscribeStateMachine = session.stateMachine.onTransition((event) => {
       companionBus.emit("session:phase-changed", {
         sessionId: event.sessionId,
         from: event.from,
@@ -349,6 +355,9 @@ export class WsBridge {
     this.stopIdleKillWatchdog(sessionId);
     const session = this.sessions.get(sessionId);
     if (!session) return;
+
+    // Unsubscribe state machine listener to prevent leaks
+    session.unsubscribeStateMachine?.();
 
     // Disconnect backend adapter (Claude or Codex)
     if (session.backendAdapter) {
@@ -533,8 +542,9 @@ export class WsBridge {
           // Run AI validation async
           this.handleAiValidation(session, adapter, perm).catch((err) => {
             console.warn(`[ws-bridge] AI validation error for tool=${perm.tool_name} request_id=${perm.request_id} session=${session.id}, falling through to manual:`, err);
-            // On error, fall through to normal flow
+            // On error, fall through to normal permission flow
             session.pendingPermissions.set(perm.request_id, perm);
+            session.stateMachine.transition("awaiting_permission", "ai_validation_error_fallback");
             this.persistSession(session);
             this.broadcastToBrowsers(session, msg);
           });
@@ -550,6 +560,10 @@ export class WsBridge {
       if (msg.type === "permission_cancelled") {
         const reqId = (msg as { request_id: string }).request_id;
         session.pendingPermissions.delete(reqId);
+        // If no more pending permissions, transition back to streaming
+        if (session.pendingPermissions.size === 0 && session.stateMachine.phase === "awaiting_permission") {
+          session.stateMachine.transition("streaming", "permission_cancelled");
+        }
         this.persistSession(session);
       }
 
@@ -694,6 +708,7 @@ export class WsBridge {
 
     // Uncertain or auto-action disabled: fall through to manual
     session.pendingPermissions.set(perm.request_id, perm);
+    session.stateMachine.transition("awaiting_permission", "ai_validation_manual_fallback");
     this.persistSession(session);
     this.broadcastToBrowsers(session, {
       type: "permission_request",
@@ -1106,7 +1121,7 @@ export class WsBridge {
         // messages, queue this incoming message behind them instead of sending
         // it immediately (which could overtake older queued work).
         if (session.pendingMessages.length > 0) {
-          session.pendingMessages.push(JSON.stringify(msg));
+          this.enqueuePendingMessage(session, JSON.stringify(msg));
           this.persistSession(session);
           return;
         }
@@ -1120,7 +1135,7 @@ export class WsBridge {
           sessionId: session.id,
           messageType: msg.type,
         });
-        session.pendingMessages.push(JSON.stringify(msg));
+        this.enqueuePendingMessage(session, JSON.stringify(msg));
       }
       this.persistSession(session);
     } else {
@@ -1129,7 +1144,7 @@ export class WsBridge {
         sessionId: session.id,
         messageType: msg.type,
       });
-      session.pendingMessages.push(JSON.stringify(msg));
+      this.enqueuePendingMessage(session, JSON.stringify(msg));
       this.persistSession(session);
     }
   }
@@ -1159,6 +1174,23 @@ export class WsBridge {
    * Flush queued browser-originated messages to an attached backend adapter.
    * Keeps ordering and re-queues retryable messages if dispatch fails.
    */
+  /** Enqueue a browser→backend message, dropping the oldest if the queue is full. */
+  private enqueuePendingMessage(session: Session, raw: string): void {
+    if (session.pendingMessages.length >= WsBridge.PENDING_MESSAGES_LIMIT) {
+      const dropped = session.pendingMessages.shift();
+      log.warn("ws-bridge", "Pending message queue full, dropping oldest message", {
+        sessionId: session.id,
+        queueSize: session.pendingMessages.length,
+        droppedPreview: dropped?.substring(0, 80),
+      });
+      this.broadcastToBrowsers(session, {
+        type: "error",
+        message: "Message queue full: the oldest queued message was discarded.",
+      });
+    }
+    session.pendingMessages.push(raw);
+  }
+
   private flushQueuedBrowserMessages(session: Session, adapter: IBackendAdapter, reason: string): void {
     if (session.pendingMessages.length === 0) return;
 

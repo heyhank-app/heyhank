@@ -103,6 +103,10 @@ export function attachCodexAdapterHandlers(
     if (msg.type === "permission_cancelled") {
       const reqId = (msg as { request_id: string }).request_id;
       session.pendingPermissions.delete(reqId);
+      // If no more pending permissions, transition back to streaming
+      if (session.pendingPermissions.size === 0 && session.stateMachine.phase === "awaiting_permission") {
+        session.stateMachine.transition("streaming", "permission_cancelled");
+      }
       deps.persistSession(session);
     }
 
@@ -120,8 +124,9 @@ export function attachCodexAdapterHandlers(
         // Run AI validation async — don't broadcast yet
         handleCodexAiValidation(session, adapter, perm, deps).catch((err) => {
           console.warn(`[ws-bridge-codex] AI validation error for tool=${perm.tool_name} request_id=${perm.request_id} session=${session.id}, falling through to manual:`, err);
-          // On error, fall through to normal flow
+          // On error, fall through to normal permission flow
           session.pendingPermissions.set(perm.request_id, perm);
+          session.stateMachine.transition("awaiting_permission", "ai_validation_error_fallback");
           deps.persistSession(session);
           deps.broadcastToBrowsers(session, msg);
         });
@@ -254,6 +259,7 @@ async function handleCodexAiValidation(
 
   // Uncertain or auto-action disabled: fall through to manual
   session.pendingPermissions.set(perm.request_id, perm);
+  session.stateMachine.transition("awaiting_permission", "ai_validation_manual_fallback");
   deps.persistSession(session);
   deps.broadcastToBrowsers(session, {
     type: "permission_request",

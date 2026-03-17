@@ -228,6 +228,21 @@ export interface CLIControlResponseMessage {
   };
 }
 
+/** CLI echoes user messages back (including subagent tool_result blocks). */
+export interface CLIUserEchoMessage {
+  type: "user";
+  message: { role: string; content: unknown };
+  uuid?: string;
+  session_id?: string;
+}
+
+/** Rate-limit status from Claude API (allowed/throttled). */
+export interface CLIRateLimitEventMessage {
+  type: "rate_limit_event";
+  rate_limit_info: Record<string, unknown>;
+  uuid?: string;
+}
+
 export type CLIMessage =
   | CLISystemMessage
   | CLIAssistantMessage
@@ -238,7 +253,9 @@ export type CLIMessage =
   | CLIControlRequestMessage
   | CLIControlResponseMessage
   | CLIKeepAliveMessage
-  | CLIAuthStatusMessage;
+  | CLIAuthStatusMessage
+  | CLIUserEchoMessage
+  | CLIRateLimitEventMessage;
 
 // ─── Content Block Types ──────────────────────────────────────────────────────
 

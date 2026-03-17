@@ -26,6 +26,7 @@ import type {
   CLIControlRequestMessage,
   CLIControlResponseMessage,
   CLIAuthStatusMessage,
+  CLIUserEchoMessage,
   CLICompactBoundaryMessage,
   CLITaskNotificationMessage,
   CLIFilesPersistedMessage,
@@ -447,6 +448,19 @@ export class ClaudeAdapter implements IBackendAdapter {
         // Silently consume keepalives
         break;
 
+      case "user":
+        // CLI echoes back user messages (including tool_result blocks from
+        // subagents). These are informational — the bridge already persists
+        // user messages from the browser side, so we emit them for history
+        // completeness but don't need special handling.
+        this.handleUserEcho(msg as CLIUserEchoMessage);
+        break;
+
+      case "rate_limit_event":
+        // Rate-limit status from Claude API (allowed/throttled). Silently
+        // consumed — no user-facing action needed.
+        break;
+
       default:
         reportProtocolDrift(
           this.protocolDriftSeen,
@@ -700,6 +714,23 @@ export class ClaudeAdapter implements IBackendAdapter {
       type: "tool_use_summary",
       summary: msg.summary,
       tool_use_ids: msg.preceding_tool_use_ids,
+    });
+  }
+
+  // -- User echo --------------------------------------------------------------
+
+  private handleUserEcho(msg: CLIUserEchoMessage): void {
+    // The CLI echoes user messages back (including subagent tool_result blocks).
+    // Only emit for non-string content (e.g. tool_result arrays from subagents)
+    // that didn't originate from the browser composer. Plain string echoes are
+    // duplicates of messages the browser already has, so silently drop them.
+    if (typeof msg.message.content === "string") return;
+
+    const content = JSON.stringify(msg.message.content);
+    this.browserMessageCb?.({
+      type: "user_message",
+      content,
+      timestamp: Date.now(),
     });
   }
 

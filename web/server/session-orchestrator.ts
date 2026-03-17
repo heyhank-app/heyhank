@@ -195,6 +195,10 @@ export class SessionOrchestrator {
       if (!info || info.archived) return;
       log.info("orchestrator", "Idle-killing session", { sessionId, reason: "no browsers, no activity" });
       await this.killSession(sessionId);
+      // Clear relaunch counters so the session gets a fresh budget when the user
+      // returns. Idle-kill is intentional cleanup, not a crash — the session
+      // should be fully relaunchable.
+      this.clearAutoRelaunchCount(sessionId);
     });
 
     // Auto-generate session title after first turn completes
@@ -732,8 +736,23 @@ export class SessionOrchestrator {
     if (freshInfo && (freshInfo.state === "connected" || freshInfo.state === "running")) {
       this.relaunchingSet.delete(sessionId); return;
     }
-    if (freshInfo?.pid) {
-      try { process.kill(freshInfo.pid, 0); this.relaunchingSet.delete(sessionId); return; } catch {}
+    // Only check PID liveness if the session is NOT already "exited".
+    // After idle-kill or explicit kill(), the PID field stays set but the
+    // process is dead. If the kernel recycles the PID to a different process,
+    // kill(pid, 0) would incorrectly succeed, preventing any relaunch.
+    // For containerized sessions, use container liveness instead of PID check
+    // (the PID is the `docker exec` wrapper, which exits immediately for some
+    // transports and is unreliable for container health).
+    if (freshInfo && freshInfo.state !== "exited") {
+      if (freshInfo.containerId) {
+        const containerState = containerManager.isContainerAlive(freshInfo.containerId);
+        if (containerState === "running") {
+          this.relaunchingSet.delete(sessionId);
+          return;
+        }
+      } else if (freshInfo.pid) {
+        try { process.kill(freshInfo.pid, 0); this.relaunchingSet.delete(sessionId); return; } catch {}
+      }
     }
 
     const count = this.autoRelaunchCounts.get(sessionId) ?? 0;

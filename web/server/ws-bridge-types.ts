@@ -59,6 +59,8 @@ export interface Session {
   lastCliActivityTs: number;
   /** Formal session state machine tracking phase and validating transitions. */
   stateMachine: SessionStateMachine;
+  /** Cleanup function for state machine transition listener — call on session teardown. */
+  unsubscribeStateMachine?: () => void;
 }
 
 export type GitSessionKey =
