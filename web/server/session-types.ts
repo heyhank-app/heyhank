@@ -228,7 +228,11 @@ export interface CLIControlResponseMessage {
   };
 }
 
-/** CLI echoes user messages back (including subagent tool_result blocks). */
+/**
+ * CLI echoes user messages back (including subagent tool_result blocks).
+ * Kept in CLIMessage union for protocol completeness; silently dropped
+ * in the adapter (case "user": break) — not forwarded to the browser.
+ */
 export interface CLIUserEchoMessage {
   type: "user";
   message: { role: string; content: unknown };

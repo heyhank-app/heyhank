@@ -26,7 +26,6 @@ import type {
   CLIControlRequestMessage,
   CLIControlResponseMessage,
   CLIAuthStatusMessage,
-  CLIUserEchoMessage,
   CLICompactBoundaryMessage,
   CLITaskNotificationMessage,
   CLIFilesPersistedMessage,
@@ -450,10 +449,9 @@ export class ClaudeAdapter implements IBackendAdapter {
 
       case "user":
         // CLI echoes back user messages (including tool_result blocks from
-        // subagents). These are informational — the bridge already persists
-        // user messages from the browser side, so we emit them for history
-        // completeness but don't need special handling.
-        this.handleUserEcho(msg as CLIUserEchoMessage);
+        // subagents). These are purely informational — the bridge already
+        // persists user messages from the browser side. Silently drop them
+        // to avoid rendering raw tool_result JSON in the chat UI.
         break;
 
       case "rate_limit_event":
@@ -714,23 +712,6 @@ export class ClaudeAdapter implements IBackendAdapter {
       type: "tool_use_summary",
       summary: msg.summary,
       tool_use_ids: msg.preceding_tool_use_ids,
-    });
-  }
-
-  // -- User echo --------------------------------------------------------------
-
-  private handleUserEcho(msg: CLIUserEchoMessage): void {
-    // The CLI echoes user messages back (including subagent tool_result blocks).
-    // Only emit for non-string content (e.g. tool_result arrays from subagents)
-    // that didn't originate from the browser composer. Plain string echoes are
-    // duplicates of messages the browser already has, so silently drop them.
-    if (typeof msg.message.content === "string") return;
-
-    const content = JSON.stringify(msg.message.content);
-    this.browserMessageCb?.({
-      type: "user_message",
-      content,
-      timestamp: Date.now(),
     });
   }
 

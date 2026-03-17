@@ -311,10 +311,9 @@ describe("Known non-standard CLI message types", () => {
     spy.mockRestore();
   });
 
-  it("user echo with plain string content is silently dropped to avoid duplicates", () => {
-    // Plain string echoes are duplicates of messages the browser already has
-    // (the browser sends user_message → ws-bridge stores it → CLI echoes it
-    // back). Silently drop them to prevent duplicate messages in the UI.
+  it("user echo with plain string content is silently dropped", () => {
+    // CLI echoes back user messages. All echoes should be silently dropped
+    // to avoid rendering raw protocol data in the chat UI.
     const spy = vi.spyOn(log, "warn").mockImplementation(() => {});
     const ws = createMockSocket("sess-1");
     adapter.attachWebSocket(ws);
@@ -334,17 +333,18 @@ describe("Known non-standard CLI message types", () => {
       "Backend protocol drift detected",
       expect.anything(),
     );
-    // Should NOT emit to browser — plain string echoes are dropped
-    expect(browserMessageCb).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: "user_message" }),
-    );
+    // Should NOT emit anything to browser — all user echoes are silently
+    // dropped with no callback fired at all.
+    expect(browserMessageCb).not.toHaveBeenCalled();
 
     spy.mockRestore();
   });
 
-  it("user echo with non-string content serializes to JSON", () => {
-    // When the user echo content is an array (e.g. tool_result blocks),
-    // it should be JSON-stringified before sending to the browser.
+  it("user echo with non-string content (tool_result) is also silently dropped", () => {
+    // Non-string user echoes (e.g. tool_result arrays from subagents) were
+    // previously forwarded as user_message, causing raw JSON to render in
+    // the chat UI. Now all user echoes are silently dropped.
+    const spy = vi.spyOn(log, "warn").mockImplementation(() => {});
     const ws = createMockSocket("sess-1");
     adapter.attachWebSocket(ws);
 
@@ -360,12 +360,18 @@ describe("Known non-standard CLI message types", () => {
       }) + "\n",
     );
 
-    expect(browserMessageCb).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "user_message",
-        content: JSON.stringify(complexContent),
-      }),
+    // Should NOT produce a protocol drift warning
+    expect(spy).not.toHaveBeenCalledWith(
+      "protocol-monitor",
+      "Backend protocol drift detected",
+      expect.anything(),
     );
+    // Should NOT emit anything to browser — the case "user" handler does
+    // nothing at all, so no callback should fire (not just user_message,
+    // but any event type).
+    expect(browserMessageCb).not.toHaveBeenCalled();
+
+    spy.mockRestore();
   });
 });
 
