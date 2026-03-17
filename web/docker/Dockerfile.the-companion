@@ -1,9 +1,11 @@
 # The Companion — comprehensive development image
 # Ships with popular languages, runtimes, and tools pre-installed so Claude Code
 # can work on any project out of the box.
+# Includes Docker-in-Docker and PostgreSQL for full-stack development.
 #
 # Build:  docker build -t the-companion:latest -f Dockerfile.the-companion .
 # Usage:  Automatically used by The Companion when creating containerized sessions
+# Note:   Run with --privileged for Docker-in-Docker support
 
 FROM ubuntu:24.04
 
@@ -58,11 +60,9 @@ ENV PATH="$GOPATH/bin:$GOROOT/bin:$PATH"
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:$PATH"
 
-# ── Layer 7: Docker CLI ──────────────────────────────────────────────────────
-RUN ARCH=$(uname -m) \
-    && if [ "$ARCH" = "aarch64" ]; then ARCH="aarch64"; fi \
-    && curl -fsSL "https://download.docker.com/linux/static/stable/${ARCH}/docker-27.5.1.tgz" \
-    | tar xz --strip-components=1 -C /usr/local/bin docker/docker
+# ── Layer 7: Docker (full engine for Docker-in-Docker) ───────────────────────
+# get.docker.com installs dockerd, docker CLI, containerd, and docker-compose-plugin
+RUN curl -fsSL https://get.docker.com | sh
 
 # ── Layer 8: GitHub CLI ──────────────────────────────────────────────────────
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -104,6 +104,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     novnc websockify procps xdotool \
     && rm -rf /var/lib/apt/lists/*
 RUN ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html
+
+# ── Layer 15: PostgreSQL ──────────────────────────────────────────────────────
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Docker-in-Docker: storage volume ─────────────────────────────────────────
+VOLUME /var/lib/docker
+
+# ── Entrypoint: start Docker daemon, then exec CMD ───────────────────────────
+RUN cat > /usr/local/bin/entrypoint.sh <<'ENTRY'
+#!/bin/bash
+set -e
+
+# Start Docker daemon in background (requires --privileged)
+# Only start if dockerd is installed and no socket already exists (e.g. host-mounted)
+if command -v dockerd &>/dev/null && [ ! -e /var/run/docker.sock ]; then
+    dockerd &>/var/log/dockerd.log &
+    # Wait until Docker is responsive (max 30s)
+    for i in $(seq 1 30); do
+        docker info &>/dev/null && break
+        sleep 1
+    done
+fi
+
+exec "$@"
+ENTRY
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # ── Workspace ─────────────────────────────────────────────────────────────────
 WORKDIR /workspace

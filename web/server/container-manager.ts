@@ -28,6 +28,8 @@ export interface ContainerConfig {
   volumes?: string[];
   /** Extra env vars to inject into the container */
   env?: Record<string, string>;
+  /** Run container in privileged mode (required for Docker-in-Docker) */
+  privileged?: boolean;
 }
 
 export interface PortMapping {
@@ -164,6 +166,8 @@ export class ContainerManager {
     const args: string[] = [
       "docker", "create",
       "--name", name,
+      // Enable Docker-in-Docker when privileged mode is requested
+      ...(config.privileged ? ["--privileged"] : []),
       // Ensure host.docker.internal resolves (automatic on Mac/Win Docker
       // Desktop, but required explicitly on Linux)
       "--add-host=host.docker.internal:host-gateway",
