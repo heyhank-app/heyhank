@@ -1801,7 +1801,35 @@ export function Playground() {
           description="Connection and session status banners"
         >
           <div className="space-y-3 max-w-3xl">
-            <Card label="Disconnected warning">
+            <Card label="CLI Disconnected">
+              <div className="px-4 py-2 bg-cc-warning/10 border border-cc-warning/20 rounded-lg text-center flex items-center justify-center gap-3">
+                <span className="text-xs text-cc-warning font-medium">
+                  CLI disconnected
+                </span>
+                <span className="text-xs font-medium px-3 py-1.5 rounded-md bg-cc-warning/20 text-cc-warning cursor-pointer">
+                  Reconnect
+                </span>
+              </div>
+            </Card>
+            <Card label="CLI Reconnecting">
+              <div className="px-4 py-2 bg-cc-warning/10 border border-cc-warning/20 rounded-lg text-center flex items-center justify-center gap-3">
+                <span className="w-3 h-3 rounded-full border-2 border-cc-warning/30 border-t-cc-warning animate-spin" />
+                <span className="text-xs text-cc-warning font-medium">
+                  Reconnecting&hellip;
+                </span>
+              </div>
+            </Card>
+            <Card label="Reconnection Error">
+              <div className="px-4 py-2 bg-cc-warning/10 border border-cc-warning/20 rounded-lg text-center flex items-center justify-center gap-3">
+                <span className="text-xs text-cc-error font-medium">
+                  Reconnection failed
+                </span>
+                <span className="text-xs font-medium px-3 py-1.5 rounded-md bg-cc-error/15 text-cc-error cursor-pointer">
+                  Retry
+                </span>
+              </div>
+            </Card>
+            <Card label="WS Disconnected">
               <div className="px-4 py-2 bg-cc-warning/10 border border-cc-warning/20 rounded-lg text-center">
                 <span className="text-xs text-cc-warning font-medium">
                   Reconnecting to session...
@@ -2729,6 +2757,7 @@ function mockSession(overrides: Partial<SessionItemType>): SessionItemType {
     linesAdded: 0,
     linesRemoved: 0,
     isConnected: false,
+    isReconnecting: false,
     status: null,
     sdkState: null,
     createdAt: Date.now(),
@@ -2826,6 +2855,20 @@ function PlaygroundSessionItems() {
             })}
             isActive={false}
             sessionName="Review PR #42"
+            permCount={0}
+            isRecentlyRenamed={false}
+            {...noopSessionItemProps}
+          />
+        </div>
+      </Card>
+
+      {/* Reconnecting */}
+      <Card label="Reconnecting — CLI restarting">
+        <div className="bg-cc-sidebar rounded-lg p-1">
+          <SessionItem
+            session={mockSession({ isReconnecting: true })}
+            isActive={false}
+            sessionName="Debug auth flow"
             permCount={0}
             isRecentlyRenamed={false}
             {...noopSessionItemProps}

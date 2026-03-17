@@ -11,6 +11,7 @@ export interface SessionItem {
   linesAdded: number;
   linesRemoved: number;
   isConnected: boolean;
+  isReconnecting: boolean;
   status: "idle" | "running" | "compacting" | null;
   sdkState: "starting" | "connected" | "running" | "exited" | null;
   createdAt: number;

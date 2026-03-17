@@ -18,6 +18,7 @@ function makeSession(overrides: Partial<SessionItemType> = {}): SessionItemType 
     linesAdded: 0,
     linesRemoved: 0,
     isConnected: true,
+    isReconnecting: false,
     status: "running",
     sdkState: "connected",
     createdAt: Date.now(),

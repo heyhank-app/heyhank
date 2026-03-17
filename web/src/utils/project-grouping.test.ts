@@ -18,6 +18,7 @@ function makeItem(overrides: Partial<SessionItem> = {}): SessionItem {
     linesAdded: 0,
     linesRemoved: 0,
     isConnected: false,
+    isReconnecting: false,
     status: null,
     sdkState: null,
     createdAt: 1000,

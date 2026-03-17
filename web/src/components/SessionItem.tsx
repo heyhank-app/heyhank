@@ -22,11 +22,12 @@ interface SessionItemProps {
   editInputRef: RefObject<HTMLInputElement | null>;
 }
 
-type DerivedStatus = "awaiting" | "running" | "idle" | "exited";
+type DerivedStatus = "awaiting" | "running" | "reconnecting" | "idle" | "exited";
 
 function deriveStatus(s: SessionItemType): DerivedStatus {
   if (s.permCount > 0) return "awaiting";
   if ((s.status === "running" || s.status === "compacting") && s.isConnected) return "running";
+  if (s.isReconnecting) return "reconnecting";
   if (s.isConnected) return "idle";
   return "exited";
 }
@@ -44,6 +45,12 @@ function StatusDot({ status }: { status: DerivedStatus }) {
       return (
         <span className="relative shrink-0 w-2 h-2">
           <span className="w-2 h-2 rounded-full bg-cc-warning block animate-[ring-pulse_1.5s_ease-out_infinite]" />
+        </span>
+      );
+    case "reconnecting":
+      return (
+        <span className="relative shrink-0 w-2 h-2">
+          <span className="w-2 h-2 rounded-full border border-cc-warning/40 border-t-cc-warning block animate-spin" />
         </span>
       );
     case "idle":

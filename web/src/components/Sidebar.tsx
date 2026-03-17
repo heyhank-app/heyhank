@@ -137,6 +137,7 @@ export function Sidebar() {
   const currentSessionId = useStore((s) => s.currentSessionId);
   const setCurrentSession = useStore((s) => s.setCurrentSession);
   const cliConnected = useStore((s) => s.cliConnected);
+  const cliReconnecting = useStore((s) => s.cliReconnecting);
   const sessionStatus = useStore((s) => s.sessionStatus);
   const removeSession = useStore((s) => s.removeSession);
   const sessionNames = useStore((s) => s.sessionNames);
@@ -435,6 +436,7 @@ export function Sidebar() {
       linesAdded: bridgeState?.total_lines_added || sdkInfo?.totalLinesAdded || 0,
       linesRemoved: bridgeState?.total_lines_removed || sdkInfo?.totalLinesRemoved || 0,
       isConnected: cliConnected.get(id) ?? false,
+      isReconnecting: cliReconnecting.get(id) ?? false,
       status: sessionStatus.get(id) ?? null,
       sdkState: sdkInfo?.state ?? null,
       createdAt: sdkInfo?.createdAt ?? 0,

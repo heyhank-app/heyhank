@@ -33,6 +33,7 @@ export interface SessionsSlice {
   currentSessionId: string | null;
   connectionStatus: Map<string, "connecting" | "connected" | "disconnected">;
   cliConnected: Map<string, boolean>;
+  cliReconnecting: Map<string, boolean>;
   sessionStatus: Map<string, "idle" | "running" | "compacting" | null>;
   previousPermissionMode: Map<string, string>;
   sessionNames: Map<string, string>;
@@ -49,6 +50,7 @@ export interface SessionsSlice {
   setSdkSessions: (sessions: SdkSessionInfo[]) => void;
   setConnectionStatus: (sessionId: string, status: "connecting" | "connected" | "disconnected") => void;
   setCliConnected: (sessionId: string, connected: boolean) => void;
+  setCliReconnecting: (sessionId: string, reconnecting: boolean) => void;
   setSessionStatus: (sessionId: string, status: "idle" | "running" | "compacting" | null) => void;
   setPreviousPermissionMode: (sessionId: string, mode: string) => void;
   setSessionName: (sessionId: string, name: string) => void;
@@ -67,6 +69,7 @@ export const createSessionsSlice: StateCreator<AppState, [], [], SessionsSlice> 
   currentSessionId: getInitialSessionId(),
   connectionStatus: new Map(),
   cliConnected: new Map(),
+  cliReconnecting: new Map(),
   sessionStatus: new Map(),
   previousPermissionMode: new Map(),
   sessionNames: getInitialSessionNames(),
@@ -116,6 +119,7 @@ export const createSessionsSlice: StateCreator<AppState, [], [], SessionsSlice> 
         sessions: deleteFromMap(s.sessions, sessionId),
         connectionStatus: deleteFromMap(s.connectionStatus, sessionId),
         cliConnected: deleteFromMap(s.cliConnected, sessionId),
+        cliReconnecting: deleteFromMap(s.cliReconnecting, sessionId),
         sessionStatus: deleteFromMap(s.sessionStatus, sessionId),
         previousPermissionMode: deleteFromMap(s.previousPermissionMode, sessionId),
         sessionNames,
@@ -159,6 +163,17 @@ export const createSessionsSlice: StateCreator<AppState, [], [], SessionsSlice> 
       const cliConnected = new Map(s.cliConnected);
       cliConnected.set(sessionId, connected);
       return { cliConnected };
+    }),
+
+  setCliReconnecting: (sessionId, reconnecting) =>
+    set((s) => {
+      const cliReconnecting = new Map(s.cliReconnecting);
+      if (reconnecting) {
+        cliReconnecting.set(sessionId, true);
+      } else {
+        cliReconnecting.delete(sessionId);
+      }
+      return { cliReconnecting };
     }),
 
   setSessionStatus: (sessionId, status) =>

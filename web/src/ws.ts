@@ -544,6 +544,7 @@ function handleParsedMessage(
       const existingSession = store.sessions.get(sessionId);
       store.addSession(data.session);
       store.setCliConnected(sessionId, true);
+      store.setCliReconnecting(sessionId, false);
       if (!existingSession) {
         store.setSessionStatus(sessionId, "idle");
       }
@@ -836,13 +837,20 @@ function handleParsedMessage(
 
     case "session_phase": {
       const phase = data.phase;
-      if (phase === "terminated" || phase === "reconnecting") {
+      if (phase === "terminated") {
         store.setCliConnected(sessionId, false);
+        store.setCliReconnecting(sessionId, false);
+        store.setSessionStatus(sessionId, null);
+      } else if (phase === "reconnecting") {
+        store.setCliConnected(sessionId, false);
+        store.setCliReconnecting(sessionId, true);
         store.setSessionStatus(sessionId, null);
       } else if (phase === "starting" || phase === "initializing") {
         store.setCliConnected(sessionId, false);
+        store.setCliReconnecting(sessionId, true);
       } else {
         store.setCliConnected(sessionId, true);
+        store.setCliReconnecting(sessionId, false);
         if (phase === "ready") store.setSessionStatus(sessionId, "idle");
         else if (phase === "streaming") store.setSessionStatus(sessionId, "running");
         else if (phase === "compacting") store.setSessionStatus(sessionId, "compacting");
@@ -853,12 +861,14 @@ function handleParsedMessage(
 
     case "cli_disconnected": {
       store.setCliConnected(sessionId, false);
+      store.setCliReconnecting(sessionId, false);
       store.setSessionStatus(sessionId, null);
       break;
     }
 
     case "cli_connected": {
       store.setCliConnected(sessionId, true);
+      store.setCliReconnecting(sessionId, false);
       break;
     }
 
