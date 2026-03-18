@@ -966,7 +966,7 @@ export class WsBridge {
   private static readonly IDLE_KILL_THRESHOLD_MS = Number(
     process.env.COMPANION_IDLE_KILL_MINUTES
       ? Number(process.env.COMPANION_IDLE_KILL_MINUTES) * 60_000
-      : 20 * 60_000, // 20 minutes default
+      : 24 * 60 * 60_000, // 24 hours default
   );
   private static readonly IDLE_CHECK_INTERVAL_MS = 60_000; // check every 60s
 

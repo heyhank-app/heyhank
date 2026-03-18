@@ -4378,11 +4378,11 @@ describe("Idle kill watchdog", () => {
     // Disconnect the browser — should start idle watchdog
     bridge.handleBrowserClose(browser);
 
-    // Advance past the idle kill threshold (default 20 min) + check interval (60s)
+    // Advance past the idle kill threshold (default 24h) + check interval (60s)
     // The watchdog checks every 60s, so we need to advance enough for:
-    // 1) The idle threshold to be exceeded (20 min)
+    // 1) The idle threshold to be exceeded (24h)
     // 2) A check interval to fire
-    vi.advanceTimersByTime(20 * 60_000 + 60_000);
+    vi.advanceTimersByTime(24 * 60 * 60_000 + 60_000);
 
     expect(idleKillHandler).toHaveBeenCalledWith({ sessionId: "s1" });
   });
@@ -4408,8 +4408,8 @@ describe("Idle kill watchdog", () => {
     const browser2 = makeBrowserSocket("s1");
     bridge.handleBrowserOpen(browser2, "s1");
 
-    // Advance well past the threshold
-    vi.advanceTimersByTime(30 * 60_000);
+    // Advance well past the 24h threshold
+    vi.advanceTimersByTime(25 * 60 * 60_000);
 
     // Should NOT have triggered idle kill
     expect(idleKillHandler).not.toHaveBeenCalled();
@@ -4432,8 +4432,8 @@ describe("Idle kill watchdog", () => {
     // Remove session while watchdog is active
     bridge.removeSession("s1");
 
-    // Advance past threshold + check
-    vi.advanceTimersByTime(25 * 60_000);
+    // Advance past 24h threshold + check interval
+    vi.advanceTimersByTime(24 * 60 * 60_000 + 60_000);
 
     // Should NOT fire idle-kill because session was removed
     expect(idleKillHandler).not.toHaveBeenCalled();
@@ -4462,8 +4462,8 @@ describe("Idle kill watchdog", () => {
     const browser2 = makeBrowserSocket("s1");
     session.browserSockets.add(browser2);
 
-    // Advance past threshold
-    vi.advanceTimersByTime(15 * 60_000);
+    // Advance past 24h threshold
+    vi.advanceTimersByTime(24 * 60 * 60_000);
 
     // Watchdog should have noticed the browser and cancelled itself
     expect(idleKillHandler).not.toHaveBeenCalled();

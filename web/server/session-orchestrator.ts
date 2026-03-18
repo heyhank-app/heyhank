@@ -189,12 +189,14 @@ export class SessionOrchestrator {
       await this.handleAutoRelaunch(sessionId);
     });
 
-    // Kill CLI when idle with no browsers for 20 minutes
+    // Kill CLI process when idle with no browsers for 24 hours.
+    // Only kills the CLI process — containers are preserved so the session
+    // can be relaunched without recreating the container.
     companionBus.on("session:idle-kill", async ({ sessionId }) => {
       const info = this.launcher.getSession(sessionId);
       if (!info || info.archived) return;
-      log.info("orchestrator", "Idle-killing session", { sessionId, reason: "no browsers, no activity" });
-      await this.killSession(sessionId);
+      log.info("orchestrator", "Idle-killing session (preserving container)", { sessionId, reason: "no browsers, no activity" });
+      await this.launcher.kill(sessionId);
       // Clear relaunch counters so the session gets a fresh budget when the user
       // returns. Idle-kill is intentional cleanup, not a crash — the session
       // should be fully relaunchable.
