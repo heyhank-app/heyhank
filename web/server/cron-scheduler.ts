@@ -1,6 +1,6 @@
 import { Cron } from "croner";
 import type { CronJob, CronJobExecution } from "./cron-types.js";
-import type { CliLauncher, SdkSessionInfo } from "./cli-launcher.js";
+import type { CliLauncher } from "./cli-launcher.js";
 import type { WsBridge } from "./ws-bridge.js";
 import * as cronStore from "./cron-store.js";
 import * as envManager from "./env-manager.js";

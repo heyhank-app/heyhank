@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from "bun";
-import type { SocketData, NoVncSocketData } from "./ws-bridge-types.js";
+import type { SocketData } from "./ws-bridge-types.js";
 import { containerManager } from "./container-manager.js";
 
 const NOVNC_CONTAINER_PORT = 6080;

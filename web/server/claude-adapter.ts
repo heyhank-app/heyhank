@@ -79,8 +79,6 @@ export class ClaudeAdapter implements IBackendAdapter {
   // Callback to update session.lastCliActivityTs from the bridge
   private onActivityUpdate: (() => void) | null;
 
-  /** Whether the CLI has sent the init message (system.init). */
-  private initialized = false;
   private protocolDriftSeen = new Set<string>();
   private parseErrorSeen = new Set<string>();
 
@@ -589,8 +587,6 @@ export class ClaudeAdapter implements IBackendAdapter {
   }
 
   private handleSystemInit(msg: CLISystemInitMessage): void {
-    this.initialized = true;
-
     // Emit session metadata so the bridge can update session state
     this.sessionMetaCb?.({
       cliSessionId: msg.session_id,

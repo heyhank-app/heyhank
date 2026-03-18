@@ -7,6 +7,29 @@ on:
     branches: [main]
 
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: web
+        run: bun install
+
+      - name: Dead code guard (unused locals/params)
+        working-directory: web
+        run: bun run deadcode:check
+
+      - name: DRY guard (duplicate code threshold)
+        working-directory: web
+        run: bun run dry:check
+
   test:
     strategy:
       matrix:

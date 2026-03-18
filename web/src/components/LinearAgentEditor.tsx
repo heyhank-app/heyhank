@@ -89,9 +89,14 @@ export function LinearAgentEditor({
               </svg>
             </button>
             <LinearLogo className="w-5 h-5 text-cc-fg" />
-            <h1 className="text-lg font-semibold text-cc-fg">
-              Edit Linear Agent
-            </h1>
+            <div>
+              <h1 className="text-lg font-semibold text-cc-fg">
+                Edit Linear Agent
+              </h1>
+              <p className="text-[10px] text-cc-muted font-mono-code">
+                ID: {editingId}
+              </p>
+            </div>
           </div>
           <div className="flex gap-2">
             <button

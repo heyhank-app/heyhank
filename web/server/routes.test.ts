@@ -375,7 +375,7 @@ beforeEach(() => {
   tracker = createMockTracker();
   terminalManager = { getInfo: vi.fn(() => null), spawn: vi.fn(() => ""), kill: vi.fn() };
   app = new Hono();
-  app.route("/api", createRoutes(orchestrator, launcher, bridge, sessionStore, tracker, terminalManager as any));
+  app.route("/api", createRoutes(orchestrator, launcher, bridge, terminalManager as any));
 
   // Default no-op mocks for container workspace isolation (called during container session creation)
   vi.spyOn(containerManager, "copyWorkspaceToContainer").mockResolvedValue(undefined);

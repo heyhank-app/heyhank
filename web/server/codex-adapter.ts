@@ -106,10 +106,6 @@ interface CodexReasoningItem extends CodexItem {
   content?: string;
 }
 
-interface CodexContextCompactionItem extends CodexItem {
-  type: "contextCompaction";
-}
-
 interface CodexCollabAgentToolCallItem extends CodexItem {
   type: "collabAgentToolCall";
   tool: string;
@@ -242,11 +238,11 @@ export class StdioTransport implements ICodexTransport {
       this.connected = false;
       // Clear all pending RPC timers and reject promises so callers don't
       // hang indefinitely when the Codex process crashes or exits.
-      for (const [id, timer] of this.pendingTimers) {
+      for (const [, timer] of this.pendingTimers) {
         clearTimeout(timer);
       }
       this.pendingTimers.clear();
-      for (const [id, { reject }] of this.pending) {
+      for (const [, { reject }] of this.pending) {
         reject(new Error("Transport closed"));
       }
       this.pending.clear();
@@ -324,11 +320,11 @@ export class StdioTransport implements ICodexTransport {
           console.warn(
             `[codex-adapter] WS proxy reconnected — rejecting ${pendingCount} orphaned RPC call(s)`,
           );
-          for (const [id, timer] of this.pendingTimers) {
+          for (const [, timer] of this.pendingTimers) {
             clearTimeout(timer);
           }
           this.pendingTimers.clear();
-          for (const [id, { reject }] of this.pending) {
+          for (const [, { reject }] of this.pending) {
             reject(new Error("Transport reconnected"));
           }
           this.pending.clear();
@@ -967,7 +963,7 @@ export class CodexAdapter implements IBackendAdapter {
 
     try {
       // Step 1: Send initialize request
-      const result = await this.transport.call("initialize", {
+      await this.transport.call("initialize", {
         clientInfo: {
           name: "thecompanion",
           title: "The Companion",
@@ -1568,7 +1564,6 @@ export class CodexAdapter implements IBackendAdapter {
       case "item/mcpToolCall/progress": {
         // MCP tool call progress — map to tool_progress
         const itemId = params.itemId as string | undefined;
-        const threadId = params.threadId as string | undefined;
         if (itemId) {
           this.emit({
             type: "tool_progress",
@@ -2376,7 +2371,7 @@ export class CodexAdapter implements IBackendAdapter {
     });
   }
 
-  private handleItemUpdated(params: Record<string, unknown>): void {
+  private handleItemUpdated(_params: Record<string, unknown>): void {
     // item/updated is a general update — currently we handle streaming via the specific delta events
     // Could handle status updates for command_execution / file_change items here
   }

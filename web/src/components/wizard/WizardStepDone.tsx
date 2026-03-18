@@ -38,7 +38,7 @@ export function WizardStepDone({ agentName, onFinish, onAddAnotherSameApp, onAdd
           { label: "OAuth app connected", detail: "Your Linear workspace is linked" },
           { label: `Agent "${agentName}" created`, detail: "Linear trigger enabled with full auto permissions" },
           { label: "Ready for @mentions", detail: "Mention the agent in any issue to trigger a session" },
-        ].map((item, i) => (
+        ].map((item) => (
           <div key={item.label} className="flex items-start gap-3">
             <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-cc-success/12 flex items-center justify-center">
               <svg className="w-2.5 h-2.5 text-cc-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>

@@ -45,7 +45,7 @@ export function getWebhookUrl(agent: AgentInfo, publicUrl: string): string {
 
 export function AgentCard({
   agent,
-  publicUrl,
+  publicUrl: _publicUrl,
   onEdit,
   onDelete,
   onToggle,

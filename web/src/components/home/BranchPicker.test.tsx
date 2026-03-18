@@ -36,6 +36,28 @@ beforeEach(() => {
 });
 
 describe("BranchPicker keyboard navigation", () => {
+  it("renders nothing when repository info is unavailable", async () => {
+    // Without git metadata, the picker should stay hidden and report no branches.
+    const onBranchesLoaded = vi.fn();
+    const { container } = render(
+      <BranchPicker
+        cwd="/repo"
+        gitRepoInfo={null}
+        selectedBranch=""
+        isNewBranch={false}
+        useWorktree={false}
+        onBranchChange={vi.fn()}
+        onWorktreeChange={vi.fn()}
+        onBranchesLoaded={onBranchesLoaded}
+      />,
+    );
+
+    expect(container.firstChild).toBeNull();
+    await waitFor(() => {
+      expect(onBranchesLoaded).toHaveBeenCalledWith([]);
+    });
+  });
+
   it("opens dropdown on button click and shows branches", async () => {
     // Verifies the dropdown opens and renders branch list after click.
     const onBranchChange = vi.fn();
@@ -168,6 +190,97 @@ describe("BranchPicker keyboard navigation", () => {
 
     expect(screen.getByText("my-new-branch")).toBeInTheDocument();
     expect(screen.getByText("Create")).toBeInTheDocument();
+  });
+
+  it("creates a new branch from trimmed filter text", async () => {
+    // Verifies "Create" action passes trimmed input and marks branch as new.
+    const onBranchChange = vi.fn();
+    render(
+      <BranchPicker
+        cwd="/repo"
+        gitRepoInfo={defaultGitRepoInfo}
+        selectedBranch="main"
+        isNewBranch={false}
+        useWorktree={false}
+        onBranchChange={onBranchChange}
+        onWorktreeChange={vi.fn()}
+        onBranchesLoaded={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("main").closest("button")!);
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Filter or create branch...")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Filter or create branch..."), {
+      target: { value: "  my-new-branch  " },
+    });
+
+    fireEvent.click(screen.getByText("Create").closest("button")!);
+    expect(onBranchChange).toHaveBeenCalledWith("my-new-branch", true);
+  });
+
+  it("exposes repo title and new-branch state on trigger", () => {
+    // Validates metadata attributes used for UX hints and state tagging.
+    render(
+      <BranchPicker
+        cwd="/repo"
+        gitRepoInfo={defaultGitRepoInfo}
+        selectedBranch="feature/new"
+        isNewBranch={true}
+        useWorktree={false}
+        onBranchChange={vi.fn()}
+        onWorktreeChange={vi.fn()}
+        onBranchesLoaded={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByText("feature/new").closest("button")!;
+    expect(trigger).toHaveAttribute("title", "Repository: /repo");
+    expect(trigger).toHaveAttribute("data-is-new-branch", "true");
+  });
+
+  it("calls onWorktreeChange when toggling worktree", () => {
+    // Ensures worktree toggle continues to emit state changes to parent form.
+    const onWorktreeChange = vi.fn();
+    render(
+      <BranchPicker
+        cwd="/repo"
+        gitRepoInfo={defaultGitRepoInfo}
+        selectedBranch="main"
+        isNewBranch={false}
+        useWorktree={false}
+        onBranchChange={vi.fn()}
+        onWorktreeChange={onWorktreeChange}
+        onBranchesLoaded={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Worktree").closest("button")!);
+    expect(onWorktreeChange).toHaveBeenCalledWith(true);
+  });
+
+  it("reports empty branch list when branch loading fails", async () => {
+    // Covers failure branch in initial list fetch and parent callback behavior.
+    mockListBranches.mockRejectedValueOnce(new Error("network"));
+    const onBranchesLoaded = vi.fn();
+    render(
+      <BranchPicker
+        cwd="/repo"
+        gitRepoInfo={defaultGitRepoInfo}
+        selectedBranch="main"
+        isNewBranch={false}
+        useWorktree={false}
+        onBranchChange={vi.fn()}
+        onWorktreeChange={vi.fn()}
+        onBranchesLoaded={onBranchesLoaded}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onBranchesLoaded).toHaveBeenCalledWith([]);
+    });
   });
 
   it("trigger button has aria-expanded attribute", async () => {

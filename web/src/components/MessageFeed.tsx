@@ -476,15 +476,12 @@ function SubagentContainer({ group }: { group: SubagentGroup }) {
   const senderThreadId = group.senderThreadId;
   const receiverThreadIds = group.receiverThreadIds || [];
   const backend = group.backend || "claude";
-  const statusSummaryCount =
-    receiverCount !== undefined ? receiverCount : childCount;
 
   // Get the last visible entry for a compact preview
   const lastEntry = group.children[group.children.length - 1];
   const lastPreview = useMemo(() => {
     if (!lastEntry) return "";
     if (lastEntry.kind === "tool_msg_group") {
-      const item = lastEntry.items[lastEntry.items.length - 1];
       return `${getToolLabel(lastEntry.toolName)}${lastEntry.items.length > 1 ? ` ×${lastEntry.items.length}` : ""}`;
     }
     if (lastEntry.kind === "message" && lastEntry.msg.role === "assistant") {

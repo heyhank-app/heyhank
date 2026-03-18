@@ -319,7 +319,10 @@ export function LinearSection({
 
   return (
     <aside className="space-y-2 mt-0.5" ref={linearDropdownRef}>
-      <div className="relative rounded-[12px] border border-cc-border bg-cc-card/90 px-2.5 py-2">
+      <div
+        className="relative rounded-[12px] border border-cc-border bg-cc-card/90 px-2.5 py-2"
+        title={`Repo: ${cwd}`}
+      >
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[11px] uppercase tracking-wide text-cc-muted">Context</span>
 
@@ -449,10 +452,7 @@ export function LinearSection({
                   </div>
                   <button
                     type="button"
-                    onClick={() => {
-                      onIssueSelect(null);
-                      setLinearQuery("");
-                    }}
+                    onClick={handleClearIssue}
                     className="text-cc-muted hover:text-cc-fg transition-colors cursor-pointer shrink-0"
                     title="Remove issue"
                   >

@@ -91,7 +91,7 @@ function normalizePath(path: string): string {
   return `${isAbs ? "/" : ""}${out.join("/")}`;
 }
 
-export function resolveSessionFilePath(filePath: string, cwd?: string): string {
+function resolveSessionFilePath(filePath: string, cwd?: string): string {
   if (filePath.startsWith("/")) return normalizePath(filePath);
   if (!cwd) return normalizePath(filePath);
   return normalizePath(`${cwd}/${filePath}`);

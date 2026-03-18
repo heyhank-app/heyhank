@@ -64,16 +64,19 @@ export function ToolBlock({
 
   // Edit gets a special borderless treatment — visual identity without a card
   if (name === "Edit") {
-    return <EditBlock input={input} />;
+    return <EditBlock input={input} toolUseId={toolUseId} />;
   }
 
   // Bash gets a terminal-style borderless treatment
   if (name === "Bash") {
-    return <BashBlock input={input} />;
+    return <BashBlock input={input} toolUseId={toolUseId} />;
   }
 
   return (
-    <div className="border border-cc-border rounded-[10px] overflow-hidden bg-cc-card tool-card">
+    <div
+      className="border border-cc-border rounded-[10px] overflow-hidden bg-cc-card tool-card"
+      data-tool-use-id={toolUseId}
+    >
       <button
         onClick={() => setOpen(!open)}
         className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-cc-hover transition-colors cursor-pointer"
@@ -106,7 +109,7 @@ export function ToolBlock({
 }
 
 /** Edit tool — inline diff, no card, no scroll, "show more" for long diffs */
-function EditBlock({ input }: { input: Record<string, unknown> }) {
+function EditBlock({ input, toolUseId }: { input: Record<string, unknown>; toolUseId: string }) {
   const filePath = String(input.file_path || "");
   const fileName = filePath ? filePath.split("/").pop() || filePath : "";
   const oldStr = String(input.old_string || "");
@@ -129,7 +132,7 @@ function EditBlock({ input }: { input: Record<string, unknown> }) {
   const isTall = diffLineCount > 15;
 
   return (
-    <div>
+    <div data-tool-use-id={toolUseId}>
       {/* Single-line header: Edit fileName [all] */}
       <div className="flex items-center gap-1.5 py-0.5">
         <span className="text-[11px] font-medium text-emerald-600/70 dark:text-emerald-400/70">Edit</span>
@@ -188,12 +191,12 @@ function EditBlock({ input }: { input: Record<string, unknown> }) {
 }
 
 /** Bash tool — shows command directly, always visible */
-function BashBlock({ input }: { input: Record<string, unknown> }) {
+function BashBlock({ input, toolUseId }: { input: Record<string, unknown>; toolUseId: string }) {
   const command = typeof input.command === "string" ? input.command : "";
   const desc = typeof input.description === "string" ? input.description : "";
 
   return (
-    <div>
+    <div data-tool-use-id={toolUseId}>
       {desc && (
         <div className="text-[11px] text-cc-muted/50 mb-1 italic">{desc}</div>
       )}

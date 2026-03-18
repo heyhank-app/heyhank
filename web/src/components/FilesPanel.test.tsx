@@ -38,6 +38,19 @@ vi.mock("../store.js", () => ({
   useStore: (selector: (s: MockStoreState) => unknown) => selector(mockState),
 }));
 
+// Mock CodeMirror to avoid runtime package-instance conflicts in jsdom while
+// preserving the same semantic hooks the component/test rely on.
+vi.mock("@uiw/react-codemirror", () => ({
+  default: ({ value }: { value?: string }) => (
+    <div className="cm-editor">
+      <div className="cm-gutters">
+        <div className="cm-lineNumbers" />
+      </div>
+      <div className="cm-content">{value}</div>
+    </div>
+  ),
+}));
+
 import { FilesPanel } from "./FilesPanel.js";
 
 const sampleTree: TreeNode[] = [

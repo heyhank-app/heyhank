@@ -18,7 +18,6 @@ import { api } from "../api.js";
 import type {
   PermissionRequest,
   ChatMessage,
-  ContentBlock,
   SessionState,
   McpServerDetail,
 } from "../types.js";

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useStore } from "../store.js";
 import { api, type ArchiveInfo } from "../api.js";
 import { ArchiveLinearModal, type LinearTransitionChoice } from "./ArchiveLinearModal.js";
-import { connectSession, connectAllSessions, disconnectSession } from "../ws.js";
+import { connectAllSessions, disconnectSession } from "../ws.js";
 import { navigateToSession, navigateHome, parseHash } from "../utils/routing.js";
 import { ProjectGroup } from "./ProjectGroup.js";
 import { SessionItem } from "./SessionItem.js";
@@ -135,7 +135,6 @@ export function Sidebar() {
   const sessions = useStore((s) => s.sessions);
   const sdkSessions = useStore((s) => s.sdkSessions);
   const currentSessionId = useStore((s) => s.currentSessionId);
-  const setCurrentSession = useStore((s) => s.setCurrentSession);
   const cliConnected = useStore((s) => s.cliConnected);
   const cliReconnecting = useStore((s) => s.cliReconnecting);
   const sessionStatus = useStore((s) => s.sessionStatus);

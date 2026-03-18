@@ -78,7 +78,6 @@ export function TopBar() {
     : null;
   const showWorkspaceControls = !!(currentSessionId && isSessionView);
   const showContextToggle = route.page === "session" && !!currentSessionId;
-  const isContainerSession = !!(sdkSession?.containerId || bridgeSession?.is_containerized);
   const workspaceTabs: WorkspaceTab[] = ["chat", "diff", "terminal", "processes", "editor", "browser"];
 
   const activateWorkspaceTab = (tab: WorkspaceTab) => {

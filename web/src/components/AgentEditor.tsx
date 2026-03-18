@@ -74,7 +74,7 @@ export const EMPTY_FORM: AgentFormData = {
   linearOAuthConnectionId: "",
 };
 
-export const CRON_PRESETS: { label: string; value: string }[] = [
+const CRON_PRESETS: { label: string; value: string }[] = [
   { label: "Every hour", value: "0 * * * *" },
   { label: "Every day at 8am", value: "0 8 * * *" },
   { label: "Every day at noon", value: "0 12 * * *" },
@@ -84,7 +84,7 @@ export const CRON_PRESETS: { label: string; value: string }[] = [
 ];
 
 /** Count how many advanced features are configured */
-export function countAdvancedFeatures(form: AgentFormData): number {
+function countAdvancedFeatures(form: AgentFormData): number {
   let count = 0;
   if (Object.keys(form.mcpServers).length > 0) count++;
   if (form.skills.length > 0) count++;
@@ -276,6 +276,7 @@ export function AgentEditor({
   const selectedMode = modes.find((m) => m.value === form.permissionMode) || modes[0];
   const selectedEnv = envProfiles.find((e) => e.slug === form.envSlug);
   const folderLabel = form.cwd ? form.cwd.split("/").pop() || form.cwd : "temp";
+  const webhookBaseUrl = publicUrl || (typeof window !== "undefined" ? window.location.origin : "");
 
   // Common pill class
   const pill = "flex items-center gap-1.5 px-2 py-1 text-xs rounded-md transition-colors cursor-pointer";
@@ -629,9 +630,16 @@ export function AgentEditor({
 
             {/* Webhook helper */}
             {form.webhookEnabled && (
-              <p className="text-[10px] text-cc-muted mt-2">
-                A unique URL will be generated after saving. POST to it with <code className="px-1 py-0.5 rounded bg-cc-hover">{`{"input": "..."}`}</code>.
-              </p>
+              <div className="mt-2 space-y-1">
+                <p className="text-[10px] text-cc-muted">
+                  A unique URL will be generated after saving. POST to it with <code className="px-1 py-0.5 rounded bg-cc-hover">{`{"input": "..."}`}</code>.
+                </p>
+                {webhookBaseUrl && (
+                  <p className="text-[10px] text-cc-muted">
+                    Base URL: <span className="font-mono-code">{webhookBaseUrl}</span>
+                  </p>
+                )}
+              </div>
             )}
 
             {/* Linear OAuth connection picker */}

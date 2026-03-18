@@ -1,6 +1,6 @@
 import type { StateCreator } from "zustand";
 import type { AppState } from "./index.js";
-import type { TaskItem, ProcessItem, ProcessStatus } from "../types.js";
+import type { TaskItem, ProcessItem } from "../types.js";
 
 /** A single tool invocation tracked across its lifecycle. */
 export interface ToolActivityEntry {

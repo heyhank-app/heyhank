@@ -131,7 +131,7 @@ if (managedAuthEnabled) {
 }
 
 app.use("/api/*", cors());
-app.route("/api", createRoutes(orchestrator, launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor, linearAgentBridge, port));
+app.route("/api", createRoutes(orchestrator, launcher, wsBridge, terminalManager, prPoller, recorder, cronScheduler, agentExecutor, linearAgentBridge, port));
 
 // Dynamic manifest — embeds auth token in start_url so PWA auto-authenticates
 // on first launch. iOS gives standalone PWAs isolated storage from Safari,
@@ -299,7 +299,7 @@ const server = Bun.serve<SocketData>({
         noVncProxy.handleMessage(ws, msg);
       }
     },
-    close(ws: ServerWebSocket<SocketData>, code?: number, reason?: string) {
+    close(ws: ServerWebSocket<SocketData>, code?: number, _reason?: string) {
       console.log("[ws-close]", ws.data.kind, "code=" + code);
       const data = ws.data;
       if (data.kind === "cli") {

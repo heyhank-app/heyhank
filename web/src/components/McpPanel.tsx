@@ -312,11 +312,9 @@ export function McpSection({ sessionId }: { sessionId: string }) {
     (s) => s.sessions.get(sessionId)?.mcp_servers ?? EMPTY_MCP_INIT,
   );
 
-  const hasMcp = servers.length > 0 || sessionMcpServers.length > 0;
-
   // Auto-fetch detailed status when connected.
   // For Codex sessions, session_init may not include MCP server hints, so
-  // we must fetch regardless of current hasMcp detection.
+  // we must fetch even when no MCP server hints are currently present.
   useEffect(() => {
     if (cliConnected) {
       sendMcpGetStatus(sessionId);

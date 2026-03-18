@@ -10,7 +10,6 @@ import {
   readFileSync,
   writeFileSync,
   unlinkSync,
-  existsSync,
 } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";

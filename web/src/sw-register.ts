@@ -16,8 +16,8 @@
  */
 import { registerSW } from "virtual:pwa-register";
 
-const updateSW = registerSW({
-  onRegisteredSW(swUrl: string, registration: ServiceWorkerRegistration | undefined) {
+registerSW({
+  onRegisteredSW(_swUrl: string, registration: ServiceWorkerRegistration | undefined) {
     if (registration) {
       // Check for SW updates every 60 minutes while the app is open.
       // Catches deployments that happen while a user has the app open.
@@ -30,5 +30,3 @@ const updateSW = registerSW({
     console.log("[SW] Offline-ready: all assets precached");
   },
 });
-
-export { updateSW };

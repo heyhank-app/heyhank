@@ -497,6 +497,31 @@ describe("POST /api/agents/import", () => {
     const json = await res.json();
     expect(json.error).toBe("Agent name is required");
   });
+
+  it("preserves provided import version metadata", async () => {
+    // Imported payload version should flow through to createAgent instead of being reset.
+    const importedAgent = makeAgent({ id: "imported-v2", name: "Imported V2", enabled: false });
+    vi.mocked(agentStore.createAgent).mockReturnValue(importedAgent);
+
+    const res = await app.request("/api/agents/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        version: 2,
+        name: "Imported V2",
+        prompt: "Do stuff",
+        backendType: "claude",
+        model: "claude-sonnet-4-6",
+        permissionMode: "bypassPermissions",
+        cwd: "/tmp",
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(agentStore.createAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ version: 2, enabled: false }),
+    );
+  });
 });
 
 // ─── GET /api/agents/:id/export ─────────────────────────────────────────────

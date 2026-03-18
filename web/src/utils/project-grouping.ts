@@ -1,5 +1,3 @@
-import type { SdkSessionInfo } from "../types.js";
-
 export interface SessionItem {
   id: string;
   model: string;

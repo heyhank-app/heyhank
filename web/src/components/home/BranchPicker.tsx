@@ -82,6 +82,8 @@ export function BranchPicker({
             setBranchFilter("");
           }}
           className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-md transition-colors cursor-pointer text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+          title={`Repository: ${cwd}`}
+          data-is-new-branch={isNewBranch ? "true" : "false"}
         >
           <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 opacity-60">
             <path d="M5 3.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm0 2.122a2.25 2.25 0 10-1.5 0v.378A2.5 2.5 0 007.5 8h1a1 1 0 010 2h-1A2.5 2.5 0 005 12.5v.128a2.25 2.25 0 101.5 0V12.5a1 1 0 011-1h1a2.5 2.5 0 000-5h-1a1 1 0 01-1-1V5.372zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />

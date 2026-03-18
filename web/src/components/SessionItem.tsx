@@ -24,8 +24,8 @@ interface SessionItemProps {
 
 type DerivedStatus = "awaiting" | "running" | "reconnecting" | "idle" | "exited";
 
-function deriveStatus(s: SessionItemType): DerivedStatus {
-  if (s.permCount > 0) return "awaiting";
+function deriveStatus(s: SessionItemType, permCount: number): DerivedStatus {
+  if (permCount > 0) return "awaiting";
   if ((s.status === "running" || s.status === "compacting") && s.isConnected) return "running";
   if (s.isReconnecting) return "reconnecting";
   if (s.isConnected) return "idle";
@@ -102,7 +102,7 @@ export function SessionItem({
   const menuRef = useRef<HTMLDivElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
 
-  const derivedStatus = archived ? ("exited" as DerivedStatus) : deriveStatus(s);
+  const derivedStatus = archived ? ("exited" as DerivedStatus) : deriveStatus(s, permCount);
 
   // Show the full cwd path below the session name
   const cwdTail = s.cwd || "";
