@@ -11,6 +11,7 @@ import type { AgentSessionEventPayload } from "../linear-agent.js";
 import * as agentStore from "../agent-store.js";
 import * as staging from "../linear-staging.js";
 import { getSettings, updateSettings } from "../settings-manager.js";
+import { findOAuthConnectionByClientId } from "../linear-oauth-connections.js";
 
 /**
  * Register the Linear Agent SDK pre-auth routes (before auth middleware).
@@ -39,19 +40,31 @@ export function registerLinearAgentWebhookRoute(
       return c.json({ ok: true, ignored: true });
     }
 
-    // Look up the agent by oauthClientId to get the correct webhook secret
-    const agent = agentStore.listAgents().find(
-      (a) => a.enabled && a.triggers?.linear?.enabled
-        && a.triggers.linear.oauthClientId === payload.oauthClientId,
-    );
+    // Look up credentials: first try OAuth connection (new model), then inline (legacy)
+    const oauthConn = payload.oauthClientId ? findOAuthConnectionByClientId(payload.oauthClientId) : null;
+    let webhookSecret: string;
+    let agent: ReturnType<typeof agentStore.listAgents>[number] | undefined;
+
+    if (oauthConn) {
+      // New model: find agent referencing this connection
+      webhookSecret = oauthConn.webhookSecret;
+      agent = agentStore.listAgents().find(
+        (a) => a.enabled && a.triggers?.linear?.enabled
+          && a.triggers.linear.oauthConnectionId === oauthConn.id,
+      );
+    } else {
+      // Legacy: find agent by inline oauthClientId
+      agent = agentStore.listAgents().find(
+        (a) => a.enabled && a.triggers?.linear?.enabled
+          && a.triggers.linear.oauthClientId === payload.oauthClientId,
+      );
+      webhookSecret = agent?.triggers?.linear?.webhookSecret || "";
+    }
 
     if (!agent) {
       console.error(`[linear-agent-routes] No agent found for oauthClientId: ${payload.oauthClientId}`);
       return c.json({ error: "No agent configured for this OAuth client" }, 404);
     }
-
-    // Verify webhook signature with this agent's webhook secret
-    const webhookSecret = agent.triggers?.linear?.webhookSecret || "";
     if (!linearAgent.verifyWebhookSignature(webhookSecret, rawBody, signature ?? null)) {
       return c.json({ error: "Invalid signature" }, 401);
     }
@@ -97,8 +110,17 @@ export function registerLinearAgentWebhookRoute(
     const redirectUri = `${baseUrl}/api/linear/oauth/callback`;
 
     // Determine which credentials to use for token exchange:
-    // prefer staging slot if present, fall back to global settings only when no stagingId was expected
+    // 1. OAuth connection (new model) — connectionId in state
+    // 2. Staging slot (wizard flow) — stagingId in state
+    // 3. Global settings (legacy fallback)
+    const { getOAuthConnection, updateOAuthConnection } = await import("../linear-oauth-connections.js");
+    const oauthConnection = stateResult.connectionId ? getOAuthConnection(stateResult.connectionId) : null;
     const stagingSlot = stateResult.stagingId ? staging.getSlot(stateResult.stagingId) : null;
+
+    // If a connectionId was in the state but the connection is gone, fail
+    if (stateResult.connectionId && !oauthConnection) {
+      return c.redirect(`${redirectBase}?oauth_error=${encodeURIComponent("connection_not_found")}`);
+    }
 
     // If a stagingId was in the state but the slot is gone (expired/deleted), don't silently
     // fall back to global settings — that would use the wrong OAuth app's credentials
@@ -106,8 +128,8 @@ export function registerLinearAgentWebhookRoute(
       return c.redirect(`${redirectBase}?oauth_error=${encodeURIComponent("staging_slot_expired")}`);
     }
 
-    const clientId = stagingSlot?.clientId || settings.linearOAuthClientId;
-    const clientSecret = stagingSlot?.clientSecret || settings.linearOAuthClientSecret;
+    const clientId = oauthConnection?.oauthClientId || stagingSlot?.clientId || settings.linearOAuthClientId;
+    const clientSecret = oauthConnection?.oauthClientSecret || stagingSlot?.clientSecret || settings.linearOAuthClientSecret;
 
     const tokens = await linearAgent.exchangeCodeForTokens(
       { clientId, clientSecret },
@@ -118,8 +140,15 @@ export function registerLinearAgentWebhookRoute(
       return c.redirect(`${redirectBase}?oauth_error=token_exchange_failed`);
     }
 
-    // Persist tokens to the staging slot if available, otherwise global staging
-    if (stateResult.stagingId) {
+    // Persist tokens to the appropriate store
+    if (stateResult.connectionId && oauthConnection) {
+      // New model: store tokens directly in the OAuth connection
+      updateOAuthConnection(stateResult.connectionId, {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        status: "connected",
+      });
+    } else if (stateResult.stagingId) {
       staging.updateSlotTokens(stateResult.stagingId, tokens);
     } else {
       updateSettings({

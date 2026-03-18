@@ -9,17 +9,25 @@
  * - Adding an MCP server of SSE type
  * - Accessibility scan of the component rendered standalone
  */
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { type AgentFormData, EMPTY_FORM, AgentEditor } from "./AgentEditor.js";
+import type { AgentFormData } from "./AgentEditor.js";
+import { EMPTY_FORM, AgentEditor } from "./AgentEditor.js";
 
 // ─── Mock setup ──────────────────────────────────────────────────────────────
 
-// Mock the api module — AgentEditor calls api.listSkills() and api.listEnvs() on mount
+// Mock the api module — AgentEditor calls api.listSkills(), api.listEnvs(),
+// and api.listLinearOAuthConnections() depending on form state
+const mockApi = {
+  listSkills: vi.fn().mockResolvedValue([]),
+  listEnvs: vi.fn().mockResolvedValue([]),
+  listLinearOAuthConnections: vi.fn().mockResolvedValue({ connections: [] }),
+};
 vi.mock("../api.js", () => ({
   api: {
-    listSkills: vi.fn().mockResolvedValue([]),
-    listEnvs: vi.fn().mockResolvedValue([]),
+    listSkills: (...args: unknown[]) => mockApi.listSkills(...args),
+    listEnvs: (...args: unknown[]) => mockApi.listEnvs(...args),
+    listLinearOAuthConnections: (...args: unknown[]) => mockApi.listLinearOAuthConnections(...args),
   },
 }));
 
@@ -266,5 +274,116 @@ describe("AgentEditor", () => {
     });
     const results = await axe(container, axeRules);
     expect(results).toHaveNoViolations();
+  });
+
+  // ── Linear OAuth connection picker ──────────────────────────────────────────
+
+  it("shows 'No OAuth connections found' when Linear is enabled but no connections exist", async () => {
+    // When linearEnabled is true but the API returns no connections,
+    // the editor should show a message directing the user to set up an OAuth app.
+    mockApi.listLinearOAuthConnections.mockResolvedValue({ connections: [] });
+    renderEditor({ linearEnabled: true }, { linearOAuthConfigured: true });
+
+    await waitFor(() => {
+      expect(screen.getByText(/No OAuth connections found/)).toBeInTheDocument();
+    });
+    expect(screen.getByText("Set up a Linear OAuth app")).toBeInTheDocument();
+  });
+
+  it("shows connection list when Linear is enabled and connections exist", async () => {
+    // When linearEnabled is true and the API returns connections,
+    // the editor should render each connection as a selectable button.
+    mockApi.listLinearOAuthConnections.mockResolvedValue({
+      connections: [
+        { id: "conn-1", name: "My Linear App", oauthClientId: "c1", status: "connected", hasAccessToken: true, hasClientSecret: true, hasWebhookSecret: true, createdAt: 0, updatedAt: 0 },
+        { id: "conn-2", name: "Staging App", oauthClientId: "c2", status: "disconnected", hasAccessToken: false, hasClientSecret: true, hasWebhookSecret: false, createdAt: 0, updatedAt: 0 },
+      ],
+    });
+    renderEditor({ linearEnabled: true }, { linearOAuthConfigured: true });
+
+    await waitFor(() => {
+      expect(screen.getByText("My Linear App")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Staging App")).toBeInTheDocument();
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByText("Not connected")).toBeInTheDocument();
+  });
+
+  it("auto-selects the only connection when there is exactly one", async () => {
+    // When only one connection exists and none is selected,
+    // the editor should auto-select it via setForm.
+    mockApi.listLinearOAuthConnections.mockResolvedValue({
+      connections: [
+        { id: "conn-only", name: "Only App", oauthClientId: "c1", status: "connected", hasAccessToken: true, hasClientSecret: true, hasWebhookSecret: true, createdAt: 0, updatedAt: 0 },
+      ],
+    });
+    const { setForm } = renderEditor({ linearEnabled: true }, { linearOAuthConfigured: true });
+
+    await waitFor(() => {
+      expect(screen.getByText("Only App")).toBeInTheDocument();
+    });
+    // setForm should have been called to auto-select the connection
+    expect(setForm).toHaveBeenCalled();
+    const calls = setForm.mock.calls;
+    const autoSelectCall = calls.find((c: unknown[]) => {
+      if (typeof c[0] === "function") {
+        const result = (c[0] as (prev: AgentFormData) => AgentFormData)({ ...EMPTY_FORM, linearEnabled: true });
+        return result.linearOAuthConnectionId === "conn-only";
+      }
+      return false;
+    });
+    expect(autoSelectCall).toBeDefined();
+  });
+
+  it("clicking a connection selects it via setForm", async () => {
+    // Clicking a connection button should call setForm to update linearOAuthConnectionId.
+    mockApi.listLinearOAuthConnections.mockResolvedValue({
+      connections: [
+        { id: "conn-1", name: "App One", oauthClientId: "c1", status: "connected", hasAccessToken: true, hasClientSecret: true, hasWebhookSecret: true, createdAt: 0, updatedAt: 0 },
+        { id: "conn-2", name: "App Two", oauthClientId: "c2", status: "connected", hasAccessToken: true, hasClientSecret: true, hasWebhookSecret: true, createdAt: 0, updatedAt: 0 },
+      ],
+    });
+    const { setForm } = renderEditor(
+      { linearEnabled: true, linearOAuthConnectionId: "conn-1" },
+      { linearOAuthConfigured: true },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("App Two")).toBeInTheDocument();
+    });
+
+    // Click the second connection
+    fireEvent.click(screen.getByText("App Two"));
+
+    // setForm should be called to select conn-2
+    expect(setForm).toHaveBeenCalled();
+    const calls = setForm.mock.calls;
+    const selectCall = calls.find((c: unknown[]) => {
+      if (typeof c[0] === "function") {
+        const result = (c[0] as (prev: AgentFormData) => AgentFormData)({
+          ...EMPTY_FORM,
+          linearEnabled: true,
+          linearOAuthConnectionId: "conn-1",
+        });
+        return result.linearOAuthConnectionId === "conn-2";
+      }
+      return false;
+    });
+    expect(selectCall).toBeDefined();
+  });
+
+  it("shows loading state while fetching connections", () => {
+    // When linearEnabled is true and connections are still loading,
+    // the editor should show "Loading connections..."
+    mockApi.listLinearOAuthConnections.mockReturnValue(new Promise(() => {}));
+    renderEditor({ linearEnabled: true }, { linearOAuthConfigured: true });
+
+    expect(screen.getByText("Loading connections...")).toBeInTheDocument();
+  });
+
+  it("does not show connection picker when Linear is not enabled", () => {
+    // The connection picker should not appear when linearEnabled is false.
+    renderEditor({ linearEnabled: false });
+    expect(screen.queryByTestId("linear-connection-picker")).not.toBeInTheDocument();
   });
 });

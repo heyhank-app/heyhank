@@ -18,6 +18,7 @@ const mockApi = {
   listSkills: vi.fn(),
   listEnvs: vi.fn(),
   getLinearOAuthStatus: vi.fn(),
+  listLinearOAuthConnections: vi.fn(),
 };
 
 vi.mock("../api.js", () => ({
@@ -35,6 +36,7 @@ vi.mock("../api.js", () => ({
     listSkills: (...args: unknown[]) => mockApi.listSkills(...args),
     listEnvs: (...args: unknown[]) => mockApi.listEnvs(...args),
     getLinearOAuthStatus: (...args: unknown[]) => mockApi.getLinearOAuthStatus(...args),
+    listLinearOAuthConnections: (...args: unknown[]) => mockApi.listLinearOAuthConnections(...args),
   },
 }));
 
@@ -92,6 +94,7 @@ beforeEach(() => {
   mockApi.listSkills.mockResolvedValue([]);
   mockApi.listEnvs.mockResolvedValue([]);
   mockApi.getLinearOAuthStatus.mockResolvedValue({ configured: false, hasClientId: false, hasClientSecret: false, hasWebhookSecret: false, hasAccessToken: false });
+  mockApi.listLinearOAuthConnections.mockResolvedValue({ connections: [] });
   window.location.hash = "#/agents";
   // Reset publicUrl mock to empty (no public URL configured)
   mockPublicUrl = "";
@@ -154,7 +157,7 @@ describe("AgentsPage", () => {
   // ── Agent Card Info ────────────────────────────────────────────────────────
 
   it("agent card shows correct info: name, description, and trigger badges", async () => {
-    // Validates that an agent card displays the name, description, enabled status,
+    // Validates that an agent card displays the name, description, status dot,
     // backend badge, and computed trigger badges (Manual is always shown, plus
     // Webhook/Schedule when enabled).
     const agent = makeAgent({
@@ -174,7 +177,9 @@ describe("AgentsPage", () => {
 
     await screen.findByText("Docs Writer");
     expect(screen.getByText("Writes documentation")).toBeInTheDocument();
-    expect(screen.getByText("Enabled")).toBeInTheDocument();
+    // Status dot shows enabled state via green color (not text badge)
+    const statusDot = screen.getByTestId("status-dot");
+    expect(statusDot.className).toContain("bg-cc-success");
 
     // Trigger badges: Manual is always present, Webhook when enabled,
     // and schedule is humanized from the cron expression
@@ -183,14 +188,16 @@ describe("AgentsPage", () => {
     expect(screen.getByText("Daily at 8:00 AM")).toBeInTheDocument();
   });
 
-  it("agent card shows Disabled badge when agent is not enabled", async () => {
-    // Agents can be toggled off. The card should reflect the disabled state.
+  it("agent card shows gray status dot when agent is not enabled", async () => {
+    // Agents can be toggled off. The card should reflect the disabled state
+    // via a gray status dot instead of the green one.
     const agent = makeAgent({ id: "a1", name: "Disabled Agent", enabled: false });
     mockApi.listAgents.mockResolvedValue([agent]);
     render(<AgentsPage route={defaultRoute} />);
 
     await screen.findByText("Disabled Agent");
-    expect(screen.getByText("Disabled")).toBeInTheDocument();
+    const statusDot = screen.getByTestId("status-dot");
+    expect(statusDot.className).toContain("bg-cc-muted");
   });
 
   it("agent card shows Codex backend badge for codex agents", async () => {
@@ -236,9 +243,9 @@ describe("AgentsPage", () => {
     expect(screen.getByText("1 run")).toBeInTheDocument();
   });
 
-  it("agent card shows Copy URL button when webhook is enabled", async () => {
-    // When webhook trigger is enabled, a "Copy URL" button appears next to
-    // the trigger badges, allowing users to copy the webhook URL.
+  it("agent card shows Copy Webhook URL in overflow menu when webhook is enabled", async () => {
+    // When webhook trigger is enabled, the overflow menu includes a
+    // "Copy Webhook URL" option for copying the webhook URL.
     const agent = makeAgent({
       id: "a1",
       name: "Webhook Agent",
@@ -251,7 +258,9 @@ describe("AgentsPage", () => {
     render(<AgentsPage route={defaultRoute} />);
 
     await screen.findByText("Webhook Agent");
-    expect(screen.getByText("Copy URL")).toBeInTheDocument();
+    // Open the overflow menu
+    fireEvent.click(screen.getByLabelText("More actions"));
+    expect(screen.getByText("Copy Webhook URL")).toBeInTheDocument();
   });
 
   // ── Interactive Behavior ───────────────────────────────────────────────────
@@ -299,15 +308,17 @@ describe("AgentsPage", () => {
     });
   });
 
-  it("clicking Edit on an agent card opens the editor in edit mode", async () => {
-    // Clicking the Edit button on an agent card should switch to the editor
-    // with "Edit Agent" heading and "Save" button.
+  it("clicking Edit in overflow menu opens the editor in edit mode", async () => {
+    // Clicking the Edit menu item in the overflow menu should switch to the
+    // editor with "Edit Agent" heading and "Save" button.
     const agent = makeAgent({ id: "a1", name: "Editable Agent", prompt: "Do something" });
     mockApi.listAgents.mockResolvedValue([agent]);
     render(<AgentsPage route={defaultRoute} />);
 
     await screen.findByText("Editable Agent");
-    fireEvent.click(screen.getByTitle("Edit"));
+    // Open overflow menu, then click Edit
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Edit"));
 
     expect(screen.getByText("Edit Agent")).toBeInTheDocument();
     expect(screen.getByText("Save")).toBeInTheDocument();
@@ -353,8 +364,8 @@ describe("AgentsPage", () => {
   });
 
   it("delete button calls deleteAgent after confirmation", async () => {
-    // Clicking the Delete button should trigger a confirm dialog, then call
-    // the deleteAgent API and refresh the agent list.
+    // Clicking the Delete menu item in the overflow menu should trigger a
+    // confirm dialog, then call the deleteAgent API and refresh the agent list.
     const agent = makeAgent({ id: "a1", name: "Delete Me" });
     mockApi.listAgents.mockResolvedValue([agent]);
     mockApi.deleteAgent.mockResolvedValue({});
@@ -362,7 +373,9 @@ describe("AgentsPage", () => {
 
     render(<AgentsPage route={defaultRoute} />);
     await screen.findByText("Delete Me");
-    fireEvent.click(screen.getByTitle("Delete"));
+    // Open overflow menu, then click Delete
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Delete"));
 
     await waitFor(() => {
       expect(window.confirm).toHaveBeenCalledWith("Delete this agent?");
@@ -371,14 +384,16 @@ describe("AgentsPage", () => {
   });
 
   it("toggle button calls toggleAgent API", async () => {
-    // Clicking the toggle button (Enable/Disable) should call the API.
+    // Clicking the Disable/Enable menu item in the overflow menu should call the API.
     const agent = makeAgent({ id: "a1", name: "Toggle Me", enabled: true });
     mockApi.listAgents.mockResolvedValue([agent]);
     mockApi.toggleAgent.mockResolvedValue({});
 
     render(<AgentsPage route={defaultRoute} />);
     await screen.findByText("Toggle Me");
-    fireEvent.click(screen.getByTitle("Disable"));
+    // Open overflow menu, then click Disable
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Disable"));
 
     await waitFor(() => {
       expect(mockApi.toggleAgent).toHaveBeenCalledWith("a1");
@@ -483,7 +498,9 @@ describe("AgentsPage", () => {
     render(<AgentsPage route={defaultRoute} />);
 
     await screen.findByText("Branch Agent");
-    fireEvent.click(screen.getByTitle("Edit"));
+    // Open overflow menu, then click Edit
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Edit"));
 
     // Branch pill should be visible since cwd is set
     expect(screen.getByText("branch")).toBeInTheDocument();
@@ -509,7 +526,9 @@ describe("AgentsPage", () => {
     render(<AgentsPage route={defaultRoute} />);
 
     await screen.findByText("Git Agent");
-    fireEvent.click(screen.getByTitle("Edit"));
+    // Open overflow menu, then click Edit
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Edit"));
 
     // Branch input should be visible with the branch name pre-filled
     expect(screen.getByDisplayValue("feature/test")).toBeInTheDocument();
@@ -587,7 +606,9 @@ describe("AgentsPage", () => {
     render(<AgentsPage route={defaultRoute} />);
 
     await screen.findByText("Advanced Agent");
-    fireEvent.click(screen.getByTitle("Edit"));
+    // Open overflow menu, then click Edit
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Edit"));
 
     // Advanced should be auto-expanded because agent has mcpServers
     expect(screen.getByText("MCP Servers")).toBeInTheDocument();
@@ -792,7 +813,9 @@ describe("AgentsPage", () => {
     render(<AgentsPage route={defaultRoute} />);
 
     await screen.findByText("Full Agent");
-    fireEvent.click(screen.getByTitle("Edit"));
+    // Open overflow menu, then click Edit
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Edit"));
 
     // Verify basic fields
     expect(screen.getByDisplayValue("Full Agent")).toBeInTheDocument();
@@ -974,7 +997,9 @@ describe("AgentsPage", () => {
     await screen.findByText("Old Name");
 
     // Open edit form
-    fireEvent.click(screen.getByTitle("Edit"));
+    // Open overflow menu, then click Edit
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Edit"));
     expect(screen.getByText("Save")).toBeInTheDocument();
 
     // Change the name
@@ -1147,7 +1172,9 @@ describe("AgentsPage", () => {
     render(<AgentsPage route={defaultRoute} />);
     await screen.findByText("Exportable Agent");
 
-    fireEvent.click(screen.getByTitle("Export JSON"));
+    // Open overflow menu, then click Export JSON
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Export JSON"));
 
     await waitFor(() => {
       expect(mockApi.exportAgent).toHaveBeenCalledWith("export-1");
@@ -1203,7 +1230,9 @@ describe("AgentsPage", () => {
     render(<AgentsPage route={defaultRoute} />);
     await screen.findByText("Fail Agent");
 
-    fireEvent.click(screen.getByTitle("Edit"));
+    // Open overflow menu, then click Edit
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Edit"));
     fireEvent.click(screen.getByText("Save"));
 
     await waitFor(() => {
@@ -1407,7 +1436,9 @@ describe("AgentsPage", () => {
     render(<AgentsPage route={defaultRoute} />);
 
     await screen.findByText("One-Time Agent");
-    fireEvent.click(screen.getByTitle("Edit"));
+    // Open overflow menu, then click Edit
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Edit"));
 
     // Should show datetime input, not cron presets
     const datetimeInput = document.querySelector('input[type="datetime-local"]');
@@ -1655,7 +1686,9 @@ describe("AgentsPage", () => {
 
     render(<AgentsPage route={defaultRoute} />);
     await screen.findByText("Keep Me");
-    fireEvent.click(screen.getByTitle("Delete"));
+    // Open overflow menu, then click Delete
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Delete"));
 
     await waitFor(() => {
       expect(window.confirm).toHaveBeenCalledWith("Delete this agent?");
@@ -1818,7 +1851,9 @@ describe("AgentsPage", () => {
 
     render(<AgentsPage route={defaultRoute} />);
     await screen.findByText("Env Agent");
-    fireEvent.click(screen.getByTitle("Edit"));
+    // Open overflow menu, then click Edit
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Edit"));
 
     // Advanced should be auto-expanded because env vars are configured
     expect(screen.getByDisplayValue("API_KEY")).toBeInTheDocument();
@@ -1889,7 +1924,9 @@ describe("AgentsPage", () => {
 
     render(<AgentsPage route={defaultRoute} />);
     await screen.findByText("Tools Agent");
-    fireEvent.click(screen.getByTitle("Edit"));
+    // Open overflow menu, then click Edit
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Edit"));
 
     // All tools should be visible as tags
     expect(screen.getByText("Read")).toBeInTheDocument();
@@ -1966,7 +2003,9 @@ describe("AgentsPage", () => {
     await screen.findByText("Copy Agent");
 
     // Click "Copy URL"
-    fireEvent.click(screen.getByText("Copy URL"));
+    // Open overflow menu, then click Copy Webhook URL
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Copy Webhook URL"));
 
     await waitFor(() => {
       expect(writeTextMock).toHaveBeenCalledTimes(1);
@@ -2187,7 +2226,9 @@ describe("AgentsPage", () => {
     await screen.findByText("Public URL Agent");
 
     // Click "Copy URL" on the agent card
-    fireEvent.click(screen.getByText("Copy URL"));
+    // Open overflow menu, then click Copy Webhook URL
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Copy Webhook URL"));
 
     await waitFor(() => {
       expect(writeTextMock).toHaveBeenCalledTimes(1);
@@ -2221,7 +2262,9 @@ describe("AgentsPage", () => {
     render(<AgentsPage route={defaultRoute} />);
     await screen.findByText("Fallback Agent");
 
-    fireEvent.click(screen.getByText("Copy URL"));
+    // Open overflow menu, then click Copy Webhook URL
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Copy Webhook URL"));
 
     await waitFor(() => {
       expect(writeTextMock).toHaveBeenCalledTimes(1);
@@ -2231,6 +2274,176 @@ describe("AgentsPage", () => {
     const copiedUrl = writeTextMock.mock.calls[0][0];
     expect(copiedUrl).toContain(window.location.origin);
     expect(copiedUrl).toContain("/api/agents/fallback-agent/webhook/fb-secret");
+  });
+
+  // ── Filter Tabs ──────────────────────────────────────────────────────────
+
+  it("filter tabs appear when agents exist", async () => {
+    // When agents are loaded, filter tabs (All, Linear, Scheduled, Webhook)
+    // should appear with counts.
+    const agents = [
+      makeAgent({ id: "a1", name: "Agent 1" }),
+      makeAgent({
+        id: "a2",
+        name: "Linear Agent",
+        triggers: { linear: { enabled: true, oauthClientId: "c1", hasAccessToken: true } },
+      }),
+    ];
+    mockApi.listAgents.mockResolvedValue(agents);
+    render(<AgentsPage route={defaultRoute} />);
+
+    await screen.findByText("Agent 1");
+    const tabs = screen.getByTestId("filter-tabs");
+    expect(tabs).toBeInTheDocument();
+
+    // Tab labels with counts
+    expect(screen.getByText("All (2)")).toBeInTheDocument();
+    expect(screen.getByText("Linear (1)")).toBeInTheDocument();
+  });
+
+  it("filter tabs do not appear when no agents exist", async () => {
+    // When there are no agents, filter tabs should not be rendered.
+    mockApi.listAgents.mockResolvedValue([]);
+    render(<AgentsPage route={defaultRoute} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("No agents yet")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("filter-tabs")).not.toBeInTheDocument();
+  });
+
+  it("clicking Linear filter shows only Linear agents", async () => {
+    // When the Linear filter tab is clicked, only agents with linear
+    // triggers should be displayed.
+    const agents = [
+      makeAgent({ id: "a1", name: "Regular Agent" }),
+      makeAgent({
+        id: "a2",
+        name: "My Linear Bot",
+        triggers: { linear: { enabled: true, oauthClientId: "c1", hasAccessToken: true } },
+      }),
+    ];
+    mockApi.listAgents.mockResolvedValue(agents);
+    render(<AgentsPage route={defaultRoute} />);
+
+    await screen.findByText("Regular Agent");
+    expect(screen.getByText("My Linear Bot")).toBeInTheDocument();
+
+    // Click the "Linear" filter tab
+    fireEvent.click(screen.getByText("Linear (1)"));
+
+    // Only the Linear-triggered agent should be visible
+    expect(screen.getByText("My Linear Bot")).toBeInTheDocument();
+    expect(screen.queryByText("Regular Agent")).not.toBeInTheDocument();
+  });
+
+  it("Linear agents appear only once (no duplication)", async () => {
+    // Previous bug: Linear agents appeared both in LinearAgentSection and
+    // in the regular agent list. With the unified design, each agent
+    // should appear exactly once.
+    const agents = [
+      makeAgent({
+        id: "linear-1",
+        name: "My Linear Agent",
+        triggers: { linear: { enabled: true, oauthClientId: "c1", hasAccessToken: true } },
+      }),
+    ];
+    mockApi.listAgents.mockResolvedValue(agents);
+    render(<AgentsPage route={defaultRoute} />);
+
+    await screen.findByText("My Linear Agent");
+    // Should appear exactly once
+    const matches = screen.getAllByText("My Linear Agent");
+    expect(matches).toHaveLength(1);
+  });
+
+  it("filter empty state shows setup CTA for Linear filter", async () => {
+    // When the Linear filter is active and there are no Linear agents,
+    // a specific empty state with "Setup Linear Agent" CTA should appear.
+    const agents = [
+      makeAgent({ id: "a1", name: "Regular Agent" }),
+    ];
+    mockApi.listAgents.mockResolvedValue(agents);
+    render(<AgentsPage route={defaultRoute} />);
+
+    await screen.findByText("Regular Agent");
+
+    // Click the "Linear" filter tab
+    fireEvent.click(screen.getByText("Linear (0)"));
+
+    // Empty state for Linear filter
+    expect(screen.getByText("No Linear agents")).toBeInTheDocument();
+    expect(screen.getByText("Setup Linear Agent")).toBeInTheDocument();
+  });
+
+  it("filter empty state shows message for Scheduled filter", async () => {
+    // When the Scheduled filter is active and there are no scheduled agents,
+    // a message should appear.
+    const agents = [
+      makeAgent({ id: "a1", name: "Regular Agent" }),
+    ];
+    mockApi.listAgents.mockResolvedValue(agents);
+    render(<AgentsPage route={defaultRoute} />);
+
+    await screen.findByText("Regular Agent");
+
+    // Click the "Scheduled" filter tab
+    fireEvent.click(screen.getByText("Scheduled (0)"));
+
+    expect(screen.getByText("No scheduled agents")).toBeInTheDocument();
+  });
+
+  it("clicking All filter tab shows all agents again", async () => {
+    // After filtering, clicking "All" should show all agents.
+    const agents = [
+      makeAgent({ id: "a1", name: "Agent One" }),
+      makeAgent({
+        id: "a2",
+        name: "My Linear Bot",
+        triggers: { linear: { enabled: true, oauthClientId: "c1", hasAccessToken: true } },
+      }),
+    ];
+    mockApi.listAgents.mockResolvedValue(agents);
+    render(<AgentsPage route={defaultRoute} />);
+
+    await screen.findByText("Agent One");
+
+    // Filter to Linear only
+    fireEvent.click(screen.getByText("Linear (1)"));
+    expect(screen.queryByText("Agent One")).not.toBeInTheDocument();
+
+    // Switch back to All
+    fireEvent.click(screen.getByText("All (2)"));
+    expect(screen.getByText("Agent One")).toBeInTheDocument();
+    expect(screen.getByText("My Linear Bot")).toBeInTheDocument();
+  });
+
+  // ── Delete confirmation for Linear agents ─────────────────────────────────
+
+  it("delete confirmation uses Linear-specific message for Linear agents", async () => {
+    // When deleting a Linear agent, the confirmation message should
+    // mention that the agent will no longer respond to @mentions.
+    const agent = makeAgent({
+      id: "linear-del",
+      name: "Linear Delete",
+      triggers: { linear: { enabled: true, oauthClientId: "c1", hasAccessToken: true } },
+    });
+    mockApi.listAgents.mockResolvedValue([agent]);
+    mockApi.deleteAgent.mockResolvedValue({});
+    window.confirm = vi.fn().mockReturnValue(true);
+
+    render(<AgentsPage route={defaultRoute} />);
+    await screen.findByText("Linear Delete");
+
+    // Open overflow menu, then click Delete
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByText("Delete"));
+
+    await waitFor(() => {
+      expect(window.confirm).toHaveBeenCalledWith(
+        "Delete this Linear agent? It will no longer respond to @mentions in Linear.",
+      );
+    });
   });
 
 });

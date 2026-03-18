@@ -70,6 +70,7 @@ const defaultForm: AgentFormData = {
   scheduleExpression: "",
   scheduleRecurring: true,
   linearEnabled: true,
+  linearOAuthConnectionId: "",
 };
 
 /** Helper to build default props, with optional overrides */

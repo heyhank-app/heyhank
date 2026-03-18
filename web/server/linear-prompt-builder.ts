@@ -45,3 +45,17 @@ export function buildLinearSystemPrompt(
   );
   return lines.join("\n");
 }
+
+export function buildLinearOAuthSystemPrompt(connection: { name: string }): string {
+  const lines = [
+    "You have access to the Linear GraphQL API via the LINEAR_OAUTH_ACCESS_TOKEN environment variable.",
+    `Connected Linear OAuth app: "${connection.name}"`,
+    "This token was authorized with `actor=app`, so Linear mutations run as the installed app rather than as the installing user.",
+    "",
+    "Call the Linear GraphQL API at https://api.linear.app/graphql.",
+    "Use the Authorization header: `Authorization: Bearer $LINEAR_OAUTH_ACCESS_TOKEN`",
+    "For compatibility with existing tooling, the same token is also available as `LINEAR_API_KEY`.",
+    "Common operations: read issue details, add comments, transition issue status, update issue fields, and create follow-up issues.",
+  ];
+  return lines.join("\n");
+}

@@ -22,8 +22,17 @@ vi.mock("./settings-manager.js", () => ({
   getSettings: vi.fn().mockReturnValue({ publicUrl: "" }),
 }));
 
+// Mock the OAuth connections module used by the bridge for credential resolution
+// and agent lookup. Default: no connections found (falls through to legacy path).
+vi.mock("./linear-oauth-connections.js", () => ({
+  findOAuthConnectionByClientId: vi.fn().mockReturnValue(null),
+  getOAuthConnection: vi.fn().mockReturnValue(null),
+  updateOAuthConnection: vi.fn(),
+}));
+
 import * as agentStore from "./agent-store.js";
 import * as linearAgent from "./linear-agent.js";
+import * as linearOAuthConnections from "./linear-oauth-connections.js";
 import { LinearAgentBridge, buildPrompt } from "./linear-agent-bridge.js";
 import type { AgentSessionEventPayload } from "./linear-agent.js";
 
@@ -117,6 +126,7 @@ describe("LinearAgentBridge", () => {
         expect.any(Object),
         "linear-session-1",
         expect.objectContaining({ type: "thought", body: "Starting Companion session..." }),
+        expect.any(Function),
       );
 
       // Should launch agent session with prompt context
@@ -133,6 +143,7 @@ describe("LinearAgentBridge", () => {
         expect.arrayContaining([
           expect.objectContaining({ label: "Companion Session" }),
         ]),
+        expect.any(Function),
       );
 
       // Should set up relay listeners on the event bus
@@ -146,6 +157,47 @@ describe("LinearAgentBridge", () => {
         expect.objectContaining({
           type: "thought",
           body: expect.stringContaining("Linear Bot"),
+        }),
+        expect.any(Function),
+      );
+    });
+
+    it("injects OAuth-backed Linear API access into the spawned agent session", async () => {
+      const oauthAgent = {
+        ...testAgent,
+        triggers: { linear: { enabled: true, oauthConnectionId: "oauth-1" } },
+      };
+      const oauthConn = {
+        id: "oauth-1",
+        name: "Enrich",
+        oauthClientId: "test-oauth-client-id",
+        oauthClientSecret: "secret",
+        webhookSecret: "hook",
+        accessToken: "lin_oauth_test",
+        refreshToken: "lin_refresh_test",
+        status: "connected" as const,
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      vi.mocked(agentStore.listAgents).mockReturnValue([oauthAgent] as ReturnType<typeof agentStore.listAgents>);
+      vi.mocked(agentStore.getAgent).mockReturnValue(oauthAgent as ReturnType<typeof agentStore.getAgent>);
+      vi.mocked(linearOAuthConnections.findOAuthConnectionByClientId).mockReturnValue(oauthConn);
+      vi.mocked(linearOAuthConnections.getOAuthConnection).mockReturnValue(oauthConn);
+      vi.mocked(executor.executeAgent).mockResolvedValue({ sessionId: "comp-sess-1" } as never);
+
+      await bridge.handleEvent(makeCreatedEvent());
+
+      expect(executor.executeAgent).toHaveBeenCalledWith(
+        "agent-1",
+        "Fix the login bug on issue LIN-42",
+        expect.objectContaining({
+          force: true,
+          triggerType: "linear",
+          additionalEnv: {
+            LINEAR_OAUTH_ACCESS_TOKEN: "lin_oauth_test",
+            LINEAR_API_KEY: "lin_oauth_test",
+          },
+          systemPrompt: expect.stringContaining("LINEAR_OAUTH_ACCESS_TOKEN"),
         }),
       );
     });
@@ -191,6 +243,7 @@ describe("LinearAgentBridge", () => {
           type: "error",
           body: expect.stringContaining("Failed to start Companion session"),
         }),
+        expect.any(Function),
       );
     });
 
@@ -210,6 +263,7 @@ describe("LinearAgentBridge", () => {
           type: "error",
           body: expect.stringContaining("currently busy"),
         }),
+        expect.any(Function),
       );
     });
 
@@ -226,6 +280,7 @@ describe("LinearAgentBridge", () => {
           type: "error",
           body: expect.stringContaining("CLI not found"),
         }),
+        expect.any(Function),
       );
     });
 
@@ -338,6 +393,7 @@ describe("LinearAgentBridge", () => {
         expect.any(Object),
         "linear-session-1",
         expect.objectContaining({ type: "thought", body: "Processing follow-up..." }),
+        expect.any(Function),
       );
 
       // Should inject message into the Companion session
@@ -448,6 +504,20 @@ describe("LinearAgentBridge", () => {
       companionBus.emit("message:assistant", { sessionId: "comp-sess-1", message: msg } as any);
     }
 
+    function emitStreamText(text: string) {
+      companionBus.emit("message:stream_event", {
+        sessionId: "comp-sess-1",
+        message: {
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            delta: { type: "text_delta", text },
+          },
+          parent_tool_use_id: null,
+        },
+      } as any);
+    }
+
     /** Emit a result message for the test session via the bus. */
     async function emitResult(msg: unknown = {}) {
       companionBus.emit("message:result", { sessionId: "comp-sess-1", message: msg } as any);
@@ -475,6 +545,44 @@ describe("LinearAgentBridge", () => {
         expect.any(Object),
         "linear-session-1",
         expect.objectContaining({ type: "response", body: "Here is the fix for the login bug." }),
+        expect.any(Function),
+      );
+    });
+
+    it("relays streamed text as a response on turn completion", async () => {
+      await createSessionAndSetupRelay();
+
+      emitStreamText("Here is");
+      emitStreamText(" the streamed reply.");
+
+      await emitResult();
+
+      expect(linearAgent.postActivity).toHaveBeenCalledWith(
+        expect.any(Object),
+        "linear-session-1",
+        expect.objectContaining({ type: "response", body: "Here is the streamed reply." }),
+        expect.any(Function),
+      );
+    });
+
+    it("does not duplicate final assistant text already seen in stream deltas", async () => {
+      await createSessionAndSetupRelay();
+
+      emitStreamText("Streamed text");
+      emitAssistant({
+        type: "assistant",
+        message: {
+          content: [{ type: "text", text: "Streamed text" }],
+        },
+      });
+
+      await emitResult();
+
+      expect(linearAgent.postActivity).toHaveBeenCalledWith(
+        expect.any(Object),
+        "linear-session-1",
+        expect.objectContaining({ type: "response", body: "Streamed text" }),
+        expect.any(Function),
       );
     });
 
@@ -498,6 +606,7 @@ describe("LinearAgentBridge", () => {
           type: "action",
           action: "Edit",
         }),
+        expect.any(Function),
       );
     });
 
@@ -522,11 +631,13 @@ describe("LinearAgentBridge", () => {
         expect.any(Object),
         "linear-session-1",
         expect.objectContaining({ type: "action", action: "Read" }),
+        expect.any(Function),
       );
       expect(linearAgent.postActivity).toHaveBeenCalledWith(
         expect.any(Object),
         "linear-session-1",
         expect.objectContaining({ type: "action", action: "Edit" }),
+        expect.any(Function),
       );
     });
 
@@ -550,6 +661,7 @@ describe("LinearAgentBridge", () => {
         expect.any(Object),
         "linear-session-1",
         expect.objectContaining({ type: "response", body: "Line 1\nLine 2" }),
+        expect.any(Function),
       );
     });
 
@@ -611,6 +723,7 @@ describe("LinearAgentBridge", () => {
         expect.any(Object),
         "linear-session-1",
         expect.objectContaining({ type: "action", action: "Read" }),
+        expect.any(Function),
       );
     });
   });
@@ -663,6 +776,7 @@ describe("LinearAgentBridge", () => {
           { content: "Fix the bug", status: "inProgress" },
           { content: "Write tests", status: "pending" },
         ],
+        expect.any(Function),
       );
     });
 
@@ -747,6 +861,7 @@ describe("LinearAgentBridge", () => {
           action: "Read",
           result: "const x = 42;",
         }),
+        expect.any(Function),
       );
     });
 
@@ -810,6 +925,7 @@ describe("LinearAgentBridge", () => {
           body: "Working on the fix...",
           ephemeral: true,
         }),
+        expect.any(Function),
       );
     });
 
@@ -917,6 +1033,7 @@ describe("LinearAgentBridge", () => {
         expect.any(Object),
         "linear-session-1",
         expect.objectContaining({ type: "response", body: "Second response" }),
+        expect.any(Function),
       );
     });
   });

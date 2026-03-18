@@ -69,8 +69,8 @@ describe("WizardStepDone", () => {
     const agentsLink = screen.getByRole("link", { name: "Agents page" });
     expect(agentsLink).toHaveAttribute("href", "#/agents");
 
-    const settingsLink = screen.getByRole("link", { name: "Linear Settings" });
-    expect(settingsLink).toHaveAttribute("href", "#/integrations/linear");
+    const settingsLink = screen.getByRole("link", { name: "OAuth Settings" });
+    expect(settingsLink).toHaveAttribute("href", "#/integrations/linear-oauth");
   });
 
   // ─── Go to Agents Button ─────────────────────────────────────────────────────

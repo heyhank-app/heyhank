@@ -83,15 +83,17 @@ export interface AgentConfig {
     /** Linear Agent Interaction SDK trigger (per-agent OAuth app) */
     linear?: {
       enabled: boolean;
-      /** OAuth app client ID from Linear */
+      /** Reference to a LinearOAuthConnection by ID (new model) */
+      oauthConnectionId?: string;
+      /** @deprecated OAuth app client ID from Linear — use oauthConnectionId instead */
       oauthClientId?: string;
-      /** OAuth app client secret */
+      /** @deprecated OAuth app client secret — use oauthConnectionId instead */
       oauthClientSecret?: string;
-      /** Webhook signing secret for this agent's Linear OAuth app */
+      /** @deprecated Webhook signing secret — use oauthConnectionId instead */
       webhookSecret?: string;
-      /** OAuth access token (obtained via actor=app install flow) */
+      /** @deprecated OAuth access token — use oauthConnectionId instead */
       accessToken?: string;
-      /** OAuth refresh token (for 24h token rotation) */
+      /** @deprecated OAuth refresh token — use oauthConnectionId instead */
       refreshToken?: string;
     };
   };

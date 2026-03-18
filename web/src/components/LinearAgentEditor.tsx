@@ -262,7 +262,7 @@ export function LinearAgentEditor({
             </div>
             <p className="text-[10px] text-cc-muted mt-2">
               This agent responds to @mentions in Linear.{" "}
-              <a href="#/integrations/linear" className="text-cc-primary underline">Manage OAuth credentials</a>.
+              <a href="#/integrations/linear-oauth" className="text-cc-primary underline">Manage OAuth connections</a>.
             </p>
           </section>
         </div>

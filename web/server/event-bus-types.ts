@@ -53,6 +53,12 @@ export interface CompanionEventMap {
     message: BrowserIncomingMessage;
   };
 
+  /** A stream event was processed and broadcast to browsers. */
+  "message:stream_event": {
+    sessionId: string;
+    message: BrowserIncomingMessage;
+  };
+
   /** A result (turn completion) was processed and broadcast to browsers. */
   "message:result": { sessionId: string; message: BrowserIncomingMessage };
 }

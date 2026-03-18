@@ -4,8 +4,7 @@ import { useStore } from "../store.js";
 import { PublicUrlBanner } from "./PublicUrlBanner.js";
 import { WizardStepIndicator } from "./wizard/WizardStepIndicator.js";
 import { WizardStepIntro } from "./wizard/WizardStepIntro.js";
-import { WizardStepCredentials } from "./wizard/WizardStepCredentials.js";
-import { WizardStepInstall } from "./wizard/WizardStepInstall.js";
+import { WizardStepSelectConnection } from "./wizard/WizardStepSelectConnection.js";
 import { WizardStepAgent } from "./wizard/WizardStepAgent.js";
 import { WizardStepDone } from "./wizard/WizardStepDone.js";
 import { LinearLogo } from "./LinearLogo.js";
@@ -14,7 +13,17 @@ import { AgentIcon } from "./AgentIcon.js";
 import { AgentCard, getWebhookUrl } from "./AgentCard.js";
 import { AgentEditor, type AgentFormData, EMPTY_FORM } from "./AgentEditor.js";
 import { LinearAgentEditor } from "./LinearAgentEditor.js";
-import { LinearAgentSection } from "./LinearAgentSection.js";
+
+// ─── Filter types ────────────────────────────────────────────────────────────
+
+type AgentFilter = "all" | "linear" | "scheduled" | "webhook";
+
+const FILTER_LABELS: Record<AgentFilter, string> = {
+  all: "All",
+  linear: "Linear",
+  scheduled: "Scheduled",
+  webhook: "Webhook",
+};
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -36,39 +45,32 @@ export function AgentsPage({ route }: Props) {
   const [runInputAgent, setRunInputAgent] = useState<AgentInfo | null>(null);
   const [runInput, setRunInput] = useState("");
   const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState<AgentFilter>("all");
   const [linearOAuthConfigured, setLinearOAuthConfigured] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Linear wizard state ──
-  type WizardStep = 1 | 2 | 3 | 4 | 5;
+  type WizardStep = 1 | 2 | 3 | 4;
   const WIZARD_STEPS = [
     { label: "Intro" },
-    { label: "Credentials" },
-    { label: "Install" },
+    { label: "Connection" },
     { label: "Agent" },
     { label: "Done" },
   ];
-  const WIZARD_STORAGE_KEY = "companion_linear_wizard_state";
 
   const [wizardStep, setWizardStep] = useState<WizardStep>(1);
-  const [wizardCredentialsSaved, setWizardCredentialsSaved] = useState(false);
-  const [wizardOauthConnected, setWizardOauthConnected] = useState(false);
-  const [wizardOauthError, setWizardOauthError] = useState("");
   const [wizardAgentName, setWizardAgentName] = useState("");
   const [wizardCreatedAgentId, setWizardCreatedAgentId] = useState<string | null>(null);
-  const [wizardLoading, setWizardLoading] = useState(false);
   const [wizardEditingAgent, setWizardEditingAgent] = useState<AgentInfo | null>(null);
-  const [wizardStagingId, setWizardStagingId] = useState<string | null>(null);
-  const [wizardCloneFromAgentId, setWizardCloneFromAgentId] = useState<string | null>(null);
+  const [wizardSelectedConnectionId, setWizardSelectedConnectionId] = useState<string | null>(null);
 
   // linearOAuthConfigured is derived from agents list in loadAgents below
 
-  // Check hash for wizard entry params (OAuth return or IntegrationsPage link)
+  // Check hash for wizard entry params
   useEffect(() => {
     const hash = window.location.hash;
-    if (hash.includes("oauth_success=true") || hash.includes("oauth_error=") || hash.includes("setup=linear")) {
+    if (hash.includes("setup=linear")) {
       startLinearSetup();
-      // Clean hash params without triggering a hashchange (which would remount and lose wizard state)
       history.replaceState(null, "", "#/agents");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -79,9 +81,19 @@ export function AgentsPage({ route }: Props) {
     try {
       const list = await api.listAgents();
       setAgents(list);
-      // Derive linearOAuthConfigured from agents: true if any Linear agent has an access token
+      // Check if any OAuth connections exist (so the Linear trigger toggle is shown)
       const hasLinearAgent = list.some(a => a.triggers?.linear?.enabled && a.triggers?.linear?.hasAccessToken);
-      setLinearOAuthConfigured(hasLinearAgent);
+      if (hasLinearAgent) {
+        setLinearOAuthConfigured(true);
+      } else {
+        // Also check if standalone OAuth connections exist
+        try {
+          const { connections } = await api.listLinearOAuthConnections();
+          setLinearOAuthConfigured(connections.length > 0);
+        } catch {
+          setLinearOAuthConfigured(false);
+        }
+      }
     } catch {
       // ignore
     } finally {
@@ -139,6 +151,7 @@ export function AgentsPage({ route }: Props) {
       scheduleExpression: agent.triggers?.schedule?.expression || "0 8 * * *",
       scheduleRecurring: agent.triggers?.schedule?.recurring ?? true,
       linearEnabled: agent.triggers?.linear?.enabled ?? false,
+      linearOAuthConnectionId: agent.triggers?.linear?.oauthConnectionId ?? "",
     });
     setError("");
     // Route Linear agents to the dedicated editor
@@ -159,160 +172,59 @@ export function AgentsPage({ route }: Props) {
   // ── Linear wizard helpers ──
 
   function startLinearSetup() {
-    setWizardLoading(true);
     setView("setup-linear");
-
-    // Read hash params before they're cleaned
-    const hash = window.location.hash;
-    let oauthSuccess = false;
-    let oauthErr = "";
-    if (hash.includes("oauth_success=true")) {
-      oauthSuccess = true;
-    } else if (hash.includes("oauth_error=")) {
-      const match = hash.match(/oauth_error=([^&]*)/);
-      try {
-        oauthErr = decodeURIComponent(match?.[1] || "OAuth failed");
-      } catch {
-        oauthErr = match?.[1] || "OAuth failed";
-      }
-    }
-
-    // Restore persisted state from sessionStorage (for OAuth redirect return)
-    let persisted: { step: WizardStep; agentName: string; createdAgentId: string | null; stagingId: string | null } | null = null;
-    try {
-      const raw = sessionStorage.getItem(WIZARD_STORAGE_KEY);
-      if (raw) persisted = JSON.parse(raw);
-    } catch { /* ignore */ }
-
-    // Restore staging ID from persisted state
-    const persistedStagingId = persisted?.stagingId || null;
-    if (persistedStagingId) setWizardStagingId(persistedStagingId);
-
-    // Check OAuth status — use staging slot if available, else global
-    const statusPromise = persistedStagingId
-      ? api.getLinearStagingStatus(persistedStagingId)
-          .then((s) => ({ hasAccessToken: s.hasAccessToken, hasClientId: s.hasClientId, hasClientSecret: s.hasClientSecret, configured: s.hasAccessToken && s.hasClientId }))
-      : api.getLinearOAuthStatus();
-
-    statusPromise.then((serverStatus) => {
-      const isConnected = oauthSuccess || serverStatus.hasAccessToken;
-      const hasCreds = serverStatus.configured || (serverStatus.hasClientId && ("hasClientSecret" in serverStatus ? serverStatus.hasClientSecret : false));
-
-      setWizardOauthConnected(isConnected);
-      setWizardCredentialsSaved(hasCreds);
-      if (oauthErr) setWizardOauthError(oauthErr);
-      if (isConnected) setLinearOAuthConfigured(true);
-
-      if (persisted) {
-        if (isConnected && persisted.step <= 3) {
-          setWizardStep(4);
-        } else {
-          setWizardStep(persisted.step);
-        }
-        if (persisted.agentName) setWizardAgentName(persisted.agentName);
-        if (persisted.createdAgentId) setWizardCreatedAgentId(persisted.createdAgentId);
-        try { sessionStorage.removeItem(WIZARD_STORAGE_KEY); } catch { /* ignore */ }
-      } else {
-        if (isConnected) {
-          setWizardStep(4);
-        } else if (hasCreds) {
-          setWizardStep(3);
-        } else {
-          setWizardStep(1);
-        }
-      }
-
-      setWizardLoading(false);
-    }).catch(() => {
-      setWizardLoading(false);
-    });
+    setWizardStep(1);
   }
 
   function cancelLinearSetup() {
     setView("list");
     setWizardStep(1);
-    setWizardCredentialsSaved(false);
-    setWizardOauthConnected(false);
-    setWizardOauthError("");
     setWizardAgentName("");
     setWizardCreatedAgentId(null);
     setWizardEditingAgent(null);
-    setWizardStagingId(null);
-    setWizardCloneFromAgentId(null);
-    try { sessionStorage.removeItem(WIZARD_STORAGE_KEY); } catch { /* ignore */ }
+    setWizardSelectedConnectionId(null);
   }
 
   const wizardCompletedSteps = new Set<number>();
-  if (wizardCredentialsSaved || wizardOauthConnected) {
+  if (wizardSelectedConnectionId) {
     wizardCompletedSteps.add(1);
     wizardCompletedSteps.add(2);
   }
-  if (wizardOauthConnected) {
+  if (wizardCreatedAgentId) {
     wizardCompletedSteps.add(3);
   }
-  if (wizardCreatedAgentId) {
-    wizardCompletedSteps.add(4);
-  }
-
-  const handleWizardBeforeRedirect = useCallback(() => {
-    try {
-      sessionStorage.setItem(WIZARD_STORAGE_KEY, JSON.stringify({
-        step: 3,
-        credentialsSaved: wizardCredentialsSaved,
-        oauthConnected: wizardOauthConnected,
-        agentName: wizardAgentName,
-        createdAgentId: wizardCreatedAgentId,
-        stagingId: wizardStagingId,
-      }));
-    } catch { /* ignore */ }
-  }, [wizardCredentialsSaved, wizardOauthConnected, wizardAgentName, wizardCreatedAgentId, wizardStagingId]);
 
   const handleWizardAgentCreated = useCallback((id: string, name: string) => {
     setWizardCreatedAgentId(id);
     setWizardAgentName(name);
-    setWizardStep(5);
+    setWizardStep(4);
   }, []);
 
   const handleWizardFinish = useCallback(() => {
-    try { sessionStorage.removeItem(WIZARD_STORAGE_KEY); } catch { /* ignore */ }
     setView("list");
     setWizardStep(1);
-    setWizardCredentialsSaved(false);
-    setWizardOauthConnected(false);
-    setWizardOauthError("");
     setWizardAgentName("");
     setWizardCreatedAgentId(null);
-    setWizardStagingId(null);
-    setWizardCloneFromAgentId(null);
+    setWizardSelectedConnectionId(null);
     loadAgents();
   }, [loadAgents]);
 
-  // "Create Another" with the same OAuth app — clone credentials, skip to agent config
+  // "Create Another" with the same OAuth app — reuse connection, skip to agent config
   const handleWizardAddAnotherSameApp = useCallback(() => {
-    const sourceAgentId = wizardCreatedAgentId;
+    // Keep wizardSelectedConnectionId as-is
     setWizardAgentName("");
     setWizardEditingAgent(null);
-    setWizardStagingId(null);
-    setWizardCloneFromAgentId(sourceAgentId);
-    setWizardOauthError("");
-    // Skip credentials + install steps, go straight to agent config
-    setWizardCredentialsSaved(true);
-    setWizardOauthConnected(true);
     setWizardCreatedAgentId(null);
-    setWizardStep(4);
-  }, [wizardCreatedAgentId]);
+    setWizardStep(3);
+  }, []);
 
-  // "Create Another" with a different OAuth app — full wizard from scratch
+  // "Create Another" with a different OAuth app — go back to connection selection
   const handleWizardAddAnotherNewApp = useCallback(() => {
     setWizardCreatedAgentId(null);
     setWizardAgentName("");
     setWizardEditingAgent(null);
-    setWizardStagingId(null);
-    setWizardCloneFromAgentId(null);
-    setWizardCredentialsSaved(false);
-    setWizardOauthConnected(false);
-    setWizardOauthError("");
-    setWizardStep(1);
+    setWizardSelectedConnectionId(null);
+    setWizardStep(2);
   }, []);
 
   async function handleSave() {
@@ -352,7 +264,10 @@ export function AgentsPage({ route }: Props) {
             expression: form.scheduleExpression,
             recurring: form.scheduleRecurring,
           },
-          linear: { enabled: form.linearEnabled },
+          linear: {
+            enabled: form.linearEnabled,
+            ...(form.linearOAuthConnectionId ? { oauthConnectionId: form.linearOAuthConnectionId } : {}),
+          },
         },
       };
 
@@ -374,7 +289,12 @@ export function AgentsPage({ route }: Props) {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Delete this agent?")) return;
+    const agent = agents.find(a => a.id === id);
+    const isLinear = agent?.triggers?.linear?.enabled;
+    const message = isLinear
+      ? "Delete this Linear agent? It will no longer respond to @mentions in Linear."
+      : "Delete this agent?";
+    if (!confirm(message)) return;
     try {
       await api.deleteAgent(id);
       await loadAgents();
@@ -490,14 +410,6 @@ export function AgentsPage({ route }: Props) {
   }
 
   if (view === "setup-linear") {
-    if (wizardLoading) {
-      return (
-        <div className="h-full flex items-center justify-center bg-cc-bg">
-          <div className="text-sm text-cc-muted">Loading...</div>
-        </div>
-      );
-    }
-
     return (
       <main className="h-full overflow-y-auto bg-cc-bg">
         <div className="max-w-3xl mx-auto px-4 sm:px-8 py-6 sm:py-10">
@@ -528,32 +440,20 @@ export function AgentsPage({ route }: Props) {
               <WizardStepIntro onNext={() => setWizardStep(2)} />
             )}
             {wizardStep === 2 && (
-              <WizardStepCredentials
-                onNext={() => setWizardStep(3)}
-                onBack={() => setWizardStep(1)}
-                credentialsSaved={wizardCredentialsSaved}
-                onCredentialsSaved={(stagingId: string) => {
-                  setWizardCredentialsSaved(true);
-                  setWizardStagingId(stagingId);
+              <WizardStepSelectConnection
+                onNext={(connectionId) => {
+                  setWizardSelectedConnectionId(connectionId);
+                  setWizardStep(3);
                 }}
+                onBack={() => setWizardStep(1)}
+                selectedConnectionId={wizardSelectedConnectionId}
               />
             )}
             {wizardStep === 3 && (
-              <WizardStepInstall
-                onNext={() => setWizardStep(4)}
-                onBack={() => setWizardStep(2)}
-                oauthConnected={wizardOauthConnected}
-                oauthError={wizardOauthError}
-                stagingId={wizardStagingId}
-                onBeforeRedirect={handleWizardBeforeRedirect}
-              />
-            )}
-            {wizardStep === 4 && (
               <WizardStepAgent
                 onNext={handleWizardAgentCreated}
-                onBack={() => setWizardStep(3)}
-                stagingId={wizardStagingId}
-                cloneFromAgentId={wizardCloneFromAgentId}
+                onBack={() => setWizardStep(2)}
+                oauthConnectionId={wizardSelectedConnectionId}
                 existingAgent={wizardEditingAgent ? {
                   id: wizardEditingAgent.id,
                   name: wizardEditingAgent.name,
@@ -564,7 +464,7 @@ export function AgentsPage({ route }: Props) {
                 } : undefined}
               />
             )}
-            {wizardStep === 5 && (
+            {wizardStep === 4 && (
               <WizardStepDone
                 agentName={wizardAgentName}
                 onFinish={handleWizardFinish}
@@ -577,6 +477,24 @@ export function AgentsPage({ route }: Props) {
       </main>
     );
   }
+
+  // ── Filtering ──
+
+  const filterCounts: Record<AgentFilter, number> = {
+    all: agents.length,
+    linear: agents.filter(a => a.triggers?.linear?.enabled).length,
+    scheduled: agents.filter(a => a.triggers?.schedule?.enabled).length,
+    webhook: agents.filter(a => a.triggers?.webhook?.enabled).length,
+  };
+
+  const filteredAgents = agents.filter(agent => {
+    switch (activeFilter) {
+      case "linear": return agent.triggers?.linear?.enabled === true;
+      case "scheduled": return agent.triggers?.schedule?.enabled === true;
+      case "webhook": return agent.triggers?.webhook?.enabled === true;
+      default: return true;
+    }
+  });
 
   return (
     <div className="h-full overflow-y-auto bg-cc-bg">
@@ -595,13 +513,6 @@ export function AgentsPage({ route }: Props) {
               onChange={handleImport}
               className="hidden"
             />
-            <button
-              onClick={startLinearSetup}
-              className="px-3 py-1.5 text-xs rounded-lg border border-cc-border text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-1.5"
-            >
-              <LinearLogo className="w-3 h-3" />
-              Setup Linear Agent
-            </button>
             <button
               onClick={() => fileInputRef.current?.click()}
               className="px-3 py-1.5 text-xs rounded-lg border border-cc-border text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
@@ -625,19 +536,24 @@ export function AgentsPage({ route }: Props) {
 
         <PublicUrlBanner publicUrl={publicUrl} />
 
-        {/* Linear Agents section */}
-        {linearOAuthConfigured && !loading && (() => {
-          const linearAgents = agents.filter(a => a.triggers?.linear?.enabled);
-          return linearAgents.length > 0 ? (
-            <LinearAgentSection
-              agents={linearAgents}
-              onEdit={(agent) => startEdit(agent)}
-              onRun={(agent) => handleRunClick(agent)}
-              onAddNew={startLinearSetup}
-              onManageCredentials={() => { window.location.hash = "#/integrations/linear"; }}
-            />
-          ) : null;
-        })()}
+        {/* Filter tabs */}
+        {!loading && agents.length > 0 && (
+          <div className="flex items-center gap-1 mb-4" data-testid="filter-tabs">
+            {(["all", "linear", "scheduled", "webhook"] as AgentFilter[]).map((f) => (
+              <button
+                key={f}
+                onClick={() => setActiveFilter(f)}
+                className={`text-xs px-2.5 py-1 rounded-full transition-colors cursor-pointer ${
+                  activeFilter === f
+                    ? "bg-cc-fg text-cc-bg"
+                    : "bg-cc-hover text-cc-muted hover:text-cc-fg"
+                }`}
+              >
+                {FILTER_LABELS[f]} ({filterCounts[f]})
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Agent Cards */}
         {loading ? (
@@ -650,9 +566,36 @@ export function AgentsPage({ route }: Props) {
             <p className="text-sm text-cc-muted">No agents yet</p>
             <p className="text-xs text-cc-muted mt-1">Create an agent to get started, or import a shared JSON config.</p>
           </div>
+        ) : filteredAgents.length === 0 ? (
+          <div className="text-center py-12">
+            {activeFilter === "linear" ? (
+              <>
+                <div className="mb-3 flex justify-center text-cc-muted">
+                  <LinearLogo className="w-6 h-6" />
+                </div>
+                <p className="text-sm text-cc-muted">No Linear agents</p>
+                <p className="text-xs text-cc-muted mt-1">Create a Linear agent to respond to @mentions in Linear issues.</p>
+                <button
+                  onClick={startLinearSetup}
+                  className="mt-3 px-3 py-1.5 text-xs rounded-lg bg-cc-primary text-white hover:bg-cc-primary-hover transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  <LinearLogo className="w-3 h-3" />
+                  Setup Linear Agent
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-cc-muted">No {FILTER_LABELS[activeFilter].toLowerCase()} agents</p>
+                <p className="text-xs text-cc-muted mt-1">
+                  {activeFilter === "scheduled" && "Create an agent with a schedule trigger to see it here."}
+                  {activeFilter === "webhook" && "Create an agent with a webhook trigger to see it here."}
+                </p>
+              </>
+            )}
+          </div>
         ) : (
           <div className="space-y-3">
-            {agents.map((agent) => (
+            {filteredAgents.map((agent) => (
               <AgentCard
                 key={agent.id}
                 agent={agent}

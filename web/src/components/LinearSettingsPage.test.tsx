@@ -14,15 +14,11 @@ const mockApi = {
   updateSettings: vi.fn(),
   getLinearConnection: vi.fn(),
   getLinearStates: vi.fn(),
-  getLinearOAuthStatus: vi.fn(),
-  getLinearOAuthAuthorizeUrl: vi.fn(),
-  disconnectLinearOAuth: vi.fn(),
   listLinearConnections: vi.fn(),
   createLinearConnection: vi.fn(),
   deleteLinearConnection: vi.fn(),
   verifyLinearConnection: vi.fn(),
   updateLinearConnection: vi.fn(),
-  listAgents: vi.fn(),
 };
 
 vi.mock("../api.js", () => ({
@@ -31,15 +27,11 @@ vi.mock("../api.js", () => ({
     updateSettings: (...args: unknown[]) => mockApi.updateSettings(...args),
     getLinearConnection: (...args: unknown[]) => mockApi.getLinearConnection(...args),
     getLinearStates: (...args: unknown[]) => mockApi.getLinearStates(...args),
-    getLinearOAuthStatus: (...args: unknown[]) => mockApi.getLinearOAuthStatus(...args),
-    getLinearOAuthAuthorizeUrl: (...args: unknown[]) => mockApi.getLinearOAuthAuthorizeUrl(...args),
-    disconnectLinearOAuth: (...args: unknown[]) => mockApi.disconnectLinearOAuth(...args),
     listLinearConnections: (...args: unknown[]) => mockApi.listLinearConnections(...args),
     createLinearConnection: (...args: unknown[]) => mockApi.createLinearConnection(...args),
     deleteLinearConnection: (...args: unknown[]) => mockApi.deleteLinearConnection(...args),
     verifyLinearConnection: (...args: unknown[]) => mockApi.verifyLinearConnection(...args),
     updateLinearConnection: (...args: unknown[]) => mockApi.updateLinearConnection(...args),
-    listAgents: (...args: unknown[]) => mockApi.listAgents(...args),
   },
 }));
 
@@ -76,16 +68,6 @@ beforeEach(() => {
   mockApi.listLinearConnections.mockResolvedValue({
     connections: [defaultConnection],
   });
-
-  mockApi.getLinearOAuthStatus.mockResolvedValue({
-    configured: false,
-    hasClientId: false,
-    hasClientSecret: false,
-    hasWebhookSecret: false,
-    hasAccessToken: false,
-  });
-
-  mockApi.listAgents.mockResolvedValue([]);
 
   mockApi.updateSettings.mockResolvedValue({
     anthropicApiKeyConfigured: false,
@@ -405,333 +387,19 @@ describe("LinearSettingsPage — edit connection settings", () => {
 });
 
 // =============================================================================
-// OAuth Agent App section
+// OAuth redirect link
 // =============================================================================
 
-describe("LinearSettingsPage — OAuth Agent App section", () => {
-  it("renders the Linear Agent App section", async () => {
-    // Verifies that the OAuth section renders with its heading
+describe("LinearSettingsPage — OAuth redirect link", () => {
+  it("renders a link to the new OAuth settings page", async () => {
+    // Verifies that after removing the inline OAuth section, a redirect link
+    // is displayed pointing users to the dedicated LinearOAuthSettingsPage.
     render(<LinearSettingsPage />);
-    expect(await screen.findByText("Linear Agent App")).toBeInTheDocument();
-  });
+    await screen.findByText("Work");
 
-  it("shows 'Not configured' status when OAuth is not set up", async () => {
-    // Verifies the status text when no agents are configured with Linear
-    render(<LinearSettingsPage />);
-    // With no agents, the component shows "No agents configured — create one in the Agents page"
-    expect(await screen.findByText(/No agents configured/i)).toBeInTheDocument();
-  });
-
-  it("renders all OAuth input fields", async () => {
-    // Verifies all three credential fields are present
-    render(<LinearSettingsPage />);
-    await screen.findByText("Linear Agent App");
-
-    expect(screen.getByLabelText("Client ID")).toBeInTheDocument();
-    expect(screen.getByLabelText("Client Secret")).toBeInTheDocument();
-    expect(screen.getByLabelText("Webhook Signing Secret")).toBeInTheDocument();
-  });
-
-  it("saves OAuth credentials when Save Credentials is clicked", async () => {
-    // Verifies that entering credentials and clicking Save Credentials
-    // calls updateSettings with the trimmed values
-    render(<LinearSettingsPage />);
-    await screen.findByText("Linear Agent App");
-
-    fireEvent.change(screen.getByLabelText("Client ID"), {
-      target: { value: "  my-client-id  " },
-    });
-    fireEvent.change(screen.getByLabelText("Client Secret"), {
-      target: { value: "  my-secret  " },
-    });
-    fireEvent.change(screen.getByLabelText("Webhook Signing Secret"), {
-      target: { value: "  wh-secret  " },
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Save Credentials" }));
-
-    await waitFor(() => {
-      expect(mockApi.updateSettings).toHaveBeenCalledWith({
-        linearOAuthClientId: "my-client-id",
-        linearOAuthClientSecret: "my-secret",
-        linearOAuthWebhookSecret: "wh-secret",
-      });
-    });
-  });
-
-  it("shows connected status when OAuth has access token", async () => {
-    // Verifies the connected badge when OAuth is fully configured and agents exist
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      configured: true,
-      hasClientId: true,
-      hasClientSecret: true,
-      hasWebhookSecret: true,
-      hasAccessToken: true,
-    });
-    mockApi.listAgents.mockResolvedValue([
-      { id: "a1", name: "My Agent", enabled: true, triggers: { linear: { enabled: true, hasAccessToken: true } } },
-    ]);
-
-    render(<LinearSettingsPage />);
-
-    // Should show the per-agent status text indicating agents are connected
-    expect(await screen.findByText(/1 agent\(s\) connected/)).toBeInTheDocument();
-  });
-
-  it("opens OAuth authorize URL when Install to Workspace is clicked", async () => {
-    // Verifies that clicking Install to Workspace calls the API and opens the URL
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      configured: true,
-      hasClientId: true,
-      hasClientSecret: true,
-      hasWebhookSecret: false,
-      hasAccessToken: false,
-    });
-    mockApi.getLinearOAuthAuthorizeUrl.mockResolvedValue({
-      url: "https://linear.app/oauth/authorize?client_id=test",
-    });
-
-    // Mock window.open
-    const originalOpen = window.open;
-    window.open = vi.fn();
-
-    render(<LinearSettingsPage />);
-    await screen.findByText("Linear Agent App");
-
-    // Wait for the status to load (sets oauthConfigured)
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Install to Workspace" })).not.toBeDisabled();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Install to Workspace" }));
-
-    await waitFor(() => {
-      expect(mockApi.getLinearOAuthAuthorizeUrl).toHaveBeenCalled();
-    });
-    expect(window.open).toHaveBeenCalledWith(
-      "https://linear.app/oauth/authorize?client_id=test",
-      "_self",
-    );
-
-    window.open = originalOpen;
-  });
-
-  it("disconnects OAuth when Disconnect is clicked", async () => {
-    // Verifies that clicking Disconnect calls the disconnect API
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      configured: true,
-      hasClientId: true,
-      hasClientSecret: true,
-      hasWebhookSecret: true,
-      hasAccessToken: true,
-    });
-
-    render(<LinearSettingsPage />);
-
-    // Wait for the "Connected" badge to appear in the OAuth section header
-    await waitFor(() => {
-      const badges = screen.getAllByText("Connected");
-      // At least one should be in the OAuth section
-      expect(badges.length).toBeGreaterThan(0);
-    });
-
-    // Find and click the OAuth Disconnect button
-    const disconnectButtons = screen.getAllByRole("button", { name: "Disconnect" });
-    fireEvent.click(disconnectButtons[disconnectButtons.length - 1]);
-
-    await waitFor(() => {
-      expect(mockApi.disconnectLinearOAuth).toHaveBeenCalled();
-    });
-  });
-
-  it("shows setup guide details section", async () => {
-    // Verifies the expandable setup guide is present
-    render(<LinearSettingsPage />);
-    await screen.findByText("Linear Agent App");
-
-    expect(screen.getByText("Setup guide")).toBeInTheDocument();
-  });
-
-  it("disables Save Credentials when no fields are filled", async () => {
-    // Verifies the button is disabled when all OAuth fields are empty
-    render(<LinearSettingsPage />);
-    await screen.findByText("Linear Agent App");
-
-    const saveBtn = screen.getByRole("button", { name: "Save Credentials" });
-    expect(saveBtn).toBeDisabled();
-  });
-
-  it("shows 'Credentials saved' status when configured but not installed", async () => {
-    // Verifies that when OAuth has credentials saved on the server but
-    // no access token, the Install to Workspace button is enabled.
-    // With per-agent credentials, the status now shows agent-level info.
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      configured: true,
-      hasClientId: true,
-      hasClientSecret: true,
-      hasWebhookSecret: false,
-      hasAccessToken: false,
-    });
-    mockApi.listAgents.mockResolvedValue([
-      { id: "a1", name: "My Agent", enabled: true, triggers: { linear: { enabled: true, hasAccessToken: false } } },
-    ]);
-
-    render(<LinearSettingsPage />);
-
-    // Should show the agent needing installation
-    expect(await screen.findByText(/1 agent\(s\) need installation/)).toBeInTheDocument();
-    // Install to Workspace button should be enabled (credentials configured)
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Install to Workspace" })).not.toBeDisabled();
-    });
-  });
-
-  it("shows error when Save Credentials fails", async () => {
-    // Verifies that a server error on updateSettings shows the error message
-    mockApi.updateSettings.mockRejectedValueOnce(new Error("Server error"));
-
-    render(<LinearSettingsPage />);
-    await screen.findByText("Linear Agent App");
-
-    fireEvent.change(screen.getByLabelText("Client ID"), {
-      target: { value: "test-id" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save Credentials" }));
-
-    expect(await screen.findByText("Server error")).toBeInTheDocument();
-  });
-
-  it("shows success message after saving OAuth credentials", async () => {
-    // Verifies the success banner appears after a successful save
-    render(<LinearSettingsPage />);
-    await screen.findByText("Linear Agent App");
-
-    fireEvent.change(screen.getByLabelText("Client ID"), {
-      target: { value: "test-id" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save Credentials" }));
-
-    expect(await screen.findByText("OAuth credentials saved.")).toBeInTheDocument();
-  });
-
-  it("shows error when Install to Workspace API call fails", async () => {
-    // Verifies that an error from getLinearOAuthAuthorizeUrl is displayed
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      configured: true,
-      hasClientId: true,
-      hasClientSecret: true,
-      hasWebhookSecret: false,
-      hasAccessToken: false,
-    });
-    mockApi.getLinearOAuthAuthorizeUrl.mockRejectedValueOnce(new Error("Not configured"));
-
-    render(<LinearSettingsPage />);
-    await screen.findByText("Linear Agent App");
-
-    // Wait for the button to be enabled (oauthConfigured = true from API)
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Install to Workspace" })).not.toBeDisabled();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Install to Workspace" }));
-
-    expect(await screen.findByText("Not configured")).toBeInTheDocument();
-  });
-
-  it("handles OAuth success callback from URL hash", async () => {
-    // Verifies that when the URL hash contains oauth_success=true (from
-    // the OAuth redirect callback), the component shows the success state.
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      configured: true, hasClientId: true, hasClientSecret: true,
-      hasWebhookSecret: true, hasAccessToken: true,
-    });
-
-    const originalHash = window.location.hash;
-    window.location.hash = "#/settings/linear?oauth_success=true";
-
-    render(<LinearSettingsPage />);
-
-    // The component should detect oauth_success in the URL and show connected state
-    expect(await screen.findByText("Agent app connected successfully!")).toBeInTheDocument();
-
-    window.location.hash = originalHash;
-  });
-
-  it("handles OAuth error callback from URL hash", async () => {
-    // Verifies that when the URL hash contains oauth_error=..., the
-    // component displays the decoded error message.
-    const originalHash = window.location.hash;
-    window.location.hash = "#/settings/linear?oauth_error=access_denied";
-
-    render(<LinearSettingsPage />);
-
-    expect(await screen.findByText("access_denied")).toBeInTheDocument();
-
-    window.location.hash = originalHash;
-  });
-
-  it("refreshes configured state after saving credentials", async () => {
-    // After saving credentials, the UI should refresh OAuth status so
-    // placeholders show "Configured" instead of the initial empty state.
-    mockApi.getLinearOAuthStatus
-      .mockResolvedValueOnce({ configured: false, hasClientId: false, hasClientSecret: false, hasWebhookSecret: false, hasAccessToken: false })
-      .mockResolvedValueOnce({ configured: false, hasClientId: true, hasClientSecret: true, hasWebhookSecret: true, hasAccessToken: false });
-
-    render(<LinearSettingsPage />);
-    await screen.findByText("Linear Agent App");
-
-    // Fill in all three credential fields
-    fireEvent.change(screen.getByLabelText("Client ID"), { target: { value: "my-id" } });
-    fireEvent.change(screen.getByLabelText("Client Secret"), { target: { value: "my-secret" } });
-    fireEvent.change(screen.getByLabelText("Webhook Signing Secret"), { target: { value: "wh-secret" } });
-
-    // Click save
-    fireEvent.click(screen.getByRole("button", { name: "Save Credentials" }));
-    await waitFor(() => expect(mockApi.updateSettings).toHaveBeenCalled());
-
-    // After save, getLinearOAuthStatus should have been called again to refresh state
-    await waitFor(() => expect(mockApi.getLinearOAuthStatus).toHaveBeenCalledTimes(2));
-  });
-
-  it("disables Install to Workspace when credentials are not persisted on server", async () => {
-    // Verifies that typing a Client ID locally does NOT enable Install —
-    // only server-side oauthConfigured makes the button clickable.
-    render(<LinearSettingsPage />);
-    await screen.findByText("Linear Agent App");
-
-    // Type a client ID locally — but oauthConfigured is false from the API
-    fireEvent.change(screen.getByLabelText("Client ID"), {
-      target: { value: "my-client-id" },
-    });
-
-    // Install button should still be disabled because credentials aren't persisted
-    const installBtn = screen.getByRole("button", { name: "Install to Workspace" });
-    expect(installBtn).toBeDisabled();
-  });
-
-  it("shows error when Disconnect OAuth fails", async () => {
-    // Verifies that the disconnect error is displayed when disconnectLinearOAuth rejects.
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      configured: true,
-      hasClientId: true,
-      hasClientSecret: true,
-      hasWebhookSecret: true,
-      hasAccessToken: true,
-    });
-    mockApi.disconnectLinearOAuth.mockRejectedValueOnce(new Error("Disconnect failed"));
-
-    render(<LinearSettingsPage />);
-
-    // Wait for the "Connected" badge to appear in the OAuth section header
-    await waitFor(() => {
-      const badges = screen.getAllByText("Connected");
-      expect(badges.length).toBeGreaterThan(0);
-    });
-
-    const disconnectButtons = screen.getAllByRole("button", { name: "Disconnect" });
-    fireEvent.click(disconnectButtons[disconnectButtons.length - 1]);
-
-    expect(await screen.findByText("Disconnect failed")).toBeInTheDocument();
+    const oauthLink = screen.getByText("Linear OAuth Apps");
+    expect(oauthLink).toBeInTheDocument();
+    expect(oauthLink.closest("a")).toHaveAttribute("href", "#/integrations/linear-oauth");
   });
 });
 

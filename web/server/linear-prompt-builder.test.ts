@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildLinearSystemPrompt } from "./linear-prompt-builder.js";
+import { buildLinearSystemPrompt, buildLinearOAuthSystemPrompt } from "./linear-prompt-builder.js";
 
 describe("buildLinearSystemPrompt", () => {
   const connection = {
@@ -57,5 +57,18 @@ describe("buildLinearSystemPrompt", () => {
     const prompt = buildLinearSystemPrompt(connection, issue);
     const lines = prompt.split("\n");
     expect(lines.length).toBeGreaterThan(3);
+  });
+});
+
+describe("buildLinearOAuthSystemPrompt", () => {
+  it("includes OAuth token guidance for app-scoped Linear access", () => {
+    const prompt = buildLinearOAuthSystemPrompt({ name: "Enrich" });
+
+    expect(prompt).toContain("LINEAR_OAUTH_ACCESS_TOKEN");
+    expect(prompt).toContain('Connected Linear OAuth app: "Enrich"');
+    expect(prompt).toContain("actor=app");
+    expect(prompt).toContain("https://api.linear.app/graphql");
+    expect(prompt).toContain("Authorization: Bearer $LINEAR_OAUTH_ACCESS_TOKEN");
+    expect(prompt).toContain("LINEAR_API_KEY");
   });
 });

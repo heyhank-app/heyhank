@@ -33,6 +33,7 @@ import { registerGitRoutes } from "./routes/git-routes.js";
 import { registerSystemRoutes } from "./routes/system-routes.js";
 import { registerLinearRoutes, transitionLinearIssue, fetchLinearTeamStates } from "./routes/linear-routes.js";
 import { registerLinearConnectionRoutes } from "./routes/linear-connection-routes.js";
+import { registerLinearOAuthConnectionRoutes } from "./routes/linear-oauth-connection-routes.js";
 import { getConnection, listConnections, resolveApiKey } from "./linear-connections.js";
 import { getSettings } from "./settings-manager.js";
 import { discoverClaudeSessions } from "./claude-session-discovery.js";
@@ -1252,6 +1253,7 @@ export function createRoutes(
 
   registerLinearRoutes(api);
   registerLinearConnectionRoutes(api);
+  registerLinearOAuthConnectionRoutes(api);
 
   registerGitRoutes(api, prPoller);
   registerSystemRoutes(api, {

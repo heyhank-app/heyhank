@@ -64,7 +64,7 @@ export function WizardStepDone({ agentName, onFinish, onAddAnotherSameApp, onAdd
           </li>
           <li>
             Manage credentials in{" "}
-            <a href="#/integrations/linear" className="text-cc-primary hover:underline">Linear Settings</a>
+            <a href="#/integrations/linear-oauth" className="text-cc-primary hover:underline">OAuth Settings</a>
           </li>
         </ul>
       </div>

@@ -24,6 +24,7 @@ const Playground = lazy(() => import("./components/Playground.js").then((m) => (
 const SettingsPage = lazy(() => import("./components/SettingsPage.js").then((m) => ({ default: m.SettingsPage })));
 const IntegrationsPage = lazy(() => import("./components/IntegrationsPage.js").then((m) => ({ default: m.IntegrationsPage })));
 const LinearSettingsPage = lazy(() => import("./components/LinearSettingsPage.js").then((m) => ({ default: m.LinearSettingsPage })));
+const LinearOAuthSettingsPage = lazy(() => import("./components/LinearOAuthSettingsPage.js").then((m) => ({ default: m.LinearOAuthSettingsPage })));
 const TailscalePage = lazy(() => import("./components/TailscalePage.js").then((m) => ({ default: m.TailscalePage })));
 const PromptsPage = lazy(() => import("./components/PromptsPage.js").then((m) => ({ default: m.PromptsPage })));
 const EnvManager = lazy(() => import("./components/EnvManager.js").then((m) => ({ default: m.EnvManager })));
@@ -70,6 +71,7 @@ export default function App() {
   const isPromptsPage = route.page === "prompts";
   const isIntegrationsPage = route.page === "integrations";
   const isLinearIntegrationPage = route.page === "integration-linear";
+  const isLinearOAuthIntegrationPage = route.page === "integration-linear-oauth";
   const isTailscaleIntegrationPage = route.page === "integration-tailscale";
   const isTerminalPage = route.page === "terminal";
   const isEnvironmentsPage = route.page === "environments";
@@ -230,6 +232,12 @@ export default function App() {
           {isLinearIntegrationPage && (
             <div className="absolute inset-0">
               <Suspense fallback={<LazyFallback />}><LinearSettingsPage embedded /></Suspense>
+            </div>
+          )}
+
+          {isLinearOAuthIntegrationPage && (
+            <div className="absolute inset-0">
+              <Suspense fallback={<LazyFallback />}><LinearOAuthSettingsPage embedded /></Suspense>
             </div>
           )}
 

@@ -420,6 +420,18 @@ export interface AppSettings {
   dockerAutoUpdate: boolean;
 }
 
+export interface LinearOAuthConnectionSummary {
+  id: string;
+  name: string;
+  oauthClientId: string;
+  status: "connected" | "disconnected";
+  hasAccessToken: boolean;
+  hasClientSecret: boolean;
+  hasWebhookSecret: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface LinearConnectionSummary {
   id: string;
   name: string;
@@ -631,7 +643,13 @@ export interface AgentInfo {
     /** Linear Agent Interaction SDK trigger (per-agent OAuth app) */
     linear?: {
       enabled: boolean;
-      /** OAuth app client ID (for display only, secret fields are stripped server-side) */
+      /** Reference to a LinearOAuthConnection by ID (new model) */
+      oauthConnectionId?: string;
+      /** Resolved name of the referenced OAuth connection */
+      oauthConnectionName?: string;
+      /** Resolved status of the referenced OAuth connection */
+      oauthConnectionStatus?: string;
+      /** @deprecated OAuth app client ID (legacy inline model) */
       oauthClientId?: string;
       /** Whether the agent has an access token (OAuth connected) */
       hasAccessToken?: boolean;
@@ -1247,6 +1265,18 @@ export const api = {
     get<{ exists: boolean; hasAccessToken: boolean; hasClientId: boolean; hasClientSecret: boolean }>(`/linear/oauth/staging/${encodeURIComponent(id)}/status`),
   deleteLinearStaging: (id: string) =>
     del(`/linear/oauth/staging/${encodeURIComponent(id)}`),
+
+  // Linear OAuth connections (standalone OAuth app management)
+  listLinearOAuthConnections: () =>
+    get<{ connections: LinearOAuthConnectionSummary[] }>("/linear/oauth-connections"),
+  createLinearOAuthConnection: (data: { name: string; oauthClientId: string; oauthClientSecret: string; webhookSecret: string }) =>
+    post<{ connection: LinearOAuthConnectionSummary }>("/linear/oauth-connections", data),
+  updateLinearOAuthConnection: (id: string, data: Record<string, unknown>) =>
+    put<{ connection: LinearOAuthConnectionSummary }>(`/linear/oauth-connections/${encodeURIComponent(id)}`, data),
+  deleteLinearOAuthConnection: (id: string) =>
+    del<{ ok: boolean }>(`/linear/oauth-connections/${encodeURIComponent(id)}`),
+  getLinearOAuthConnectionAuthorizeUrl: (id: string, returnTo?: string) =>
+    get<{ url: string }>(`/linear/oauth-connections/${encodeURIComponent(id)}/authorize-url${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`),
 
   // Skills
   listSkills: () =>

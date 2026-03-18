@@ -17,6 +17,13 @@ const CLI_CONNECT_TIMEOUT_MS = 30_000;
 /** Poll interval when waiting for CLI connection */
 const CLI_CONNECT_POLL_MS = 500;
 
+export interface ExecuteAgentOptions {
+  force?: boolean;
+  triggerType?: "manual" | "webhook" | "schedule" | "linear";
+  additionalEnv?: Record<string, string>;
+  systemPrompt?: string;
+}
+
 export class AgentExecutor {
   private timers = new Map<string, Cron>();
   private launcher: CliLauncher;
@@ -110,7 +117,7 @@ export class AgentExecutor {
   async executeAgent(
     agentId: string,
     input?: string,
-    opts?: { force?: boolean; triggerType?: "manual" | "webhook" | "schedule" | "linear" },
+    opts?: ExecuteAgentOptions,
   ): Promise<SdkSessionInfo | undefined> {
     const agent = agentStore.getAgent(agentId);
     if (!agent) return;
@@ -142,6 +149,9 @@ export class AgentExecutor {
       if (agent.env) {
         envVars = { ...envVars, ...agent.env };
       }
+      if (opts?.additionalEnv) {
+        envVars = { ...envVars, ...opts.additionalEnv };
+      }
 
       // Resolve working directory
       let cwd = agent.cwd;
@@ -170,6 +180,7 @@ export class AgentExecutor {
         codexSandbox: agent.backendType === "codex"
           ? (agent.permissionMode === "bypassPermissions" ? "danger-full-access" : "workspace-write")
           : undefined,
+        systemPrompt: agent.backendType === "codex" ? opts?.systemPrompt : undefined,
       });
 
       execution.sessionId = sessionInfo.sessionId;
@@ -194,6 +205,10 @@ export class AgentExecutor {
         // CLI doesn't expose an MCP-ready signal yet.
         const MCP_INIT_DELAY_MS = 2000;
         await new Promise((r) => setTimeout(r, MCP_INIT_DELAY_MS));
+      }
+
+      if (opts?.systemPrompt && agent.backendType === "claude") {
+        this.wsBridge.injectSystemPrompt(sessionInfo.sessionId, opts.systemPrompt);
       }
 
       // Resolve prompt: replace {{input}} placeholder with trigger input

@@ -4,17 +4,16 @@
  *
  * Validates:
  * - Wizard entry via "Setup Linear Agent" button
- * - Rendering with step indicator across all wizard steps
+ * - Rendering with 4-step indicator (Intro, Connection, Agent, Done)
  * - Accessibility (axe scan)
  * - Step navigation (Next/Back buttons)
- * - Starting step detection based on OAuth status
- * - OAuth redirect return handling (oauth_success / oauth_error in hash)
- * - Credential saving via API
- * - Agent creation with correct payload (Linear trigger enabled)
- * - sessionStorage persistence across OAuth redirect
+ * - Connection selection (step 2) with auto-select for single connection
+ * - Agent creation with correct payload (Linear trigger + oauthConnectionId)
  * - Error handling for API failures
  * - Cancel returns to agent list
  * - Finish refreshes agent list
+ * - Entry from IntegrationsPage via ?setup=linear hash param
+ * - Public URL warning
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
@@ -35,11 +34,7 @@ const mockApi = {
   regenerateAgentWebhookSecret: vi.fn(),
   listSkills: vi.fn(),
   listEnvs: vi.fn(),
-  getLinearOAuthStatus: vi.fn(),
-  getLinearOAuthAuthorizeUrl: vi.fn(),
-  updateSettings: vi.fn(),
-  createLinearStaging: vi.fn(),
-  getLinearStagingStatus: vi.fn(),
+  listLinearOAuthConnections: vi.fn(),
 };
 
 vi.mock("../api.js", () => ({
@@ -55,11 +50,7 @@ vi.mock("../api.js", () => ({
     regenerateAgentWebhookSecret: (...args: unknown[]) => mockApi.regenerateAgentWebhookSecret(...args),
     listSkills: (...args: unknown[]) => mockApi.listSkills(...args),
     listEnvs: (...args: unknown[]) => mockApi.listEnvs(...args),
-    getLinearOAuthStatus: (...args: unknown[]) => mockApi.getLinearOAuthStatus(...args),
-    getLinearOAuthAuthorizeUrl: (...args: unknown[]) => mockApi.getLinearOAuthAuthorizeUrl(...args),
-    updateSettings: (...args: unknown[]) => mockApi.updateSettings(...args),
-    createLinearStaging: (...args: unknown[]) => mockApi.createLinearStaging(...args),
-    getLinearStagingStatus: (...args: unknown[]) => mockApi.getLinearStagingStatus(...args),
+    listLinearOAuthConnections: (...args: unknown[]) => mockApi.listLinearOAuthConnections(...args),
   },
 }));
 
@@ -88,27 +79,23 @@ import { AgentsPage } from "./AgentsPage.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const defaultOAuthStatus = {
-  configured: false,
-  hasClientId: false,
-  hasClientSecret: false,
-  hasWebhookSecret: false,
-  hasAccessToken: false,
+const defaultConnections = {
+  connections: [
+    { id: "conn-1", name: "My OAuth App", status: "connected" as const },
+  ],
 };
 
-/** Render AgentsPage and enter the wizard via the "Setup Linear Agent" button */
+/**
+ * Render AgentsPage and enter the wizard via the setup=linear hash param.
+ * The "Setup Linear Agent" button was moved from the page header into the
+ * Linear filter empty state, so the hash param is the reliable entry point.
+ */
 async function renderAndEnterWizard() {
+  // Set hash before render so useEffect picks it up on mount
+  window.location.hash = "#/agents?setup=linear";
   render(<AgentsPage route={{ page: "agents" }} />);
 
-  // Wait for agents page to load
-  await waitFor(() => {
-    expect(screen.getByText("Setup Linear Agent")).toBeInTheDocument();
-  });
-
-  // Click the "Setup Linear Agent" button
-  fireEvent.click(screen.getByText("Setup Linear Agent"));
-
-  // Wait for wizard to load (OAuth status check)
+  // Wait for wizard to load
   await waitFor(() => {
     expect(screen.getByRole("heading", { name: "Linear Agent Setup" })).toBeInTheDocument();
   });
@@ -120,16 +107,12 @@ beforeEach(() => {
   mockApi.listAgents.mockResolvedValue([]);
   mockApi.listSkills.mockResolvedValue([]);
   mockApi.listEnvs.mockResolvedValue([]);
-  mockApi.getLinearOAuthStatus.mockResolvedValue(defaultOAuthStatus);
-  mockApi.updateSettings.mockResolvedValue({});
-  mockApi.createLinearStaging.mockResolvedValue({ stagingId: "test-staging-id" });
-  mockApi.getLinearStagingStatus.mockResolvedValue({ exists: true, hasAccessToken: false, hasClientId: true });
+  mockApi.listLinearOAuthConnections.mockResolvedValue(defaultConnections);
   mockApi.createAgent.mockResolvedValue({
     id: "linear-agent",
     name: "Linear Agent",
     triggers: { linear: { enabled: true } },
   });
-  sessionStorage.clear();
   window.location.hash = "#/agents";
 });
 
@@ -142,55 +125,24 @@ afterEach(() => {
 // =============================================================================
 
 describe("Linear Agent Wizard in AgentsPage", () => {
-  it("renders the wizard with step indicator when Setup Linear Agent is clicked", async () => {
+  it("renders the wizard with 4-step indicator when Setup Linear Agent is clicked", async () => {
+    // Wizard now has 4 steps: Intro, Connection, Agent, Done
     await renderAndEnterWizard();
 
-    // Step indicator should be visible
+    // Step indicator should be visible with 4 steps
     expect(screen.getByLabelText(/Step 1/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Step 2/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Step 3/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Step 4/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Step 5/)).toBeInTheDocument();
+    // No Step 5 anymore
+    expect(screen.queryByLabelText(/Step 5/)).not.toBeInTheDocument();
   });
 
-  it("shows Step 1 by default when OAuth is not configured", async () => {
+  it("shows Step 1 by default (intro)", async () => {
     await renderAndEnterWizard();
 
     // Step 1 content: intro
     expect(screen.getByText("Connect your Linear workspace")).toBeInTheDocument();
-  });
-
-  it("shows Step 3 when credentials are saved but not installed", async () => {
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      ...defaultOAuthStatus,
-      configured: false,
-      hasClientId: true,
-      hasClientSecret: true,
-      hasWebhookSecret: true,
-      hasAccessToken: false,
-    });
-
-    await renderAndEnterWizard();
-
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Install to Workspace" })).toBeInTheDocument();
-    });
-  });
-
-  it("shows Step 4 when OAuth is already connected", async () => {
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      ...defaultOAuthStatus,
-      configured: true,
-      hasClientId: true,
-      hasClientSecret: true,
-      hasAccessToken: true,
-    });
-
-    await renderAndEnterWizard();
-
-    await waitFor(() => {
-      expect(screen.getByText("Configure Your Agent")).toBeInTheDocument();
-    });
   });
 
   // ─── Accessibility ─────────────────────────────────────────────────────────
@@ -206,12 +158,13 @@ describe("Linear Agent Wizard in AgentsPage", () => {
   // ─── Step Navigation ──────────────────────────────────────────────────────
 
   it("navigates from Step 1 to Step 2 when Next is clicked", async () => {
+    // Step 2 is now "Select OAuth Connection" instead of "Enter OAuth Credentials"
     await renderAndEnterWizard();
 
     fireEvent.click(screen.getByText("Next"));
 
     await waitFor(() => {
-      expect(screen.getByText("Enter OAuth Credentials")).toBeInTheDocument();
+      expect(screen.getByText("Select OAuth Connection")).toBeInTheDocument();
     });
   });
 
@@ -221,7 +174,7 @@ describe("Linear Agent Wizard in AgentsPage", () => {
     // Go to step 2
     fireEvent.click(screen.getByText("Next"));
     await waitFor(() => {
-      expect(screen.getByText("Enter OAuth Credentials")).toBeInTheDocument();
+      expect(screen.getByText("Select OAuth Connection")).toBeInTheDocument();
     });
 
     // Go back to step 1
@@ -231,127 +184,73 @@ describe("Linear Agent Wizard in AgentsPage", () => {
     });
   });
 
-  // ─── Step 2: Credentials ──────────────────────────────────────────────────
+  // ─── Step 2: Connection Selection ──────────────────────────────────────────
 
-  it("saves credentials and advances to Step 3", async () => {
+  it("shows available OAuth connections in step 2", async () => {
+    mockApi.listLinearOAuthConnections.mockResolvedValue({
+      connections: [
+        { id: "conn-1", name: "My OAuth App", status: "connected" },
+        { id: "conn-2", name: "Other App", status: "disconnected" },
+      ],
+    });
+
     await renderAndEnterWizard();
-
-    // Navigate to step 2
     fireEvent.click(screen.getByText("Next"));
-    await waitFor(() => {
-      expect(screen.getByText("Enter OAuth Credentials")).toBeInTheDocument();
-    });
-
-    // Fill in credentials
-    fireEvent.change(screen.getByLabelText("Client ID"), { target: { value: "client-id-123" } });
-    fireEvent.change(screen.getByLabelText("Client Secret"), { target: { value: "client-secret-456" } });
-    fireEvent.change(screen.getByLabelText("Webhook Signing Secret"), { target: { value: "webhook-secret-789" } });
-
-    // Save
-    fireEvent.click(screen.getByText("Save Credentials"));
 
     await waitFor(() => {
-      expect(mockApi.createLinearStaging).toHaveBeenCalledWith({
-        clientId: "client-id-123",
-        clientSecret: "client-secret-456",
-        webhookSecret: "webhook-secret-789",
-      });
-    });
-
-    // Should show success and Next button
-    await waitFor(() => {
-      expect(screen.getByText("Credentials saved successfully.")).toBeInTheDocument();
-    });
-
-    // Advance to step 3
-    fireEvent.click(screen.getByText("Next"));
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Install to Workspace" })).toBeInTheDocument();
+      expect(screen.getByText("My OAuth App")).toBeInTheDocument();
+      expect(screen.getByText("Other App")).toBeInTheDocument();
     });
   });
 
-  it("shows error when credentials save fails", async () => {
-    mockApi.createLinearStaging.mockRejectedValue(new Error("Network error"));
-
+  it("selects a connection and advances to step 3", async () => {
     await renderAndEnterWizard();
 
-    // Navigate to step 2
+    // Go to step 2
     fireEvent.click(screen.getByText("Next"));
     await waitFor(() => {
-      expect(screen.getByText("Enter OAuth Credentials")).toBeInTheDocument();
+      expect(screen.getByText("Select OAuth Connection")).toBeInTheDocument();
     });
 
-    // Fill and save
-    fireEvent.change(screen.getByLabelText("Client ID"), { target: { value: "id" } });
-    fireEvent.change(screen.getByLabelText("Client Secret"), { target: { value: "secret" } });
-    fireEvent.change(screen.getByLabelText("Webhook Signing Secret"), { target: { value: "webhook" } });
-    fireEvent.click(screen.getByText("Save Credentials"));
-
+    // Connection should be auto-selected (only one)
+    // Click Next to advance to step 3
     await waitFor(() => {
-      expect(screen.getByText("Network error")).toBeInTheDocument();
-    });
-  });
-
-  // ─── Step 3: OAuth Return ─────────────────────────────────────────────────
-
-  it("detects oauth_success in hash and advances to Step 4", async () => {
-    // Simulate returning from OAuth redirect with success
-    window.location.hash = "#/agents?oauth_success=true";
-
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      ...defaultOAuthStatus,
-      configured: true,
-      hasClientId: true,
-      hasAccessToken: true,
+      expect(screen.getByText("My OAuth App")).toBeInTheDocument();
     });
 
-    render(<AgentsPage route={{ page: "agents" }} />);
+    // Find and click the Next button (should be enabled since connection is auto-selected)
+    const nextButtons = screen.getAllByText("Next");
+    fireEvent.click(nextButtons[nextButtons.length - 1]);
 
-    // Should auto-enter wizard and advance to step 4 (agent configuration)
     await waitFor(() => {
       expect(screen.getByText("Configure Your Agent")).toBeInTheDocument();
     });
   });
 
-  it("detects oauth_error in hash and shows error on Step 3", async () => {
-    // Simulate persisted state so we return to step 3
-    sessionStorage.setItem("companion_linear_wizard_state", JSON.stringify({
-      step: 3,
-      credentialsSaved: true,
-      oauthConnected: false,
-      agentName: "",
-      createdAgentId: null,
-    }));
-
-    window.location.hash = "#/agents?oauth_error=access_denied";
-
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      ...defaultOAuthStatus,
-      configured: false,
-      hasClientId: true,
-      hasAccessToken: false,
-    });
-
-    render(<AgentsPage route={{ page: "agents" }} />);
-
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Install to Workspace" })).toBeInTheDocument();
-    });
-
-    expect(screen.getByText("access_denied")).toBeInTheDocument();
-  });
-
-  // ─── Step 4: Agent Creation ────────────────────────────────────────────────
-
-  it("creates agent with Linear trigger enabled and advances to Step 5", async () => {
-    // Start at step 4 (OAuth already connected)
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      ...defaultOAuthStatus,
-      configured: true,
-      hasAccessToken: true,
-    });
+  it("shows empty state when no OAuth connections exist", async () => {
+    mockApi.listLinearOAuthConnections.mockResolvedValue({ connections: [] });
 
     await renderAndEnterWizard();
+    fireEvent.click(screen.getByText("Next"));
+
+    await waitFor(() => {
+      expect(screen.getByText("No OAuth connections found.")).toBeInTheDocument();
+      expect(screen.getByText("Go to OAuth Settings")).toBeInTheDocument();
+    });
+  });
+
+  // ─── Step 3: Agent Creation ────────────────────────────────────────────────
+
+  it("creates agent with Linear trigger and oauthConnectionId, advances to step 4", async () => {
+    await renderAndEnterWizard();
+
+    // Navigate through to step 3
+    fireEvent.click(screen.getByText("Next"));
+    await waitFor(() => {
+      expect(screen.getByText("My OAuth App")).toBeInTheDocument();
+    });
+    const nextButtons = screen.getAllByText("Next");
+    fireEvent.click(nextButtons[nextButtons.length - 1]);
 
     await waitFor(() => {
       expect(screen.getByText("Configure Your Agent")).toBeInTheDocument();
@@ -366,14 +265,14 @@ describe("Linear Agent Wizard in AgentsPage", () => {
           name: "Linear Agent",
           permissionMode: "bypassPermissions",
           triggers: expect.objectContaining({
-            linear: { enabled: true },
+            linear: { enabled: true, oauthConnectionId: "conn-1" },
           }),
           enabled: true,
         }),
       );
     });
 
-    // Should advance to step 5
+    // Should advance to step 4 (Done)
     await waitFor(() => {
       expect(screen.getByText("Linear Agent is live")).toBeInTheDocument();
     });
@@ -383,14 +282,17 @@ describe("Linear Agent Wizard in AgentsPage", () => {
   });
 
   it("shows error when agent creation fails", async () => {
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      ...defaultOAuthStatus,
-      configured: true,
-      hasAccessToken: true,
-    });
     mockApi.createAgent.mockRejectedValue(new Error("Agent name already exists"));
 
     await renderAndEnterWizard();
+
+    // Navigate through to step 3
+    fireEvent.click(screen.getByText("Next"));
+    await waitFor(() => {
+      expect(screen.getByText("My OAuth App")).toBeInTheDocument();
+    });
+    const nextButtons = screen.getAllByText("Next");
+    fireEvent.click(nextButtons[nextButtons.length - 1]);
 
     await waitFor(() => {
       expect(screen.getByText("Configure Your Agent")).toBeInTheDocument();
@@ -402,28 +304,26 @@ describe("Linear Agent Wizard in AgentsPage", () => {
       expect(screen.getByText("Agent name already exists")).toBeInTheDocument();
     });
 
-    // Should still be on step 4
+    // Should still be on step 3
     expect(screen.getByText("Configure Your Agent")).toBeInTheDocument();
   });
 
-  // ─── Step 5: Done ─────────────────────────────────────────────────────────
+  // ─── Step 4: Done ─────────────────────────────────────────────────────────
 
   it("returns to agent list when Go to Agents is clicked", async () => {
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      ...defaultOAuthStatus,
-      configured: true,
-      hasAccessToken: true,
-    });
-
     await renderAndEnterWizard();
 
+    // Navigate all the way to step 4
+    fireEvent.click(screen.getByText("Next"));
+    await waitFor(() => {
+      expect(screen.getByText("My OAuth App")).toBeInTheDocument();
+    });
+    const nextButtons = screen.getAllByText("Next");
+    fireEvent.click(nextButtons[nextButtons.length - 1]);
     await waitFor(() => {
       expect(screen.getByText("Configure Your Agent")).toBeInTheDocument();
     });
-
-    // Create agent to get to step 5
     fireEvent.click(screen.getByText("Create Agent"));
-
     await waitFor(() => {
       expect(screen.getByText("Linear Agent is live")).toBeInTheDocument();
     });
@@ -435,37 +335,6 @@ describe("Linear Agent Wizard in AgentsPage", () => {
       // Should be back on the agents list (header visible)
       expect(screen.getByText("Agents")).toBeInTheDocument();
     });
-  });
-
-  // ─── sessionStorage Persistence ────────────────────────────────────────────
-
-  it("restores wizard state from sessionStorage after OAuth redirect", async () => {
-    // Simulate wizard state saved before OAuth redirect
-    sessionStorage.setItem("companion_linear_wizard_state", JSON.stringify({
-      step: 3,
-      credentialsSaved: true,
-      oauthConnected: false,
-      agentName: "",
-      createdAgentId: null,
-    }));
-
-    // Simulate successful OAuth return
-    window.location.hash = "#/agents?oauth_success=true";
-    mockApi.getLinearOAuthStatus.mockResolvedValue({
-      ...defaultOAuthStatus,
-      configured: true,
-      hasAccessToken: true,
-    });
-
-    render(<AgentsPage route={{ page: "agents" }} />);
-
-    // Should skip to step 4 since OAuth is now connected
-    await waitFor(() => {
-      expect(screen.getByText("Configure Your Agent")).toBeInTheDocument();
-    });
-
-    // sessionStorage should be cleared after restore
-    expect(sessionStorage.getItem("companion_linear_wizard_state")).toBeNull();
   });
 
   // ─── Cancel ────────────────────────────────────────────────────────────────

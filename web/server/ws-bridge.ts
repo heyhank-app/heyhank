@@ -486,6 +486,10 @@ export class WsBridge {
         companionBus.emit("message:assistant", { sessionId: session.id, message: assistantMsg });
       }
 
+      if (msg.type === "stream_event") {
+        companionBus.emit("message:stream_event", { sessionId: session.id, message: msg });
+      }
+
       // -- result: update session cost/turns, refresh git, notify listeners
       if (msg.type === "result") {
         const resultData = msg.data;

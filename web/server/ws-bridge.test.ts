@@ -3964,6 +3964,39 @@ describe("per-session listener error handling", () => {
 
     spy.mockRestore();
   });
+
+  it("catches and logs errors thrown by stream event listeners", async () => {
+    const sessionId = "stream-listener-error-session";
+    const cli = makeCliSocket(sessionId);
+    bridge.handleCLIOpen(cli, sessionId);
+    await bridge.handleCLIMessage(cli, makeInitMsg());
+
+    const browser = makeBrowserSocket(sessionId);
+    bridge.handleBrowserOpen(browser, sessionId);
+
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    companionBus.on("message:stream_event", ({ sessionId: sid }) => {
+      if (sid === sessionId) {
+        throw new Error("stream listener boom");
+      }
+    });
+
+    await bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "hi" } },
+      parent_tool_use_id: null,
+      uuid: "stream-listener-uuid-1",
+      session_id: sessionId,
+    }));
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("Handler error"),
+      expect.any(Error),
+    );
+
+    spy.mockRestore();
+  });
 });
 
 // ─── sendToCLI error handling ──────────────────────────────────────────────

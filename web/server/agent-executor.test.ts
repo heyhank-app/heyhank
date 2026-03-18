@@ -129,6 +129,7 @@ function makeMockLauncher() {
 function makeMockWsBridge() {
   return {
     injectMcpSetServers: vi.fn(),
+    injectSystemPrompt: vi.fn(),
     injectUserMessage: vi.fn(),
   };
 }
@@ -577,6 +578,58 @@ describe("AgentExecutor", () => {
           env: { ENV_VAR: "env-value", INLINE_VAR: "inline-value" },
         }),
       );
+    });
+
+    it("merges additional env vars and injects a Claude system prompt when provided", async () => {
+      const agent = makeAgent({
+        id: "linear-agent",
+        name: "Linear Agent",
+        backendType: "claude",
+      });
+      mockAgentStore.getAgent.mockReturnValue(agent);
+
+      await executor.executeAgent("linear-agent", "Handle this issue", {
+        triggerType: "linear",
+        additionalEnv: {
+          LINEAR_OAUTH_ACCESS_TOKEN: "lin_oauth_test",
+          LINEAR_API_KEY: "lin_oauth_test",
+        },
+        systemPrompt: "Use the Linear OAuth token for GraphQL requests.",
+      });
+
+      expect(launcher.launch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          env: expect.objectContaining({
+            LINEAR_OAUTH_ACCESS_TOKEN: "lin_oauth_test",
+            LINEAR_API_KEY: "lin_oauth_test",
+          }),
+        }),
+      );
+      expect(wsBridge.injectSystemPrompt).toHaveBeenCalledWith(
+        "session-123",
+        "Use the Linear OAuth token for GraphQL requests.",
+      );
+    });
+
+    it("passes the extra system prompt directly to Codex launches", async () => {
+      const agent = makeAgent({
+        id: "linear-codex-agent",
+        name: "Linear Codex Agent",
+        backendType: "codex",
+      });
+      mockAgentStore.getAgent.mockReturnValue(agent);
+
+      await executor.executeAgent("linear-codex-agent", "Handle this issue", {
+        triggerType: "linear",
+        systemPrompt: "Codex linear context",
+      });
+
+      expect(launcher.launch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          systemPrompt: "Codex linear context",
+        }),
+      );
+      expect(wsBridge.injectSystemPrompt).not.toHaveBeenCalled();
     });
 
     it("uses temp directory when cwd is 'temp'", async () => {

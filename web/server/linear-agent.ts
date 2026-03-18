@@ -24,14 +24,14 @@ const oauthStateNonces = new Map<string, number>();
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 /** Generate a random state nonce for OAuth CSRF protection.
- *  Optionally encodes a `stagingId` (for per-wizard staging slots) and a
- *  `returnTo` path so the OAuth callback can redirect back to the originating
- *  page (e.g. the setup wizard).
+ *  Optionally encodes a `stagingId` (for per-wizard staging slots), a
+ *  `connectionId` (for OAuth connection management), and a `returnTo` path
+ *  so the OAuth callback can redirect back to the originating page.
  *
  *  State format: `{nonce}` or `{nonce}:{segments}` where segments are
  *  colon-separated. A segment starting with `sid=` is the staging ID;
- *  anything else is a returnTo path. */
-export function generateOAuthState(options?: { stagingId?: string; returnTo?: string }): string {
+ *  `cid=` is the connection ID; anything else is a returnTo path. */
+export function generateOAuthState(options?: { stagingId?: string; connectionId?: string; returnTo?: string }): string {
   // Prune expired nonces
   const now = Date.now();
   for (const [nonce, expiresAt] of oauthStateNonces) {
@@ -42,19 +42,21 @@ export function generateOAuthState(options?: { stagingId?: string; returnTo?: st
 
   const parts = [nonce];
   if (options?.stagingId) parts.push(`sid=${options.stagingId}`);
+  if (options?.connectionId) parts.push(`cid=${options.connectionId}`);
   if (options?.returnTo) parts.push(encodeURIComponent(options.returnTo));
   return parts.join(":");
 }
 
 /** Validate and consume an OAuth state nonce.
- *  Returns validity, an optional `stagingId`, and an optional `returnTo` path. */
-export function validateOAuthState(state: string | null | undefined): { valid: boolean; stagingId?: string; returnTo?: string } {
+ *  Returns validity, an optional `stagingId`, `connectionId`, and `returnTo` path. */
+export function validateOAuthState(state: string | null | undefined): { valid: boolean; stagingId?: string; connectionId?: string; returnTo?: string } {
   if (!state) return { valid: false };
 
   const parts = state.split(":");
   const nonce = parts[0];
 
   let stagingId: string | undefined;
+  let connectionId: string | undefined;
   let returnTo: string | undefined;
 
   // Parse remaining segments after the nonce
@@ -62,9 +64,11 @@ export function validateOAuthState(state: string | null | undefined): { valid: b
     const segment = parts[i];
     if (segment.startsWith("sid=")) {
       stagingId = segment.slice(4);
+    } else if (segment.startsWith("cid=")) {
+      connectionId = segment.slice(4);
     } else if (!returnTo) {
-      // First non-sid segment is returnTo (may need reassembly if returnTo itself contained encoded colons)
-      returnTo = decodeURIComponent(parts.slice(i).filter(s => !s.startsWith("sid=")).join(":"));
+      // First non-sid/cid segment is returnTo (may need reassembly if returnTo itself contained encoded colons)
+      returnTo = decodeURIComponent(parts.slice(i).filter(s => !s.startsWith("sid=") && !s.startsWith("cid=")).join(":"));
       break;
     }
   }
@@ -72,7 +76,7 @@ export function validateOAuthState(state: string | null | undefined): { valid: b
   const expiresAt = oauthStateNonces.get(nonce);
   if (!expiresAt) return { valid: false };
   oauthStateNonces.delete(nonce); // consume — single use
-  return Date.now() < expiresAt ? { valid: true, stagingId, returnTo } : { valid: false };
+  return Date.now() < expiresAt ? { valid: true, stagingId, connectionId, returnTo } : { valid: false };
 }
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -391,6 +395,7 @@ export async function postActivity(
   creds: LinearOAuthCredentials,
   agentSessionId: string,
   content: AgentActivityContent,
+  onTokensRefreshed?: (tokens: { accessToken: string; refreshToken: string }) => void,
 ): Promise<void> {
   const result = await linearGraphQL<{ agentActivityCreate?: { success: boolean } }>(
     creds,
@@ -398,6 +403,7 @@ export async function postActivity(
       agentActivityCreate(input: $input) { success }
     }`,
     { input: { agentSessionId, content } },
+    onTokensRefreshed,
   );
 
   if (result.errors?.length) {
@@ -410,6 +416,7 @@ export async function updateSessionUrls(
   creds: LinearOAuthCredentials,
   agentSessionId: string,
   urls: Array<{ label: string; url: string }>,
+  onTokensRefreshed?: (tokens: { accessToken: string; refreshToken: string }) => void,
 ): Promise<void> {
   const result = await linearGraphQL<{ agentSessionUpdate?: { success: boolean } }>(
     creds,
@@ -417,6 +424,7 @@ export async function updateSessionUrls(
       agentSessionUpdate(id: $id, input: $input) { success }
     }`,
     { id: agentSessionId, input: { externalUrls: urls } },
+    onTokensRefreshed,
   );
 
   if (result.errors?.length) {
@@ -429,6 +437,7 @@ export async function updateSessionPlan(
   creds: LinearOAuthCredentials,
   agentSessionId: string,
   plan: AgentPlanItem[],
+  onTokensRefreshed?: (tokens: { accessToken: string; refreshToken: string }) => void,
 ): Promise<void> {
   const result = await linearGraphQL<{ agentSessionUpdate?: { success: boolean } }>(
     creds,
@@ -436,6 +445,7 @@ export async function updateSessionPlan(
       agentSessionUpdate(id: $id, input: $input) { success }
     }`,
     { id: agentSessionId, input: { plan } },
+    onTokensRefreshed,
   );
 
   if (result.errors?.length) {
@@ -450,11 +460,12 @@ export function isLinearOAuthConfigured(creds: Partial<LinearOAuthCredentials>):
 
 /** Get the OAuth authorization URL for installing the app with actor=app.
  *  Pass `returnTo` to redirect back to a specific page after the OAuth callback.
- *  Pass `stagingId` to associate the OAuth flow with a specific staging slot. */
-export function getOAuthAuthorizeUrl(clientId: string, redirectUri: string, options?: { returnTo?: string; stagingId?: string }): { url: string; state: string } | null {
+ *  Pass `stagingId` to associate the OAuth flow with a specific staging slot.
+ *  Pass `connectionId` to store tokens directly in an OAuth connection. */
+export function getOAuthAuthorizeUrl(clientId: string, redirectUri: string, options?: { returnTo?: string; stagingId?: string; connectionId?: string }): { url: string; state: string } | null {
   if (!clientId) return null;
 
-  const state = generateOAuthState({ stagingId: options?.stagingId, returnTo: options?.returnTo });
+  const state = generateOAuthState({ stagingId: options?.stagingId, connectionId: options?.connectionId, returnTo: options?.returnTo });
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
