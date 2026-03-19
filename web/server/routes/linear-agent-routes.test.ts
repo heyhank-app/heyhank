@@ -2,7 +2,7 @@
 // Covers webhook signature verification, event dispatch, OAuth callback,
 // authorization URL generation, status endpoint, and disconnect flow.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
 
 // Mock linear-agent module
@@ -95,10 +95,20 @@ const validPayload = {
 describe("POST /linear/agent-webhook", () => {
   let app: Hono;
   let bridge: ReturnType<typeof createMockBridge>;
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     ({ app, bridge } = createApp());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("returns 401 when webhook signature is invalid", async () => {
@@ -115,6 +125,9 @@ describe("POST /linear/agent-webhook", () => {
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.error).toBe("Invalid signature");
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Invalid webhook signature"),
+    );
   });
 
   it("returns 400 for invalid JSON body", async () => {
@@ -147,6 +160,9 @@ describe("POST /linear/agent-webhook", () => {
     // Wait a tick for the async dispatch
     await new Promise((r) => setTimeout(r, 10));
     expect(bridge.handleEvent).toHaveBeenCalledWith(validPayload);
+    expect(consoleLogSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Accepted AgentSessionEvent"),
+    );
   });
 
   it("ignores non-AgentSessionEvent types", async () => {
@@ -195,6 +211,44 @@ describe("POST /linear/agent-webhook", () => {
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.error).toContain("No agent configured");
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("No agent found for oauthClientId"),
+    );
+  });
+
+  it("sanitizes user-controlled fields before logging webhook diagnostics", async () => {
+    vi.mocked(agentStore.listAgents).mockReturnValue([]);
+
+    const maliciousPayload = {
+      ...validPayload,
+      action: "created\nforged",
+      oauthClientId: "evil\n[linear-agent-routes] Accepted AgentSessionEvent",
+      agentSession: {
+        ...validPayload.agentSession,
+        id: "session-123\tforged",
+      },
+    };
+
+    const res = await app.request("/linear/agent-webhook", {
+      method: "POST",
+      body: JSON.stringify(maliciousPayload),
+      headers: { "Content-Type": "application/json", "linear-signature": "valid-sig" },
+    });
+
+    expect(res.status).toBe(404);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "[linear-agent-routes] No agent found for oauthClientId: evil_[linear-agent-routes] Accepted AgentSessionEvent action=created_forged sessionId=session-123_forged",
+    );
+  });
+});
+
+describe("console spy cleanup", () => {
+  it("restores console spies before later describe blocks run", () => {
+    // Regression test: webhook tests install console spies, but later describes
+    // should still see the original console implementations.
+    expect(vi.isMockFunction(console.log)).toBe(false);
+    expect(vi.isMockFunction(console.warn)).toBe(false);
+    expect(vi.isMockFunction(console.error)).toBe(false);
   });
 });
 
