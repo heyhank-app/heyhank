@@ -1171,3 +1171,193 @@ describe("Edge cases", () => {
     expect(browserMessageCb).not.toHaveBeenCalled();
   });
 });
+
+// ─── control_cancel_request handling ─────────────────────────────────────────
+
+describe("control_cancel_request", () => {
+  it("emits permission_cancelled to browser", () => {
+    // When the CLI cancels a pending control request (e.g. tool permission
+    // that is no longer needed), the adapter should notify browsers so they
+    // can remove the pending permission UI.
+    const ws = createMockSocket("sess-1");
+    adapter.attachWebSocket(ws);
+
+    const msg = JSON.stringify({ type: "control_cancel_request", request_id: "req-cancel-1" });
+    adapter.handleRawMessage(msg);
+
+    expect(browserMessageCb).toHaveBeenCalledOnce();
+    const emitted = browserMessageCb.mock.calls[0][0];
+    expect(emitted.type).toBe("permission_cancelled");
+    expect(emitted.request_id).toBe("req-cancel-1");
+  });
+});
+
+// ─── Enriched can_use_tool fields ────────────────────────────────────────────
+
+describe("enriched can_use_tool", () => {
+  it("forwards title, display_name, blocked_path, decision_reason", () => {
+    // Newer CLI versions may include enriched fields on can_use_tool requests
+    // (title, display_name, blocked_path, decision_reason). The adapter should
+    // forward all of these to the browser in the permission_request.
+    const ws = createMockSocket("sess-1");
+    adapter.attachWebSocket(ws);
+
+    const msg = JSON.stringify({
+      type: "control_request",
+      request_id: "req-enriched-1",
+      request: {
+        subtype: "can_use_tool",
+        tool_name: "Edit",
+        input: { file_path: "/test.ts" },
+        tool_use_id: "tu-enriched-1",
+        title: "Edit a TypeScript file",
+        display_name: "File Editor",
+        blocked_path: "/test.ts",
+        decision_reason: "File is outside trusted directories",
+      },
+    });
+    adapter.handleRawMessage(msg);
+
+    expect(browserMessageCb).toHaveBeenCalledOnce();
+    const emitted = browserMessageCb.mock.calls[0][0];
+    expect(emitted.type).toBe("permission_request");
+    const perm = emitted.request;
+    expect(perm.title).toBe("Edit a TypeScript file");
+    expect(perm.display_name).toBe("File Editor");
+    expect(perm.blocked_path).toBe("/test.ts");
+    expect(perm.decision_reason).toBe("File is outside trusted directories");
+  });
+
+  it("works without enriched fields (backward compat)", () => {
+    // Older CLI versions do not include enriched fields. The adapter should
+    // still emit a valid permission_request with those fields undefined.
+    const ws = createMockSocket("sess-1");
+    adapter.attachWebSocket(ws);
+
+    const msg = JSON.stringify({
+      type: "control_request",
+      request_id: "req-basic-1",
+      request: {
+        subtype: "can_use_tool",
+        tool_name: "Bash",
+        input: { command: "ls" },
+        tool_use_id: "tu-basic-1",
+      },
+    });
+    adapter.handleRawMessage(msg);
+
+    expect(browserMessageCb).toHaveBeenCalledOnce();
+    const emitted = browserMessageCb.mock.calls[0][0];
+    expect(emitted.type).toBe("permission_request");
+    const perm = emitted.request;
+    expect(perm.title).toBeUndefined();
+    expect(perm.display_name).toBeUndefined();
+  });
+});
+
+// ─── end_session outgoing ────────────────────────────────────────────────────
+
+describe("end_session", () => {
+  it("sends end_session control_request to CLI", () => {
+    // The browser can request the session to end. This should be translated
+    // into a control_request with subtype "end_session" and the reason forwarded.
+    const ws = createMockSocket("sess-1");
+    adapter.attachWebSocket(ws);
+
+    adapter.send({ type: "end_session", reason: "user closed" } as any);
+
+    const sent = JSON.parse((ws.send.mock.calls[0][0] as string).trim());
+    expect(sent.type).toBe("control_request");
+    expect(sent.request.subtype).toBe("end_session");
+    expect(sent.request.reason).toBe("user closed");
+  });
+});
+
+// ─── stop_task outgoing ──────────────────────────────────────────────────────
+
+describe("stop_task", () => {
+  it("sends stop_task control_request to CLI", () => {
+    // The browser can stop a running task. This should be translated into
+    // a control_request with subtype "stop_task" and the task_id forwarded.
+    const ws = createMockSocket("sess-1");
+    adapter.attachWebSocket(ws);
+
+    adapter.send({ type: "stop_task", task_id: "task-123" } as any);
+
+    const sent = JSON.parse((ws.send.mock.calls[0][0] as string).trim());
+    expect(sent.type).toBe("control_request");
+    expect(sent.request.subtype).toBe("stop_task");
+    expect(sent.request.task_id).toBe("task-123");
+  });
+});
+
+// ─── update_environment_variables outgoing ───────────────────────────────────
+
+describe("update_environment_variables", () => {
+  it("sends update_environment_variables directly (not as control_request)", () => {
+    // Environment variable updates are sent as a top-level message type,
+    // not wrapped in a control_request, because the CLI expects them
+    // as a distinct message kind.
+    const ws = createMockSocket("sess-1");
+    adapter.attachWebSocket(ws);
+
+    adapter.send({ type: "update_environment_variables", variables: { TOKEN: "new-val" } } as any);
+
+    const sent = JSON.parse((ws.send.mock.calls[0][0] as string).trim());
+    expect(sent.type).toBe("update_environment_variables");
+    expect(sent.variables.TOKEN).toBe("new-val");
+  });
+});
+
+// ─── Streamlined messages ────────────────────────────────────────────────────
+
+describe("streamlined messages", () => {
+  it("forwards streamlined_text to browser", () => {
+    // In simplified output mode, the CLI sends streamlined_text messages
+    // instead of full assistant messages. These should be forwarded as-is.
+    const ws = createMockSocket("sess-1");
+    adapter.attachWebSocket(ws);
+
+    const msg = JSON.stringify({ type: "streamlined_text", text: "Hello world", session_id: "s1", uuid: "u1" });
+    adapter.handleRawMessage(msg);
+
+    expect(browserMessageCb).toHaveBeenCalledOnce();
+    const emitted = browserMessageCb.mock.calls[0][0];
+    expect(emitted.type).toBe("streamlined_text");
+    expect(emitted.text).toBe("Hello world");
+  });
+
+  it("forwards streamlined_tool_use_summary to browser", () => {
+    // In simplified output mode, tool use summaries are sent as
+    // streamlined_tool_use_summary. These should be forwarded with the summary text.
+    const ws = createMockSocket("sess-1");
+    adapter.attachWebSocket(ws);
+
+    const msg = JSON.stringify({ type: "streamlined_tool_use_summary", tool_summary: "Read 2 files", session_id: "s1", uuid: "u2" });
+    adapter.handleRawMessage(msg);
+
+    expect(browserMessageCb).toHaveBeenCalledOnce();
+    const emitted = browserMessageCb.mock.calls[0][0];
+    expect(emitted.type).toBe("streamlined_tool_use_summary");
+    expect(emitted.tool_summary).toBe("Read 2 files");
+  });
+});
+
+// ─── Prompt suggestion ───────────────────────────────────────────────────────
+
+describe("prompt_suggestion", () => {
+  it("forwards prompt suggestions to browser", () => {
+    // The CLI can suggest next prompts to the user. These should be forwarded
+    // so the browser can render suggestion chips in the UI.
+    const ws = createMockSocket("sess-1");
+    adapter.attachWebSocket(ws);
+
+    const msg = JSON.stringify({ type: "prompt_suggestion", suggestions: ["Fix the bug", "Add tests"], session_id: "s1", uuid: "u3" });
+    adapter.handleRawMessage(msg);
+
+    expect(browserMessageCb).toHaveBeenCalledOnce();
+    const emitted = browserMessageCb.mock.calls[0][0];
+    expect(emitted.type).toBe("prompt_suggestion");
+    expect(emitted.suggestions).toEqual(["Fix the bug", "Add tests"]);
+  });
+});

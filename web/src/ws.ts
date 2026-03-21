@@ -853,6 +853,7 @@ function handleParsedMessage(
         content: data.content,
         timestamp: data.timestamp || Date.now(),
       });
+      store.clearPromptSuggestions(sessionId);
       break;
     }
 
@@ -1137,6 +1138,39 @@ function handleParsedMessage(
       if (typeof latestProcessed === "number") {
         ackSeq(sessionId, latestProcessed);
       }
+      break;
+    }
+
+    case "prompt_suggestion": {
+      const suggestions = (data as BrowserIncomingMessage & { type: "prompt_suggestion"; suggestions: string[] }).suggestions;
+      store.setPromptSuggestions(sessionId, suggestions);
+      break;
+    }
+
+    case "streamlined_text": {
+      store.appendMessage(sessionId, {
+        id: nextId(),
+        role: "assistant",
+        content: data.text,
+        timestamp: Date.now(),
+      });
+      break;
+    }
+
+    case "streamlined_tool_use_summary": {
+      // Streamlined mode emits summary-only tool activity instead of the richer
+      // assistant/tool_use_summary flow, so surface it as a system message.
+      store.appendMessage(sessionId, {
+        id: nextId(),
+        role: "system",
+        content: data.tool_summary,
+        timestamp: Date.now(),
+      });
+      break;
+    }
+
+    default: {
+      console.debug("[ws] Unhandled message type:", (data as { type: string }).type);
       break;
     }
   }

@@ -1,6 +1,7 @@
 # Claude Code WebSocket SDK Protocol — Reverse Engineered
 
 > **Reverse-engineered from Claude Code CLI v2.1.37 (`cli.js`) and Agent SDK v0.2.37 (`sdk.mjs`, `sdk.d.ts`)**
+> **Updated with v2.1.81 discoveries (channels system, new message types, enriched fields)**
 >
 > This document describes the undocumented WebSocket protocol that Claude Code CLI uses for programmatic control via the `--sdk-url` flag. This is the same NDJSON protocol used over stdin/stdout, but transported over WebSocket — enabling full bidirectional control without tmux or PTY hacks.
 
@@ -14,13 +15,14 @@
 4. [Connection Lifecycle](#4-connection-lifecycle)
 5. [Wire Protocol (NDJSON)](#5-wire-protocol-ndjson)
 6. [Message Types — Complete Reference](#6-message-types--complete-reference)
-7. [Control Protocol (13 Subtypes)](#7-control-protocol-13-subtypes)
+7. [Control Protocol (19 Subtypes)](#7-control-protocol-19-subtypes)
 8. [Permission / Tool Approval Flow](#8-permission--tool-approval-flow)
 9. [Session Management](#9-session-management)
 10. [Reconnection & Resilience](#10-reconnection--resilience)
 11. [Environment Variables](#11-environment-variables)
 12. [Transport Class Hierarchy](#12-transport-class-hierarchy)
 13. [Implementation Guide](#13-implementation-guide)
+14. [MCP Channels (Codename: "tengu harbor")](#14-mcp-channels-codename-tengu-harbor)
 
 ---
 
@@ -219,7 +221,7 @@ Each message is a single JSON object followed by `\n` (newline). Multiple messag
 | Direction | Types |
 |-----------|-------|
 | **Server → CLI** | `user`, `control_response`, `control_cancel_request`, `keep_alive`, `update_environment_variables` |
-| **CLI → Server** | `system`, `assistant`, `result`, `stream_event`, `tool_progress`, `tool_use_summary`, `auth_status`, `control_request` (can_use_tool, hook_callback), `keep_alive`, `streamlined_text`, `streamlined_tool_use_summary` |
+| **CLI → Server** | `system`, `assistant`, `result`, `stream_event`, `tool_progress`, `tool_use_summary`, `auth_status`, `control_request` (can_use_tool, hook_callback), `control_cancel_request`, `keep_alive`, `rate_limit_event`, `streamlined_text`, `streamlined_tool_use_summary`, `prompt_suggestion` |
 | **Bidirectional** | `control_request`, `control_response`, `keep_alive` |
 
 ### Filtered by SDK (present on wire but not exposed to consumers)
@@ -548,8 +550,77 @@ interface SDKStreamlinedToolUseSummaryMessage {
   uuid: string;
 }
 
-// Update environment variables (Server → CLI, stdin only)
+// Update environment variables (Server → CLI)
 interface UpdateEnvironmentVariables {
+  type: "update_environment_variables";
+  variables: Record<string, string>;
+}
+```
+
+### 6.15. `control_cancel_request` — Cancel Pending Permission (Server → CLI / CLI → Server)
+
+> Added in v2.1.81.
+
+Cancels a pending `control_request`. When the CLI sends this, the server should remove the corresponding pending permission and notify browsers.
+
+```typescript
+interface SDKControlCancelRequest {
+  type: "control_cancel_request";
+  request_id: string;  // matches the request_id of a pending control_request
+}
+```
+
+### 6.16. `streamlined_text` — Simplified Assistant Output (CLI → Server)
+
+> Added in v2.1.81. Marked `@internal` in the SDK.
+
+Sent when streamlined output mode is active. Provides simplified text output from the assistant without full message structure.
+
+```typescript
+interface SDKStreamlinedText {
+  type: "streamlined_text";
+  text: string;
+  session_id: string;
+  uuid: string;
+}
+```
+
+### 6.17. `streamlined_tool_use_summary` — Streamlined Tool Summary (CLI → Server)
+
+> Added in v2.1.81. Marked `@internal` in the SDK.
+
+```typescript
+interface SDKStreamlinedToolUseSummary {
+  type: "streamlined_tool_use_summary";
+  tool_summary: string;  // e.g. "Read 2 files, wrote 1 file"
+  session_id: string;
+  uuid: string;
+}
+```
+
+### 6.18. `prompt_suggestion` — Suggested Follow-ups (CLI → Server)
+
+> Added in v2.1.81.
+
+Predicted next user prompts. Enabled by setting `promptSuggestions: true` in the `initialize` control_request.
+
+```typescript
+interface SDKPromptSuggestion {
+  type: "prompt_suggestion";
+  suggestions: string[];
+  session_id: string;
+  uuid: string;
+}
+```
+
+### 6.19. `update_environment_variables` — Runtime Env Update (Server → CLI)
+
+> Added in v2.1.81.
+
+Updates environment variables at runtime (e.g., rotating access tokens). This is a direct message type, NOT a control_request.
+
+```typescript
+interface SDKUpdateEnvironmentVariables {
   type: "update_environment_variables";
   variables: Record<string, string>;
 }
@@ -557,7 +628,7 @@ interface UpdateEnvironmentVariables {
 
 ---
 
-## 7. Control Protocol (13 Subtypes)
+## 7. Control Protocol (19 Subtypes)
 
 Control messages use a request/response pattern with correlated `request_id` fields.
 
@@ -612,8 +683,13 @@ Register hooks, MCP servers, agents, system prompt. **Must be sent before the fi
   jsonSchema?: Record<string, unknown>,
   systemPrompt?: string,
   appendSystemPrompt?: string,
-  agents?: Record<string, AgentDefinition>
+  agents?: Record<string, AgentDefinition>,
+  // NEW in v2.1.81:
+  promptSuggestions?: boolean,        // Enable prompt_suggestion messages
+  agentProgressSummaries?: boolean,   // Enable agent progress summaries
 }
+
+In v2.1.81, the wire format was broadened for some fields (`hooks`, `sdkMcpServers`, `agents`), but the exact extended shapes are not yet fully documented here.
 
 // Response
 {
@@ -622,7 +698,11 @@ Register hooks, MCP servers, agents, system prompt. **Must be sent before the fi
   available_output_styles: string[],
   models: { value: string; displayName: string; description: string }[],
   account: { email?: string; organization?: string; subscriptionType?: string; apiKeySource?: string },
-  fast_mode?: boolean
+  fast_mode?: boolean,
+  // NEW in v2.1.81:
+  agents?: Record<string, unknown>,
+  pid?: number,
+  fast_mode_state?: unknown,
 }
 ```
 
@@ -643,7 +723,10 @@ Register hooks, MCP servers, agents, system prompt. **Must be sent before the fi
   decision_reason?: string,             // "hook"|"asyncAgent"|"sandboxOverride"|"classifier"|"workingDir"|"other"
   tool_use_id: string,
   agent_id?: string,
-  description?: string
+  description?: string,
+  // NEW in v2.1.81:
+  title?: string,                       // Human-readable title for the permission request
+  display_name?: string,                // Display name override for the tool
 }
 
 // Response: Allow
@@ -807,6 +890,107 @@ The CLI invokes a registered hook callback.
 { async: true, asyncTimeout?: number }
 ```
 
+### 7.14. `end_session` (Server → CLI)
+
+> Added in v2.1.81.
+
+Gracefully terminate the session.
+
+```typescript
+// Request
+{
+  subtype: "end_session",
+  reason?: string
+}
+
+// Response: empty success
+```
+
+### 7.15. `stop_task` (Server → CLI)
+
+> Added in v2.1.81.
+
+Stop a running sub-agent task.
+
+```typescript
+// Request
+{
+  subtype: "stop_task",
+  task_id: string
+}
+
+// Response: empty success
+```
+
+### 7.16. `cancel_async_message` (Server → CLI)
+
+> Added in v2.1.81.
+
+Cancel an asynchronous message in progress.
+
+```typescript
+// Request
+{
+  subtype: "cancel_async_message",
+  uuid: string
+}
+
+// Response: empty success
+```
+
+### 7.17. `apply_flag_settings` (Server → CLI)
+
+> Added in v2.1.81.
+
+Apply runtime flag/settings changes.
+
+```typescript
+// Request
+{
+  subtype: "apply_flag_settings",
+  settings: Record<string, unknown>
+}
+
+// Response: empty success
+```
+
+### 7.18. `get_settings` (Server → CLI)
+
+> Added in v2.1.81.
+
+Retrieve the effective merged settings and per-source settings.
+
+```typescript
+// Request
+{
+  subtype: "get_settings"
+}
+
+// Response
+{
+  settings: Record<string, unknown>,   // effective merged settings
+  sources?: Record<string, unknown>    // per-source settings breakdown
+}
+```
+
+### 7.19. `elicitation` (CLI → Server)
+
+> Added in v2.1.81.
+
+MCP server elicitation — requests user input via forms or URL redirect.
+
+```typescript
+// Request (from CLI)
+{
+  subtype: "elicitation",
+  mode: "form" | "url",
+  // form mode: schema-driven input fields
+  // url mode: redirect to URL for input
+}
+
+// Response: form data or URL redirect result
+```
+
 ### Direction Summary
 
 | Subtype | Direction | Purpose |
@@ -824,6 +1008,12 @@ The CLI invokes a registered hook callback.
 | `mcp_set_servers` | Server → CLI | Configure MCP servers |
 | `rewind_files` | Server → CLI | Rewind files to checkpoint |
 | `hook_callback` | CLI → Server | Invoke registered hook |
+| `end_session` | Server → CLI | Gracefully terminate session |
+| `stop_task` | Server → CLI | Stop a running sub-agent task |
+| `cancel_async_message` | Server → CLI | Cancel async message in progress |
+| `apply_flag_settings` | Server → CLI | Apply runtime flag/settings |
+| `get_settings` | Server → CLI | Retrieve effective settings |
+| `elicitation` | CLI → Server | MCP server elicitation (form/URL) |
 
 ---
 
@@ -1318,6 +1508,72 @@ To build a production controller on top of this protocol:
 | Streaming | Not supported | `stream_event` messages |
 | Session control | Limited (mode, shutdown) | Full (model, thinking, MCP, rewind) |
 | Dependency | Teammate mode required | Standalone (`--print` mode) |
+
+---
+
+## 14. MCP Channels (Codename: "tengu harbor")
+
+> Added in v2.1.81. This is an experimental feature gated behind feature flags.
+
+MCP Channels enable push notifications from MCP servers into Claude Code sessions. This is separate from auto-update channels (`latest`/`stable`).
+
+### CLI Flags
+
+| Flag | Purpose |
+|------|---------|
+| `--channels <servers...>` | Register MCP servers for inbound push notifications (hidden flag) |
+| `--dangerously-load-development-channels <servers...>` | Load unvetted channel servers for local dev |
+
+### Gating (6 levels)
+
+1. **Capability**: Server must declare `experimental["claude/channel"]`
+2. **Feature flag**: `tengu_harbor` LaunchDarkly flag must be enabled
+3. **Auth**: Requires claude.ai OAuth authentication
+4. **Policy**: For Teams/Enterprise, `policySettings.channelsEnabled` must be `true`
+5. **Session**: Server must be in the `--channels` list for the session
+6. **Allowlist**: Plugin must be on approved channels allowlist (`tengu_harbor_ledger`)
+
+### MCP Notification Methods
+
+| Method | Direction | Purpose |
+|--------|-----------|---------|
+| `notifications/claude/channel` | MCP Server → CLI | Inbound message from MCP server |
+| `notifications/claude/channel/permission` | CLI → MCP Server | Permission response (allow/deny) |
+| `notifications/claude/channel/permission_request` | MCP Server → CLI | Permission request from channel |
+
+**Notification payload:**
+```typescript
+{
+  content: string;
+  meta?: Record<string, string>;
+}
+```
+
+### Message Format
+
+Channel messages are wrapped in XML and injected as user prompts:
+
+```xml
+<channel source="server-name" key="value">
+message content
+</channel>
+```
+
+Injected with `priority: "next"`, `isMeta: true`, `origin: { kind: "channel", server: name }`.
+
+### Auto-Update Channels
+
+Separate from MCP channels. Two release channels:
+
+| Channel | npm dist-tag | Description |
+|---------|-------------|-------------|
+| `latest` (default) | `latest` | Default release channel |
+| `stable` | `stable` | Stable release channel |
+
+Configured via `autoUpdatesChannel` in `~/.claude/settings.json`. Version resolution endpoint:
+```
+https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/{channel}
+```
 
 ---
 

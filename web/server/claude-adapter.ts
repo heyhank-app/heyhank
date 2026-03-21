@@ -26,6 +26,10 @@ import type {
   CLIControlRequestMessage,
   CLIControlResponseMessage,
   CLIAuthStatusMessage,
+  CLIControlCancelRequestMessage,
+  CLIStreamlinedTextMessage,
+  CLIStreamlinedToolUseSummaryMessage,
+  CLIPromptSuggestionMessage,
   CLICompactBoundaryMessage,
   CLITaskNotificationMessage,
   CLIFilesPersistedMessage,
@@ -246,6 +250,15 @@ export class ClaudeAdapter implements IBackendAdapter {
       case "mcp_set_servers":
         return this.handleOutgoingMcpSetServers(msg.servers);
 
+      case "end_session":
+        return this.handleOutgoingEndSession((msg as { reason?: string }).reason);
+
+      case "stop_task":
+        return this.handleOutgoingStopTask((msg as { task_id: string }).task_id);
+
+      case "update_environment_variables":
+        return this.handleOutgoingUpdateEnvVars((msg as { variables: Record<string, string> }).variables);
+
       case "session_subscribe":
       case "session_ack":
         // These are handled at the bridge level -- never forwarded to the backend.
@@ -396,6 +409,25 @@ export class ClaudeAdapter implements IBackendAdapter {
     return true;
   }
 
+  private handleOutgoingEndSession(reason?: string): boolean {
+    this.sendControlRequest({ subtype: "end_session", ...(reason ? { reason } : {}) });
+    return true;
+  }
+
+  private handleOutgoingStopTask(taskId: string): boolean {
+    this.sendControlRequest({ subtype: "stop_task", task_id: taskId });
+    return true;
+  }
+
+  private handleOutgoingUpdateEnvVars(variables: Record<string, string>): boolean {
+    const ndjson = JSON.stringify({
+      type: "update_environment_variables",
+      variables,
+    });
+    this.sendToBackend(ndjson);
+    return true;
+  }
+
   // -- CLI message routing (NDJSON -> BrowserIncomingMessage) -----------------
 
   private routeCLIMessage(msg: CLIMessage): void {
@@ -455,6 +487,22 @@ export class ClaudeAdapter implements IBackendAdapter {
       case "rate_limit_event":
         // Rate-limit status from Claude API (allowed/throttled). Silently
         // consumed — no user-facing action needed.
+        break;
+
+      case "control_cancel_request":
+        this.handleControlCancelRequest(msg as CLIControlCancelRequestMessage);
+        break;
+
+      case "streamlined_text":
+        this.handleStreamlinedText(msg as CLIStreamlinedTextMessage);
+        break;
+
+      case "streamlined_tool_use_summary":
+        this.handleStreamlinedToolUseSummary(msg as CLIStreamlinedToolUseSummaryMessage);
+        break;
+
+      case "prompt_suggestion":
+        this.handlePromptSuggestion(msg as CLIPromptSuggestionMessage);
         break;
 
       default:
@@ -664,16 +712,55 @@ export class ClaudeAdapter implements IBackendAdapter {
         description: msg.request.description,
         tool_use_id: msg.request.tool_use_id,
         agent_id: msg.request.agent_id,
+        title: msg.request.title,
+        display_name: msg.request.display_name,
+        blocked_path: msg.request.blocked_path,
+        decision_reason: msg.request.decision_reason,
         timestamp: Date.now(),
       };
 
-      // Emit the permission request. The bridge handler is responsible for
-      // AI validation, pending permission tracking, and persistence.
       this.browserMessageCb?.({
         type: "permission_request",
         request: perm,
       });
     }
+  }
+
+  // -- Control cancel request ------------------------------------------------
+
+  private handleControlCancelRequest(msg: CLIControlCancelRequestMessage): void {
+    // Clean up any pending async control request in the adapter
+    this.pendingControlRequests.delete(msg.request_id);
+    // Emit permission_cancelled so the bridge removes from pendingPermissions
+    this.browserMessageCb?.({
+      type: "permission_cancelled",
+      request_id: msg.request_id,
+    });
+  }
+
+  // -- Streamlined messages (simplified output mode) -------------------------
+
+  private handleStreamlinedText(msg: CLIStreamlinedTextMessage): void {
+    this.browserMessageCb?.({
+      type: "streamlined_text",
+      text: msg.text,
+    } as BrowserIncomingMessage);
+  }
+
+  private handleStreamlinedToolUseSummary(msg: CLIStreamlinedToolUseSummaryMessage): void {
+    this.browserMessageCb?.({
+      type: "streamlined_tool_use_summary",
+      tool_summary: msg.tool_summary,
+    } as BrowserIncomingMessage);
+  }
+
+  // -- Prompt suggestions ----------------------------------------------------
+
+  private handlePromptSuggestion(msg: CLIPromptSuggestionMessage): void {
+    this.browserMessageCb?.({
+      type: "prompt_suggestion",
+      suggestions: msg.suggestions,
+    } as BrowserIncomingMessage);
   }
 
   // -- Control response (for pending control requests like MCP status) --------

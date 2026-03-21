@@ -206,3 +206,41 @@ describe("Streaming", () => {
     expect(useStore.getState().streamingOutputTokens.has("s1")).toBe(false);
   });
 });
+
+describe("Prompt suggestions", () => {
+  it("setPromptSuggestions: stores suggestions for a session", () => {
+    useStore.getState().setPromptSuggestions("s1", ["First", "Second"]);
+
+    expect(useStore.getState().promptSuggestions.get("s1")).toEqual([
+      "First",
+      "Second",
+    ]);
+  });
+
+  it("setPromptSuggestions: overwrites only the targeted session", () => {
+    useStore.getState().setPromptSuggestions("s1", ["Old value"]);
+    useStore.getState().setPromptSuggestions("s2", ["Other session"]);
+    useStore.getState().setPromptSuggestions("s1", ["New value"]);
+
+    expect(useStore.getState().promptSuggestions.get("s1")).toEqual(["New value"]);
+    expect(useStore.getState().promptSuggestions.get("s2")).toEqual(["Other session"]);
+  });
+
+  it("clearPromptSuggestions: removes one session without affecting others", () => {
+    useStore.getState().setPromptSuggestions("s1", ["Clear me"]);
+    useStore.getState().setPromptSuggestions("s2", ["Keep me"]);
+
+    useStore.getState().clearPromptSuggestions("s1");
+
+    expect(useStore.getState().promptSuggestions.has("s1")).toBe(false);
+    expect(useStore.getState().promptSuggestions.get("s2")).toEqual(["Keep me"]);
+  });
+
+  it("clearPromptSuggestions: is a no-op for unknown sessions", () => {
+    useStore.getState().setPromptSuggestions("s1", ["Keep me"]);
+
+    useStore.getState().clearPromptSuggestions("missing-session");
+
+    expect(useStore.getState().promptSuggestions.get("s1")).toEqual(["Keep me"]);
+  });
+});

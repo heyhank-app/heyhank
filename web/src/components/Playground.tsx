@@ -217,6 +217,15 @@ const PERM_AI_DANGEROUS = mockPermission({
   },
 });
 
+// Enriched permission fields (display_name, title, decision_reason) — v2.1.81+
+const PERM_ENRICHED = mockPermission({
+  tool_name: "Edit",
+  display_name: "File Editor",
+  title: "Edit a TypeScript file",
+  decision_reason: "File is outside trusted directories",
+  input: { file_path: "/workspace/src/app.ts", new_string: "const x = 1;", old_string: "const x = 0;" },
+});
+
 const PERM_ASK_SINGLE = mockPermission({
   tool_name: "AskUserQuestion",
   input: {
@@ -882,6 +891,10 @@ export function Playground() {
             />
             <PermissionBanner
               permission={PERM_DYNAMIC}
+              sessionId={MOCK_SESSION_ID}
+            />
+            <PermissionBanner
+              permission={PERM_ENRICHED}
               sessionId={MOCK_SESSION_ID}
             />
           </div>
@@ -2172,6 +2185,43 @@ export function Playground() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </Card>
+          </div>
+        </Section>
+
+        {/* ─── Prompt Suggestions ──────────────────────────────── */}
+        <Section
+          title="Prompt Suggestions"
+          description="Suggestion chips from the CLI for predicted next user prompts"
+        >
+          <div className="max-w-3xl space-y-4">
+            <Card label="Suggestion chips (idle state)">
+              <div className="flex flex-wrap gap-2 p-3">
+                {["Fix the failing test", "Add error handling", "Refactor to use async/await"].map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    className="px-3 py-1.5 text-sm rounded-full border border-cc-border bg-cc-card text-cc-fg hover:bg-cc-hover transition-colors"
+                    onClick={() => alert(`Selected: ${suggestion}`)}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </Card>
+            <Card label="Suggestion chips (after completion)">
+              <div className="flex flex-wrap gap-2 p-3">
+                {["Run the test suite", "Deploy to staging", "Update the README"].map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    className="px-3 py-1.5 text-sm rounded-full border border-cc-primary/30 bg-cc-primary/5 text-cc-primary hover:bg-cc-primary/10 transition-colors"
+                    onClick={() => alert(`Selected: ${suggestion}`)}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
               </div>
             </Card>
           </div>

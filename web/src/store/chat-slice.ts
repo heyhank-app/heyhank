@@ -13,6 +13,10 @@ export interface ChatSlice {
   updateLastAssistantMessage: (sessionId: string, updater: (msg: ChatMessage) => ChatMessage) => void;
   setStreaming: (sessionId: string, text: string | null) => void;
   setStreamingStats: (sessionId: string, stats: { startedAt?: number; outputTokens?: number } | null) => void;
+
+  promptSuggestions: Map<string, string[]>;
+  setPromptSuggestions: (sessionId: string, suggestions: string[]) => void;
+  clearPromptSuggestions: (sessionId: string) => void;
 }
 
 export const createChatSlice: StateCreator<AppState, [], [], ChatSlice> = (set) => ({
@@ -77,5 +81,21 @@ export const createChatSlice: StateCreator<AppState, [], [], ChatSlice> = (set) 
         if (stats.outputTokens !== undefined) streamingOutputTokens.set(sessionId, stats.outputTokens);
       }
       return { streamingStartedAt, streamingOutputTokens };
+    }),
+
+  promptSuggestions: new Map(),
+
+  setPromptSuggestions: (sessionId, suggestions) =>
+    set((s) => {
+      const promptSuggestions = new Map(s.promptSuggestions);
+      promptSuggestions.set(sessionId, suggestions);
+      return { promptSuggestions };
+    }),
+
+  clearPromptSuggestions: (sessionId) =>
+    set((s) => {
+      const promptSuggestions = new Map(s.promptSuggestions);
+      promptSuggestions.delete(sessionId);
+      return { promptSuggestions };
     }),
 });

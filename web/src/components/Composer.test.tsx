@@ -37,6 +37,7 @@ vi.mock("../api.js", () => ({
 const mockAppendMessage = vi.fn();
 const mockUpdateSession = vi.fn();
 const mockSetPreviousPermissionMode = vi.fn();
+const mockClearPromptSuggestions = vi.fn();
 
 vi.mock("../store.js", () => {
   // Create a mock store function that acts like zustand's useStore
@@ -112,6 +113,8 @@ function setupMockStore(overrides: {
     updateSession: mockUpdateSession,
     setPreviousPermissionMode: mockSetPreviousPermissionMode,
     setSdkSessions: vi.fn(),
+    promptSuggestions: new Map<string, string[]>(),
+    clearPromptSuggestions: mockClearPromptSuggestions,
   };
 }
 
@@ -217,6 +220,71 @@ describe("Composer sending messages", () => {
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
 
     expect(textarea.value).toBe("");
+  });
+});
+
+describe("Composer prompt suggestion chips", () => {
+  it("renders suggestion chips when prompt suggestions exist", () => {
+    setupMockStore();
+    (mockStoreState.promptSuggestions as Map<string, string[]>).set("s1", [
+      "Explain this stack trace",
+      "Draft a fix plan",
+    ]);
+
+    render(<Composer sessionId="s1" />);
+
+    expect(screen.getByText("Explain this stack trace")).toBeTruthy();
+    expect(screen.getByText("Draft a fix plan")).toBeTruthy();
+  });
+
+  it("clicking a suggestion sends it, appends an optimistic message, and clears suggestions", () => {
+    setupMockStore();
+    (mockStoreState.promptSuggestions as Map<string, string[]>).set("s1", [
+      "Explain this stack trace",
+    ]);
+
+    render(<Composer sessionId="s1" />);
+    fireEvent.click(screen.getByText("Explain this stack trace"));
+
+    expect(mockSendToSession).toHaveBeenCalledWith("s1", {
+      type: "user_message",
+      content: "Explain this stack trace",
+      session_id: "s1",
+      client_msg_id: "test-client-msg-id",
+    });
+    expect(mockAppendMessage).toHaveBeenCalledWith(
+      "s1",
+      expect.objectContaining({
+        id: "test-client-msg-id",
+        role: "user",
+        content: "Explain this stack trace",
+      }),
+    );
+    expect(mockClearPromptSuggestions).toHaveBeenCalledWith("s1");
+  });
+
+  it("does not render suggestion chips when prompt suggestions are empty", () => {
+    render(<Composer sessionId="s1" />);
+
+    expect(screen.queryByText("Explain this stack trace")).toBeNull();
+    expect(screen.queryByText("Draft a fix plan")).toBeNull();
+  });
+
+  it("does not send a suggestion when the composer is unavailable", () => {
+    setupMockStore({ isConnected: false });
+    (mockStoreState.promptSuggestions as Map<string, string[]>).set("s1", [
+      "Explain this stack trace",
+    ]);
+
+    render(<Composer sessionId="s1" />);
+    const chip = screen.getByText("Explain this stack trace") as HTMLButtonElement;
+
+    expect(chip.disabled).toBe(true);
+    fireEvent.click(chip);
+
+    expect(mockSendToSession).not.toHaveBeenCalled();
+    expect(mockAppendMessage).not.toHaveBeenCalled();
+    expect(mockClearPromptSuggestions).not.toHaveBeenCalled();
   });
 });
 

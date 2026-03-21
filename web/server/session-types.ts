@@ -202,6 +202,10 @@ export interface CLIControlRequestMessage {
     description?: string;
     tool_use_id: string;
     agent_id?: string;
+    title?: string;
+    display_name?: string;
+    blocked_path?: string;
+    decision_reason?: string;
   };
 }
 
@@ -243,6 +247,36 @@ export interface CLIRateLimitEventMessage {
   uuid?: string;
 }
 
+/** CLI cancels a pending control_request (e.g. permission revoked). */
+export interface CLIControlCancelRequestMessage {
+  type: "control_cancel_request";
+  request_id: string;
+}
+
+/** Simplified assistant text (streamlined output mode). @internal */
+export interface CLIStreamlinedTextMessage {
+  type: "streamlined_text";
+  text: string;
+  session_id: string;
+  uuid: string;
+}
+
+/** Simplified tool use summary (e.g. "Read 2 files, wrote 1 file"). @internal */
+export interface CLIStreamlinedToolUseSummaryMessage {
+  type: "streamlined_tool_use_summary";
+  tool_summary: string;
+  session_id: string;
+  uuid: string;
+}
+
+/** Predicted next user prompts (enabled via promptSuggestions in initialize). */
+export interface CLIPromptSuggestionMessage {
+  type: "prompt_suggestion";
+  suggestions: string[];
+  session_id: string;
+  uuid: string;
+}
+
 export type CLIMessage =
   | CLISystemMessage
   | CLIAssistantMessage
@@ -255,7 +289,11 @@ export type CLIMessage =
   | CLIKeepAliveMessage
   | CLIAuthStatusMessage
   | CLIUserEchoMessage
-  | CLIRateLimitEventMessage;
+  | CLIRateLimitEventMessage
+  | CLIControlCancelRequestMessage
+  | CLIStreamlinedTextMessage
+  | CLIStreamlinedToolUseSummaryMessage
+  | CLIPromptSuggestionMessage;
 
 // ─── Content Block Types ──────────────────────────────────────────────────────
 
@@ -280,7 +318,10 @@ export type BrowserOutgoingMessage =
   | { type: "mcp_toggle"; serverName: string; enabled: boolean; client_msg_id?: string }
   | { type: "mcp_reconnect"; serverName: string; client_msg_id?: string }
   | { type: "mcp_set_servers"; servers: Record<string, McpServerConfig>; client_msg_id?: string }
-  | { type: "set_ai_validation"; aiValidationEnabled?: boolean | null; aiValidationAutoApprove?: boolean | null; aiValidationAutoDeny?: boolean | null; client_msg_id?: string };
+  | { type: "set_ai_validation"; aiValidationEnabled?: boolean | null; aiValidationAutoApprove?: boolean | null; aiValidationAutoDeny?: boolean | null; client_msg_id?: string }
+  | { type: "end_session"; reason?: string; client_msg_id?: string }
+  | { type: "stop_task"; task_id: string; client_msg_id?: string }
+  | { type: "update_environment_variables"; variables: Record<string, string>; client_msg_id?: string };
 
 /** Messages the bridge sends to the browser */
 export type BrowserIncomingMessageBase =
@@ -316,7 +357,10 @@ export type BrowserIncomingMessageBase =
   | { type: "session_name_update"; name: string }
   | { type: "pr_status_update"; pr: import("./github-pr.js").GitHubPRInfo | null; available: boolean }
   | { type: "mcp_status"; servers: McpServerDetail[] }
-  | { type: "session_phase"; phase: SessionPhase; previousPhase: SessionPhase };
+  | { type: "session_phase"; phase: SessionPhase; previousPhase: SessionPhase }
+  | { type: "prompt_suggestion"; suggestions: string[] }
+  | { type: "streamlined_text"; text: string }
+  | { type: "streamlined_tool_use_summary"; tool_summary: string };
 
 export type BrowserIncomingMessage = BrowserIncomingMessageBase & { seq?: number };
 
@@ -434,6 +478,10 @@ export interface PermissionRequest {
   description?: string;
   tool_use_id: string;
   agent_id?: string;
+  title?: string;
+  display_name?: string;
+  blocked_path?: string;
+  decision_reason?: string;
   timestamp: number;
   ai_validation?: AiValidationInfo;
 }

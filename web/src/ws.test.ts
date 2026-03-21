@@ -273,6 +273,21 @@ describe("handleMessage: user_message", () => {
       content: "optimistic first prompt",
     });
   });
+
+  it("clears prompt suggestions when a server user_message is received", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+    useStore.getState().setPromptSuggestions("s1", ["Explain the diff"]);
+
+    fireMessage({
+      type: "user_message",
+      id: "cmsg-live-2",
+      content: "server-backed prompt",
+      timestamp: 1001,
+    });
+
+    expect(useStore.getState().promptSuggestions.has("s1")).toBe(false);
+  });
 });
 
 // ===========================================================================
@@ -940,6 +955,54 @@ describe("handleMessage: permission_cancelled", () => {
 
     const perms = useStore.getState().pendingPermissions.get("s1");
     expect(perms!.has("req-1")).toBe(false);
+  });
+});
+
+describe("handleMessage: prompt suggestions and streamlined messages", () => {
+  it("stores prompt suggestions for the active session", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({
+      type: "prompt_suggestion",
+      suggestions: ["Summarize this change", "Write regression tests"],
+    });
+
+    expect(useStore.getState().promptSuggestions.get("s1")).toEqual([
+      "Summarize this change",
+      "Write regression tests",
+    ]);
+  });
+
+  it("renders streamlined_text as an assistant message", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({ type: "streamlined_text", text: "Rendered streamlined text" });
+
+    expect(useStore.getState().messages.get("s1")).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: "Rendered streamlined text",
+      }),
+    ]);
+  });
+
+  it("renders streamlined_tool_use_summary as a system message", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({
+      type: "streamlined_tool_use_summary",
+      tool_summary: "Read 2 files",
+    });
+
+    expect(useStore.getState().messages.get("s1")).toEqual([
+      expect.objectContaining({
+        role: "system",
+        content: "Read 2 files",
+      }),
+    ]);
   });
 });
 

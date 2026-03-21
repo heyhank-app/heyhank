@@ -10,6 +10,9 @@ import { useMentionMenu } from "../utils/use-mention-menu.js";
 
 import { readFileAsBase64, type ImageAttachment } from "../utils/image.js";
 
+/** Stable reference to avoid infinite re-renders in Zustand selectors. */
+const emptyStringArray: string[] = [];
+
 interface CommandItem {
   name: string;
   type: "command" | "skill";
@@ -331,6 +334,10 @@ export function Composer({ sessionId }: { sessionId: string }) {
     }
   }
 
+  const promptSuggestionsRaw = useStore((s) => s.promptSuggestions.get(sessionId));
+  const promptSuggestions = promptSuggestionsRaw ?? emptyStringArray;
+  const clearPromptSuggestions = useStore((s) => s.clearPromptSuggestions);
+
   const sessionStatus = useStore((s) => s.sessionStatus);
   const isRunning = sessionStatus.get(sessionId) === "running";
   const canSend = text.trim().length > 0 && isConnected;
@@ -372,6 +379,39 @@ export function Composer({ sessionId }: { sessionId: string }) {
           className="hidden"
           aria-label="Attach images"
         />
+
+        {/* Prompt suggestion chips */}
+        {promptSuggestions.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-2 sm:px-4 pb-2">
+            {promptSuggestions.map((suggestion, i) => (
+              <button
+                key={i}
+                onClick={() => {
+                  if (!isConnected || isRunning) return;
+                  const clientMsgId = createClientMessageId();
+                  sendToSession(sessionId, {
+                    type: "user_message",
+                    content: suggestion,
+                    session_id: sessionId,
+                    client_msg_id: clientMsgId,
+                  });
+                  useStore.getState().appendMessage(sessionId, {
+                    id: clientMsgId,
+                    role: "user",
+                    content: suggestion,
+                    timestamp: Date.now(),
+                  });
+                  clearPromptSuggestions(sessionId);
+                }}
+                disabled={!isConnected || isRunning}
+                className="text-xs px-2.5 py-1.5 rounded-lg bg-cc-hover hover:bg-cc-active text-cc-fg border border-cc-border transition-colors cursor-pointer truncate max-w-[280px]"
+                title={suggestion}
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Input container: flat separator on mobile, card on desktop */}
         <div className={`relative overflow-visible transition-all duration-200 border-t border-cc-separator sm:border sm:border-cc-border sm:bg-cc-input-bg/95 sm:rounded-[16px] sm:backdrop-blur-sm composer-card ${

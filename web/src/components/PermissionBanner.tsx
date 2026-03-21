@@ -87,7 +87,10 @@ export function PermissionBanner({
                 {isAskUser ? "Question" : "Permission Request"}
               </span>
               {!isAskUser && (
-                <span className="text-[11px] text-cc-muted font-mono-code">{permission.tool_name}</span>
+                <span className="text-[11px] text-cc-muted font-mono-code">{permission.display_name || permission.tool_name}</span>
+              )}
+              {permission.title && (
+                <span className="text-[11px] text-cc-muted">{permission.title}</span>
               )}
             </div>
 
@@ -99,6 +102,9 @@ export function PermissionBanner({
               />
             ) : (
               <ToolInputDisplay toolName={permission.tool_name} input={permission.input} description={permission.description} />
+            )}
+            {permission.decision_reason && (
+              <p className="text-xs text-cc-muted mt-1 italic">{permission.decision_reason}</p>
             )}
 
             {/* AI validation recommendation (shown for "uncertain" verdicts that fall through to manual) */}

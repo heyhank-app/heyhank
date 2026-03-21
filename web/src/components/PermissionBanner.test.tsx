@@ -68,6 +68,41 @@ describe("PermissionBanner label rendering", () => {
     // Should NOT show "Permission Request"
     expect(screen.queryByText("Permission Request")).toBeNull();
   });
+
+  it("renders enriched permission metadata when present", () => {
+    render(
+      <PermissionBanner
+        permission={makePermission({
+          tool_name: "Bash",
+          display_name: "Shell command",
+          title: "Needs broader access",
+          decision_reason: "This command writes outside the current workspace.",
+        })}
+        sessionId="s1"
+      />,
+    );
+
+    expect(screen.getByText("Shell command")).toBeTruthy();
+    expect(screen.getByText("Needs broader access")).toBeTruthy();
+    expect(
+      screen.getByText("This command writes outside the current workspace."),
+    ).toBeTruthy();
+  });
+
+  it("falls back to tool_name when enriched permission metadata is absent", () => {
+    render(
+      <PermissionBanner
+        permission={makePermission({ tool_name: "Read" })}
+        sessionId="s1"
+      />,
+    );
+
+    expect(screen.getByText("Read")).toBeTruthy();
+    expect(screen.queryByText("Needs broader access")).toBeNull();
+    expect(
+      screen.queryByText("This command writes outside the current workspace."),
+    ).toBeNull();
+  });
 });
 
 // ─── BashDisplay ─────────────────────────────────────────────────────────────
