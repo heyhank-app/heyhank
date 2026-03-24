@@ -46,6 +46,9 @@ vi.mock("./settings-manager.js", () => ({
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+    claudeCodeOAuthToken: "",
+    openaiApiKey: "",
+    onboardingCompleted: false,
   })),
 }));
 
@@ -449,6 +452,79 @@ describe("SessionOrchestrator", () => {
           env: expect.objectContaining({ API_KEY: "secret", DB_HOST: "db.example.com" }),
         }),
       );
+    });
+
+    // ── Global token injection from settings ───────────────────────────
+
+    // Verifies that CLAUDE_CODE_OAUTH_TOKEN is injected from global settings
+    // when the session backend is "claude" and no token is already set
+    it("injects CLAUDE_CODE_OAUTH_TOKEN from global settings for claude backend", async () => {
+      vi.mocked(settingsManager.getSettings).mockReturnValue({
+        ...settingsManager.getSettings(),
+        claudeCodeOAuthToken: "global-oauth-token",
+      });
+
+      await orchestrator.createSession({ cwd: "/test", backend: "claude" });
+
+      expect(deps.launcher.launch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          env: expect.objectContaining({ CLAUDE_CODE_OAUTH_TOKEN: "global-oauth-token" }),
+        }),
+      );
+    });
+
+    // Verifies that OPENAI_API_KEY is injected from global settings
+    // when the session backend is "codex" and no key is already set
+    it("injects OPENAI_API_KEY from global settings for codex backend", async () => {
+      vi.mocked(settingsManager.getSettings).mockReturnValue({
+        ...settingsManager.getSettings(),
+        openaiApiKey: "sk-global-key",
+      });
+
+      await orchestrator.createSession({ cwd: "/test", backend: "codex" });
+
+      expect(deps.launcher.launch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          env: expect.objectContaining({ OPENAI_API_KEY: "sk-global-key" }),
+        }),
+      );
+    });
+
+    // Verifies that env-profile tokens take precedence over global settings
+    it("does not overwrite CLAUDE_CODE_OAUTH_TOKEN when already set by env profile", async () => {
+      vi.mocked(settingsManager.getSettings).mockReturnValue({
+        ...settingsManager.getSettings(),
+        claudeCodeOAuthToken: "global-token",
+      });
+      vi.mocked(envManager.getEnv).mockReturnValue({
+        name: "Custom",
+        slug: "custom",
+        variables: { CLAUDE_CODE_OAUTH_TOKEN: "env-profile-token" },
+        createdAt: 1000,
+        updatedAt: 1000,
+      });
+
+      await orchestrator.createSession({ cwd: "/test", backend: "claude", envSlug: "custom" });
+
+      expect(deps.launcher.launch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          env: expect.objectContaining({ CLAUDE_CODE_OAUTH_TOKEN: "env-profile-token" }),
+        }),
+      );
+    });
+
+    // Verifies that no token is injected when global settings have empty values
+    it("does not inject token when global setting is empty", async () => {
+      vi.mocked(settingsManager.getSettings).mockReturnValue({
+        ...settingsManager.getSettings(),
+        claudeCodeOAuthToken: "",
+        openaiApiKey: "",
+      });
+
+      await orchestrator.createSession({ cwd: "/test", backend: "claude" });
+
+      const launchCall = vi.mocked(deps.launcher.launch).mock.calls[0][0];
+      expect(launchCall.env?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     });
 
     it("validates branch name to prevent injection", async () => {

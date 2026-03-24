@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import { DEFAULT_ANTHROPIC_MODEL, getSettings, updateSettings, type UpdateChannel } from "../settings-manager.js";
 import { linearCache } from "../linear-cache.js";
 import { listConnections } from "../linear-connections.js";
+import { hasContainerCodexAuth } from "../codex-container-auth.js";
 
 export function registerSettingsRoutes(api: Hono): void {
   api.get("/settings", (c) => {
@@ -10,6 +11,10 @@ export function registerSettingsRoutes(api: Hono): void {
     return c.json({
       anthropicApiKeyConfigured: !!settings.anthropicApiKey.trim(),
       anthropicModel: settings.anthropicModel || DEFAULT_ANTHROPIC_MODEL,
+      claudeCodeOAuthTokenConfigured: !!settings.claudeCodeOAuthToken.trim(),
+      openaiApiKeyConfigured: !!settings.openaiApiKey.trim(),
+      codexDeviceAuthConfigured: hasContainerCodexAuth(),
+      onboardingCompleted: settings.onboardingCompleted,
       linearApiKeyConfigured: !!settings.linearApiKey.trim() || connections.length > 0,
       linearConnectionCount: connections.length,
       linearAutoTransition: settings.linearAutoTransition,
@@ -90,10 +95,21 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.linearOAuthWebhookSecret !== undefined && typeof body.linearOAuthWebhookSecret !== "string") {
       return c.json({ error: "linearOAuthWebhookSecret must be a string" }, 400);
     }
+    if (body.claudeCodeOAuthToken !== undefined && typeof body.claudeCodeOAuthToken !== "string") {
+      return c.json({ error: "claudeCodeOAuthToken must be a string" }, 400);
+    }
+    if (body.openaiApiKey !== undefined && typeof body.openaiApiKey !== "string") {
+      return c.json({ error: "openaiApiKey must be a string" }, 400);
+    }
+    if (body.onboardingCompleted !== undefined && typeof body.onboardingCompleted !== "boolean") {
+      return c.json({ error: "onboardingCompleted must be a boolean" }, 400);
+    }
     if (body.dockerAutoUpdate !== undefined && typeof body.dockerAutoUpdate !== "boolean") {
       return c.json({ error: "dockerAutoUpdate must be a boolean" }, 400);
     }
     const hasAnyField = body.anthropicApiKey !== undefined || body.anthropicModel !== undefined
+      || body.claudeCodeOAuthToken !== undefined || body.openaiApiKey !== undefined
+      || body.onboardingCompleted !== undefined
       || body.linearApiKey !== undefined || body.linearAutoTransition !== undefined
       || body.linearAutoTransitionStateId !== undefined || body.linearAutoTransitionStateName !== undefined
       || body.linearArchiveTransition !== undefined || body.linearArchiveTransitionStateId !== undefined
@@ -122,6 +138,18 @@ export function registerSettingsRoutes(api: Hono): void {
       anthropicModel:
         typeof body.anthropicModel === "string"
           ? (body.anthropicModel.trim() || DEFAULT_ANTHROPIC_MODEL)
+          : undefined,
+      claudeCodeOAuthToken:
+        typeof body.claudeCodeOAuthToken === "string"
+          ? body.claudeCodeOAuthToken.trim()
+          : undefined,
+      openaiApiKey:
+        typeof body.openaiApiKey === "string"
+          ? body.openaiApiKey.trim()
+          : undefined,
+      onboardingCompleted:
+        typeof body.onboardingCompleted === "boolean"
+          ? body.onboardingCompleted
           : undefined,
       linearApiKey:
         typeof body.linearApiKey === "string"
@@ -197,6 +225,10 @@ export function registerSettingsRoutes(api: Hono): void {
     return c.json({
       anthropicApiKeyConfigured: !!settings.anthropicApiKey.trim(),
       anthropicModel: settings.anthropicModel || DEFAULT_ANTHROPIC_MODEL,
+      claudeCodeOAuthTokenConfigured: !!settings.claudeCodeOAuthToken.trim(),
+      openaiApiKeyConfigured: !!settings.openaiApiKey.trim(),
+      codexDeviceAuthConfigured: hasContainerCodexAuth(),
+      onboardingCompleted: settings.onboardingCompleted,
       linearApiKeyConfigured: !!settings.linearApiKey.trim() || connectionsAfterUpdate.length > 0,
       linearConnectionCount: connectionsAfterUpdate.length,
       linearAutoTransition: settings.linearAutoTransition,

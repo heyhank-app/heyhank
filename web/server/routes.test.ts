@@ -91,6 +91,9 @@ vi.mock("./settings-manager.js", () => ({
     linearOAuthWebhookSecret: "",
     linearOAuthAccessToken: "",
     linearOAuthRefreshToken: "",
+    claudeCodeOAuthToken: "",
+    openaiApiKey: "",
+    onboardingCompleted: false,
     editorTabEnabled: false,
     aiValidationEnabled: false,
     aiValidationAutoApprove: true,
@@ -177,6 +180,10 @@ vi.mock("./linear-connections.js", () => ({
   deleteConnection: vi.fn(),
   resolveApiKey: vi.fn(() => ({ apiKey: "lin_api_123", connectionId: "test-conn" })),
   _resetForTest: vi.fn(),
+}));
+
+vi.mock("./codex-container-auth.js", () => ({
+  hasContainerCodexAuth: vi.fn(() => false),
 }));
 
 const mockDiscoverClaudeSessions = vi.hoisted(() => vi.fn(
@@ -1130,6 +1137,9 @@ describe("GET /api/sessions/:id/archive-info", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -1498,6 +1508,9 @@ describe("GET /api/settings", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -1515,6 +1528,10 @@ describe("GET /api/settings", () => {
     expect(json).toEqual({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
+      claudeCodeOAuthTokenConfigured: false,
+      openaiApiKeyConfigured: false,
+      codexDeviceAuthConfigured: false,
+      onboardingCompleted: false,
       linearApiKeyConfigured: false,
       linearConnectionCount: 0,
       linearAutoTransition: false,
@@ -1549,6 +1566,9 @@ describe("GET /api/settings", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -1566,6 +1586,10 @@ describe("GET /api/settings", () => {
     expect(json).toEqual({
       anthropicApiKeyConfigured: false,
       anthropicModel: "openai/gpt-4o-mini",
+      claudeCodeOAuthTokenConfigured: false,
+      openaiApiKeyConfigured: false,
+      codexDeviceAuthConfigured: false,
+      onboardingCompleted: false,
       linearApiKeyConfigured: true,
       linearConnectionCount: 0,
       linearAutoTransition: false,
@@ -1601,6 +1625,9 @@ describe("GET /api/settings", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -1636,6 +1663,9 @@ describe("PUT /api/settings", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -1676,6 +1706,10 @@ describe("PUT /api/settings", () => {
     expect(json).toEqual({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
+      claudeCodeOAuthTokenConfigured: false,
+      openaiApiKeyConfigured: false,
+      codexDeviceAuthConfigured: false,
+      onboardingCompleted: false,
       linearApiKeyConfigured: false,
       linearConnectionCount: 0,
       linearAutoTransition: false,
@@ -1710,6 +1744,9 @@ describe("PUT /api/settings", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -1754,6 +1791,9 @@ describe("PUT /api/settings", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -1861,6 +1901,9 @@ describe("PUT /api/settings", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -1924,6 +1967,54 @@ describe("PUT /api/settings", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json).toEqual({ error: "At least one settings field is required" });
+  });
+
+  // Validates that claudeCodeOAuthToken must be a string
+  it("returns 400 for non-string claudeCodeOAuthToken", async () => {
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ claudeCodeOAuthToken: 123 }),
+    });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "claudeCodeOAuthToken must be a string" });
+  });
+
+  // Validates that openaiApiKey must be a string
+  it("returns 400 for non-string openaiApiKey", async () => {
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ openaiApiKey: true }),
+    });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "openaiApiKey must be a string" });
+  });
+
+  // Validates that onboardingCompleted must be a boolean
+  it("returns 400 for non-boolean onboardingCompleted", async () => {
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ onboardingCompleted: "yes" }),
+    });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "onboardingCompleted must be a boolean" });
+  });
+
+  // Validates that dockerAutoUpdate must be a boolean
+  it("returns 400 for non-boolean dockerAutoUpdate", async () => {
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dockerAutoUpdate: "yes" }),
+    });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "dockerAutoUpdate must be a boolean" });
   });
 });
 
@@ -2037,6 +2128,9 @@ describe("GET /api/linear/issues", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2070,6 +2164,9 @@ describe("GET /api/linear/issues", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2156,6 +2253,9 @@ describe("GET /api/linear/issues", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2249,6 +2349,9 @@ describe("GET /api/linear/issues", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2307,6 +2410,9 @@ describe("GET /api/linear/connection", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2340,6 +2446,9 @@ describe("GET /api/linear/connection", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2395,6 +2504,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2432,6 +2544,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2468,6 +2583,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2506,6 +2624,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2578,6 +2699,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2629,6 +2753,9 @@ describe("GET /api/linear/projects", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2662,6 +2789,9 @@ describe("GET /api/linear/projects", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2725,6 +2855,9 @@ describe("GET /api/linear/project-issues", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2758,6 +2891,9 @@ describe("GET /api/linear/project-issues", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -2836,6 +2972,9 @@ describe("GET /api/linear/project-issues", () => {
       linearOAuthWebhookSecret: "",
       linearOAuthAccessToken: "",
       linearOAuthRefreshToken: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,

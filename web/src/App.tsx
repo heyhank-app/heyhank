@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useStore } from "./store.js";
 import { connectSession } from "./ws.js";
 import { api } from "./api.js";
@@ -18,6 +18,7 @@ import { SessionEditorPane } from "./components/SessionEditorPane.js";
 import { SessionBrowserPane } from "./components/SessionBrowserPane.js";
 import { UpdateOverlay } from "./components/UpdateOverlay.js";
 import { DockerUpdateDialog } from "./components/DockerUpdateDialog.js";
+import { OnboardingModal } from "./components/OnboardingModal.js";
 
 // Lazy-loaded route-level pages (not needed for initial render)
 const Playground = lazy(() => import("./components/Playground.js").then((m) => ({ default: m.Playground })));
@@ -160,12 +161,19 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Load publicUrl from settings on mount (used for webhook URL generation)
+  // Load publicUrl from settings + check onboarding status.
+  // Re-runs when isAuthenticated flips to true (e.g. after login) so that
+  // users who authenticate first still see the onboarding wizard.
+  const [showOnboarding, setShowOnboarding] = useState(false);
   useEffect(() => {
+    if (!isAuthenticated) return;
     api.getSettings().then((s) => {
       if (s.publicUrl) useStore.getState().setPublicUrl(s.publicUrl);
+      if (!s.onboardingCompleted) {
+        setShowOnboarding(true);
+      }
     }).catch(() => {});
-  }, []);
+  }, [isAuthenticated]);
 
   // Show Docker image update dialog if an app update just completed
   useEffect(() => {
@@ -367,6 +375,7 @@ export default function App() {
       )}
       <UpdateOverlay active={updateOverlayActive} />
       <DockerUpdateDialog />
+      {showOnboarding && <OnboardingModal onComplete={() => setShowOnboarding(false)} />}
     </div>
   );
 }

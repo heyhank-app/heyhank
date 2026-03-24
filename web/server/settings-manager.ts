@@ -14,6 +14,12 @@ export type UpdateChannel = "stable" | "prerelease";
 export interface CompanionSettings {
   anthropicApiKey: string;
   anthropicModel: string;
+  /** OAuth token obtained via `claude setup-token` — injected as CLAUDE_CODE_OAUTH_TOKEN */
+  claudeCodeOAuthToken: string;
+  /** OpenAI API key for Codex — injected as OPENAI_API_KEY */
+  openaiApiKey: string;
+  /** Whether the onboarding wizard has been completed */
+  onboardingCompleted: boolean;
   linearApiKey: string;
   linearAutoTransition: boolean;
   linearAutoTransitionStateId: string;
@@ -48,6 +54,9 @@ let filePath = DEFAULT_PATH;
 let settings: CompanionSettings = {
   anthropicApiKey: "",
   anthropicModel: DEFAULT_ANTHROPIC_MODEL,
+  claudeCodeOAuthToken: "",
+  openaiApiKey: "",
+  onboardingCompleted: false,
   linearApiKey: "",
   linearAutoTransition: false,
   linearAutoTransitionStateId: "",
@@ -77,6 +86,9 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
       typeof raw?.anthropicModel === "string" && raw.anthropicModel.trim()
         ? raw.anthropicModel === "claude-sonnet-4.6" ? DEFAULT_ANTHROPIC_MODEL : raw.anthropicModel
         : DEFAULT_ANTHROPIC_MODEL,
+    claudeCodeOAuthToken: typeof raw?.claudeCodeOAuthToken === "string" ? raw.claudeCodeOAuthToken : "",
+    openaiApiKey: typeof raw?.openaiApiKey === "string" ? raw.openaiApiKey : "",
+    onboardingCompleted: typeof raw?.onboardingCompleted === "boolean" ? raw.onboardingCompleted : false,
     linearApiKey: typeof raw?.linearApiKey === "string" ? raw.linearApiKey : "",
     linearAutoTransition: typeof raw?.linearAutoTransition === "boolean" ? raw.linearAutoTransition : false,
     linearAutoTransitionStateId: typeof raw?.linearAutoTransitionStateId === "string" ? raw.linearAutoTransitionStateId : "",
@@ -124,12 +136,15 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "editorTabEnabled" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate">>,
+  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "editorTabEnabled" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
     anthropicApiKey: patch.anthropicApiKey ?? settings.anthropicApiKey,
     anthropicModel: patch.anthropicModel ?? settings.anthropicModel,
+    claudeCodeOAuthToken: patch.claudeCodeOAuthToken ?? settings.claudeCodeOAuthToken,
+    openaiApiKey: patch.openaiApiKey ?? settings.openaiApiKey,
+    onboardingCompleted: patch.onboardingCompleted ?? settings.onboardingCompleted,
     linearApiKey: patch.linearApiKey ?? settings.linearApiKey,
     linearAutoTransition: patch.linearAutoTransition ?? settings.linearAutoTransition,
     linearAutoTransitionStateId: patch.linearAutoTransitionStateId ?? settings.linearAutoTransitionStateId,

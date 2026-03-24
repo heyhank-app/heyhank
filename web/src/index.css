@@ -39,6 +39,13 @@
   --color-cc-separator: rgba(31,30,29,0.10);
   --color-cc-info: #2b6cb0;
   --color-cc-merged: #805ad5;
+  --color-cc-codex: #10a37f;
+  --color-cc-codex-hover: #0d8c6d;
+  /* Darker button-grade variants — meet WCAG AA (4.5:1) with white text */
+  --color-cc-primary-btn: #ad5535;
+  --color-cc-primary-btn-hover: #b85c3a;
+  --color-cc-codex-btn: #0a7d5f;
+  --color-cc-codex-btn-hover: #0b8362;
 }
 
 @keyframes fadeSlideIn {
@@ -201,6 +208,12 @@
   --color-cc-separator: rgba(222,220,209,0.08);
   --color-cc-info: #63b3ed;
   --color-cc-merged: #b794f4;
+  --color-cc-codex: #34d399;
+  --color-cc-codex-hover: #2fc48d;
+  --color-cc-primary-btn: #ad5535;
+  --color-cc-primary-btn-hover: #b85c3a;
+  --color-cc-codex-btn: #0a7d5f;
+  --color-cc-codex-btn-hover: #0b8362;
 }
 
 /* Scrollbar styling — desktop only.
@@ -299,6 +312,34 @@
   background: var(--color-cc-primary);
   opacity: 0.4;
   animation: typing-breathe 1.5s ease-in-out infinite;
+}
+
+/* ─── Onboarding provider cards ─────────────────────────────────────────── */
+.provider-card--claude:hover,
+.provider-card--claude:focus-visible {
+  border-color: var(--color-cc-primary);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--color-cc-primary) 12%, transparent);
+}
+.provider-card--codex:hover,
+.provider-card--codex:focus-visible {
+  border-color: var(--color-cc-codex);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--color-cc-codex) 12%, transparent);
+}
+
+/* WCAG AA button backgrounds — darker shades for white text contrast */
+.btn-primary-aa {
+  background-color: var(--color-cc-primary-btn);
+}
+.btn-primary-aa:hover {
+  background-color: var(--color-cc-primary-btn-hover);
+}
+.btn-codex-aa {
+  background-color: var(--color-cc-codex-btn);
+}
+.btn-codex-aa:hover {
+  background-color: var(--color-cc-codex-btn-hover);
 }
 
 /* Global focus-visible ring — ensures keyboard users always see focus.
