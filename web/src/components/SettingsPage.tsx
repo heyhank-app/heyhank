@@ -13,6 +13,7 @@ const CATEGORIES = [
   { id: "webhooks", label: "Webhooks" },
   { id: "authentication", label: "Authentication" },
   { id: "notifications", label: "Notifications" },
+  { id: "providers", label: "Providers" },
   { id: "anthropic", label: "Anthropic" },
   { id: "ai-validation", label: "AI Validation" },
   { id: "updates", label: "Updates" },
@@ -59,6 +60,17 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [apiKeyFocused, setApiKeyFocused] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{ valid: boolean; error?: string } | null>(null);
+
+  // Provider tokens state
+  const [claudeCodeToken, setClaudeCodeToken] = useState("");
+  const [claudeCodeTokenConfigured, setClaudeCodeTokenConfigured] = useState(false);
+  const [openaiApiKey, setOpenaiApiKey] = useState("");
+  const [openaiApiKeyConfigured, setOpenaiApiKeyConfigured] = useState(false);
+  const [providerSaving, setProviderSaving] = useState(false);
+  const [providerSaved, setProviderSaved] = useState(false);
+  const [providerError, setProviderError] = useState("");
+  const [claudeTokenFocused, setClaudeTokenFocused] = useState(false);
+  const [openaiKeyFocused, setOpenaiKeyFocused] = useState(false);
 
   // Auth section state
   const [authToken, setAuthToken] = useState<string | null>(null);
@@ -120,6 +132,8 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
       .getSettings()
       .then((s) => {
         setConfigured(s.anthropicApiKeyConfigured);
+        setClaudeCodeTokenConfigured(s.claudeCodeOAuthTokenConfigured);
+        setOpenaiApiKeyConfigured(s.openaiApiKeyConfigured);
         setAnthropicModel(s.anthropicModel || "claude-sonnet-4-6");
         setEditorTabEnabled(s.editorTabEnabled);
         setStoreEditorTabEnabled(s.editorTabEnabled);
@@ -590,6 +604,107 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     <span className="text-xs text-cc-muted">{notificationDesktop ? "On" : "Off"}</span>
                   </button>
                 )}
+              </div>
+            </section>
+
+            {/* Providers */}
+            <section id="providers" ref={setSectionRef("providers")}>
+              <h2 className="text-sm font-semibold text-cc-fg mb-4">Providers</h2>
+              <div className="space-y-6">
+                <p className="text-xs text-cc-muted">
+                  Configure authentication tokens for Claude Code and Codex. These are injected into sessions automatically.
+                </p>
+
+                {/* Claude Code OAuth Token */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium" htmlFor="claude-code-token">
+                    Claude Code OAuth Token
+                  </label>
+                  <p className="text-xs text-cc-muted">
+                    Run <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">claude setup-token</code> in your terminal, then paste the token here.
+                  </p>
+                  <input
+                    id="claude-code-token"
+                    type="password"
+                    value={claudeCodeTokenConfigured && !claudeTokenFocused && !claudeCodeToken ? "••••••••••••••••" : claudeCodeToken}
+                    onChange={(e) => setClaudeCodeToken(e.target.value)}
+                    onFocus={() => setClaudeTokenFocused(true)}
+                    onBlur={() => setClaudeTokenFocused(false)}
+                    placeholder={claudeCodeTokenConfigured ? "Enter a new token to replace" : "Paste token from claude setup-token"}
+                    className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
+                  />
+                  <p className="text-xs text-cc-muted">
+                    {claudeCodeTokenConfigured ? "Claude Code token configured" : "Claude Code token not configured"}
+                  </p>
+                </div>
+
+                {/* OpenAI API Key (Codex) */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium" htmlFor="openai-api-key">
+                    OpenAI API Key (Codex)
+                  </label>
+                  <p className="text-xs text-cc-muted">
+                    Used to authenticate Codex sessions. You can also use <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">codex --login</code> for device-based auth.
+                  </p>
+                  <input
+                    id="openai-api-key"
+                    type="password"
+                    value={openaiApiKeyConfigured && !openaiKeyFocused && !openaiApiKey ? "••••••••••••••••" : openaiApiKey}
+                    onChange={(e) => setOpenaiApiKey(e.target.value)}
+                    onFocus={() => setOpenaiKeyFocused(true)}
+                    onBlur={() => setOpenaiKeyFocused(false)}
+                    placeholder={openaiApiKeyConfigured ? "Enter a new key to replace" : "sk-..."}
+                    className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
+                  />
+                  <p className="text-xs text-cc-muted">
+                    {openaiApiKeyConfigured ? "OpenAI key configured" : "OpenAI key not configured"}
+                  </p>
+                </div>
+
+                {providerError && (
+                  <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
+                    {providerError}
+                  </div>
+                )}
+
+                {providerSaved && (
+                  <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
+                    Provider settings saved.
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  disabled={providerSaving || (!claudeCodeToken.trim() && !openaiApiKey.trim())}
+                  onClick={async () => {
+                    setProviderSaving(true);
+                    setProviderError("");
+                    setProviderSaved(false);
+                    try {
+                      const payload: { claudeCodeOAuthToken?: string; openaiApiKey?: string } = {};
+                      if (claudeCodeToken.trim()) payload.claudeCodeOAuthToken = claudeCodeToken.trim();
+                      if (openaiApiKey.trim()) payload.openaiApiKey = openaiApiKey.trim();
+                      const res = await api.updateSettings(payload);
+                      setClaudeCodeTokenConfigured(res.claudeCodeOAuthTokenConfigured);
+                      setOpenaiApiKeyConfigured(res.openaiApiKeyConfigured);
+                      setClaudeCodeToken("");
+                      setOpenaiApiKey("");
+                      setProviderSaved(true);
+                      setTimeout(() => setProviderSaved(false), 1800);
+                    } catch (err: unknown) {
+                      setProviderError(err instanceof Error ? err.message : String(err));
+                    } finally {
+                      setProviderSaving(false);
+                    }
+                  }}
+                  className={`px-4 py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors ${
+                    providerSaving || (!claudeCodeToken.trim() && !openaiApiKey.trim())
+                      ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                      : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+                  }`}
+                >
+                  {providerSaving ? "Saving..." : "Save Provider Settings"}
+                </button>
               </div>
             </section>
 

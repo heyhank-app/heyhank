@@ -1182,4 +1182,142 @@ describe("SettingsPage", () => {
     const results = await axe(webhooksSection!);
     expect(results).toHaveNoViolations();
   });
+
+  // --- Providers section tests ---
+
+  // Verifies the Providers section renders and shows the correct configuration
+  // status for Claude Code token and OpenAI API key based on server settings.
+  it("renders Providers section with configured status from server", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4-6",
+      claudeCodeOAuthTokenConfigured: true,
+      openaiApiKeyConfigured: false,
+      editorTabEnabled: false,
+      updateChannel: "stable",
+      publicUrl: "",
+    });
+
+    render(<SettingsPage />);
+    await screen.findByText("Claude Code token configured");
+    expect(screen.getByText("OpenAI key not configured")).toBeInTheDocument();
+  });
+
+  // Verifies that the Claude Code token input shows masked dots when configured,
+  // and clears on focus to allow entering a replacement token.
+  it("shows masked dots in Claude Code token field when configured", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4-6",
+      claudeCodeOAuthTokenConfigured: true,
+      openaiApiKeyConfigured: false,
+      editorTabEnabled: false,
+      updateChannel: "stable",
+      publicUrl: "",
+    });
+
+    render(<SettingsPage />);
+    await screen.findByText("Claude Code token configured");
+
+    const input = screen.getByLabelText("Claude Code OAuth Token") as HTMLInputElement;
+    expect(input.value).toBe("••••••••••••••••");
+
+    fireEvent.focus(input);
+    expect(input.value).toBe("");
+  });
+
+  // Verifies that provider settings are saved correctly via updateSettings API
+  // and that the inputs are cleared after successful save.
+  it("saves provider settings and clears inputs on success", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4-6",
+      claudeCodeOAuthTokenConfigured: false,
+      openaiApiKeyConfigured: false,
+      editorTabEnabled: false,
+      updateChannel: "stable",
+      publicUrl: "",
+    });
+    mockApi.updateSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4-6",
+      claudeCodeOAuthTokenConfigured: true,
+      openaiApiKeyConfigured: true,
+      editorTabEnabled: false,
+      updateChannel: "stable",
+      publicUrl: "",
+    });
+
+    render(<SettingsPage />);
+    // Wait for initial load to complete
+    await screen.findByText("Claude Code token not configured");
+
+    const claudeInput = screen.getByLabelText("Claude Code OAuth Token") as HTMLInputElement;
+    const openaiInput = screen.getByLabelText("OpenAI API Key (Codex)") as HTMLInputElement;
+
+    fireEvent.change(claudeInput, { target: { value: "test-oauth-token" } });
+    fireEvent.change(openaiInput, { target: { value: "sk-test-key" } });
+
+    const saveBtn = screen.getByRole("button", { name: "Save Provider Settings" });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({
+        claudeCodeOAuthToken: "test-oauth-token",
+        openaiApiKey: "sk-test-key",
+      });
+    });
+
+    // Inputs should be cleared after save – button is disabled again,
+    // and masked-dot placeholders are restored since both tokens are now configured.
+    await waitFor(() => {
+      expect(screen.getByText("Provider settings saved.")).toBeInTheDocument();
+      expect(saveBtn).toBeDisabled();
+      expect(claudeInput.value).toBe("••••••••••••••••");
+      expect(openaiInput.value).toBe("••••••••••••••••");
+    });
+  });
+
+  // Verifies that the save button is disabled when both provider inputs are empty
+  it("disables Save Provider Settings button when no inputs have values", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4-6",
+      claudeCodeOAuthTokenConfigured: false,
+      openaiApiKeyConfigured: false,
+      editorTabEnabled: false,
+      updateChannel: "stable",
+      publicUrl: "",
+    });
+
+    render(<SettingsPage />);
+    await screen.findByText("Claude Code token not configured");
+
+    const saveBtn = screen.getByRole("button", { name: "Save Provider Settings" });
+    expect(saveBtn).toBeDisabled();
+  });
+
+  // Verifies that the Providers section passes accessibility checks
+  it("passes axe accessibility checks for the Providers section", async () => {
+    const { axe } = await import("vitest-axe");
+
+    mockApi.getSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4-6",
+      claudeCodeOAuthTokenConfigured: false,
+      openaiApiKeyConfigured: false,
+      editorTabEnabled: false,
+      updateChannel: "stable",
+      publicUrl: "",
+    });
+
+    render(<SettingsPage />);
+    await screen.findByText("Claude Code token not configured");
+
+    const providersSection = document.getElementById("providers");
+    expect(providersSection).toBeInTheDocument();
+
+    const results = await axe(providersSection!);
+    expect(results).toHaveNoViolations();
+  });
 });
