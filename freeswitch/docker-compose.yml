@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  freeswitch:
+    image: signalwire/freeswitch:latest
+    container_name: heyhank-freeswitch
+    restart: unless-stopped
+    network_mode: host  # SIP needs many ports (5060, RTP range)
+    volumes:
+      - ./conf:/etc/freeswitch/custom
+      - ./sounds:/usr/share/freeswitch/sounds/custom
+      - ./recordings:/var/lib/freeswitch/recordings
+      - ./scripts:/usr/share/freeswitch/scripts/custom
+      - ./entrypoint.sh:/docker-entrypoint-custom.sh:ro
+    environment:
+      - FREESWITCH_DOMAIN=${FREESWITCH_DOMAIN:-127.0.0.1}
+    # Override entrypoint to inject our gateway configs
+    entrypoint: ["/bin/bash", "/docker-entrypoint-custom.sh"]

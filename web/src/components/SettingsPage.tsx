@@ -22,6 +22,7 @@ const CATEGORIES = [
   { id: "ai-validation", label: "AI Validation" },
   { id: "updates", label: "Updates" },
   { id: "appearance", label: "Appearance" },
+  { id: "telephony", label: "Telephony" },
   { id: "environments", label: "Environments" },
   { id: "federation", label: "Federation" },
 ] as const;
@@ -2059,6 +2060,17 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
               </div>
             </section>
 
+            {/* Telephony */}
+            <section id="telephony" ref={setSectionRef("telephony")}>
+              <h2 className="text-sm font-semibold text-cc-fg mb-4">Telephony</h2>
+              <div className="space-y-3">
+                <p className="text-xs text-cc-muted">
+                  AI-powered phone calls via FreeSWITCH + Gemini Live.
+                </p>
+                <TelephonySettingsSection />
+              </div>
+            </section>
+
             {/* Federation */}
             <section id="federation" ref={setSectionRef("federation")}>
               <h2 className="text-sm font-semibold text-cc-fg mb-4">Federation</h2>
@@ -2072,6 +2084,266 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Telephony Settings ─────────────────────────────────────────────────────
+
+function TelephonySettingsSection() {
+  const [settings, setSettings] = useState<{
+    enabled: boolean;
+    freeswitch: { eslHost: string; eslPort: number; eslPassword?: string };
+    trunks: Array<{ id: string; name: string; provider: string; username?: string; password?: string; server?: string; callerId: string; enabled: boolean }>;
+    defaultVoice: string;
+    maxCallDurationSeconds?: number;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testResult, setTestResult] = useState<{ connected: boolean; status?: string; error?: string } | null>(null);
+  const [showAddTrunk, setShowAddTrunk] = useState(false);
+  const [newTrunk, setNewTrunk] = useState({ name: "peoplefone", provider: "peoplefone", username: "", password: "", server: "sip.peoplefone.at", callerId: "", enabled: true });
+
+  useEffect(() => {
+    api.getTelephonySettings().then((s) => {
+      setSettings(s as typeof settings);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  async function save(updates: Record<string, unknown>) {
+    setSaving(true);
+    try {
+      await api.updateTelephonySettings(updates);
+      const fresh = await api.getTelephonySettings();
+      setSettings(fresh as typeof settings);
+    } catch { /* silent */ }
+    setSaving(false);
+  }
+
+  async function testConnection() {
+    setTestResult(null);
+    const result = await api.testFreeSwitchConnection();
+    setTestResult(result);
+  }
+
+  async function addTrunk() {
+    if (!newTrunk.username || !newTrunk.password || !newTrunk.server) return;
+    try {
+      await fetch("/api/telephony/trunks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newTrunk),
+      });
+      const fresh = await api.getTelephonySettings();
+      setSettings(fresh as typeof settings);
+      setShowAddTrunk(false);
+      setNewTrunk({ name: "peoplefone", provider: "peoplefone", username: "", password: "", server: "sip.peoplefone.at", callerId: "", enabled: true });
+    } catch { /* silent */ }
+  }
+
+  async function removeTrunk(id: string) {
+    try {
+      await fetch(`/api/telephony/trunks/${encodeURIComponent(id)}`, { method: "DELETE" });
+      const fresh = await api.getTelephonySettings();
+      setSettings(fresh as typeof settings);
+    } catch { /* silent */ }
+  }
+
+  if (loading) return <p className="text-xs text-cc-muted">Loading...</p>;
+  if (!settings) return <p className="text-xs text-cc-muted">Failed to load settings.</p>;
+
+  return (
+    <div className="space-y-4">
+      {/* Enable/Disable */}
+      <button
+        type="button"
+        onClick={() => save({ enabled: !settings.enabled })}
+        disabled={saving}
+        className="w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg text-sm bg-cc-hover text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
+      >
+        <span>Enable Telephony</span>
+        <span className={`w-8 h-5 rounded-full transition-colors relative ${settings.enabled ? "bg-green-500" : "bg-cc-muted/30"}`}>
+          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${settings.enabled ? "translate-x-3.5" : "translate-x-0.5"}`} />
+        </span>
+      </button>
+
+      {settings.enabled && (
+        <>
+          {/* FreeSWITCH Connection */}
+          <div className="bg-cc-hover/50 rounded-lg p-3 space-y-2">
+            <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">FreeSWITCH ESL</h3>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[11px] text-cc-muted">Host</label>
+                <input
+                  type="text"
+                  value={settings.freeswitch.eslHost}
+                  onChange={(e) => setSettings({ ...settings, freeswitch: { ...settings.freeswitch, eslHost: e.target.value } })}
+                  onBlur={() => save({ freeswitch: settings.freeswitch })}
+                  className="w-full px-2 py-1.5 text-xs bg-cc-bg border border-cc-border rounded text-cc-fg"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-cc-muted">Port</label>
+                <input
+                  type="number"
+                  value={settings.freeswitch.eslPort}
+                  onChange={(e) => setSettings({ ...settings, freeswitch: { ...settings.freeswitch, eslPort: parseInt(e.target.value) || 8021 } })}
+                  onBlur={() => save({ freeswitch: settings.freeswitch })}
+                  className="w-full px-2 py-1.5 text-xs bg-cc-bg border border-cc-border rounded text-cc-fg"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-[11px] text-cc-muted">ESL Password</label>
+              <input
+                type="password"
+                value={settings.freeswitch.eslPassword || ""}
+                onChange={(e) => setSettings({ ...settings, freeswitch: { ...settings.freeswitch, eslPassword: e.target.value } })}
+                onBlur={() => save({ freeswitch: settings.freeswitch })}
+                placeholder="heyhank_esl_secret"
+                className="w-full px-2 py-1.5 text-xs bg-cc-bg border border-cc-border rounded text-cc-fg"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={testConnection}
+                className="px-3 py-1.5 text-xs rounded bg-cc-primary text-white hover:opacity-90 transition-opacity cursor-pointer"
+              >
+                Test Connection
+              </button>
+              {testResult && (
+                <span className={`text-xs ${testResult.connected ? "text-green-500" : "text-red-400"}`}>
+                  {testResult.connected ? "Connected" : testResult.error || "Failed"}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* SIP Trunks */}
+          <div className="bg-cc-hover/50 rounded-lg p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">SIP Trunks</h3>
+              <button
+                onClick={() => setShowAddTrunk(!showAddTrunk)}
+                className="text-xs text-cc-primary hover:text-cc-primary/80 transition-colors cursor-pointer"
+              >
+                {showAddTrunk ? "Cancel" : "+ Add Trunk"}
+              </button>
+            </div>
+
+            {/* Existing trunks */}
+            {settings.trunks.length === 0 && !showAddTrunk && (
+              <p className="text-xs text-cc-muted">No SIP trunks configured.</p>
+            )}
+            {settings.trunks.map((trunk) => (
+              <div key={trunk.id} className="flex items-center justify-between bg-cc-bg rounded-lg px-3 py-2 border border-cc-border">
+                <div>
+                  <p className="text-xs font-medium text-cc-fg">{trunk.name} <span className="text-cc-muted">({trunk.provider})</span></p>
+                  <p className="text-[11px] text-cc-muted">{trunk.callerId || "No caller ID"}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${trunk.enabled ? "bg-green-500" : "bg-cc-muted"}`} />
+                  <button
+                    onClick={() => removeTrunk(trunk.id)}
+                    className="text-[11px] text-red-400 hover:text-red-300 transition-colors cursor-pointer"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {/* Add trunk form */}
+            {showAddTrunk && (
+              <div className="bg-cc-bg rounded-lg p-3 border border-cc-border space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[11px] text-cc-muted">Name</label>
+                    <input type="text" value={newTrunk.name} onChange={(e) => setNewTrunk({ ...newTrunk, name: e.target.value })}
+                      className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-cc-muted">Provider</label>
+                    <select value={newTrunk.provider} onChange={(e) => {
+                      const p = e.target.value;
+                      const servers: Record<string, string> = { peoplefone: "sip.peoplefone.at", easybell: "sip.easybell.de", sipgate: "sipconnect.sipgate.de" };
+                      setNewTrunk({ ...newTrunk, provider: p, name: p, server: servers[p] || "" });
+                    }} className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg">
+                      <option value="peoplefone">peoplefone (AT)</option>
+                      <option value="easybell">easybell (DE)</option>
+                      <option value="sipgate">sipgate (DE)</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[11px] text-cc-muted">SIP Server</label>
+                  <input type="text" value={newTrunk.server} onChange={(e) => setNewTrunk({ ...newTrunk, server: e.target.value })}
+                    className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[11px] text-cc-muted">SIP Username</label>
+                    <input type="text" value={newTrunk.username} onChange={(e) => setNewTrunk({ ...newTrunk, username: e.target.value })}
+                      className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-cc-muted">SIP Password</label>
+                    <input type="password" value={newTrunk.password} onChange={(e) => setNewTrunk({ ...newTrunk, password: e.target.value })}
+                      className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[11px] text-cc-muted">Caller ID (your phone number, E.164)</label>
+                  <input type="text" value={newTrunk.callerId} onChange={(e) => setNewTrunk({ ...newTrunk, callerId: e.target.value })}
+                    placeholder="+43..."
+                    className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
+                </div>
+                <button
+                  onClick={addTrunk}
+                  disabled={!newTrunk.username || !newTrunk.password || !newTrunk.server}
+                  className="px-3 py-1.5 text-xs rounded bg-green-600 text-white hover:bg-green-500 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Add Trunk
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Voice & Limits */}
+          <div className="bg-cc-hover/50 rounded-lg p-3 space-y-2">
+            <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Defaults</h3>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[11px] text-cc-muted">Default Voice</label>
+                <select
+                  value={settings.defaultVoice || "Kore"}
+                  onChange={(e) => save({ defaultVoice: e.target.value })}
+                  className="w-full px-2 py-1.5 text-xs bg-cc-bg border border-cc-border rounded text-cc-fg"
+                >
+                  <option value="Kore">Kore (male)</option>
+                  <option value="Puck">Puck (male)</option>
+                  <option value="Charon">Charon (male)</option>
+                  <option value="Aoede">Aoede (female)</option>
+                  <option value="Fenrir">Fenrir (male)</option>
+                  <option value="Leda">Leda (female)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] text-cc-muted">Max Call Duration (sec)</label>
+                <input
+                  type="number"
+                  value={settings.maxCallDurationSeconds || 600}
+                  onChange={(e) => save({ maxCallDurationSeconds: parseInt(e.target.value) || 600 })}
+                  className="w-full px-2 py-1.5 text-xs bg-cc-bg border border-cc-border rounded text-cc-fg"
+                />
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

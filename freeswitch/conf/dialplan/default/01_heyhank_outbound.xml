@@ -1,0 +1,29 @@
+<!-- HeyHank Outbound Dialplan -->
+<!-- Routes outbound calls through the configured SIP gateway -->
+<include>
+  <extension name="heyhank_outbound">
+    <!-- Austrian numbers (+43...) -->
+    <condition field="destination_number" expression="^(\+43\d+)$">
+      <action application="set" data="effective_caller_id_name=HeyHank"/>
+      <action application="set" data="hangup_after_bridge=true"/>
+      <action application="set" data="ignore_early_media=true"/>
+      <action application="bridge" data="sofia/gateway/peoplefone/$1"/>
+    </condition>
+
+    <!-- German numbers (+49...) -->
+    <condition field="destination_number" expression="^(\+49\d+)$">
+      <action application="set" data="effective_caller_id_name=HeyHank"/>
+      <action application="set" data="hangup_after_bridge=true"/>
+      <action application="set" data="ignore_early_media=true"/>
+      <action application="bridge" data="sofia/gateway/peoplefone/$1"/>
+    </condition>
+
+    <!-- International fallback (+...) -->
+    <condition field="destination_number" expression="^(\+\d+)$">
+      <action application="set" data="effective_caller_id_name=HeyHank"/>
+      <action application="set" data="hangup_after_bridge=true"/>
+      <action application="set" data="ignore_early_media=true"/>
+      <action application="bridge" data="sofia/gateway/peoplefone/$1"/>
+    </condition>
+  </extension>
+</include>

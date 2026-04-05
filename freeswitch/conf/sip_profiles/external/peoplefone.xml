@@ -1,0 +1,14 @@
+<!-- peoplefone.at SIP Trunk Gateway -->
+<!-- Fill in credentials from peoplefone dashboard after verification -->
+<include>
+  <gateway name="peoplefone">
+    <param name="username" value="PEOPLEFONE_SIP_USERNAME"/>
+    <param name="password" value="PEOPLEFONE_SIP_PASSWORD"/>
+    <param name="realm" value="sip.peoplefone.at"/>
+    <param name="proxy" value="sip.peoplefone.at"/>
+    <param name="register" value="true"/>
+    <param name="expire-seconds" value="600"/>
+    <param name="caller-id-in-from" value="true"/>
+    <param name="codec-prefs" value="PCMA,PCMU"/>
+  </gateway>
+</include>
