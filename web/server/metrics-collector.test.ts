@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MetricsCollector } from "./metrics-collector.js";
 import type { GaugeDataProvider } from "./metrics-collector.js";
 import type { SessionPhase } from "./session-state-machine.js";
-import { companionBus } from "./event-bus.js";
+import { heyHankBus } from "./event-bus.js";
 
 // Fresh collector per test (avoids singleton pollution)
 let collector: MetricsCollector;
@@ -40,10 +40,10 @@ describe("counters", () => {
   });
 
   it("tracks sessions terminated by exit code via event bus", () => {
-    companionBus.emit("session:exited", { sessionId: "s1", exitCode: 0 });
-    companionBus.emit("session:exited", { sessionId: "s2", exitCode: 1 });
-    companionBus.emit("session:exited", { sessionId: "s3", exitCode: null });
-    companionBus.emit("session:exited", { sessionId: "s4", exitCode: 0 });
+    heyHankBus.emit("session:exited", { sessionId: "s1", exitCode: 0 });
+    heyHankBus.emit("session:exited", { sessionId: "s2", exitCode: 1 });
+    heyHankBus.emit("session:exited", { sessionId: "s3", exitCode: null });
+    heyHankBus.emit("session:exited", { sessionId: "s4", exitCode: 0 });
 
     const snap = collector.getSnapshot();
     expect(snap.counters.sessionsTerminated).toEqual({ "0": 2, "1": 1, "null": 1 });
@@ -113,13 +113,13 @@ describe("counters", () => {
   });
 
   it("tracks state transitions via event bus", () => {
-    companionBus.emit("session:phase-changed", {
+    heyHankBus.emit("session:phase-changed", {
       sessionId: "s1",
       from: "starting" as SessionPhase,
       to: "initializing" as SessionPhase,
       trigger: "cli_ws_open",
     });
-    companionBus.emit("session:phase-changed", {
+    heyHankBus.emit("session:phase-changed", {
       sessionId: "s1",
       from: "initializing" as SessionPhase,
       to: "ready" as SessionPhase,
@@ -161,7 +161,7 @@ describe("histograms", () => {
     vi.advanceTimersByTime(2000);
 
     // Simulate initializing → ready transition
-    companionBus.emit("session:phase-changed", {
+    heyHankBus.emit("session:phase-changed", {
       sessionId: "s1",
       from: "initializing" as SessionPhase,
       to: "ready" as SessionPhase,
@@ -184,7 +184,7 @@ describe("histograms", () => {
     collector.recordTurnStarted("s1");
     vi.advanceTimersByTime(3000);
 
-    companionBus.emit("message:result", {
+    heyHankBus.emit("message:result", {
       sessionId: "s1",
       message: { type: "result", data: {} } as any,
     });
@@ -229,7 +229,7 @@ describe("histograms", () => {
     for (const d of durations) {
       collector.recordTurnStarted(`s-${d}`);
       vi.advanceTimersByTime(d);
-      companionBus.emit("message:result", {
+      heyHankBus.emit("message:result", {
         sessionId: `s-${d}`,
         message: { type: "result", data: {} } as any,
       });
@@ -361,10 +361,10 @@ describe("edge cases", () => {
     collector.recordSessionSpawned("s1");
     collector.recordTurnStarted("s1");
 
-    companionBus.emit("session:exited", { sessionId: "s1", exitCode: 0 });
+    heyHankBus.emit("session:exited", { sessionId: "s1", exitCode: 0 });
 
     // Subsequent result should not record a turn duration (timing state was cleaned up)
-    companionBus.emit("message:result", {
+    heyHankBus.emit("message:result", {
       sessionId: "s1",
       message: { type: "result", data: {} } as any,
     });
@@ -379,7 +379,7 @@ describe("edge cases", () => {
     collector.recordPermissionRequested("perm-2", "s1");
     collector.recordPermissionRequested("perm-3", "s2"); // different session
 
-    companionBus.emit("session:exited", { sessionId: "s1", exitCode: 0 });
+    heyHankBus.emit("session:exited", { sessionId: "s1", exitCode: 0 });
 
     // Resolving perm-1 and perm-2 should NOT record a duration (cleaned up on exit)
     collector.recordPermissionResolved("perm-1", "allow", false);
@@ -400,7 +400,7 @@ describe("edge cases", () => {
 
     collector.recordTurnStarted("s1");
     vi.advanceTimersByTime(120_000); // 2 minutes
-    companionBus.emit("message:result", {
+    heyHankBus.emit("message:result", {
       sessionId: "s1",
       message: { type: "result", data: {} } as any,
     });

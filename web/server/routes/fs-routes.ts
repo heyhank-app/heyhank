@@ -4,10 +4,27 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Hono } from "hono";
 
+/** Sensitive paths that must never be exposed via the FS API */
+const SENSITIVE_PATTERNS = [
+  "/.heyhank/assistant/",      // email accounts with passwords
+  "/.heyhank/settings.json",   // API keys
+  "/.heyhank/push-keys.json",  // VAPID keys
+  "/.companion/assistant/",    // legacy path — backward compat
+  "/.companion/settings.json", // legacy path — backward compat
+  "/.companion/push-keys.json", // legacy path — backward compat
+  "/email-accounts.json",
+  "/calendar-accounts.json",
+];
+
 /** Ensure a resolved path is within one of the allowed base directories.
- *  Returns the resolved absolute path, or null if it escapes all bases. */
+ *  Returns the resolved absolute path, or null if it escapes all bases.
+ *  Also blocks access to sensitive files (credentials, API keys). */
 function guardPath(raw: string, allowedBases: string[]): string | null {
   const abs = resolve(raw);
+  // Block sensitive files
+  for (const pattern of SENSITIVE_PATTERNS) {
+    if (abs.includes(pattern)) return null;
+  }
   for (const base of allowedBases) {
     if (abs === base || abs.startsWith(base + "/")) return abs;
   }
@@ -93,9 +110,9 @@ export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }):
   api.get("/fs/home", (c) => {
     const home = homedir();
     const cwd = process.cwd();
-    // Only report cwd if the user launched companion from a real project directory
+    // Only report cwd if the user launched heyhank from a real project directory
     // (not from the package root or the home directory itself)
-    const packageRoot = process.env.__COMPANION_PACKAGE_ROOT;
+    const packageRoot = process.env.__HEYHANK_PACKAGE_ROOT || process.env.__COMPANION_PACKAGE_ROOT;
     const isProjectDir =
       cwd !== home &&
       (!packageRoot || !cwd.startsWith(packageRoot));

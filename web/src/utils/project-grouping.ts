@@ -21,6 +21,8 @@ export interface SessionItem {
   cronJobName?: string;
   agentId?: string;
   agentName?: string;
+  nodeId?: string;
+  nodeName?: string;
 }
 
 export interface ProjectGroup {

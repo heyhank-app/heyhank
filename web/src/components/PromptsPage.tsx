@@ -261,7 +261,7 @@ export function PromptsPage({ embedded = false }: PromptsPageProps) {
 
             <div className="flex items-center justify-between pt-1">
               <p className="text-[11px] text-cc-muted">
-                Stored in <code className="text-[10px]">~/.companion/prompts.json</code>
+                Stored in <code className="text-[10px]">~/.heyhank/prompts.json</code>
               </p>
               <button
                 type="submit"

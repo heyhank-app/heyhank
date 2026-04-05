@@ -109,4 +109,8 @@ export interface SdkSessionInfo {
   agentName?: string;
   /** Sandbox profile slug used for this session */
   sandboxSlug?: string;
+  /** Federation: remote node ID if this session originates from a peer */
+  nodeId?: string;
+  /** Federation: remote node display name */
+  nodeName?: string;
 }

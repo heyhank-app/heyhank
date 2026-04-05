@@ -8,6 +8,7 @@ package-lock.json
 test-live.ts
 web/dist/
 .env
+.env.*
 web/.env.local
 .dev-*.pid
 .dev-*.log
@@ -15,3 +16,12 @@ docs/mocks/
 docs/repo-only/
 scripts/test-codex-*.ts
 web/dev-dist/
+
+# Sensitive user data — NEVER commit
+*.credentials
+*.secret
+email-accounts.json
+calendar-accounts.json
+settings.json
+push-keys.json
+recordings/

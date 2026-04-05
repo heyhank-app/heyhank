@@ -2,7 +2,7 @@
  * Claude Code Backend Adapter
  *
  * Translates between the Claude Code NDJSON WebSocket protocol and
- * The Companion's BrowserIncomingMessage/BrowserOutgoingMessage types.
+ * HeyHank's BrowserIncomingMessage/BrowserOutgoingMessage types.
  *
  * This allows the bridge (and by extension the browser) to be completely
  * unaware of which backend is running -- it sees the same message types

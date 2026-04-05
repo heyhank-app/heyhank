@@ -19,7 +19,7 @@ import { SessionStore } from "./session-store.js";
 import { WorktreeTracker } from "./worktree-tracker.js";
 import { containerManager } from "./container-manager.js";
 import { join } from "node:path";
-import { COMPANION_HOME } from "./paths.js";
+import { HEYHANK_HOME } from "./paths.js";
 import { TerminalManager } from "./terminal-manager.js";
 import { PRPoller } from "./pr-poller.js";
 import { RecorderManager } from "./recorder.js";
@@ -32,8 +32,11 @@ import { migrateLinearCredentialsToAgents } from "./linear-credential-migration.
 import { authenticateManagedWebSocket } from "./ws-auth.js";
 import { LinearAgentBridge } from "./linear-agent-bridge.js";
 import { NoVncProxy } from "./novnc-proxy.js";
+import { nodeManager } from "./federation/node-manager.js";
+import { callManager } from "./telephony/call-manager.js";
 
 import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
+import { startReminderScheduler } from "./reminder-scheduler.js";
 import { imagePullManager } from "./image-pull-manager.js";
 import { restoreIfNeeded as restoreTailscaleFunnel, cleanup as cleanupTailscaleFunnel } from "./tailscale-manager.js";
 import { isRunningAsService } from "./service.js";
@@ -43,18 +46,18 @@ import type { SocketData } from "./ws-bridge.js";
 import type { ServerWebSocket } from "bun";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const packageRoot = process.env.__COMPANION_PACKAGE_ROOT || resolve(__dirname, "..");
+const packageRoot = process.env.__HEYHANK_PACKAGE_ROOT || process.env.__COMPANION_PACKAGE_ROOT || resolve(__dirname, "..");
 
 import { DEFAULT_PORT_DEV, DEFAULT_PORT_PROD } from "./constants.js";
 
 const defaultPort = process.env.NODE_ENV === "production" ? DEFAULT_PORT_PROD : DEFAULT_PORT_DEV;
 const port = Number(process.env.PORT) || defaultPort;
-const host = process.env.HOST || "0.0.0.0";
-const sessionStore = new SessionStore(process.env.COMPANION_SESSION_DIR);
+const host = process.env.HOST || "127.0.0.1";
+const sessionStore = new SessionStore(process.env.HEYHANK_SESSION_DIR || process.env.COMPANION_SESSION_DIR);
 const wsBridge = new WsBridge();
 const launcher = new CliLauncher(port);
 const worktreeTracker = new WorktreeTracker();
-const CONTAINER_STATE_PATH = join(COMPANION_HOME, "containers.json");
+const CONTAINER_STATE_PATH = join(HEYHANK_HOME, "containers.json");
 const terminalManager = new TerminalManager();
 const noVncProxy = new NoVncProxy();
 const prPoller = new PRPoller(wsBridge);
@@ -69,14 +72,16 @@ const orchestrator = new SessionOrchestrator({
 });
 
 // ── Cloud relay connection (for receiving webhooks behind a firewall) ────────
-// The relay forwards platform webhooks (e.g. GitHub, Slack) to the Companion
+// The relay forwards platform webhooks (e.g. GitHub, Slack) to the HeyHank
 // instance via an outbound WebSocket. Currently no webhook handlers are
 // registered (Chat SDK was removed). The relay is left disabled until handlers
 // are wired up (e.g. LinearAgentBridge or future platform integrations).
-if (process.env.COMPANION_RELAY_URL && process.env.COMPANION_RELAY_SECRET) {
+const relayUrl = process.env.HEYHANK_RELAY_URL || process.env.COMPANION_RELAY_URL;
+const relaySecret = process.env.HEYHANK_RELAY_SECRET || process.env.COMPANION_RELAY_SECRET;
+if (relayUrl && relaySecret) {
   console.warn(
-    "[server] COMPANION_RELAY_URL is set but no relay webhook handlers are registered. " +
-    "The relay client will not be started. Remove COMPANION_RELAY_URL/COMPANION_RELAY_SECRET " +
+    "[server] HEYHANK_RELAY_URL is set but no relay webhook handlers are registered. " +
+    "The relay client will not be started. Remove HEYHANK_RELAY_URL/HEYHANK_RELAY_SECRET " +
     "or wire up webhook handlers to use relay mode.",
   );
 }
@@ -98,7 +103,7 @@ if (recorder.isGloballyEnabled()) {
   console.log(`[server] Recording enabled (dir: ${recorder.getRecordingsDir()}, max: ${recorder.getMaxLines()} lines)`);
 }
 
-// ── Log file persistence — writes all log output to ~/.companion/logs/ ───────
+// ── Log file persistence — writes all log output to ~/.heyhank/logs/ ───────
 const logFileWriter = initLogFile();
 if (logFileWriter) {
   console.log(`[server] Log file enabled (dir: ${logFileWriter.getLogsDir()}, max: ${logFileWriter.getMaxLines()} lines, file: ${logFileWriter.filePath})`);
@@ -116,11 +121,11 @@ app.get("/health", (c) => {
   });
 });
 
-// ── Managed auth middleware — only active when COMPANION_AUTH_ENABLED=1 ────
-const hasManagedAuthSecret = Boolean(process.env.COMPANION_AUTH_SECRET?.trim());
+// ── Managed auth middleware — only active when HEYHANK_AUTH_ENABLED=1 ────
+const hasManagedAuthSecret = Boolean((process.env.HEYHANK_AUTH_SECRET || process.env.COMPANION_AUTH_SECRET)?.trim());
 const managedAuthEnabled =
-  process.env.COMPANION_AUTH_ENABLED === "1" ||
-  (hasManagedAuthSecret && process.env.COMPANION_AUTH_ENABLED !== "0");
+  (process.env.HEYHANK_AUTH_ENABLED || process.env.COMPANION_AUTH_ENABLED) === "1" ||
+  (hasManagedAuthSecret && (process.env.HEYHANK_AUTH_ENABLED || process.env.COMPANION_AUTH_ENABLED) !== "0");
 
 if (managedAuthEnabled) {
   const { managedAuth } = await import("./middleware/managed-auth.js");
@@ -138,9 +143,9 @@ app.route("/api", createRoutes(orchestrator, launcher, wsBridge, terminalManager
 // so this is the only way to bridge auth across the install boundary.
 app.get("/manifest.json", (c) => {
   const manifest = {
-    name: "The Companion",
-    short_name: "Companion",
-    description: "Web UI for Claude Code and Codex",
+    name: "HeyHank",
+    short_name: "HeyHank",
+    description: "Multi-Agent Platform with AI-powered coding, monitoring, and personal assistant",
     start_url: "/",
     scope: "/",
     display: "standalone" as const,
@@ -154,16 +159,19 @@ app.get("/manifest.json", (c) => {
 
   // If the user has an auth cookie (set during login), embed token in start_url.
   // Safari sends this cookie when fetching the manifest at "Add to Home Screen" time.
-  const authCookie = getCookie(c, "companion_auth");
+  const authCookie = getCookie(c, "heyhank_auth") || getCookie(c, "companion_auth");
   if (authCookie && verifyToken(authCookie)) {
     manifest.start_url = `/?token=${authCookie}`;
   } else {
-    // Localhost bypass — always embed the token for same-machine installs
-    const bunServer = c.env as { requestIP?: (req: Request) => { address: string } | null };
-    const ip = bunServer?.requestIP?.(c.req.raw);
-    const addr = ip?.address ?? "";
-    if (addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1") {
-      manifest.start_url = `/?token=${getToken()}`;
+    // Localhost bypass — only for direct connections (not behind reverse proxy)
+    const realIp = c.req.header("x-real-ip");
+    if (!realIp) {
+      const bunServer = c.env as { requestIP?: (req: Request) => { address: string } | null };
+      const ip = bunServer?.requestIP?.(c.req.raw);
+      const addr = ip?.address ?? "";
+      if (addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1") {
+        manifest.start_url = `/?token=${getToken()}`;
+      }
     }
   }
 
@@ -197,10 +205,17 @@ const server = Bun.serve<SocketData>({
       return new Response("WebSocket upgrade failed", { status: 400 });
     }
 
-    // Helper: check if request is from localhost (same machine)
-    const reqIp = server.requestIP(req);
-    const reqAddr = reqIp?.address ?? "";
-    const isLocalhost = reqAddr === "127.0.0.1" || reqAddr === "::1" || reqAddr === "::ffff:127.0.0.1";
+    // Helper: check if request is from localhost (same machine, not behind proxy)
+    const realIpHeader = req.headers.get("x-real-ip");
+    const isLocalhost = (() => {
+      if (realIpHeader) {
+        const trimmed = realIpHeader.trim();
+        return trimmed === "127.0.0.1" || trimmed === "::1" || trimmed === "::ffff:127.0.0.1";
+      }
+      const reqIp = server.requestIP(req);
+      const reqAddr = reqIp?.address ?? "";
+      return reqAddr === "127.0.0.1" || reqAddr === "::1" || reqAddr === "::ffff:127.0.0.1";
+    })();
 
     // ── Browser WebSocket — connects to a specific session ─────────────
     const browserMatch = url.pathname.match(/^\/ws\/browser\/([a-f0-9-]+)$/);
@@ -268,6 +283,36 @@ const server = Bun.serve<SocketData>({
       return new Response("WebSocket upgrade failed", { status: 400 });
     }
 
+    // ── Telephony Audio WebSocket — FreeSWITCH mod_audio_fork ───────
+    const telAudioMatch = url.pathname.match(/^\/ws\/telephony\/audio\/([a-f0-9-]+)$/);
+    if (telAudioMatch) {
+      const upgraded = server.upgrade(req, {
+        data: { kind: "telephony-audio" as const, callId: telAudioMatch[1] },
+      });
+      if (upgraded) return undefined;
+      return new Response("WebSocket upgrade failed", { status: 400 });
+    }
+
+    // ── Telephony Transcript WebSocket — browser live transcript ─────
+    const telTranscriptMatch = url.pathname.match(/^\/ws\/telephony\/transcript\/([a-f0-9-]+)$/);
+    if (telTranscriptMatch) {
+      const upgraded = server.upgrade(req, {
+        data: { kind: "telephony-transcript" as const, callId: telTranscriptMatch[1] },
+      });
+      if (upgraded) return undefined;
+      return new Response("WebSocket upgrade failed", { status: 400 });
+    }
+
+    // ── Federation WebSocket — peer node connections ─────────────────
+    if (url.pathname === "/ws/node") {
+      // Auth is handled inside the federation protocol (first frame)
+      const upgraded = server.upgrade(req, {
+        data: { kind: "node" as const, nodeId: "" },
+      });
+      if (upgraded) return undefined;
+      return new Response("WebSocket upgrade failed", { status: 400 });
+    }
+
     // Hono handles the rest
     return app.fetch(req, server);
   },
@@ -285,6 +330,12 @@ const server = Bun.serve<SocketData>({
         terminalManager.addBrowserSocket(ws);
       } else if (data.kind === "novnc") {
         noVncProxy.handleOpen(ws, data.sessionId);
+      } else if (data.kind === "node") {
+        nodeManager.handleInboundConnection(ws);
+      } else if (data.kind === "telephony-audio") {
+        callManager.addFreeSwitchSocket(data.callId, ws);
+      } else if (data.kind === "telephony-transcript") {
+        callManager.addTranscriptSocket(data.callId, ws);
       }
     },
     message(ws: ServerWebSocket<SocketData>, msg: string | Buffer) {
@@ -297,7 +348,16 @@ const server = Bun.serve<SocketData>({
         terminalManager.handleBrowserMessage(ws, msg);
       } else if (data.kind === "novnc") {
         noVncProxy.handleMessage(ws, msg);
+      } else if (data.kind === "node") {
+        const handler = (ws as unknown as Record<string, unknown>).__federationOnMessage as ((data: string | Buffer) => void) | undefined;
+        handler?.(typeof msg === "string" ? msg : msg.toString());
+      } else if (data.kind === "telephony-audio") {
+        // Binary audio from FreeSWITCH mod_audio_fork
+        if (msg instanceof Buffer || msg instanceof Uint8Array) {
+          callManager.handleFreeSwitchAudio(data.callId, msg as Buffer);
+        }
       }
+      // telephony-transcript: browser only sends keep-alive, no handling needed
     },
     close(ws: ServerWebSocket<SocketData>, code?: number, _reason?: string) {
       console.log("[ws-close]", ws.data.kind, "code=" + code);
@@ -310,6 +370,13 @@ const server = Bun.serve<SocketData>({
         terminalManager.removeBrowserSocket(ws);
       } else if (data.kind === "novnc") {
         noVncProxy.handleClose(ws);
+      } else if (data.kind === "node") {
+        const handler = (ws as unknown as Record<string, unknown>).__federationOnClose as (() => void) | undefined;
+        handler?.();
+      } else if (data.kind === "telephony-audio") {
+        callManager.removeFreeSwitchSocket(data.callId, ws);
+      } else if (data.kind === "telephony-transcript") {
+        callManager.removeTranscriptSocket(data.callId, ws);
       }
     },
   },
@@ -319,8 +386,8 @@ const authToken = getToken();
 console.log(`Server running on http://${host}:${server.port}`);
 console.log();
 console.log(`  Auth token: ${authToken}`);
-if (process.env.COMPANION_AUTH_TOKEN) {
-  console.log("  (using COMPANION_AUTH_TOKEN env var)");
+if (process.env.HEYHANK_AUTH_TOKEN || process.env.COMPANION_AUTH_TOKEN) {
+  console.log("  (using HEYHANK_AUTH_TOKEN env var)");
 }
 console.log();
 console.log(`  CLI WebSocket:     ws://localhost:${server.port}/ws/cli/:sessionId`);
@@ -330,6 +397,24 @@ if (process.env.NODE_ENV !== "production") {
   console.log("Dev mode: frontend at http://localhost:5174");
 }
 
+// ── Federation — multi-node mesh ──────────────────────────────────────────
+nodeManager.getLocalSessions = () => {
+  return launcher.listSessions().map((s) => {
+    const session = wsBridge.getSession(s.sessionId);
+    const state = session?.state;
+    return {
+      sessionId: s.sessionId,
+      name: s.name ?? s.sessionId,
+      model: state?.model ?? s.model ?? "",
+      cwd: state?.cwd ?? s.cwd ?? "",
+      status: s.state ?? "unknown",
+      backendType: state?.backend_type ?? s.backendType ?? "claude",
+      isConnected: s.state === "connected" || s.state === "running",
+    };
+  });
+};
+nodeManager.initialize();
+
 // ── Cron scheduler ──────────────────────────────────────────────────────────
 cronScheduler.startAll();
 
@@ -337,6 +422,13 @@ cronScheduler.startAll();
 migrateCronJobsToAgents();
 migrateLinearCredentialsToAgents();
 agentExecutor.startAll();
+
+// ── Agent Platform extensions ──────────────────────────────────────────────
+import { attachMessageDelivery } from "./message-delivery.js";
+import { startTimeoutMonitor } from "./agent-timeout.js";
+
+attachMessageDelivery(agentExecutor, wsBridge);
+startTimeoutMonitor(launcher, wsBridge);
 
 // ── Image pull manager — pre-pull missing Docker images for environments ────
 imagePullManager.initFromEnvironments();
@@ -348,6 +440,9 @@ restoreTailscaleFunnel(port).catch((err) => {
 
 // ── Update checker ──────────────────────────────────────────────────────────
 startPeriodicCheck();
+
+// ── Reminder scheduler ──────────────────────────────────────────────────────
+startReminderScheduler();
 if (isRunningAsService()) {
   setServiceMode(true);
   console.log("[server] Running as background service (auto-update available)");
@@ -386,8 +481,11 @@ setInterval(() => {
 // ── Graceful shutdown — persist container state ──────────────────────────────
 function gracefulShutdown() {
   console.log("[server] Persisting container state before shutdown...");
+  nodeManager.shutdown();
   containerManager.persistState(CONTAINER_STATE_PATH);
   cleanupTailscaleFunnel(port);
+  import("./agent-timeout.js").then(({ stopTimeoutMonitor }) => stopTimeoutMonitor()).catch(() => {});
+  import("./cost-tracker.js").then(({ costTracker }) => costTracker.close()).catch(() => {});
   closeLogFile();
   process.exit(0);
 }

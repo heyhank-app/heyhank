@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "../api.js";
 import { useStore } from "../store.js";
-import { getTelemetryPreferenceEnabled, setTelemetryPreferenceEnabled } from "../analytics.js";
 import { navigateToSession, navigateHome } from "../utils/routing.js";
+import { FederationSettings } from "./FederationSettings.js";
+import { subscribeToPush, unsubscribeFromPush } from "../sw-register.js";
 
 interface SettingsPageProps {
   embedded?: boolean;
@@ -14,14 +15,76 @@ const CATEGORIES = [
   { id: "authentication", label: "Authentication" },
   { id: "notifications", label: "Notifications" },
   { id: "providers", label: "Providers" },
+  { id: "gemini", label: "Gemini" },
+  { id: "email", label: "Email" },
+  { id: "calendar", label: "Calendar" },
   { id: "anthropic", label: "Anthropic" },
   { id: "ai-validation", label: "AI Validation" },
   { id: "updates", label: "Updates" },
-  { id: "telemetry", label: "Telemetry" },
+  { id: "appearance", label: "Appearance" },
   { id: "environments", label: "Environments" },
+  { id: "federation", label: "Federation" },
 ] as const;
 
 type CategoryId = (typeof CATEGORIES)[number]["id"];
+
+function PushNotificationToggle() {
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushLoading, setPushLoading] = useState(true);
+
+  useEffect(() => {
+    // Check current push subscription status
+    (async () => {
+      try {
+        const reg = await navigator.serviceWorker?.ready;
+        if (reg) {
+          const sub = await reg.pushManager.getSubscription();
+          setPushEnabled(!!sub);
+        }
+      } catch { /* SW not available */ }
+      setPushLoading(false);
+    })();
+  }, []);
+
+  const toggle = async () => {
+    setPushLoading(true);
+    try {
+      if (pushEnabled) {
+        await unsubscribeFromPush();
+        setPushEnabled(false);
+      } else {
+        if (Notification.permission !== "granted") {
+          const result = await Notification.requestPermission();
+          if (result !== "granted") {
+            setPushLoading(false);
+            return;
+          }
+        }
+        const sub = await subscribeToPush();
+        setPushEnabled(!!sub);
+      }
+    } catch (err) {
+      console.error("[push] Toggle failed:", err);
+    }
+    setPushLoading(false);
+  };
+
+  if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      disabled={pushLoading}
+      className="w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg text-sm bg-cc-hover text-cc-fg hover:bg-cc-active transition-colors cursor-pointer disabled:opacity-50"
+    >
+      <span>Push Notifications (Agent Alerts)</span>
+      <span className="text-xs text-cc-muted">
+        {pushLoading ? "..." : pushEnabled ? "On" : "Off"}
+      </span>
+    </button>
+  );
+}
 
 export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [anthropicApiKey, setAnthropicApiKey] = useState("");
@@ -51,7 +114,6 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [updatingApp, setUpdatingApp] = useState(false);
   const [updateStatus, setUpdateStatus] = useState("");
   const [updateError, setUpdateError] = useState("");
-  const [telemetryEnabled, setTelemetryEnabled] = useState(getTelemetryPreferenceEnabled());
   const [aiValidationEnabled, setAiValidationEnabled] = useState(false);
   const [aiValidationAutoApprove, setAiValidationAutoApprove] = useState(true);
   const [aiValidationAutoDeny, setAiValidationAutoDeny] = useState(false);
@@ -71,6 +133,66 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [providerError, setProviderError] = useState("");
   const [claudeTokenFocused, setClaudeTokenFocused] = useState(false);
   const [openaiKeyFocused, setOpenaiKeyFocused] = useState(false);
+  const [claudeCliAuth, setClaudeCliAuth] = useState<{ authenticated: boolean; method: string; oauthTokenConfigured: boolean; cliVersion: string | null } | null>(null);
+  const [codexCliAuth, setCodexCliAuth] = useState<{ authenticated: boolean; method: string; apiKeyConfigured: boolean; cliVersion: string | null } | null>(null);
+
+  // Gemini state
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [geminiApiKeyConfigured, setGeminiApiKeyConfigured] = useState(false);
+  const [geminiVoice, setGeminiVoice] = useState("Kore");
+  const [geminiVoiceOriginal, setGeminiVoiceOriginal] = useState("Kore");
+  const [assistantName, setAssistantName] = useState("");
+  const [assistantNameOriginal, setAssistantNameOriginal] = useState("");
+  const [geminiKeyFocused, setGeminiKeyFocused] = useState(false);
+  const [geminiSaving, setGeminiSaving] = useState(false);
+  const [geminiSaved, setGeminiSaved] = useState(false);
+  const [geminiError, setGeminiError] = useState("");
+
+  // Email accounts state
+  interface EmailAccountUI {
+    id: string;
+    name: string;
+    email: string;
+    imap: { host: string; port: number; secure: boolean };
+    smtp: { host: string; port: number; secure: boolean };
+    auth: { user: string; pass: string };
+  }
+  const [emailAccounts, setEmailAccounts] = useState<EmailAccountUI[]>([]);
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const [emailSaved, setEmailSaved] = useState("");
+  const [editingEmail, setEditingEmail] = useState<EmailAccountUI | null>(null);
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [emailForm, setEmailForm] = useState({
+    name: "", email: "",
+    imapHost: "", imapPort: "993", imapSecure: true,
+    smtpHost: "", smtpPort: "465", smtpSecure: true,
+    authUser: "", authPass: "",
+  });
+  const [emailTesting, setEmailTesting] = useState<string | null>(null);
+  const [emailTestResult, setEmailTestResult] = useState<{ id: string; ok: boolean; message?: string } | null>(null);
+
+  // Calendar accounts state
+  interface CalendarAccountUI {
+    id: string;
+    name: string;
+    provider: "google" | "icloud" | "caldav";
+    serverUrl: string;
+    auth: { user: string; pass: string };
+    defaultCalendarId?: string;
+  }
+  const [calAccounts, setCalAccounts] = useState<CalendarAccountUI[]>([]);
+  const [calLoading, setCalLoading] = useState(false);
+  const [calError, setCalError] = useState("");
+  const [calSaved, setCalSaved] = useState("");
+  const [editingCal, setEditingCal] = useState<CalendarAccountUI | null>(null);
+  const [showCalForm, setShowCalForm] = useState(false);
+  const [calForm, setCalForm] = useState({
+    name: "", provider: "google" as "google" | "icloud" | "caldav",
+    serverUrl: "", authUser: "", authPass: "",
+  });
+  const [calTesting, setCalTesting] = useState<string | null>(null);
+  const [calTestResult, setCalTestResult] = useState<{ id: string; ok: boolean; message?: string; calendars?: string[] } | null>(null);
 
   // Auth section state
   const [authToken, setAuthToken] = useState<string | null>(null);
@@ -134,6 +256,11 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
         setConfigured(s.anthropicApiKeyConfigured);
         setClaudeCodeTokenConfigured(s.claudeCodeOAuthTokenConfigured);
         setOpenaiApiKeyConfigured(s.openaiApiKeyConfigured);
+        if (s.claudeCliAuth) setClaudeCliAuth(s.claudeCliAuth);
+        if (s.codexCliAuth) setCodexCliAuth(s.codexCliAuth);
+        setGeminiApiKeyConfigured(s.geminiApiKeyConfigured);
+        if (s.geminiVoice) { setGeminiVoice(s.geminiVoice); setGeminiVoiceOriginal(s.geminiVoice); }
+        if (typeof s.assistantName === "string") { setAssistantName(s.assistantName); setAssistantNameOriginal(s.assistantName); }
         setAnthropicModel(s.anthropicModel || "claude-sonnet-4-6");
         setEditorTabEnabled(s.editorTabEnabled);
         setStoreEditorTabEnabled(s.editorTabEnabled);
@@ -152,7 +279,197 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
 
     // Fetch auth token in parallel (non-blocking)
     api.getAuthToken().then((res) => setAuthToken(res.token)).catch(() => {});
+
+    // Fetch email accounts
+    loadEmailAccounts();
+    // Fetch calendar accounts
+    loadCalendarAccounts();
   }, []);
+
+  function loadEmailAccounts() {
+    setEmailLoading(true);
+    fetch("/api/email-accounts", { headers: { ...getAuthHeadersForFetch() } })
+      .then((r) => r.json())
+      .then((data) => setEmailAccounts(data as EmailAccountUI[]))
+      .catch(() => {})
+      .finally(() => setEmailLoading(false));
+  }
+
+  function getAuthHeadersForFetch(): Record<string, string> {
+    const token = localStorage.getItem("auth_token") || sessionStorage.getItem("auth_token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  function resetEmailForm() {
+    setEmailForm({ name: "", email: "", imapHost: "", imapPort: "993", imapSecure: true, smtpHost: "", smtpPort: "465", smtpSecure: true, authUser: "", authPass: "" });
+    setEditingEmail(null);
+    setShowEmailForm(false);
+  }
+
+  async function saveEmailAccount() {
+    setEmailError("");
+    const payload = {
+      name: emailForm.name.trim(),
+      email: emailForm.email.trim(),
+      imap: { host: emailForm.imapHost.trim(), port: parseInt(emailForm.imapPort) || 993, secure: emailForm.imapSecure },
+      smtp: { host: emailForm.smtpHost.trim(), port: parseInt(emailForm.smtpPort) || 465, secure: emailForm.smtpSecure },
+      auth: { user: emailForm.authUser.trim(), pass: emailForm.authPass },
+    };
+    if (!payload.name || !payload.email || !payload.imap.host || !payload.smtp.host || !payload.auth.user || !payload.auth.pass) {
+      setEmailError("All fields are required.");
+      return;
+    }
+    try {
+      const url = editingEmail ? `/api/email-accounts/${editingEmail.id}` : "/api/email-accounts";
+      const method = editingEmail ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json", ...getAuthHeadersForFetch() },
+        body: JSON.stringify(editingEmail ? payload : payload),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as { error?: string }).error || "Failed"); }
+      setEmailSaved(editingEmail ? "Account updated." : "Account added.");
+      setTimeout(() => setEmailSaved(""), 2000);
+      resetEmailForm();
+      loadEmailAccounts();
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function deleteEmailAccount(id: string) {
+    if (!confirm("Delete this email account?")) return;
+    try {
+      await fetch(`/api/email-accounts/${id}`, { method: "DELETE", headers: getAuthHeadersForFetch() });
+      loadEmailAccounts();
+    } catch {}
+  }
+
+  async function testEmailAccount(id: string) {
+    setEmailTesting(id);
+    setEmailTestResult(null);
+    try {
+      const res = await fetch(`/api/email-accounts/${id}/test`, { method: "POST", headers: getAuthHeadersForFetch() });
+      const data = await res.json() as { ok: boolean; message?: string; error?: string };
+      setEmailTestResult({ id, ok: data.ok, message: data.ok ? data.message : data.error });
+    } catch (err) {
+      setEmailTestResult({ id, ok: false, message: err instanceof Error ? err.message : "Connection failed" });
+    } finally {
+      setEmailTesting(null);
+    }
+  }
+
+  function startEditEmail(account: EmailAccountUI) {
+    setEditingEmail(account);
+    setEmailForm({
+      name: account.name,
+      email: account.email,
+      imapHost: account.imap.host,
+      imapPort: String(account.imap.port),
+      imapSecure: account.imap.secure,
+      smtpHost: account.smtp.host,
+      smtpPort: String(account.smtp.port),
+      smtpSecure: account.smtp.secure,
+      authUser: account.auth.user,
+      authPass: "", // don't prefill password
+    });
+    setShowEmailForm(true);
+  }
+
+  // ─── Calendar Account Functions ──────────────────────────────────────
+
+  function loadCalendarAccounts() {
+    setCalLoading(true);
+    fetch("/api/calendar-accounts", { headers: { ...getAuthHeadersForFetch() } })
+      .then((r) => r.json())
+      .then((data) => setCalAccounts(data as CalendarAccountUI[]))
+      .catch(() => {})
+      .finally(() => setCalLoading(false));
+  }
+
+  function resetCalForm() {
+    setCalForm({ name: "", provider: "google", serverUrl: "", authUser: "", authPass: "" });
+    setEditingCal(null);
+    setShowCalForm(false);
+  }
+
+  function applyCalPreset(provider: "google" | "icloud" | "outlook" | "caldav") {
+    const presets: Record<string, { serverUrl: string }> = {
+      google: { serverUrl: "https://apidata.googleusercontent.com/caldav/v2/" },
+      icloud: { serverUrl: "https://caldav.icloud.com/" },
+      outlook: { serverUrl: "https://outlook.office365.com/caldav/" },
+      caldav: { serverUrl: "" },
+    };
+    setCalForm((f) => ({ ...f, provider: provider === "outlook" ? "caldav" : provider, serverUrl: presets[provider]?.serverUrl || "" }));
+  }
+
+  async function saveCalendarAccount() {
+    setCalError("");
+    const payload = {
+      name: calForm.name.trim(),
+      provider: calForm.provider,
+      serverUrl: calForm.serverUrl.trim(),
+      auth: { user: calForm.authUser.trim(), pass: calForm.authPass },
+    };
+    if (!payload.name || !payload.auth.user || !payload.auth.pass) {
+      setCalError("Name, user and password are required.");
+      return;
+    }
+    if (payload.provider === "caldav" && !payload.serverUrl) {
+      setCalError("Server URL is required for custom CalDAV.");
+      return;
+    }
+    try {
+      const url = editingCal ? `/api/calendar-accounts/${editingCal.id}` : "/api/calendar-accounts";
+      const method = editingCal ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json", ...getAuthHeadersForFetch() },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as { error?: string }).error || "Failed"); }
+      setCalSaved(editingCal ? "Account updated." : "Account added.");
+      setTimeout(() => setCalSaved(""), 2000);
+      resetCalForm();
+      loadCalendarAccounts();
+    } catch (err) {
+      setCalError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function deleteCalendarAccount(id: string) {
+    if (!confirm("Delete this calendar account?")) return;
+    try {
+      await fetch(`/api/calendar-accounts/${id}`, { method: "DELETE", headers: getAuthHeadersForFetch() });
+      loadCalendarAccounts();
+    } catch {}
+  }
+
+  async function testCalendarAccount(id: string) {
+    setCalTesting(id);
+    setCalTestResult(null);
+    try {
+      const res = await fetch(`/api/calendar-accounts/${id}/test`, { method: "POST", headers: getAuthHeadersForFetch() });
+      const data = await res.json() as { ok: boolean; message?: string; error?: string; calendars?: string[] };
+      setCalTestResult({ id, ok: data.ok, message: data.ok ? data.message : data.error, calendars: data.calendars });
+    } catch (err) {
+      setCalTestResult({ id, ok: false, message: err instanceof Error ? err.message : "Connection failed" });
+    } finally {
+      setCalTesting(null);
+    }
+  }
+
+  function startEditCal(account: CalendarAccountUI) {
+    setEditingCal(account);
+    setCalForm({
+      name: account.name,
+      provider: account.provider,
+      serverUrl: account.serverUrl,
+      authUser: account.auth.user,
+      authPass: "",
+    });
+    setShowCalForm(true);
+  }
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
@@ -228,12 +545,12 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
     setUpdateError("");
     try {
       // Flag so the Docker image update dialog appears after restart
-      localStorage.setItem("companion_docker_prompt_pending", "1");
+      localStorage.setItem("heyhank_docker_prompt_pending", "1");
       const res = await api.triggerUpdate();
       setUpdateStatus(res.message);
       setUpdateOverlayActive(true);
     } catch (err: unknown) {
-      localStorage.removeItem("companion_docker_prompt_pending");
+      localStorage.removeItem("heyhank_docker_prompt_pending");
       setUpdateError(err instanceof Error ? err.message : String(err));
       setUpdatingApp(false);
     }
@@ -368,7 +685,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
               <div className="space-y-4">
                 <p className="text-xs text-cc-muted">
                   The public URL is used for webhook URLs that external services (Linear, GitHub) send events to.
-                  Set this to the externally-reachable address of your Companion instance.
+                  Set this to the externally-reachable address of your HeyHank instance.
                 </p>
                 <p className="text-xs text-cc-muted">
                   Tip:{" "}
@@ -604,6 +921,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     <span className="text-xs text-cc-muted">{notificationDesktop ? "On" : "Off"}</span>
                   </button>
                 )}
+                <PushNotificationToggle />
               </div>
             </section>
 
@@ -612,53 +930,142 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
               <h2 className="text-sm font-semibold text-cc-fg mb-4">Providers</h2>
               <div className="space-y-6">
                 <p className="text-xs text-cc-muted">
-                  Configure authentication tokens for Claude Code and Codex. These are injected into sessions automatically.
+                  Connect AI backends to power your agent sessions. Each provider needs authentication — either via CLI login on the server or by entering a token/key below.
                 </p>
 
-                {/* Claude Code OAuth Token */}
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium" htmlFor="claude-code-token">
-                    Claude Code OAuth Token
-                  </label>
-                  <p className="text-xs text-cc-muted">
-                    Run <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">claude setup-token</code> in your terminal, then paste the token here.
-                  </p>
-                  <input
-                    id="claude-code-token"
-                    type="password"
-                    value={claudeCodeTokenConfigured && !claudeTokenFocused && !claudeCodeToken ? "••••••••••••••••" : claudeCodeToken}
-                    onChange={(e) => setClaudeCodeToken(e.target.value)}
-                    onFocus={() => setClaudeTokenFocused(true)}
-                    onBlur={() => setClaudeTokenFocused(false)}
-                    placeholder={claudeCodeTokenConfigured ? "Enter a new token to replace" : "Paste token from claude setup-token"}
-                    className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
-                  />
-                  <p className="text-xs text-cc-muted">
-                    {claudeCodeTokenConfigured ? "Claude Code token configured" : "Claude Code token not configured"}
-                  </p>
+                {/* Claude Code */}
+                <div className="space-y-3 p-4 bg-cc-bg rounded-lg border border-cc-border">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-medium text-cc-fg">Claude Code</h3>
+                      {claudeCliAuth?.cliVersion && (
+                        <p className="text-xs text-cc-muted mt-0.5">{claudeCliAuth.cliVersion}</p>
+                      )}
+                    </div>
+                    {/* Status badge */}
+                    {claudeCliAuth?.authenticated || claudeCodeTokenConfigured ? (
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-cc-success/15 text-cc-success border border-cc-success/20">
+                        Authenticated
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-cc-error/15 text-cc-error border border-cc-error/20">
+                        Not configured
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Auth method info */}
+                  {claudeCliAuth?.authenticated && (
+                    <div className="px-3 py-2 rounded-lg bg-cc-success/5 border border-cc-success/10 text-xs text-cc-muted">
+                      {claudeCliAuth.method === "cli_login" && (
+                        <>Authenticated via <strong className="text-cc-fg">CLI login</strong> (credentials found on server). Sessions will authenticate automatically.</>
+                      )}
+                      {claudeCliAuth.method === "env_api_key" && (
+                        <>Authenticated via <strong className="text-cc-fg">ANTHROPIC_API_KEY</strong> environment variable.</>
+                      )}
+                      {claudeCliAuth.method === "env_oauth" && (
+                        <>Authenticated via <strong className="text-cc-fg">CLAUDE_CODE_OAUTH_TOKEN</strong> environment variable.</>
+                      )}
+                      {claudeCliAuth.method === "env_auth_token" && (
+                        <>Authenticated via <strong className="text-cc-fg">ANTHROPIC_AUTH_TOKEN</strong> environment variable.</>
+                      )}
+                      {claudeCodeTokenConfigured && (
+                        <> Additionally, a dashboard OAuth token is configured.</>
+                      )}
+                    </div>
+                  )}
+
+                  {!claudeCliAuth?.authenticated && !claudeCodeTokenConfigured && (
+                    <div className="px-3 py-2.5 rounded-lg bg-cc-primary/5 border border-cc-primary/15 text-xs text-cc-muted space-y-2">
+                      <p className="font-medium text-cc-fg">Setup options (choose one):</p>
+                      <div className="space-y-1.5 ml-1">
+                        <p><strong>Option 1 — CLI Login (recommended):</strong> Run <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">claude login</code> on the server. This stores credentials locally and all sessions authenticate automatically.</p>
+                        <p><strong>Option 2 — OAuth Token:</strong> Run <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">claude setup-token</code> on any machine, copy the token, and paste it below. The token is injected into every Claude session.</p>
+                        <p><strong>Option 3 — API Key:</strong> Set <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">ANTHROPIC_API_KEY</code> as an environment variable on the server.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Token input (always available as override) */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs text-cc-muted" htmlFor="claude-code-token">
+                      OAuth Token {claudeCliAuth?.authenticated ? "(optional override)" : ""}
+                    </label>
+                    <input
+                      id="claude-code-token"
+                      type="password"
+                      value={claudeCodeTokenConfigured && !claudeTokenFocused && !claudeCodeToken ? "••••••••••••••••" : claudeCodeToken}
+                      onChange={(e) => setClaudeCodeToken(e.target.value)}
+                      onFocus={() => setClaudeTokenFocused(true)}
+                      onBlur={() => setClaudeTokenFocused(false)}
+                      placeholder={claudeCodeTokenConfigured ? "Enter a new token to replace" : "Paste token from claude setup-token"}
+                      className="w-full px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
+                    />
+                  </div>
                 </div>
 
-                {/* OpenAI API Key (Codex) */}
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium" htmlFor="openai-api-key">
-                    OpenAI API Key (Codex)
-                  </label>
-                  <p className="text-xs text-cc-muted">
-                    Used to authenticate Codex sessions. You can also use <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">codex --login</code> for device-based auth.
-                  </p>
-                  <input
-                    id="openai-api-key"
-                    type="password"
-                    value={openaiApiKeyConfigured && !openaiKeyFocused && !openaiApiKey ? "••••••••••••••••" : openaiApiKey}
-                    onChange={(e) => setOpenaiApiKey(e.target.value)}
-                    onFocus={() => setOpenaiKeyFocused(true)}
-                    onBlur={() => setOpenaiKeyFocused(false)}
-                    placeholder={openaiApiKeyConfigured ? "Enter a new key to replace" : "sk-..."}
-                    className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
-                  />
-                  <p className="text-xs text-cc-muted">
-                    {openaiApiKeyConfigured ? "OpenAI key configured" : "OpenAI key not configured"}
-                  </p>
+                {/* OpenAI / Codex */}
+                <div className="space-y-3 p-4 bg-cc-bg rounded-lg border border-cc-border">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-medium text-cc-fg">OpenAI Codex</h3>
+                      {codexCliAuth?.cliVersion && (
+                        <p className="text-xs text-cc-muted mt-0.5">{codexCliAuth.cliVersion}</p>
+                      )}
+                    </div>
+                    {/* Status badge */}
+                    {codexCliAuth?.authenticated || openaiApiKeyConfigured ? (
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-cc-success/15 text-cc-success border border-cc-success/20">
+                        Authenticated
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-cc-error/15 text-cc-error border border-cc-error/20">
+                        Not configured
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Auth method info */}
+                  {codexCliAuth?.authenticated && (
+                    <div className="px-3 py-2 rounded-lg bg-cc-success/5 border border-cc-success/10 text-xs text-cc-muted">
+                      {codexCliAuth.method === "cli_login" && (
+                        <>Authenticated via <strong className="text-cc-fg">device login</strong> (auth.json found on server). Sessions will authenticate automatically.</>
+                      )}
+                      {codexCliAuth.method === "env_api_key" && (
+                        <>Authenticated via <strong className="text-cc-fg">OPENAI_API_KEY</strong> environment variable.</>
+                      )}
+                      {openaiApiKeyConfigured && (
+                        <> Additionally, a dashboard API key is configured.</>
+                      )}
+                    </div>
+                  )}
+
+                  {!codexCliAuth?.authenticated && !openaiApiKeyConfigured && (
+                    <div className="px-3 py-2.5 rounded-lg bg-cc-primary/5 border border-cc-primary/15 text-xs text-cc-muted space-y-2">
+                      <p className="font-medium text-cc-fg">Setup options (choose one):</p>
+                      <div className="space-y-1.5 ml-1">
+                        <p><strong>Option 1 — Device Login (recommended):</strong> Run <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">codex --login</code> on the server. This opens a browser-based auth flow and stores credentials locally.</p>
+                        <p><strong>Option 2 — API Key:</strong> Enter your OpenAI API key below. Get one from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-cc-primary hover:underline">platform.openai.com/api-keys</a>. The key is injected into every Codex session.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* API Key input */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs text-cc-muted" htmlFor="openai-api-key">
+                      API Key {codexCliAuth?.authenticated ? "(optional override)" : ""}
+                    </label>
+                    <input
+                      id="openai-api-key"
+                      type="password"
+                      value={openaiApiKeyConfigured && !openaiKeyFocused && !openaiApiKey ? "••••••••••••••••" : openaiApiKey}
+                      onChange={(e) => setOpenaiApiKey(e.target.value)}
+                      onFocus={() => setOpenaiKeyFocused(true)}
+                      onBlur={() => setOpenaiKeyFocused(false)}
+                      placeholder={openaiApiKeyConfigured ? "Enter a new key to replace" : "sk-..."}
+                      className="w-full px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
+                    />
+                  </div>
                 </div>
 
                 {providerError && (
@@ -687,6 +1094,8 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                       const res = await api.updateSettings(payload);
                       setClaudeCodeTokenConfigured(res.claudeCodeOAuthTokenConfigured);
                       setOpenaiApiKeyConfigured(res.openaiApiKeyConfigured);
+                      if (res.claudeCliAuth) setClaudeCliAuth(res.claudeCliAuth);
+                      if (res.codexCliAuth) setCodexCliAuth(res.codexCliAuth);
                       setClaudeCodeToken("");
                       setOpenaiApiKey("");
                       setProviderSaved(true);
@@ -700,12 +1109,563 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   className={`px-4 py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors ${
                     providerSaving || (!claudeCodeToken.trim() && !openaiApiKey.trim())
                       ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                      : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+                      : "bg-cc-primary-btn hover:bg-cc-primary-btn-hover text-white cursor-pointer"
                   }`}
                 >
                   {providerSaving ? "Saving..." : "Save Provider Settings"}
                 </button>
               </div>
+            </section>
+
+            {/* Gemini */}
+            <section id="gemini" ref={setSectionRef("gemini")}>
+              <h2 className="text-sm font-semibold text-cc-fg mb-4">Gemini</h2>
+              <div className="space-y-6">
+                <p className="text-xs text-cc-muted">
+                  Configure Gemini Live for voice chat. Get an API key from{" "}
+                  <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-cc-primary hover:underline">
+                    Google AI Studio
+                  </a>.
+                </p>
+
+                {/* Gemini API Key */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium" htmlFor="gemini-api-key">
+                    Gemini API Key
+                  </label>
+                  <input
+                    id="gemini-api-key"
+                    type="password"
+                    value={geminiApiKeyConfigured && !geminiKeyFocused && !geminiApiKey ? "••••••••••••••••" : geminiApiKey}
+                    onChange={(e) => setGeminiApiKey(e.target.value)}
+                    onFocus={() => setGeminiKeyFocused(true)}
+                    onBlur={() => setGeminiKeyFocused(false)}
+                    placeholder={geminiApiKeyConfigured ? "Enter a new key to replace" : "AIza..."}
+                    className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
+                  />
+                  <p className="text-xs text-cc-muted">
+                    {geminiApiKeyConfigured ? "Gemini API key configured" : "Gemini API key not configured"}
+                  </p>
+                </div>
+
+                {/* Assistant Name */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium" htmlFor="assistant-name">
+                    Assistant Name
+                  </label>
+                  <input
+                    id="assistant-name"
+                    type="text"
+                    value={assistantName}
+                    onChange={(e) => setAssistantName(e.target.value)}
+                    placeholder="e.g. Jarvis, Friday, Max"
+                    className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
+                  />
+                  <p className="text-xs text-cc-muted">
+                    Give your voice assistant a custom name. Leave empty for default.
+                  </p>
+                </div>
+
+                {/* Voice Selection */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium" htmlFor="gemini-voice">
+                    Voice
+                  </label>
+                  <select
+                    id="gemini-voice"
+                    value={geminiVoice}
+                    onChange={(e) => setGeminiVoice(e.target.value)}
+                    className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
+                  >
+                    <option value="Kore">Kore (female, firm)</option>
+                    <option value="Puck">Puck (male, playful)</option>
+                    <option value="Charon">Charon (male, deep)</option>
+                    <option value="Fenrir">Fenrir (male, bold)</option>
+                    <option value="Aoede">Aoede (female, bright)</option>
+                    <option value="Leda">Leda (female, gentle)</option>
+                    <option value="Orus">Orus (male, clear)</option>
+                    <option value="Zephyr">Zephyr (neutral, calm)</option>
+                  </select>
+                </div>
+
+                {geminiError && (
+                  <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
+                    {geminiError}
+                  </div>
+                )}
+
+                {geminiSaved && (
+                  <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
+                    Gemini settings saved.
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  disabled={geminiSaving || (!geminiApiKey.trim() && geminiVoice === geminiVoiceOriginal && assistantName === assistantNameOriginal)}
+                  onClick={async () => {
+                    setGeminiSaving(true);
+                    setGeminiError("");
+                    setGeminiSaved(false);
+                    try {
+                      const payload: { geminiApiKey?: string; geminiVoice?: string; assistantName?: string } = {};
+                      if (geminiApiKey.trim()) payload.geminiApiKey = geminiApiKey.trim();
+                      payload.assistantName = assistantName;
+                      payload.geminiVoice = geminiVoice;
+                      const res = await api.updateSettings(payload);
+                      setGeminiApiKeyConfigured(res.geminiApiKeyConfigured);
+                      if (res.geminiVoice) { setGeminiVoice(res.geminiVoice); setGeminiVoiceOriginal(res.geminiVoice); }
+                      if (typeof res.assistantName === "string") { setAssistantName(res.assistantName); setAssistantNameOriginal(res.assistantName); }
+                      setGeminiApiKey("");
+                      setGeminiSaved(true);
+                      setTimeout(() => setGeminiSaved(false), 1800);
+                    } catch (err: unknown) {
+                      setGeminiError(err instanceof Error ? err.message : String(err));
+                    } finally {
+                      setGeminiSaving(false);
+                    }
+                  }}
+                  className={`px-4 py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors ${
+                    geminiSaving
+                      ? "bg-cc-hover text-cc-muted cursor-not-allowed"
+                      : "bg-cc-primary-btn hover:bg-cc-primary-btn-hover text-white cursor-pointer"
+                  }`}
+                >
+                  {geminiSaving ? "Saving..." : "Save Gemini Settings"}
+                </button>
+              </div>
+            </section>
+
+            {/* Email Accounts */}
+            <section id="email" ref={setSectionRef("email")}>
+              <h2 className="text-sm font-semibold text-cc-fg mb-4">Email Accounts</h2>
+              <div className="space-y-4">
+                <p className="text-xs text-cc-muted">
+                  Configure IMAP/SMTP email accounts for the voice assistant. Gemini can read, search, and send emails on your behalf.
+                </p>
+
+                {/* Account list */}
+                {emailLoading ? (
+                  <p className="text-xs text-cc-muted">Loading accounts...</p>
+                ) : emailAccounts.length === 0 ? (
+                  <p className="text-xs text-cc-muted">No email accounts configured.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {emailAccounts.map((acc) => (
+                      <div key={acc.id} className="flex items-center justify-between px-3 py-2.5 bg-cc-bg rounded-lg">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium text-cc-fg truncate">{acc.name}</div>
+                          <div className="text-xs text-cc-muted truncate">{acc.email}</div>
+                          <div className="text-xs text-cc-muted">IMAP: {acc.imap.host}:{acc.imap.port} | SMTP: {acc.smtp.host}:{acc.smtp.port}</div>
+                          {emailTestResult?.id === acc.id && (
+                            <div className={`text-xs mt-1 ${emailTestResult.ok ? "text-cc-success" : "text-cc-error"}`}>
+                              {emailTestResult.message}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex gap-1.5 ml-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => testEmailAccount(acc.id)}
+                            disabled={emailTesting === acc.id}
+                            className="px-2 py-1 text-xs rounded bg-cc-hover text-cc-fg hover:bg-cc-border transition-colors"
+                          >
+                            {emailTesting === acc.id ? "..." : "Test"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => startEditEmail(acc)}
+                            className="px-2 py-1 text-xs rounded bg-cc-hover text-cc-fg hover:bg-cc-border transition-colors"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteEmailAccount(acc.id)}
+                            className="px-2 py-1 text-xs rounded bg-cc-error/10 text-cc-error hover:bg-cc-error/20 transition-colors"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add/Edit form */}
+                {!showEmailForm ? (
+                  <button
+                    type="button"
+                    onClick={() => { resetEmailForm(); setShowEmailForm(true); }}
+                    className="px-4 py-2 min-h-[44px] rounded-lg text-sm font-medium bg-cc-primary-btn hover:bg-cc-primary-btn-hover text-white transition-colors cursor-pointer"
+                  >
+                    Add Email Account
+                  </button>
+                ) : (
+                  <div className="space-y-3 p-4 bg-cc-bg rounded-lg border border-cc-border">
+                    <h3 className="text-sm font-medium text-cc-fg">
+                      {editingEmail ? `Edit: ${editingEmail.name}` : "Add Email Account"}
+                    </h3>
+
+                    {/* Quick presets with info tooltips */}
+                    {!editingEmail && (
+                      <div className="space-y-1">
+                        <p className="text-xs text-cc-muted font-medium">Quick presets:</p>
+                        <div className="flex gap-2 flex-wrap">
+                          {[
+                            { label: "Gmail", imap: "imap.gmail.com", smtp: "smtp.gmail.com", imapPort: "993", smtpPort: "465", info: "1. Go to myaccount.google.com\n2. Security \u2192 2-Step Verification (must be ON)\n3. Search for \"App passwords\" or go to myaccount.google.com/apppasswords\n4. Create a new App Password (name: e.g. \"Email Agent\")\n5. Copy the 16-character password\n6. Use your Gmail address as both Email and Username\n\nNote: If \"App passwords\" is not available, 2-Step Verification is not enabled yet." },
+                            { label: "Outlook", imap: "outlook.office365.com", smtp: "smtp.office365.com", imapPort: "993", smtpPort: "587", smtpSecure: false, info: "1. Go to account.microsoft.com\n2. Security \u2192 Advanced security options\n3. Enable 2-Step Verification if not active\n4. App passwords \u2192 Create a new app password\n5. Copy the generated password\n6. Use your Outlook/Hotmail email as both Email and Username\n\nNote: SMTP uses port 587 with STARTTLS (not SSL). For work/school accounts, ask your admin about IMAP access." },
+                            { label: "Hostinger", imap: "imap.hostinger.com", smtp: "smtp.hostinger.com", imapPort: "993", smtpPort: "465", info: "1. Use the email address you created in Hostinger\n2. Use the same password you set for the email account\n3. IMAP: imap.hostinger.com (Port 993, SSL)\n4. SMTP: smtp.hostinger.com (Port 465, SSL)\n\nNo App Password needed \u2014 use your regular email password." },
+                            { label: "World4You", imap: "imap.world4you.com", smtp: "smtp.world4you.com", imapPort: "993", smtpPort: "465", info: "1. Use your World4You email address\n2. Use the password from your World4You control panel\n3. IMAP: imap.world4you.com (Port 993, SSL)\n4. SMTP: smtp.world4you.com (Port 465, SSL)\n\nNo App Password needed \u2014 use your regular email password." },
+                          ].map((preset) => (
+                            <div key={preset.label} className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setEmailForm((f) => ({
+                                  ...f,
+                                  imapHost: preset.imap,
+                                  smtpHost: preset.smtp,
+                                  imapPort: preset.imapPort,
+                                  smtpPort: preset.smtpPort,
+                                  imapSecure: true,
+                                  smtpSecure: (preset as { smtpSecure?: boolean }).smtpSecure !== false,
+                                }))}
+                                className="px-2 py-1 text-xs rounded bg-cc-hover text-cc-fg hover:bg-cc-active transition-colors cursor-pointer border border-cc-border"
+                              >
+                                {preset.label}
+                              </button>
+                              <div className="relative group">
+                                <div className="w-4 h-4 flex items-center justify-center rounded-full bg-cc-hover text-cc-muted text-[10px] font-bold cursor-help border border-cc-border group-hover:bg-cc-primary group-hover:text-white group-hover:border-cc-primary transition-colors">
+                                  i
+                                </div>
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-3 rounded-lg bg-cc-card border border-cc-border shadow-lg text-xs text-cc-fg whitespace-pre-line opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-50">
+                                  <div className="font-semibold mb-1.5 text-cc-primary">{preset.label} Setup</div>
+                                  {preset.info}
+                                  <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px w-2 h-2 bg-cc-card border-r border-b border-cc-border rotate-45" />
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-cc-muted mb-1">Display Name</label>
+                        <input
+                          type="text"
+                          value={emailForm.name}
+                          onChange={(e) => setEmailForm((f) => ({ ...f, name: e.target.value }))}
+                          placeholder="e.g. Gmail, Work, Personal"
+                          className="w-full px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-cc-muted mb-1">Email Address</label>
+                        <input
+                          type="email"
+                          value={emailForm.email}
+                          onChange={(e) => setEmailForm((f) => ({ ...f, email: e.target.value }))}
+                          placeholder="user@example.com"
+                          className="w-full px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40"
+                        />
+                      </div>
+                    </div>
+
+                    {/* IMAP */}
+                    <div>
+                      <label className="block text-xs text-cc-muted mb-1 font-medium">IMAP (Incoming)</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        <input
+                          type="text"
+                          value={emailForm.imapHost}
+                          onChange={(e) => setEmailForm((f) => ({ ...f, imapHost: e.target.value }))}
+                          placeholder="imap.example.com"
+                          className="col-span-2 px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40"
+                        />
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={emailForm.imapPort}
+                            onChange={(e) => setEmailForm((f) => ({ ...f, imapPort: e.target.value }))}
+                            placeholder="993"
+                            className="w-full px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40"
+                          />
+                        </div>
+                      </div>
+                      <label className="flex items-center gap-2 mt-1.5 text-xs text-cc-muted cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={emailForm.imapSecure}
+                          onChange={(e) => setEmailForm((f) => ({ ...f, imapSecure: e.target.checked }))}
+                          className="rounded"
+                        />
+                        SSL/TLS
+                      </label>
+                    </div>
+
+                    {/* SMTP */}
+                    <div>
+                      <label className="block text-xs text-cc-muted mb-1 font-medium">SMTP (Outgoing)</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        <input
+                          type="text"
+                          value={emailForm.smtpHost}
+                          onChange={(e) => setEmailForm((f) => ({ ...f, smtpHost: e.target.value }))}
+                          placeholder="smtp.example.com"
+                          className="col-span-2 px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40"
+                        />
+                        <input
+                          type="text"
+                          value={emailForm.smtpPort}
+                          onChange={(e) => setEmailForm((f) => ({ ...f, smtpPort: e.target.value }))}
+                          placeholder="465"
+                          className="w-full px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40"
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 mt-1.5 text-xs text-cc-muted cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={emailForm.smtpSecure}
+                          onChange={(e) => setEmailForm((f) => ({ ...f, smtpSecure: e.target.checked }))}
+                          className="rounded"
+                        />
+                        SSL/TLS
+                      </label>
+                    </div>
+
+                    {/* Auth */}
+                    <div>
+                      <label className="block text-xs text-cc-muted mb-1 font-medium">Authentication</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          value={emailForm.authUser}
+                          onChange={(e) => setEmailForm((f) => ({ ...f, authUser: e.target.value }))}
+                          placeholder="Username / Email"
+                          className="px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40"
+                        />
+                        <input
+                          type="password"
+                          value={emailForm.authPass}
+                          onChange={(e) => setEmailForm((f) => ({ ...f, authPass: e.target.value }))}
+                          placeholder={editingEmail ? "New password (leave empty to keep)" : "Password / App Password"}
+                          className="px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40"
+                        />
+                      </div>
+                    </div>
+
+                    {emailError && (
+                      <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
+                        {emailError}
+                      </div>
+                    )}
+
+                    {emailSaved && (
+                      <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
+                        {emailSaved}
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={saveEmailAccount}
+                        className="px-4 py-2 min-h-[44px] rounded-lg text-sm font-medium bg-cc-primary-btn hover:bg-cc-primary-btn-hover text-white transition-colors cursor-pointer"
+                      >
+                        {editingEmail ? "Update Account" : "Add Account"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={resetEmailForm}
+                        className="px-4 py-2 min-h-[44px] rounded-lg text-sm font-medium bg-cc-hover text-cc-fg hover:bg-cc-border transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </section>
+
+            {/* Calendar */}
+            <section id="calendar" ref={setSectionRef("calendar")}>
+              <h2 className="text-sm font-semibold text-cc-fg mb-4">Calendar Accounts</h2>
+              <p className="text-xs text-cc-muted mb-4">
+                Connect CalDAV calendars (Google Calendar, iCloud, Outlook, Nextcloud, etc.) so your assistant can manage events.
+              </p>
+
+              {calError && <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error mb-2">{calError}</div>}
+              {calSaved && <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success mb-2">{calSaved}</div>}
+
+              {/* Existing accounts list */}
+              {calLoading ? (
+                <div className="text-xs text-cc-muted">Loading...</div>
+              ) : calAccounts.length > 0 ? (
+                <div className="space-y-2 mb-4">
+                  {calAccounts.map((acc) => (
+                    <div key={acc.id} className="flex items-center justify-between px-3 py-2.5 bg-cc-bg rounded-lg">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-cc-fg truncate">{acc.name}</div>
+                        <div className="text-xs text-cc-muted truncate">{acc.auth.user} ({acc.provider})</div>
+                        {calTestResult?.id === acc.id && (
+                          <div className={`text-xs mt-1 ${calTestResult.ok ? "text-cc-success" : "text-cc-error"}`}>
+                            {calTestResult.message}
+                            {calTestResult.calendars && (
+                              <span className="text-cc-muted"> — Calendars: {calTestResult.calendars.join(", ")}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex gap-1.5 ml-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => testCalendarAccount(acc.id)}
+                          disabled={calTesting === acc.id}
+                          className="px-2 py-1 text-xs rounded bg-cc-hover text-cc-fg hover:bg-cc-border transition-colors"
+                        >
+                          {calTesting === acc.id ? "..." : "Test"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => startEditCal(acc)}
+                          className="px-2 py-1 text-xs rounded bg-cc-hover text-cc-fg hover:bg-cc-border transition-colors"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteCalendarAccount(acc.id)}
+                          className="px-2 py-1 text-xs rounded bg-cc-error/10 text-cc-error hover:bg-cc-error/20 transition-colors"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-cc-muted mb-4">No calendar accounts configured.</div>
+              )}
+
+              {/* Add / Edit form */}
+              {!showCalForm && (
+                <button
+                  type="button"
+                  onClick={() => { resetCalForm(); setShowCalForm(true); }}
+                  className="px-4 py-2 min-h-[44px] rounded-lg text-sm font-medium bg-cc-primary-btn hover:bg-cc-primary-btn-hover text-white transition-colors cursor-pointer"
+                >
+                  Add Calendar Account
+                </button>
+              )}
+
+              {showCalForm && (
+                <div className="space-y-3 p-4 bg-cc-bg rounded-lg border border-cc-border">
+                  <h3 className="text-sm font-medium text-cc-fg">
+                    {editingCal ? "Edit Calendar Account" : "Add Calendar Account"}
+                  </h3>
+
+                  {/* Provider selection with info tooltips */}
+                  <div>
+                    <label className="block text-xs text-cc-muted mb-1 font-medium">Provider</label>
+                    <div className="flex gap-2 flex-wrap">
+                      {([
+                        { id: "google" as const, label: "Google", info: "1. Go to myaccount.google.com\n2. Security \u2192 2-Step Verification (must be ON)\n3. Search for \"App passwords\" or go to myaccount.google.com/apppasswords\n4. Create a new App Password (name: e.g. \"Calendar\")\n5. Copy the 16-character password (format: xxxx xxxx xxxx xxxx)\n6. Use your Gmail address as username and the App Password here" },
+                        { id: "icloud" as const, label: "iCloud", info: "1. Go to appleid.apple.com and sign in\n2. Sign-In and Security \u2192 App-Specific Passwords\n3. Click \"+\" to generate a new password\n4. Name it (e.g. \"Calendar Agent\")\n5. Copy the generated password (format: xxxx-xxxx-xxxx-xxxx)\n6. Use your Apple ID email as username and the App-Specific Password here\n\nNote: 2-Factor Authentication must be enabled (default for iCloud)" },
+                        { id: "outlook" as const, label: "Outlook", info: "1. Go to account.microsoft.com and sign in\n2. Security \u2192 Advanced security options\n3. App passwords \u2192 Create a new app password\n4. Copy the generated password\n5. Use your Outlook/Hotmail email as username\n\nCalDAV URL: https://outlook.office365.com/caldav/\n\nNote: App Passwords require 2-Step Verification to be enabled. For work/school accounts, your admin may need to enable CalDAV access." },
+                        { id: "caldav" as const, label: "CalDAV", info: "For Nextcloud:\n  URL: https://your-server.com/remote.php/dav/\n\nFor Synology:\n  URL: https://your-nas:5001/caldav/\n\nFor other servers, check your provider's CalDAV documentation for the correct URL." },
+                      ]).map((p) => (
+                        <div key={p.id} className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => applyCalPreset(p.id)}
+                            className={`px-2 py-1 text-xs rounded border transition-colors cursor-pointer ${calForm.provider === p.id ? "bg-cc-primary-btn text-white border-cc-primary-btn" : "bg-cc-hover text-cc-fg border-cc-border hover:bg-cc-active"}`}
+                          >
+                            {p.label}
+                          </button>
+                          <div className="relative group">
+                            <div className="w-4 h-4 flex items-center justify-center rounded-full bg-cc-hover text-cc-muted text-[10px] font-bold cursor-help border border-cc-border group-hover:bg-cc-primary group-hover:text-white group-hover:border-cc-primary transition-colors">
+                              i
+                            </div>
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-3 rounded-lg bg-cc-card border border-cc-border shadow-lg text-xs text-cc-fg whitespace-pre-line opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-50">
+                              <div className="font-semibold mb-1.5 text-cc-primary">{p.label} Setup</div>
+                              {p.info}
+                              <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px w-2 h-2 bg-cc-card border-r border-b border-cc-border rotate-45" />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-cc-muted mb-1">Display Name</label>
+                      <input
+                        type="text"
+                        value={calForm.name}
+                        onChange={(e) => setCalForm((f) => ({ ...f, name: e.target.value }))}
+                        placeholder="e.g. Google, iCloud, Work"
+                        className="w-full px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40"
+                      />
+                    </div>
+                    {(calForm.provider === "caldav" || calForm.provider === "outlook") && (
+                      <div>
+                        <label className="block text-xs text-cc-muted mb-1">Server URL</label>
+                        <input
+                          type="text"
+                          value={calForm.serverUrl}
+                          onChange={(e) => setCalForm((f) => ({ ...f, serverUrl: e.target.value }))}
+                          placeholder={calForm.provider === "outlook" ? "https://outlook.office365.com/caldav/" : "https://cloud.example.com/remote.php/dav/"}
+                          className="w-full px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-cc-muted mb-1">Username / Email</label>
+                      <input
+                        type="text"
+                        value={calForm.authUser}
+                        onChange={(e) => setCalForm((f) => ({ ...f, authUser: e.target.value }))}
+                        placeholder={calForm.provider === "google" ? "you@gmail.com" : calForm.provider === "icloud" ? "you@icloud.com" : calForm.provider === "outlook" ? "you@outlook.com" : "username"}
+                        className="w-full px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-cc-muted mb-1">Password / App Password</label>
+                      <input
+                        type="password"
+                        value={calForm.authPass}
+                        onChange={(e) => setCalForm((f) => ({ ...f, authPass: e.target.value }))}
+                        placeholder={editingCal ? "New password (leave empty to keep)" : "App Password"}
+                        className="w-full px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={saveCalendarAccount}
+                      className="px-4 py-2 min-h-[44px] rounded-lg text-sm font-medium bg-cc-primary-btn hover:bg-cc-primary-btn-hover text-white transition-colors cursor-pointer"
+                    >
+                      {editingCal ? "Update Account" : "Add Account"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={resetCalForm}
+                      className="px-4 py-2 min-h-[44px] rounded-lg text-sm font-medium bg-cc-hover text-cc-fg hover:bg-cc-border transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </section>
 
             {/* Anthropic */}
@@ -793,7 +1753,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                       className={`px-3 py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors ${
                         saving || loading
                           ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                          : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+                          : "bg-cc-primary-btn hover:bg-cc-primary-btn-hover text-white cursor-pointer"
                       }`}
                     >
                       {saving ? "Saving..." : "Save"}
@@ -962,7 +1922,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   <div>
                     <span className="block text-sm font-medium">Auto-update Docker image</span>
                     <p className="mt-0.5 text-xs text-cc-muted">
-                      Automatically re-pull the sandbox Docker image when updating The Companion
+                      Automatically re-pull the sandbox Docker image when updating HeyHank
                     </p>
                   </div>
                   <button
@@ -1024,42 +1984,59 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                       className={`px-3 py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors ${
                         updatingApp || updateInfo.updateInProgress || !updateInfo.updateAvailable
                           ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                          : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
+                          : "bg-cc-primary-btn hover:bg-cc-primary-btn-hover text-white cursor-pointer"
                       }`}
                     >
                       {updatingApp || updateInfo.updateInProgress ? "Updating..." : "Update & Restart"}
                     </button>
                   ) : (
                     <p className="text-xs text-cc-muted self-center">
-                      Install service mode with <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">the-companion install</code> to enable one-click updates.
+                      Install service mode with <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">heyhank install</code> to enable one-click updates.
                     </p>
                   )}
                 </div>
               </div>
             </section>
 
-            {/* Telemetry */}
-            <section id="telemetry" ref={setSectionRef("telemetry")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Telemetry</h2>
+            {/* Appearance */}
+            <section id="appearance" ref={setSectionRef("appearance")}>
+              <h2 className="text-sm font-semibold text-cc-fg mb-4">Appearance</h2>
               <div className="space-y-3">
                 <p className="text-xs text-cc-muted">
-                  Anonymous product analytics and crash reports via PostHog to improve reliability.
+                  Adjust the UI font size to your preference.
                 </p>
+                <div className="flex items-center gap-3">
+                  <label htmlFor="font-size-slider" className="text-xs text-cc-fg shrink-0 w-16">Font Size</label>
+                  <input
+                    id="font-size-slider"
+                    type="range"
+                    min="12"
+                    max="20"
+                    step="1"
+                    value={parseInt(localStorage.getItem("cc-font-size") || "14", 10)}
+                    onChange={(e) => {
+                      const size = e.target.value;
+                      localStorage.setItem("cc-font-size", size);
+                      document.documentElement.style.fontSize = `${size}px`;
+                    }}
+                    className="flex-1 accent-cc-primary cursor-pointer"
+                  />
+                  <span className="text-xs text-cc-muted tabular-nums w-8 text-right">
+                    {localStorage.getItem("cc-font-size") || "14"}px
+                  </span>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
-                    const next = !telemetryEnabled;
-                    setTelemetryPreferenceEnabled(next);
-                    setTelemetryEnabled(next);
+                    localStorage.removeItem("cc-font-size");
+                    document.documentElement.style.fontSize = "";
+                    // Force re-render
+                    window.dispatchEvent(new Event("storage"));
                   }}
-                  className="w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg text-sm bg-cc-hover text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
+                  className="text-xs text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
                 >
-                  <span>Usage analytics and errors</span>
-                  <span className="text-xs text-cc-muted">{telemetryEnabled ? "On" : "Off"}</span>
+                  Reset to default
                 </button>
-                <p className="text-xs text-cc-muted">
-                  Browser Do Not Track is respected automatically.
-                </p>
               </div>
             </section>
 
@@ -1075,10 +2052,21 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   onClick={() => {
                     window.location.hash = "#/environments";
                   }}
-                  className="px-3 py-2 min-h-[44px] rounded-lg text-sm font-medium bg-cc-primary hover:bg-cc-primary-hover text-white transition-colors cursor-pointer"
+                  className="px-3 py-2 min-h-[44px] rounded-lg text-sm font-medium bg-cc-primary-btn hover:bg-cc-primary-btn-hover text-white transition-colors cursor-pointer"
                 >
                   Open Environments Page
                 </button>
+              </div>
+            </section>
+
+            {/* Federation */}
+            <section id="federation" ref={setSectionRef("federation")}>
+              <h2 className="text-sm font-semibold text-cc-fg mb-4">Federation</h2>
+              <div className="space-y-3">
+                <p className="text-xs text-cc-muted">
+                  Connect multiple HeyHank instances into a peer-to-peer mesh.
+                </p>
+                <FederationSettings />
               </div>
             </section>
           </div>

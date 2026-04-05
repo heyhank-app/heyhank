@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { join, basename } from "node:path";
-import { COMPANION_HOME } from "./paths.js";
+import { HEYHANK_HOME } from "./paths.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -41,7 +41,7 @@ export interface WorktreeCreateResult {
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
-const WORKTREES_BASE = join(COMPANION_HOME, "worktrees");
+const WORKTREES_BASE = join(HEYHANK_HOME, "worktrees");
 
 function sanitizeBranch(branch: string): string {
   return branch.replace(/\//g, "--");
@@ -292,7 +292,7 @@ export function ensureWorktree(
 }
 
 /**
- * Generate a unique branch name for a companion-managed worktree.
+ * Generate a unique branch name for a HeyHank-managed worktree.
  * Pattern: `{branch}-wt-{random4digit}` (e.g. `main-wt-8374`).
  * Uses random suffixes to avoid collisions with leftover branches.
  */
@@ -332,7 +332,7 @@ export function removeWorktree(
   try {
     const forceFlag = options?.force ? " --force" : "";
     git(`worktree remove "${worktreePath}"${forceFlag}`, repoRoot);
-    // Clean up the companion-managed branch after worktree removal
+    // Clean up the HeyHank-managed branch after worktree removal
     if (options?.branchToDelete) {
       gitSafe(`branch -D ${options.branchToDelete}`, repoRoot);
     }

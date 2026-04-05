@@ -13,6 +13,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       strategies: "generateSW",
       workbox: {
+        // Import push notification handler into the generated service worker
+        importScripts: ["/push-sw.js"],
         // Precache all build output: JS chunks (incl. lazy-loaded), CSS, HTML,
         // icons, SVGs, and the two terminal Nerd Font woff2 files (~2.4MB total)
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
@@ -29,6 +31,30 @@ export default defineConfig({
             // All /api/* fetch() calls: always go to network, never cache
             urlPattern: /^\/api\//,
             handler: "NetworkOnly",
+          },
+          {
+            // Cache icon/image assets with stale-while-revalidate
+            urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp|ico)$/,
+            handler: "StaleWhileRevalidate",
+            options: {
+              cacheName: "images",
+              expiration: {
+                maxEntries: 60,
+                maxAgeSeconds: 30 * 24 * 60 * 60,
+              },
+            },
+          },
+          {
+            // Cache fonts with cache-first strategy
+            urlPattern: /\.(?:woff|woff2|ttf|otf)$/,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "fonts",
+              expiration: {
+                maxEntries: 20,
+                maxAgeSeconds: 365 * 24 * 60 * 60,
+              },
+            },
           },
         ],
       },

@@ -2,16 +2,16 @@ import { describe, it, expect } from "vitest";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
-  DEFAULT_COMPANION_CODEX_HOME,
+  DEFAULT_HEYHANK_CODEX_HOME,
   getLegacyCodexHome,
-  resolveCompanionCodexHome,
-  resolveCompanionCodexSessionHome,
+  resolveHeyHankCodexHome,
+  resolveHeyHankCodexSessionHome,
 } from "./codex-home.js";
 
 describe("codex-home", () => {
-  it("DEFAULT_COMPANION_CODEX_HOME points to ~/.companion/codex-home", () => {
-    expect(DEFAULT_COMPANION_CODEX_HOME).toBe(
-      join(homedir(), ".companion", "codex-home"),
+  it("DEFAULT_HEYHANK_CODEX_HOME points to ~/.heyhank/codex-home", () => {
+    expect(DEFAULT_HEYHANK_CODEX_HOME).toBe(
+      join(homedir(), ".heyhank", "codex-home"),
     );
   });
 
@@ -19,22 +19,22 @@ describe("codex-home", () => {
     expect(getLegacyCodexHome()).toBe(join(homedir(), ".codex"));
   });
 
-  it("resolveCompanionCodexHome returns default when no explicit path given", () => {
-    expect(resolveCompanionCodexHome()).toBe(DEFAULT_COMPANION_CODEX_HOME);
+  it("resolveHeyHankCodexHome returns default when no explicit path given", () => {
+    expect(resolveHeyHankCodexHome()).toBe(DEFAULT_HEYHANK_CODEX_HOME);
   });
 
-  it("resolveCompanionCodexHome uses explicit path when provided", () => {
+  it("resolveHeyHankCodexHome uses explicit path when provided", () => {
     const custom = "/tmp/my-codex-home";
-    expect(resolveCompanionCodexHome(custom)).toBe(custom);
+    expect(resolveHeyHankCodexHome(custom)).toBe(custom);
   });
 
-  // Regression: resolveCompanionCodexHome must NOT read process.env.CODEX_HOME
+  // Regression: resolveHeyHankCodexHome must NOT read process.env.CODEX_HOME
   // because that points to the user's global ~/.codex and would break per-session isolation.
-  it("resolveCompanionCodexHome ignores process.env.CODEX_HOME", () => {
+  it("resolveHeyHankCodexHome ignores process.env.CODEX_HOME", () => {
     const original = process.env.CODEX_HOME;
     try {
       process.env.CODEX_HOME = "/tmp/global-codex";
-      expect(resolveCompanionCodexHome()).toBe(DEFAULT_COMPANION_CODEX_HOME);
+      expect(resolveHeyHankCodexHome()).toBe(DEFAULT_HEYHANK_CODEX_HOME);
     } finally {
       if (original === undefined) {
         delete process.env.CODEX_HOME;
@@ -44,17 +44,17 @@ describe("codex-home", () => {
     }
   });
 
-  it("resolveCompanionCodexSessionHome appends sessionId to base", () => {
+  it("resolveHeyHankCodexSessionHome appends sessionId to base", () => {
     const sessionId = "abc-123";
-    expect(resolveCompanionCodexSessionHome(sessionId)).toBe(
-      join(DEFAULT_COMPANION_CODEX_HOME, sessionId),
+    expect(resolveHeyHankCodexSessionHome(sessionId)).toBe(
+      join(DEFAULT_HEYHANK_CODEX_HOME, sessionId),
     );
   });
 
-  it("resolveCompanionCodexSessionHome uses explicit path", () => {
+  it("resolveHeyHankCodexSessionHome uses explicit path", () => {
     const custom = "/tmp/my-codex-home";
     const sessionId = "xyz-789";
-    expect(resolveCompanionCodexSessionHome(sessionId, custom)).toBe(
+    expect(resolveHeyHankCodexSessionHome(sessionId, custom)).toBe(
       join(custom, sessionId),
     );
   });

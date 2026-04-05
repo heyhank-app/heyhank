@@ -1,4 +1,4 @@
-// Formal session state machine for the Companion server.
+// Formal session state machine for the HeyHank server.
 // Centralizes session phase definitions and validates transitions.
 
 import { metricsCollector } from "./metrics-collector.js";

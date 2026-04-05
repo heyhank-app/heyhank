@@ -32,7 +32,7 @@ async function verifyLinearApiKey(apiKey: string): Promise<{
       },
       body: JSON.stringify({
         query: `
-          query CompanionVerifyConnection {
+          query HeyHankVerifyConnection {
             viewer { id name email }
             organization { id name }
           }

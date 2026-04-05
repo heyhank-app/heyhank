@@ -2,7 +2,7 @@
  * Codex App-Server Adapter
  *
  * Translates between the Codex app-server JSON-RPC protocol (stdin/stdout)
- * and The Companion's BrowserIncomingMessage/BrowserOutgoingMessage types.
+ * and HeyHank's BrowserIncomingMessage/BrowserOutgoingMessage types.
  *
  * This allows the browser to be completely unaware of which backend is running —
  * it sees the same message types regardless of whether Claude Code or Codex is
@@ -965,8 +965,8 @@ export class CodexAdapter implements IBackendAdapter {
       // Step 1: Send initialize request
       await this.transport.call("initialize", {
         clientInfo: {
-          name: "thecompanion",
-          title: "The Companion",
+          name: "maxxagent",
+          title: "HeyHank",
           version: "1.0.0",
         },
         capabilities: {
@@ -1675,7 +1675,7 @@ export class CodexAdapter implements IBackendAdapter {
       });
       this.browserMessageCb?.({
         type: "error",
-        message: `Codex notification handler crashed on "${method}". Companion may need an update.`,
+        message: `Codex notification handler crashed on "${method}". HeyHank may need an update.`,
       });
     }
   }
@@ -1728,7 +1728,7 @@ export class CodexAdapter implements IBackendAdapter {
       });
       this.browserMessageCb?.({
         type: "error",
-        message: `Codex request handler crashed on "${method}". Companion may need an update.`,
+        message: `Codex request handler crashed on "${method}". HeyHank may need an update.`,
       });
     }
   }

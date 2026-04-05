@@ -5,11 +5,11 @@ import {
   existsSync,
 } from "node:fs";
 import { join, dirname } from "node:path";
-import { COMPANION_HOME } from "./paths.js";
+import { HEYHANK_HOME } from "./paths.js";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
-const DEFAULT_PATH = join(COMPANION_HOME, "session-names.json");
+const DEFAULT_PATH = join(HEYHANK_HOME, "session-names.json");
 
 // ─── Store ──────────────────────────────────────────────────────────────────
 

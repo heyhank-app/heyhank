@@ -134,7 +134,7 @@ export class ContainerManager {
   /**
    * Create and start a container for a session.
    *
-   * - Mounts `~/.claude` read-only at `/companion-host-claude` (auth seed)
+   * - Mounts `~/.claude` read-only at `/heyhank-host-claude` (auth seed)
    * - Uses a writable tmpfs at `/root/.claude` for runtime state
    * - Mounts `hostCwd` at `/workspace`
    * - Publishes requested ports with auto-assigned host ports (`-p 0:PORT`)
@@ -144,7 +144,7 @@ export class ContainerManager {
     hostCwd: string,
     config: ContainerConfig,
   ): ContainerInfo {
-    const name = `companion-${sessionId.slice(0, 8)}`;
+    const name = `heyhank-${sessionId.slice(0, 8)}`;
     const homedir = process.env.HOME || process.env.USERPROFILE || "/root";
 
     // Validate port numbers
@@ -156,7 +156,7 @@ export class ContainerManager {
     }
 
     // Create a named volume for workspace isolation (each container gets its own copy)
-    const volumeName = `companion-ws-${sessionId.slice(0, 8)}`;
+    const volumeName = `heyhank-ws-${sessionId.slice(0, 8)}`;
     exec(`docker volume create ${shellEscape(volumeName)}`, {
       encoding: "utf-8",
       timeout: QUICK_EXEC_TIMEOUT_MS,
@@ -172,11 +172,11 @@ export class ContainerManager {
       // Desktop, but required explicitly on Linux)
       "--add-host=host.docker.internal:host-gateway",
       // Seed auth/config from host home, but keep runtime writes inside container.
-      "-v", `${homedir}/.claude:/companion-host-claude:ro`,
+      "-v", `${homedir}/.claude:/heyhank-host-claude:ro`,
       "--tmpfs", "/root/.claude",
       // Seed Codex auth/config from host (if present)
       ...(existsSync(join(homedir, ".codex"))
-        ? ["-v", `${homedir}/.codex:/companion-host-codex:ro`, "--tmpfs", "/root/.codex"]
+        ? ["-v", `${homedir}/.codex:/heyhank-host-codex:ro`, "--tmpfs", "/root/.codex"]
         : []),
       // Isolated workspace: named volume populated later via docker cp
       "-v", `${volumeName}:/workspace`,
@@ -189,7 +189,7 @@ export class ContainerManager {
     // can also write container-specific overrides (e.g. gpgsign=false).
     const gitconfigPath = join(homedir, ".gitconfig");
     if (existsSync(gitconfigPath)) {
-      args.push("-v", `${gitconfigPath}:/companion-host-gitconfig:ro`);
+      args.push("-v", `${gitconfigPath}:/heyhank-host-gitconfig:ro`);
     }
 
     // Port mappings: -p [hostIp:]0:{containerPort}
@@ -282,14 +282,14 @@ export class ContainerManager {
         [
           "mkdir -p /root/.claude",
           "for f in .credentials.json auth.json .auth.json credentials.json; do " +
-            "[ -f /companion-host-claude/$f ] && cp /companion-host-claude/$f /root/.claude/$f 2>/dev/null; done",
+            "[ -f /heyhank-host-claude/$f ] && cp /heyhank-host-claude/$f /root/.claude/$f 2>/dev/null; done",
           "for f in settings.json settings.local.json; do " +
-            "[ -f /companion-host-claude/$f ] && cp /companion-host-claude/$f /root/.claude/$f 2>/dev/null; done",
-          "[ -d /companion-host-claude/skills ] && cp -r /companion-host-claude/skills /root/.claude/skills 2>/dev/null",
+            "[ -f /heyhank-host-claude/$f ] && cp /heyhank-host-claude/$f /root/.claude/$f 2>/dev/null; done",
+          "[ -d /heyhank-host-claude/skills ] && cp -r /heyhank-host-claude/skills /root/.claude/skills 2>/dev/null",
           "true",
         ].join("; "),
       ]);
-    } catch { /* best-effort — container may not have /companion-host-claude mounted */ }
+    } catch { /* best-effort — container may not have /heyhank-host-claude mounted */ }
   }
 
   /**
@@ -302,16 +302,16 @@ export class ContainerManager {
       this.execInContainer(containerId, [
         "sh", "-lc",
         [
-          "[ -d /companion-host-codex ] || exit 0",
+          "[ -d /heyhank-host-codex ] || exit 0",
           "mkdir -p /root/.codex",
           "for f in auth.json config.toml models_cache.json version.json; do " +
-            "[ -f /companion-host-codex/$f ] && cp /companion-host-codex/$f /root/.codex/$f 2>/dev/null; done",
+            "[ -f /heyhank-host-codex/$f ] && cp /heyhank-host-codex/$f /root/.codex/$f 2>/dev/null; done",
           "for d in skills vendor_imports prompts rules; do " +
-            "[ -d /companion-host-codex/$d ] && cp -r /companion-host-codex/$d /root/.codex/$d 2>/dev/null; done",
+            "[ -d /heyhank-host-codex/$d ] && cp -r /heyhank-host-codex/$d /root/.codex/$d 2>/dev/null; done",
           "true",
         ].join("; "),
       ]);
-    } catch { /* best-effort — container may not have /companion-host-codex mounted */ }
+    } catch { /* best-effort — container may not have /heyhank-host-codex mounted */ }
   }
 
   /**
@@ -363,9 +363,9 @@ export class ContainerManager {
         "sh", "-lc",
         [
           // Import user.name and user.email from host gitconfig (if mounted)
-          "if [ -f /companion-host-gitconfig ]; then " +
-            "NAME=$(git config -f /companion-host-gitconfig user.name 2>/dev/null); " +
-            "EMAIL=$(git config -f /companion-host-gitconfig user.email 2>/dev/null); " +
+          "if [ -f /heyhank-host-gitconfig ]; then " +
+            "NAME=$(git config -f /heyhank-host-gitconfig user.name 2>/dev/null); " +
+            "EMAIL=$(git config -f /heyhank-host-gitconfig user.email 2>/dev/null); " +
             '[ -n "$NAME" ] && git config --global user.name "$NAME"; ' +
             '[ -n "$EMAIL" ] && git config --global user.email "$EMAIL"; ' +
           "fi",
@@ -858,7 +858,7 @@ export class ContainerManager {
     onProgress?: (line: string) => void,
   ): Promise<{ success: boolean; log: string }> {
     // Write Dockerfile to temp dir
-    const buildDir = join(tmpdir(), `companion-build-${Date.now()}`);
+    const buildDir = join(tmpdir(), `heyhank-build-${Date.now()}`);
     mkdirSync(buildDir, { recursive: true });
     const dockerfilePath = join(buildDir, "Dockerfile");
     writeFileSync(dockerfilePath, dockerfileContent, "utf-8");

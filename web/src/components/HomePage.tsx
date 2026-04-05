@@ -4,8 +4,8 @@ import {
   api,
   createSessionStream,
   type ClaudeDiscoveredSession,
-  type CompanionEnv,
-  type CompanionSandbox,
+  type HeyHankEnv,
+  type HeyHankSandbox,
   type GitRepoInfo,
   type GitBranchInfo,
   type BackendInfo,
@@ -28,6 +28,7 @@ import { MentionMenu } from "./MentionMenu.js";
 import { useMentionMenu } from "../utils/use-mention-menu.js";
 import type { SavedPrompt } from "../api.js";
 import type { SdkSessionInfo } from "../types.js";
+import type { AgentInfo } from "../api.js";
 
 type ResumeCandidate = {
   resumeSessionId: string;
@@ -38,7 +39,7 @@ type ResumeCandidate = {
   createdAt: number;
   cwd: string;
   gitBranch?: string;
-  source: "companion" | "claude_disk";
+  source: "heyhank" | "claude_disk";
 };
 
 type SessionLaunchOverride = {
@@ -118,14 +119,14 @@ export function HomePage() {
   const MODES = getModesForBackend(backend);
 
   // Environment state
-  const [envs, setEnvs] = useState<CompanionEnv[]>([]);
+  const [envs, setEnvs] = useState<HeyHankEnv[]>([]);
   const [selectedEnv, setSelectedEnv] = useState(() => localStorage.getItem("cc-selected-env") || "");
   const [showEnvDropdown, setShowEnvDropdown] = useState(false);
   const [showEnvManager, setShowEnvManager] = useState(false);
 
   // Sandbox state
   const [sandboxEnabled, setSandboxEnabled] = useState(() => localStorage.getItem("cc-sandbox-enabled") === "true");
-  const [sandboxes, setSandboxes] = useState<CompanionSandbox[]>([]);
+  const [sandboxes, setSandboxes] = useState<HeyHankSandbox[]>([]);
   const [selectedSandbox, setSelectedSandbox] = useState(() => localStorage.getItem("cc-selected-sandbox") || "");
   const [showSandboxDropdown, setShowSandboxDropdown] = useState(false);
   const sandboxDropdownRef = useRef<HTMLDivElement>(null);
@@ -248,7 +249,7 @@ export function HomePage() {
     });
   }, [backend]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When sandbox is enabled, check the-companion:latest image status
+  // When sandbox is enabled, check heyhank:latest image status
   useEffect(() => {
     if (sandboxImagePollRef.current) {
       clearInterval(sandboxImagePollRef.current);
@@ -258,7 +259,7 @@ export function HomePage() {
 
     if (!sandboxEnabled) return;
 
-    const effectiveImage = "the-companion:latest";
+    const effectiveImage = "heyhank:latest";
 
     const checkAndPull = () => {
       api.getImageStatus(effectiveImage).then((state) => {
@@ -325,7 +326,7 @@ export function HomePage() {
 
   const selectedModel = MODELS.find((m) => m.value === model) || MODELS[0];
   const selectedMode = MODES.find((m) => m.value === mode) || MODES[0];
-  const logoSrc = backend === "codex" ? "/logo-codex.svg" : "/logo.svg";
+  const logoSrc = backend === "codex" ? "/logo-codex.svg" : "/logo.png";
   const dirLabel = cwd ? cwd.split("/").pop() || cwd : "Select folder";
   const trimmedResumeSessionAt = useMemo(() => resumeSessionAt.trim(), [resumeSessionAt]);
   const branchFromSessionEnabled = backend === "claude"
@@ -371,7 +372,7 @@ export function HomePage() {
     setResumeCandidatesLoading(true);
     setResumeCandidatesError("");
     try {
-      const [companionSessions, discovered] = await Promise.all([
+      const [heyhankSessions, discovered] = await Promise.all([
         api.listSessions(),
         api.discoverClaudeSessions(400).then((result) => result.sessions),
       ]);
@@ -384,7 +385,7 @@ export function HomePage() {
         }
       };
 
-      for (const session of companionSessions as SdkSessionInfo[]) {
+      for (const session of heyhankSessions as SdkSessionInfo[]) {
         if (session.backendType === "codex") continue;
         if (!session.cliSessionId) continue;
         upsertCandidate({
@@ -395,7 +396,7 @@ export function HomePage() {
           createdAt: session.createdAt,
           cwd: session.cwd,
           gitBranch: session.gitBranch,
-          source: "companion",
+          source: "heyhank",
         });
       }
 
@@ -829,11 +830,11 @@ export function HomePage() {
       {/* Fixed-height spacer — pushes content to ~20% from top, content grows downward only */}
       <div className="shrink-0 h-[12vh] sm:h-[18vh]" />
       <div className="w-full max-w-[720px]">
-        {/* Logo + Title — minimal, centered */}
+        {/* Logo + Title — mascot video with fallback to poster */}
         <div className="flex flex-col items-center mb-6 sm:mb-10">
-          <img src={logoSrc} alt="The Companion" className="w-10 h-10 sm:w-12 sm:h-12 mb-3" />
+          <img src="/logo.png" alt="HeyHank" className="w-16 h-16 sm:w-20 sm:h-20 mb-3 object-contain" />
           <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-cc-fg">
-            The Companion
+            HeyHank
           </h1>
         </div>
 
@@ -1151,7 +1152,7 @@ export function HomePage() {
                       sandboxEnabled && !selectedSandbox ? "text-cc-primary font-medium" : "text-cc-fg"
                     }`}
                   >
-                    Default (the-companion:latest)
+                    Default (heyhank:latest)
                   </button>
                   {sandboxes.map((sb) => (
                     <button
@@ -1381,7 +1382,7 @@ export function HomePage() {
                               {visibleResumeCandidates.map((candidate) => {
                                 const title = getResumeCandidateTitle(candidate);
                                 const project = getResumeCandidateProject(candidate.cwd);
-                                const sourceLabel = candidate.source === "companion" ? "Companion" : "Claude";
+                                const sourceLabel = candidate.source === "heyhank" ? "HeyHank" : "Claude";
                                 const selected = trimmedResumeSessionAt === candidate.resumeSessionId;
                                 return (
                                   <div

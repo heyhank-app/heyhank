@@ -65,6 +65,9 @@ beforeEach(() => {
     updateChannel: "stable",
     dockerAutoUpdate: false,
     updatedAt: 0,
+    geminiApiKey: "",
+    geminiVoice: "Puck",
+    assistantName: "Maxx",
   });
 });
 
@@ -197,6 +200,9 @@ describe("linear-connections", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
     // Need to reset so migration runs with updated mock
     _resetForTest(join(tempDir, "linear-connections-legacy.json"));
@@ -239,6 +245,9 @@ describe("linear-connections", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
     _resetForTest(join(tempDir, "linear-connections-migrate.json"));
 
@@ -300,6 +309,9 @@ describe("linear-connections", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     _resetForTest(join(tempDir, "linear-connections-existing.json"));

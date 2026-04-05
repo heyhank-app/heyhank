@@ -318,8 +318,17 @@ export function registerAgentRoutes(
     if (!agent) return c.json({ error: "Agent not found" }, 404);
     const body = await c.req.json().catch(() => ({}));
     const input = typeof body.input === "string" ? body.input : undefined;
-    agentExecutor?.executeAgentManually(id, input);
-    return c.json({ ok: true, message: "Agent triggered" });
+    try {
+      const sessionInfo = await agentExecutor?.executeAgent(id, input, { force: true, triggerType: "manual" });
+      return c.json({
+        ok: true,
+        message: "Agent triggered",
+        sessionId: sessionInfo?.sessionId || null,
+        agentName: agent.name,
+      });
+    } catch (err) {
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    }
   });
 
   // ── Executions ─────────────────────────────────────────────────────────

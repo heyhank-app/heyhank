@@ -2,10 +2,10 @@ import { createMiddleware } from "hono/factory";
 import type { Context } from "hono";
 
 /**
- * Auth middleware for managed Companion Cloud instances.
+ * Auth middleware for managed HeyHank Cloud instances.
  *
- * Only active when COMPANION_AUTH_ENABLED=1. Validates a JWT from a cookie
- * or query parameter, signed by the control plane using COMPANION_AUTH_SECRET.
+ * Only active when HEYHANK_AUTH_ENABLED=1. Validates a JWT from a cookie
+ * or query parameter, signed by the control plane using HEYHANK_AUTH_SECRET.
  *
  * Skipped paths:
  *  - /ws/cli/*  — internal CLI WebSocket (Claude Code connects from within the machine)
@@ -13,7 +13,7 @@ import type { Context } from "hono";
  */
 export const managedAuth = createMiddleware(async (c: Context, next) => {
   // This middleware is only registered by index.ts when managed auth is
-  // enabled (COMPANION_AUTH_ENABLED=1 or COMPANION_AUTH_SECRET is set).
+  // enabled (HEYHANK_AUTH_ENABLED=1 or HEYHANK_AUTH_SECRET is set).
   // No redundant env check needed here.
 
   const path = c.req.path;
@@ -21,7 +21,7 @@ export const managedAuth = createMiddleware(async (c: Context, next) => {
   // Internal paths that bypass auth
   if (path.startsWith("/ws/cli/") || path === "/health") return next();
 
-  const cookieToken = getCookie(c, "companion_token");
+  const cookieToken = getCookie(c, "heyhank_token") || getCookie(c, "companion_token");
   const queryToken = c.req.query("token");
   // Give explicit URL token precedence so reconnect links can always override
   // stale/expired cookies in the browser.
@@ -31,9 +31,9 @@ export const managedAuth = createMiddleware(async (c: Context, next) => {
     return redirectOrUnauthorized(c);
   }
 
-  const secret = process.env.COMPANION_AUTH_SECRET;
+  const secret = process.env.HEYHANK_AUTH_SECRET || process.env.COMPANION_AUTH_SECRET;
   if (!secret) {
-    console.error("[managed-auth] COMPANION_AUTH_SECRET is not set");
+    console.error("[managed-auth] HEYHANK_AUTH_SECRET is not set");
     return c.json({ error: "Server misconfigured" }, 500);
   }
 
@@ -65,7 +65,7 @@ function setAuthCookie(c: Context, token: string): void {
   const secure = shouldUseSecureCookie(c) ? "; Secure" : "";
   c.header(
     "Set-Cookie",
-    `companion_token=${encoded}; Path=/; HttpOnly${secure}; SameSite=Lax; Max-Age=900`,
+    `heyhank_token=${encoded}; Path=/; HttpOnly${secure}; SameSite=Lax; Max-Age=900`,
   );
 }
 
@@ -81,7 +81,7 @@ function shouldUseSecureCookie(c: Context): boolean {
 }
 
 function redirectOrUnauthorized(c: Context): Response {
-  const loginUrl = process.env.COMPANION_LOGIN_URL;
+  const loginUrl = process.env.HEYHANK_LOGIN_URL || process.env.COMPANION_LOGIN_URL;
   if (loginUrl) {
     return c.redirect(loginUrl);
   }

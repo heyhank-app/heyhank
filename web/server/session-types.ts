@@ -373,7 +373,7 @@ export interface BufferedBrowserEvent {
 
 // ─── Session State ────────────────────────────────────────────────────────────
 
-export type BackendType = "claude" | "codex";
+export type BackendType = "claude" | "codex" | "ollama" | "openrouter" | "gemini";
 
 export interface SessionState {
   session_id: string;
@@ -428,6 +428,10 @@ export interface SessionState {
   aiValidationAutoDeny?: boolean | null;
   /** If this session is linked to a Linear agent session */
   linearSessionId?: string;
+  /** Federation: remote node ID if this session originates from a peer */
+  nodeId?: string;
+  /** Federation: remote node display name */
+  nodeName?: string;
 }
 
 // ─── MCP Types ───────────────────────────────────────────────────────────────

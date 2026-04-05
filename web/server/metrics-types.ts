@@ -1,4 +1,4 @@
-// Type definitions for the Companion runtime metrics system.
+// Type definitions for the HeyHank runtime metrics system.
 // Defines the shape of the JSON snapshot returned by GET /api/metrics.
 
 import type { SessionPhase } from "./session-state-machine.js";

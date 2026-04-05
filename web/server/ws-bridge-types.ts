@@ -32,7 +32,22 @@ export interface NoVncSocketData {
   sessionId: string;
 }
 
-export type SocketData = CLISocketData | BrowserSocketData | TerminalSocketData | NoVncSocketData;
+export interface NodeSocketData {
+  kind: "node";
+  nodeId: string;
+}
+
+export interface TelephonyAudioSocketData {
+  kind: "telephony-audio";
+  callId: string;
+}
+
+export interface TelephonyTranscriptSocketData {
+  kind: "telephony-transcript";
+  callId: string;
+}
+
+export type SocketData = CLISocketData | BrowserSocketData | TerminalSocketData | NoVncSocketData | NodeSocketData | TelephonyAudioSocketData | TelephonyTranscriptSocketData;
 
 /** Tracks a pending control_request sent to CLI that expects a control_response. */
 export interface PendingControlRequest {

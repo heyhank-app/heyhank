@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { api, type CompanionEnv } from "../api.js";
+import { api, type HeyHankEnv } from "../api.js";
 
 interface Props {
   onClose?: () => void;
@@ -13,7 +13,7 @@ interface VarRow {
 }
 
 export function EnvManager({ onClose, embedded = false }: Props) {
-  const [envs, setEnvs] = useState<CompanionEnv[]>([]);
+  const [envs, setEnvs] = useState<HeyHankEnv[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -34,7 +34,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
     refresh();
   }, [refresh]);
 
-  function startEdit(env: CompanionEnv) {
+  function startEdit(env: HeyHankEnv) {
     setEditingSlug(env.slug);
     setEditName(env.name);
     const rows = Object.entries(env.variables).map(([key, value]) => ({ key, value }));
@@ -112,7 +112,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
             <div className="min-w-0">
               <h1 className="text-lg font-semibold text-cc-fg">Environments</h1>
               <p className="mt-0.5 text-[13px] text-cc-muted leading-relaxed">
-                Reusable runtime profiles.
+                Reusable environment variable profiles for agents and sessions.
               </p>
             </div>
           </div>
@@ -159,7 +159,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
 
               <div className="flex items-center justify-between pt-1">
                 <p className="text-[11px] text-cc-muted">
-                  Stored in <code className="text-[10px]">~/.companion/envs/</code>
+                  Variables are securely stored on the server.
                 </p>
                 <button
                   onClick={handleCreate}
@@ -372,7 +372,7 @@ export function EnvManager({ onClose, embedded = false }: Props) {
 /* ─── Env Row (for embedded page — display only) ─────────────────── */
 
 interface EnvRowProps {
-  env: CompanionEnv;
+  env: HeyHankEnv;
   varCount: number;
   onStartEdit: () => void;
   onDelete: () => void;

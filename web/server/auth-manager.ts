@@ -4,7 +4,7 @@ import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { networkInterfaces } from "node:os";
 
-const AUTH_FILE = join(homedir(), ".companion", "auth.json");
+const AUTH_FILE = join(homedir(), ".heyhank", "auth.json");
 const TOKEN_BYTES = 32; // 64 hex characters
 
 interface AuthData {
@@ -16,13 +16,13 @@ let cachedToken: string | null = null;
 
 /**
  * Get the auth token. Priority:
- * 1. COMPANION_AUTH_TOKEN env var
- * 2. Persisted token from ~/.companion/auth.json
+ * 1. HEYHANK_AUTH_TOKEN env var (falls back to COMPANION_AUTH_TOKEN)
+ * 2. Persisted token from ~/.heyhank/auth.json
  * 3. Auto-generate and persist a new token
  */
 export function getToken(): string {
   // Env var override (always takes priority)
-  const envToken = process.env.COMPANION_AUTH_TOKEN;
+  const envToken = process.env.HEYHANK_AUTH_TOKEN || process.env.COMPANION_AUTH_TOKEN;
   if (envToken && envToken.trim()) {
     cachedToken = envToken.trim();
     return cachedToken;

@@ -1,8 +1,8 @@
-// In-memory runtime metrics collector for the Companion server.
+// In-memory runtime metrics collector for the HeyHank server.
 // Subscribes to the event bus and provides direct instrumentation methods.
 // All data is in-memory — resets on server restart.
 
-import { companionBus } from "./event-bus.js";
+import { heyHankBus } from "./event-bus.js";
 import type { SessionPhase } from "./session-state-machine.js";
 import type {
   MetricsSnapshot,
@@ -132,7 +132,7 @@ export class MetricsCollector {
 
   private wireEventBus(): void {
     this.unsubscribers.push(
-      companionBus.on("session:phase-changed", ({ sessionId, from, to }) => {
+      heyHankBus.on("session:phase-changed", ({ sessionId, from, to }) => {
         // Count state transitions
         const key = `${from}→${to}`;
         this.stateTransitions.set(key, (this.stateTransitions.get(key) ?? 0) + 1);
@@ -147,7 +147,7 @@ export class MetricsCollector {
         }
       }),
 
-      companionBus.on("session:exited", ({ sessionId, exitCode }) => {
+      heyHankBus.on("session:exited", ({ sessionId, exitCode }) => {
         const key = String(exitCode ?? "null");
         this.sessionsTerminated.set(key, (this.sessionsTerminated.get(key) ?? 0) + 1);
 
@@ -164,7 +164,7 @@ export class MetricsCollector {
         }
       }),
 
-      companionBus.on("message:result", ({ sessionId }) => {
+      heyHankBus.on("message:result", ({ sessionId }) => {
         const started = this.turnStartedAt.get(sessionId);
         if (started != null) {
           recordHistogramValue(this.turnDuration, Date.now() - started);

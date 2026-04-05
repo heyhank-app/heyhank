@@ -1,11 +1,11 @@
-// Typed event map for the Companion internal event bus.
+// Typed event map for the HeyHank internal event bus.
 // Each key is a namespaced event name; values are the payload passed to handlers.
 
 import type { BrowserIncomingMessage } from "./session-types.js";
 import type { CodexAdapter } from "./codex-adapter.js";
 import type { SessionPhase } from "./session-state-machine.js";
 
-export interface CompanionEventMap {
+export interface HeyHankEventMap {
   // ── Session lifecycle ──────────────────────────────────────────────
 
   /** CLI reported its internal session ID (used for --resume). */
@@ -61,4 +61,15 @@ export interface CompanionEventMap {
 
   /** A result (turn completion) was processed and broadcast to browsers. */
   "message:result": { sessionId: string; message: BrowserIncomingMessage };
+
+  // ── Federation ──────────────────────────────────────────────────────
+
+  /** A remote federation node connected. */
+  "federation:node-connected": { nodeId: string; name: string };
+
+  /** A remote federation node disconnected. */
+  "federation:node-disconnected": { nodeId: string; name: string };
+
+  /** Remote sessions list updated from a peer. */
+  "federation:sessions-updated": { nodeId: string };
 }

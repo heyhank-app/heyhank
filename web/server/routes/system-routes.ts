@@ -112,10 +112,10 @@ export function registerSystemRoutes(
     setTimeout(async () => {
       try {
         console.log(
-          `[update] Updating the-companion to ${state.latestVersion}...`,
+          `[update] Updating heyhank to ${state.latestVersion}...`,
         );
         const proc = Bun.spawn(
-          ["bun", "install", "-g", `the-companion@${state.latestVersion}`],
+          ["bun", "install", "-g", `heyhank@${state.latestVersion}`],
           { stdout: "pipe", stderr: "pipe" },
         );
         const exitCode = await proc.exited;
@@ -157,10 +157,10 @@ export function registerSystemRoutes(
         const isLinux = process.platform === "linux";
         const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
         const restartCmd = isLinux
-          ? ["systemctl", "--user", "restart", "the-companion.service"]
+          ? ["systemctl", "--user", "restart", "heyhank.service"]
           : uid !== undefined
-            ? ["launchctl", "kickstart", "-k", `gui/${uid}/sh.thecompanion.app`]
-            : ["launchctl", "kickstart", "-k", "sh.thecompanion.app"];
+            ? ["launchctl", "kickstart", "-k", `gui/${uid}/sh.heyhank.app`]
+            : ["launchctl", "kickstart", "-k", "sh.heyhank.app"];
 
         Bun.spawn(restartCmd, {
           stdout: "ignore",

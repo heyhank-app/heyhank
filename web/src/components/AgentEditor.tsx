@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { api, type McpServerConfigAgent, type CompanionEnv, type LinearOAuthConnectionSummary } from "../api.js";
+import { api, type McpServerConfigAgent, type HeyHankEnv, type LinearOAuthConnectionSummary } from "../api.js";
 import { getModelsForBackend, getDefaultModel, getAgentModesForBackend, getDefaultAgentMode } from "../utils/backends.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { AgentIcon, AGENT_ICON_OPTIONS } from "./AgentIcon.js";
@@ -130,7 +130,7 @@ export function AgentEditor({
     env: "",
   });
   const [availableSkills, setAvailableSkills] = useState<{ slug: string; name: string; description: string }[]>([]);
-  const [envProfiles, setEnvProfiles] = useState<CompanionEnv[]>([]);
+  const [envProfiles, setEnvProfiles] = useState<HeyHankEnv[]>([]);
   const [linearConnections, setLinearConnections] = useState<LinearOAuthConnectionSummary[]>([]);
   const [linearConnectionsLoading, setLinearConnectionsLoading] = useState(false);
   const [allowedToolInput, setAllowedToolInput] = useState("");

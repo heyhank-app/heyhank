@@ -7,11 +7,11 @@ import {
   existsSync,
 } from "node:fs";
 import { join } from "node:path";
-import { COMPANION_HOME } from "./paths.js";
+import { HEYHANK_HOME } from "./paths.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-export interface CompanionEnv {
+export interface HeyHankEnv {
   name: string;
   slug: string;
   variables: Record<string, string>;
@@ -28,7 +28,7 @@ export interface EnvUpdateFields {
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
-const ENVS_DIR = join(COMPANION_HOME, "envs");
+const ENVS_DIR = join(HEYHANK_HOME, "envs");
 
 function ensureDir(): void {
   mkdirSync(ENVS_DIR, { recursive: true });
@@ -59,11 +59,11 @@ function slugify(name: string): string {
 
 // ─── CRUD ───────────────────────────────────────────────────────────────────
 
-export function listEnvs(): CompanionEnv[] {
+export function listEnvs(): HeyHankEnv[] {
   ensureDir();
   try {
     const files = readdirSync(ENVS_DIR).filter((f) => f.endsWith(".json"));
-    const envs: CompanionEnv[] = [];
+    const envs: HeyHankEnv[] = [];
     for (const file of files) {
       try {
         const raw = readFileSync(join(ENVS_DIR, file), "utf-8");
@@ -79,11 +79,11 @@ export function listEnvs(): CompanionEnv[] {
   }
 }
 
-export function getEnv(slug: string): CompanionEnv | null {
+export function getEnv(slug: string): HeyHankEnv | null {
   ensureDir();
   try {
     const raw = readFileSync(filePath(slug), "utf-8");
-    return JSON.parse(raw) as CompanionEnv;
+    return JSON.parse(raw) as HeyHankEnv;
   } catch {
     return null;
   }
@@ -92,7 +92,7 @@ export function getEnv(slug: string): CompanionEnv | null {
 export function createEnv(
   name: string,
   variables: Record<string, string> = {},
-): CompanionEnv {
+): HeyHankEnv {
   if (!name || !name.trim()) throw new Error("Environment name is required");
   const slug = slugify(name.trim());
   if (!slug) throw new Error("Environment name must contain alphanumeric characters");
@@ -103,7 +103,7 @@ export function createEnv(
   }
 
   const now = Date.now();
-  const env: CompanionEnv = {
+  const env: HeyHankEnv = {
     name: name.trim(),
     slug,
     variables,
@@ -118,7 +118,7 @@ export function createEnv(
 export function updateEnv(
   slug: string,
   updates: EnvUpdateFields,
-): CompanionEnv | null {
+): HeyHankEnv | null {
   ensureDir();
   const existing = getEnv(slug);
   if (!existing) return null;
@@ -132,7 +132,7 @@ export function updateEnv(
     throw new Error(`An environment with a similar name already exists ("${newSlug}")`);
   }
 
-  const env: CompanionEnv = {
+  const env: HeyHankEnv = {
     ...existing,
     name: newName,
     slug: newSlug,

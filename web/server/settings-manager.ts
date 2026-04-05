@@ -5,13 +5,13 @@ import {
   existsSync,
 } from "node:fs";
 import { join, dirname } from "node:path";
-import { COMPANION_HOME } from "./paths.js";
+import { HEYHANK_HOME } from "./paths.js";
 
 export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 
 export type UpdateChannel = "stable" | "prerelease";
 
-export interface CompanionSettings {
+export interface HeyHankSettings {
   anthropicApiKey: string;
   anthropicModel: string;
   /** OAuth token obtained via `claude setup-token` — injected as CLAUDE_CODE_OAUTH_TOKEN */
@@ -37,6 +37,12 @@ export interface CompanionSettings {
   linearOAuthAccessToken: string;
   /** @deprecated Used only as staging during wizard flow. Per-agent credentials are in AgentConfig.triggers.linear. */
   linearOAuthRefreshToken: string;
+  /** Gemini API key for voice chat */
+  geminiApiKey: string;
+  /** Gemini Live voice name (e.g. Kore, Puck, Charon, Fenrir, Aoede, Leda, Orus, Zephyr) */
+  geminiVoice: string;
+  /** Custom name for the voice assistant (e.g. "Jarvis", "Friday") */
+  assistantName: string;
   editorTabEnabled: boolean;
   aiValidationEnabled: boolean;
   aiValidationAutoApprove: boolean;
@@ -47,11 +53,11 @@ export interface CompanionSettings {
   updatedAt: number;
 }
 
-const DEFAULT_PATH = join(COMPANION_HOME, "settings.json");
+const DEFAULT_PATH = join(HEYHANK_HOME, "settings.json");
 
 let loaded = false;
 let filePath = DEFAULT_PATH;
-let settings: CompanionSettings = {
+let settings: HeyHankSettings = {
   anthropicApiKey: "",
   anthropicModel: DEFAULT_ANTHROPIC_MODEL,
   claudeCodeOAuthToken: "",
@@ -69,6 +75,9 @@ let settings: CompanionSettings = {
   linearOAuthWebhookSecret: "",
   linearOAuthAccessToken: "",
   linearOAuthRefreshToken: "",
+  geminiApiKey: "",
+  geminiVoice: "Kore",
+  assistantName: "",
   editorTabEnabled: false,
   aiValidationEnabled: false,
   aiValidationAutoApprove: true,
@@ -79,7 +88,7 @@ let settings: CompanionSettings = {
   updatedAt: 0,
 };
 
-function normalize(raw: Partial<CompanionSettings> | null | undefined): CompanionSettings {
+function normalize(raw: Partial<HeyHankSettings> | null | undefined): HeyHankSettings {
   return {
     anthropicApiKey: typeof raw?.anthropicApiKey === "string" ? raw.anthropicApiKey : "",
     anthropicModel:
@@ -101,6 +110,9 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
     linearOAuthWebhookSecret: typeof raw?.linearOAuthWebhookSecret === "string" ? raw.linearOAuthWebhookSecret : "",
     linearOAuthAccessToken: typeof raw?.linearOAuthAccessToken === "string" ? raw.linearOAuthAccessToken : "",
     linearOAuthRefreshToken: typeof raw?.linearOAuthRefreshToken === "string" ? raw.linearOAuthRefreshToken : "",
+    geminiApiKey: typeof raw?.geminiApiKey === "string" ? raw.geminiApiKey : "",
+    geminiVoice: typeof raw?.geminiVoice === "string" && raw.geminiVoice.trim() ? raw.geminiVoice : "Kore",
+    assistantName: typeof raw?.assistantName === "string" ? raw.assistantName.trim() : "",
     editorTabEnabled: typeof raw?.editorTabEnabled === "boolean" ? raw.editorTabEnabled : false,
     aiValidationEnabled: typeof raw?.aiValidationEnabled === "boolean" ? raw.aiValidationEnabled : false,
     aiValidationAutoApprove: typeof raw?.aiValidationAutoApprove === "boolean" ? raw.aiValidationAutoApprove : true,
@@ -117,7 +129,7 @@ function ensureLoaded(): void {
   try {
     if (existsSync(filePath)) {
       const raw = readFileSync(filePath, "utf-8");
-      settings = normalize(JSON.parse(raw) as Partial<CompanionSettings>);
+      settings = normalize(JSON.parse(raw) as Partial<HeyHankSettings>);
     }
   } catch {
     settings = normalize(null);
@@ -127,17 +139,17 @@ function ensureLoaded(): void {
 
 function persist(): void {
   mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, JSON.stringify(settings, null, 2), "utf-8");
+  writeFileSync(filePath, JSON.stringify(settings, null, 2), { encoding: "utf-8", mode: 0o600 });
 }
 
-export function getSettings(): CompanionSettings {
+export function getSettings(): HeyHankSettings {
   ensureLoaded();
   return { ...settings };
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "editorTabEnabled" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate">>,
-): CompanionSettings {
+  patch: Partial<Pick<HeyHankSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "geminiApiKey" | "geminiVoice" | "assistantName" | "editorTabEnabled" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate">>,
+): HeyHankSettings {
   ensureLoaded();
   settings = normalize({
     anthropicApiKey: patch.anthropicApiKey ?? settings.anthropicApiKey,
@@ -157,6 +169,9 @@ export function updateSettings(
     linearOAuthWebhookSecret: patch.linearOAuthWebhookSecret ?? settings.linearOAuthWebhookSecret,
     linearOAuthAccessToken: patch.linearOAuthAccessToken ?? settings.linearOAuthAccessToken,
     linearOAuthRefreshToken: patch.linearOAuthRefreshToken ?? settings.linearOAuthRefreshToken,
+    geminiApiKey: patch.geminiApiKey ?? settings.geminiApiKey,
+    geminiVoice: patch.geminiVoice ?? settings.geminiVoice,
+    assistantName: patch.assistantName ?? settings.assistantName,
     editorTabEnabled: patch.editorTabEnabled ?? settings.editorTabEnabled,
     aiValidationEnabled: patch.aiValidationEnabled ?? settings.aiValidationEnabled,
     aiValidationAutoApprove: patch.aiValidationAutoApprove ?? settings.aiValidationAutoApprove,

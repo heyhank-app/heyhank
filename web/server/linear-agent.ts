@@ -399,7 +399,7 @@ export async function postActivity(
 ): Promise<void> {
   const result = await linearGraphQL<{ agentActivityCreate?: { success: boolean } }>(
     creds,
-    `mutation CompanionAgentActivity($input: AgentActivityCreateInput!) {
+    `mutation HeyHankAgentActivity($input: AgentActivityCreateInput!) {
       agentActivityCreate(input: $input) { success }
     }`,
     { input: { agentSessionId, content } },
@@ -411,7 +411,7 @@ export async function postActivity(
   }
 }
 
-/** Update the external URLs on an agent session (links back to Companion). */
+/** Update the external URLs on an agent session (links back to HeyHank). */
 export async function updateSessionUrls(
   creds: LinearOAuthCredentials,
   agentSessionId: string,
@@ -420,7 +420,7 @@ export async function updateSessionUrls(
 ): Promise<void> {
   const result = await linearGraphQL<{ agentSessionUpdate?: { success: boolean } }>(
     creds,
-    `mutation CompanionAgentSessionUpdate($id: String!, $input: AgentSessionUpdateInput!) {
+    `mutation HeyHankAgentSessionUpdate($id: String!, $input: AgentSessionUpdateInput!) {
       agentSessionUpdate(id: $id, input: $input) { success }
     }`,
     { id: agentSessionId, input: { externalUrls: urls } },
@@ -441,7 +441,7 @@ export async function updateSessionPlan(
 ): Promise<void> {
   const result = await linearGraphQL<{ agentSessionUpdate?: { success: boolean } }>(
     creds,
-    `mutation CompanionAgentPlanUpdate($id: String!, $input: AgentSessionUpdateInput!) {
+    `mutation HeyHankAgentPlanUpdate($id: String!, $input: AgentSessionUpdateInput!) {
       agentSessionUpdate(id: $id, input: $input) { success }
     }`,
     { id: agentSessionId, input: { plan } },

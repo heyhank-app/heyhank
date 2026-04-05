@@ -65,7 +65,8 @@ export function LoginPage() {
     <div className="h-[100dvh] flex items-center justify-center bg-cc-bg text-cc-fg font-sans-ui antialiased">
       <div className="w-full max-w-sm px-6">
         <div className="text-center mb-8">
-          <h1 className="text-xl font-semibold text-cc-fg mb-2">The Companion</h1>
+          <img src="/logo-192.png" alt="HeyHank" className="w-16 h-16 mx-auto mb-4" />
+          <h1 className="text-xl font-semibold text-cc-fg mb-2">HeyHank</h1>
           <p className="text-sm text-cc-muted">Enter your auth token to continue</p>
         </div>
 
@@ -100,7 +101,7 @@ export function LoginPage() {
           </div>
 
           {error && (
-            <p className="text-xs text-cc-error" role="alert">{error}</p>
+            <p className="text-xs text-cc-error" role="alert">{error === "Invalid token" ? "Invalid token" : error}</p>
           )}
 
           <button
@@ -112,10 +113,17 @@ export function LoginPage() {
           </button>
         </form>
 
-        <p className="mt-6 text-[11px] text-cc-muted text-center leading-relaxed">
-          Scan the QR code in Settings with your phone camera to authenticate,
-          or find your token in the server console.
-        </p>
+        <div className="mt-6 text-[11px] text-cc-muted text-center leading-relaxed space-y-2">
+          <p className="font-medium text-cc-fg/70">Where do I find the token?</p>
+          <p>
+            The token is automatically generated on first start and stored on the server.
+          </p>
+          <div className="text-left bg-cc-hover rounded-lg px-3 py-2 space-y-1.5">
+            <p>Run this on your server to see the token:</p>
+            <code className="block text-[10px] font-mono bg-cc-code-bg px-2 py-1 rounded text-cc-fg/80 select-all">cat ~/.heyhank/auth.json</code>
+          </div>
+          <p>From mobile: Open Settings &gt; Scan QR code (only when already logged in).</p>
+        </div>
       </div>
     </div>
   );

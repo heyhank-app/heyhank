@@ -12,7 +12,7 @@ interface ProxyPair {
 /**
  * Proxies noVNC WebSocket traffic between the user's browser and the
  * container's websockify server. This allows the noVNC client to connect
- * through the companion's single port instead of requiring direct access
+ * through HeyHank's single port instead of requiring direct access
  * to the container's mapped port.
  */
 export class NoVncProxy {

@@ -89,21 +89,21 @@ export async function executeSessionCreation(
   await emit(onProgress, "resolving_env", "Resolving environment...", "in_progress");
 
   let envVars: Record<string, string> | undefined = body.env as Record<string, string> | undefined;
-  const companionEnv = body.envSlug ? envManager.getEnv(body.envSlug as string) : null;
-  if (body.envSlug && companionEnv) {
+  const heyhankEnv = body.envSlug ? envManager.getEnv(body.envSlug as string) : null;
+  if (body.envSlug && heyhankEnv) {
     console.log(
-      `[session-creation] Injecting env "${companionEnv.name}" (${Object.keys(companionEnv.variables).length} vars):`,
-      Object.keys(companionEnv.variables).join(", "),
+      `[session-creation] Injecting env "${heyhankEnv.name}" (${Object.keys(heyhankEnv.variables).length} vars):`,
+      Object.keys(heyhankEnv.variables).join(", "),
     );
-    envVars = { ...companionEnv.variables, ...(body.env as Record<string, string>) };
+    envVars = { ...heyhankEnv.variables, ...(body.env as Record<string, string>) };
   } else if (body.envSlug) {
     console.warn(`[session-creation] Environment "${body.envSlug}" not found, ignoring`);
   }
 
   // Resolve sandbox configuration
   const sandboxEnabled = body.sandboxEnabled === true;
-  const companionSandbox = body.sandboxSlug ? sandboxManager.getSandbox(body.sandboxSlug as string) : null;
-  if (sandboxEnabled && body.sandboxSlug && !companionSandbox) {
+  const sandbox = body.sandboxSlug ? sandboxManager.getSandbox(body.sandboxSlug as string) : null;
+  if (sandboxEnabled && body.sandboxSlug && !sandbox) {
     throw new SessionCreationError(`Sandbox "${body.sandboxSlug}" not found`, 404, "resolving_env");
   }
 
@@ -353,11 +353,11 @@ export async function executeSessionCreation(
     }
 
     // -- Init script --
-    const initScript = companionSandbox?.initScript?.trim();
+    const initScript = sandbox?.initScript?.trim();
     if (initScript) {
       await emit(onProgress, "running_init_script", "Running init script...", "in_progress");
       try {
-        const initTimeout = Number(process.env.COMPANION_INIT_SCRIPT_TIMEOUT) || 120_000;
+        const initTimeout = Number(process.env.HEYHANK_INIT_SCRIPT_TIMEOUT || process.env.COMPANION_INIT_SCRIPT_TIMEOUT) || 120_000;
         const result = await containerManager.execInContainerAsync(
           containerInfo.containerId,
           ["sh", "-lc", initScript],
@@ -372,7 +372,7 @@ export async function executeSessionCreation(
         );
         if (result.exitCode !== 0) {
           console.error(
-            `[session-creation] Init script failed for sandbox "${companionSandbox?.name || "sandbox"}" (exit ${result.exitCode}):\n${result.output}`,
+            `[session-creation] Init script failed for sandbox "${sandbox?.name || "sandbox"}" (exit ${result.exitCode}):\n${result.output}`,
           );
           containerManager.removeContainer(tempId);
           const truncated =
@@ -385,7 +385,7 @@ export async function executeSessionCreation(
             "running_init_script",
           );
         }
-        console.log(`[session-creation] Init script completed successfully for sandbox "${companionSandbox?.name || "sandbox"}"`);
+        console.log(`[session-creation] Init script completed successfully for sandbox "${sandbox?.name || "sandbox"}"`);
         await emit(onProgress, "running_init_script", "Init script complete", "done");
       } catch (e) {
         if (e instanceof SessionCreationError) throw e;

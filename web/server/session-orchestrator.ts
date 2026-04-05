@@ -20,7 +20,7 @@ import { hasContainerCodexAuth } from "./codex-container-auth.js";
 import { discoverCommandsAndSkills } from "./commands-discovery.js";
 import { getSettings } from "./settings-manager.js";
 import { generateSessionTitle } from "./auto-namer.js";
-import { companionBus } from "./event-bus.js";
+import { heyHankBus } from "./event-bus.js";
 import { metricsCollector } from "./metrics-collector.js";
 import { log } from "./logger.js";
 
@@ -29,11 +29,11 @@ import { log } from "./logger.js";
 const MAX_AUTO_RELAUNCHES = 3;
 const RELAUNCH_GRACE_MS = 10_000;
 const RELAUNCH_COOLDOWN_MS = 5_000;
-const RECONNECT_GRACE_MS = Number(process.env.COMPANION_RECONNECT_GRACE_MS || "30000");
+const RECONNECT_GRACE_MS = Number(process.env.HEYHANK_RECONNECT_GRACE_MS || process.env.COMPANION_RECONNECT_GRACE_MS || "30000");
 
 const VSCODE_EDITOR_CONTAINER_PORT = 13337;
 const CODEX_APP_SERVER_CONTAINER_PORT = Number(
-  process.env.COMPANION_CODEX_CONTAINER_WS_PORT || "4502",
+  process.env.HEYHANK_CODEX_CONTAINER_WS_PORT || process.env.COMPANION_CODEX_CONTAINER_WS_PORT || "4502",
 );
 const NOVNC_CONTAINER_PORT = 6080;
 
@@ -149,21 +149,21 @@ export class SessionOrchestrator {
     this._initialized = true;
 
     // When the CLI reports its internal session_id, store it for --resume
-    companionBus.on("session:cli-id-received", ({ sessionId, cliSessionId }) => {
+    heyHankBus.on("session:cli-id-received", ({ sessionId, cliSessionId }) => {
       this.launcher.setCLISessionId(sessionId, cliSessionId);
     });
 
     // When a Codex adapter is created, attach it to the WsBridge
-    companionBus.on("backend:codex-adapter-created", ({ sessionId, adapter }) => {
+    heyHankBus.on("backend:codex-adapter-created", ({ sessionId, adapter }) => {
       this.wsBridge.attachBackendAdapter(sessionId, adapter, "codex");
     });
 
     // When a CLI/Codex process exits, notify agent executor and external listeners
     // separately so a throw in one doesn't skip the other (bus isolates each handler).
-    companionBus.on("session:exited", ({ sessionId, exitCode }) => {
+    heyHankBus.on("session:exited", ({ sessionId, exitCode }) => {
       this.agentExecutor.handleSessionExited(sessionId, exitCode);
     });
-    companionBus.on("session:exited", ({ sessionId, exitCode }) => {
+    heyHankBus.on("session:exited", ({ sessionId, exitCode }) => {
       for (const cb of this.exitCallbacks) {
         try {
           cb(sessionId, exitCode);
@@ -172,7 +172,7 @@ export class SessionOrchestrator {
         }
       }
     });
-    companionBus.on("session:exited", ({ sessionId }) => {
+    heyHankBus.on("session:exited", ({ sessionId }) => {
       const session = this.wsBridge.getSession(sessionId);
       if (session?.stateMachine) {
         session.stateMachine.transition("terminated", "process_exited");
@@ -180,19 +180,19 @@ export class SessionOrchestrator {
     });
 
     // Start watching PRs when git info is resolved
-    companionBus.on("session:git-info-ready", ({ sessionId, cwd, branch }) => {
+    heyHankBus.on("session:git-info-ready", ({ sessionId, cwd, branch }) => {
       this.prPoller.watch(sessionId, cwd, branch);
     });
 
     // Auto-relaunch CLI when a browser connects to a session with no CLI
-    companionBus.on("session:relaunch-needed", async ({ sessionId }) => {
+    heyHankBus.on("session:relaunch-needed", async ({ sessionId }) => {
       await this.handleAutoRelaunch(sessionId);
     });
 
     // Kill CLI process when idle with no browsers for 24 hours.
     // Only kills the CLI process — containers are preserved so the session
     // can be relaunched without recreating the container.
-    companionBus.on("session:idle-kill", async ({ sessionId }) => {
+    heyHankBus.on("session:idle-kill", async ({ sessionId }) => {
       const info = this.launcher.getSession(sessionId);
       if (!info || info.archived) return;
       log.info("orchestrator", "Idle-killing session (preserving container)", { sessionId, reason: "no browsers, no activity" });
@@ -204,7 +204,7 @@ export class SessionOrchestrator {
     });
 
     // Auto-generate session title after first turn completes
-    companionBus.on("session:first-turn-completed", async ({ sessionId, firstUserMessage }) => {
+    heyHankBus.on("session:first-turn-completed", async ({ sessionId, firstUserMessage }) => {
       await this.handleAutoNaming(sessionId, firstUserMessage);
     });
 
@@ -244,13 +244,13 @@ export class SessionOrchestrator {
       if (onProgress) await onProgress("resolving_env", "Resolving environment...", "in_progress");
 
       let envVars: Record<string, string> | undefined = body.env;
-      const companionEnv = body.envSlug ? envManager.getEnv(body.envSlug) : null;
-      if (body.envSlug && companionEnv) {
+      const heyhankEnv = body.envSlug ? envManager.getEnv(body.envSlug) : null;
+      if (body.envSlug && heyhankEnv) {
         console.log(
-          `[orchestrator] Injecting env "${companionEnv.name}" (${Object.keys(companionEnv.variables).length} vars):`,
-          Object.keys(companionEnv.variables).join(", "),
+          `[orchestrator] Injecting env "${heyhankEnv.name}" (${Object.keys(heyhankEnv.variables).length} vars):`,
+          Object.keys(heyhankEnv.variables).join(", "),
         );
-        envVars = { ...companionEnv.variables, ...body.env };
+        envVars = { ...heyhankEnv.variables, ...body.env };
       } else if (body.envSlug) {
         console.warn(`[orchestrator] Environment "${body.envSlug}" not found, ignoring`);
       }
@@ -269,8 +269,8 @@ export class SessionOrchestrator {
 
       // Resolve sandbox configuration
       const sandboxEnabled = body.sandboxEnabled === true;
-      const companionSandbox = body.sandboxSlug ? sandboxManager.getSandbox(body.sandboxSlug) : null;
-      if (sandboxEnabled && body.sandboxSlug && !companionSandbox) {
+      const sandbox = body.sandboxSlug ? sandboxManager.getSandbox(body.sandboxSlug) : null;
+      if (sandboxEnabled && body.sandboxSlug && !sandbox) {
         return { ok: false, error: `Sandbox "${body.sandboxSlug}" not found`, status: 404 };
       }
 
@@ -499,12 +499,12 @@ export class SessionOrchestrator {
         }
 
         // Init script
-        const initScript = companionSandbox?.initScript?.trim();
+        const initScript = sandbox?.initScript?.trim();
         if (initScript) {
           if (onProgress) await onProgress("running_init_script", "Running init script...", "in_progress");
           try {
-            console.log(`[orchestrator] Running init script for sandbox "${companionSandbox?.name || "sandbox"}" in container ${containerInfo.name}...`);
-            const initTimeout = Number(process.env.COMPANION_INIT_SCRIPT_TIMEOUT) || 120_000;
+            console.log(`[orchestrator] Running init script for sandbox "${sandbox?.name || "sandbox"}" in container ${containerInfo.name}...`);
+            const initTimeout = Number(process.env.HEYHANK_INIT_SCRIPT_TIMEOUT || process.env.COMPANION_INIT_SCRIPT_TIMEOUT) || 120_000;
             const result = await containerManager.execInContainerAsync(
               containerInfo.containerId,
               ["sh", "-lc", initScript],
@@ -524,7 +524,7 @@ export class SessionOrchestrator {
               return { ok: false, error: `Init script failed (exit ${result.exitCode}):\n${truncated}`, status: 503 };
             }
             if (onProgress) await onProgress("running_init_script", "Init script complete", "done");
-            console.log(`[orchestrator] Init script completed successfully for sandbox "${companionSandbox?.name || "sandbox"}"`);
+            console.log(`[orchestrator] Init script completed successfully for sandbox "${sandbox?.name || "sandbox"}"`);
           } catch (e) {
             containerManager.removeContainer(tempId);
             const reason = e instanceof Error ? e.message : String(e);

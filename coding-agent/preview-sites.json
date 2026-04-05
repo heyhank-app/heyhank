@@ -1,0 +1,42 @@
+[
+  {
+    "name": "xxx",
+    "fqdn": "xxx.markusstoeger.com",
+    "url": "https://xxx.markusstoeger.com",
+    "webroot": "/var/www/xxx.markusstoeger.com",
+    "user": "kunde",
+    "pass": "9RKCLWwczvq41m3n",
+    "created": "2026-04-01T06:47:16Z",
+    "status": "active"
+  },
+  {
+    "name": "stevens-taverne",
+    "fqdn": "stevens-taverne.markusstoeger.com",
+    "url": "https://stevens-taverne.markusstoeger.com",
+    "webroot": "/var/www/stevens-taverne.markusstoeger.com",
+    "user": "kunde",
+    "pass": "lvv3GAaLgOc8XQRd",
+    "created": "2026-04-01T10:20:10Z",
+    "status": "active"
+  },
+  {
+    "name": "borak",
+    "fqdn": "borak.markusstoeger.com",
+    "url": "https://borak.markusstoeger.com",
+    "webroot": "/var/www/borak.markusstoeger.com",
+    "user": "kunde",
+    "pass": "KWNpCXkuLOLaHX8r",
+    "created": "2026-04-03T16:18:31Z",
+    "status": "active"
+  },
+  {
+    "name": "borrag",
+    "fqdn": "borrag.markusstoeger.com",
+    "url": "https://borrag.markusstoeger.com",
+    "webroot": "/var/www/borrag.markusstoeger.com",
+    "user": "kunde",
+    "pass": "z0Nh0JqbVWNimLWb",
+    "created": "2026-04-03T16:21:20Z",
+    "status": "active"
+  }
+]

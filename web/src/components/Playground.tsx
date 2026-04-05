@@ -2463,7 +2463,7 @@ export function Playground() {
                     },
                   ] satisfies CreationProgressEvent[]
                 }
-                error="Failed to pull docker.io/stangirard/the-companion:latest — connection timed out after 30s"
+                error="Failed to pull docker.io/stangirard/heyhank:latest — connection timed out after 30s"
               />
             </Card>
             <Card label="With streaming init script logs">
@@ -2633,7 +2633,7 @@ export function Playground() {
                       },
                     ] satisfies CreationProgressEvent[]
                   }
-                  error="Failed to pull docker.io/stangirard/the-companion:latest — connection timed out after 30s"
+                  error="Failed to pull docker.io/stangirard/heyhank:latest — connection timed out after 30s"
                   backend="claude"
                   onCancel={() => {}}
                 />

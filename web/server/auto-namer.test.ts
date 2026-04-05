@@ -39,6 +39,9 @@ beforeEach(() => {
     updateChannel: "stable",
     dockerAutoUpdate: false,
     updatedAt: 0,
+    geminiApiKey: "",
+    geminiVoice: "Puck",
+    assistantName: "Maxx",
   });
 });
 
@@ -83,6 +86,9 @@ describe("generateSessionTitle", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const title = await generateSessionTitle("Fix login", "claude-sonnet-4-6");
@@ -134,6 +140,9 @@ describe("generateSessionTitle", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -214,6 +223,9 @@ describe("generateSessionTitle", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
     mockFetch.mockResolvedValueOnce({
       ok: true,

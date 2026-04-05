@@ -102,6 +102,9 @@ vi.mock("./settings-manager.js", () => ({
     updateChannel: "stable",
     dockerAutoUpdate: false,
     updatedAt: 0,
+    geminiApiKey: "",
+    geminiVoice: "Puck",
+    assistantName: "Maxx",
   })),
   updateSettings: vi.fn((patch) => ({
     anthropicApiKey: patch.anthropicApiKey ?? "",
@@ -126,6 +129,9 @@ vi.mock("./settings-manager.js", () => ({
     updateChannel: patch.updateChannel ?? "stable",
     dockerAutoUpdate: patch.dockerAutoUpdate ?? false,
     updatedAt: Date.now(),
+    geminiApiKey: patch.geminiApiKey ?? "",
+    geminiVoice: patch.geminiVoice ?? "Puck",
+    assistantName: patch.assistantName ?? "Maxx",
   })),
 }));
 
@@ -1148,6 +1154,9 @@ describe("GET /api/sessions/:id/archive-info", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
     const res = await app.request("/api/sessions/s1/archive-info", { method: "GET" });
     expect(res.status).toBe(200);
@@ -1519,6 +1528,9 @@ describe("GET /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 123,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const res = await app.request("/api/settings", { method: "GET" });
@@ -1577,6 +1589,9 @@ describe("GET /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 123,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const res = await app.request("/api/settings", { method: "GET" });
@@ -1636,6 +1651,9 @@ describe("GET /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 100,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const res = await app.request("/api/settings", { method: "GET" });
@@ -1674,6 +1692,9 @@ describe("PUT /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 456,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const res = await app.request("/api/settings", {
@@ -1755,6 +1776,9 @@ describe("PUT /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 789,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const res = await app.request("/api/settings", {
@@ -1802,6 +1826,9 @@ describe("PUT /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 999,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const res = await app.request("/api/settings", {
@@ -1912,6 +1939,9 @@ describe("PUT /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 500,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const res = await app.request("/api/settings", {
@@ -2139,6 +2169,9 @@ describe("GET /api/linear/issues", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
 
@@ -2175,6 +2208,9 @@ describe("GET /api/linear/issues", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const fetchMock = vi.fn().mockResolvedValue({
@@ -2264,6 +2300,9 @@ describe("GET /api/linear/issues", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const fetchMock = vi.fn().mockResolvedValue({
@@ -2360,6 +2399,9 @@ describe("GET /api/linear/issues", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const fetchMock = vi.fn().mockResolvedValue({
@@ -2421,6 +2463,9 @@ describe("GET /api/linear/connection", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
 
@@ -2457,6 +2502,9 @@ describe("GET /api/linear/connection", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const fetchMock = vi.fn().mockResolvedValue({
@@ -2515,6 +2563,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const res = await app.request("/api/linear/issues/issue-123/transition", {
@@ -2555,6 +2606,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const res = await app.request("/api/linear/issues/issue-123/transition", {
@@ -2594,6 +2648,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
 
@@ -2635,6 +2692,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const fetchMock = vi.fn().mockResolvedValueOnce({
@@ -2710,6 +2770,9 @@ describe("POST /api/linear/issues/:id/transition", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const fetchMock = vi.fn().mockResolvedValueOnce({
@@ -2764,6 +2827,9 @@ describe("GET /api/linear/projects", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
 
@@ -2800,6 +2866,9 @@ describe("GET /api/linear/projects", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const fetchMock = vi.fn().mockResolvedValue({
@@ -2866,6 +2935,9 @@ describe("GET /api/linear/project-issues", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
 
@@ -2902,6 +2974,9 @@ describe("GET /api/linear/project-issues", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const fetchMock = vi.fn().mockResolvedValue({
@@ -2983,6 +3058,9 @@ describe("GET /api/linear/project-issues", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Puck",
+      assistantName: "Maxx",
     });
 
     const fetchMock = vi.fn().mockResolvedValue({

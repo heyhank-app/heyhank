@@ -3,9 +3,16 @@ import { createRoot } from "react-dom/client";
 import App from "./App.js";
 import { initAnalytics } from "./analytics.js";
 import { AppErrorBoundary } from "./components/AppErrorBoundary.js";
+import { VoiceChat } from "./components/VoiceChat.js";
 import "./index.css";
 
 initAnalytics();
+
+// Apply persisted font size
+const savedFontSize = localStorage.getItem("cc-font-size");
+if (savedFontSize) {
+  document.documentElement.style.fontSize = `${savedFontSize}px`;
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -14,6 +21,12 @@ createRoot(document.getElementById("root")!).render(
     </AppErrorBoundary>
   </StrictMode>
 );
+
+// Render VoiceChat in its own root so it's independent of the main app tree
+const voiceRoot = document.getElementById("voice-chat-root");
+if (voiceRoot) {
+  createRoot(voiceRoot).render(<VoiceChat />);
+}
 
 // Register Service Worker in production (no-op in dev).
 // Dynamic import ensures SW registration never blocks initial render.

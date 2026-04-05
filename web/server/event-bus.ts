@@ -1,6 +1,6 @@
-// Zero-dependency, strongly-typed internal event bus for the Companion server.
+// Zero-dependency, strongly-typed internal event bus for the HeyHank server.
 
-import type { CompanionEventMap } from "./event-bus-types.js";
+import type { HeyHankEventMap } from "./event-bus-types.js";
 
 type EventHandler<T> = (payload: T) => void | Promise<void>;
 
@@ -10,7 +10,7 @@ type EventHandler<T> = (payload: T) => void | Promise<void>;
  * propagated to emitters.
  */
 export class EventBus<
-  TMap extends Record<string, any> = CompanionEventMap,
+  TMap extends Record<string, any> = HeyHankEventMap,
 > {
   private handlers = new Map<keyof TMap, Set<EventHandler<any>>>();
   private onceHandlers = new Map<keyof TMap, Set<EventHandler<any>>>();
@@ -120,5 +120,5 @@ export class EventBus<
   }
 }
 
-/** Singleton bus instance for the Companion server. */
-export const companionBus = new EventBus<CompanionEventMap>();
+/** Singleton bus instance for the HeyHank server. */
+export const heyHankBus = new EventBus<HeyHankEventMap>();

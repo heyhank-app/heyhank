@@ -44,9 +44,9 @@ export const SECTION_DEFINITIONS: TaskPanelSectionDef[] = [
     backends: null,
   },
   {
-    id: "linear-issue",
-    label: "Linear Issue",
-    description: "Linked Linear ticket and comments",
+    id: "federation",
+    label: "Federation",
+    description: "Connected nodes and remote sessions",
     backends: null,
   },
   {

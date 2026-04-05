@@ -3,17 +3,80 @@ import { DEFAULT_ANTHROPIC_MODEL, getSettings, updateSettings, type UpdateChanne
 import { linearCache } from "../linear-cache.js";
 import { listConnections } from "../linear-connections.js";
 import { hasContainerCodexAuth } from "../codex-container-auth.js";
+import { hasContainerClaudeAuth } from "../claude-container-auth.js";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { execSync } from "node:child_process";
+
+/** Detect Claude CLI auth method */
+function detectClaudeAuthStatus(): { authenticated: boolean; method: string } {
+  const home = process.env.HOME || process.env.USERPROFILE || homedir();
+
+  // Check for credentials file (claude login)
+  const credFiles = [
+    join(home, ".claude", ".credentials.json"),
+    join(home, ".claude", "auth.json"),
+    join(home, ".claude", ".auth.json"),
+    join(home, ".claude", "credentials.json"),
+  ];
+  if (credFiles.some((p) => existsSync(p))) {
+    return { authenticated: true, method: "cli_login" };
+  }
+
+  // Check env vars
+  if (process.env.ANTHROPIC_API_KEY) return { authenticated: true, method: "env_api_key" };
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) return { authenticated: true, method: "env_oauth" };
+  if (process.env.ANTHROPIC_AUTH_TOKEN) return { authenticated: true, method: "env_auth_token" };
+
+  return { authenticated: false, method: "none" };
+}
+
+/** Detect Codex CLI auth method */
+function detectCodexAuthStatus(): { authenticated: boolean; method: string } {
+  const home = process.env.HOME || process.env.USERPROFILE || homedir();
+
+  // Check for codex auth file
+  const codexAuth = join(home, ".codex", "auth.json");
+  if (existsSync(codexAuth)) {
+    return { authenticated: true, method: "cli_login" };
+  }
+
+  // Check env var
+  if (process.env.OPENAI_API_KEY) return { authenticated: true, method: "env_api_key" };
+
+  return { authenticated: false, method: "none" };
+}
+
+/** Detect Claude CLI version */
+function detectClaudeVersion(): string | null {
+  try {
+    return execSync("claude --version 2>/dev/null", { timeout: 3000 }).toString().trim().split("\n")[0] || null;
+  } catch { return null; }
+}
+
+/** Detect Codex CLI version */
+function detectCodexVersion(): string | null {
+  try {
+    return execSync("codex --version 2>/dev/null", { timeout: 3000 }).toString().trim().split("\n")[0] || null;
+  } catch { return null; }
+}
 
 export function registerSettingsRoutes(api: Hono): void {
   api.get("/settings", (c) => {
     const settings = getSettings();
     const connections = listConnections();
+    const claudeAuth = detectClaudeAuthStatus();
+    const codexAuth = detectCodexAuthStatus();
     return c.json({
       anthropicApiKeyConfigured: !!settings.anthropicApiKey.trim(),
       anthropicModel: settings.anthropicModel || DEFAULT_ANTHROPIC_MODEL,
       claudeCodeOAuthTokenConfigured: !!settings.claudeCodeOAuthToken.trim(),
       openaiApiKeyConfigured: !!settings.openaiApiKey.trim(),
       codexDeviceAuthConfigured: hasContainerCodexAuth(),
+      // Enhanced auth detection
+      claudeCliAuth: { ...claudeAuth, oauthTokenConfigured: !!settings.claudeCodeOAuthToken.trim(), cliVersion: detectClaudeVersion() },
+      codexCliAuth: { ...codexAuth, apiKeyConfigured: !!settings.openaiApiKey.trim(), cliVersion: detectCodexVersion() },
       onboardingCompleted: settings.onboardingCompleted,
       linearApiKeyConfigured: !!settings.linearApiKey.trim() || connections.length > 0,
       linearConnectionCount: connections.length,
@@ -23,6 +86,9 @@ export function registerSettingsRoutes(api: Hono): void {
       linearArchiveTransitionStateName: settings.linearArchiveTransitionStateName,
       linearOAuthConfigured: !!(settings.linearOAuthClientId.trim() && settings.linearOAuthClientSecret.trim() && settings.linearOAuthAccessToken.trim()),
       linearOAuthCredentialsSaved: !!(settings.linearOAuthClientId.trim() && settings.linearOAuthClientSecret.trim()),
+      geminiApiKeyConfigured: !!settings.geminiApiKey.trim(),
+      geminiVoice: settings.geminiVoice || "Kore",
+      assistantName: settings.assistantName || "",
       editorTabEnabled: settings.editorTabEnabled,
       aiValidationEnabled: settings.aiValidationEnabled,
       aiValidationAutoApprove: settings.aiValidationAutoApprove,
@@ -61,6 +127,12 @@ export function registerSettingsRoutes(api: Hono): void {
     }
     if (body.linearArchiveTransitionStateName !== undefined && typeof body.linearArchiveTransitionStateName !== "string") {
       return c.json({ error: "linearArchiveTransitionStateName must be a string" }, 400);
+    }
+    if (body.geminiApiKey !== undefined && typeof body.geminiApiKey !== "string") {
+      return c.json({ error: "geminiApiKey must be a string" }, 400);
+    }
+    if (body.geminiVoice !== undefined && typeof body.geminiVoice !== "string") {
+      return c.json({ error: "geminiVoice must be a string" }, 400);
     }
     if (body.editorTabEnabled !== undefined && typeof body.editorTabEnabled !== "boolean") {
       return c.json({ error: "editorTabEnabled must be a boolean" }, 400);
@@ -116,6 +188,7 @@ export function registerSettingsRoutes(api: Hono): void {
       || body.linearArchiveTransitionStateName !== undefined
       || body.linearOAuthClientId !== undefined || body.linearOAuthClientSecret !== undefined
       || body.linearOAuthWebhookSecret !== undefined
+      || body.geminiApiKey !== undefined || body.geminiVoice !== undefined || body.assistantName !== undefined
       || body.editorTabEnabled !== undefined
       || body.aiValidationEnabled !== undefined || body.aiValidationAutoApprove !== undefined
       || body.aiValidationAutoDeny !== undefined
@@ -191,6 +264,18 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.linearOAuthWebhookSecret === "string"
           ? body.linearOAuthWebhookSecret.trim()
           : undefined,
+      geminiApiKey:
+        typeof body.geminiApiKey === "string"
+          ? body.geminiApiKey.trim()
+          : undefined,
+      geminiVoice:
+        typeof body.geminiVoice === "string"
+          ? body.geminiVoice.trim()
+          : undefined,
+      assistantName:
+        typeof body.assistantName === "string"
+          ? body.assistantName.trim()
+          : undefined,
       editorTabEnabled:
         typeof body.editorTabEnabled === "boolean"
           ? body.editorTabEnabled
@@ -222,12 +307,16 @@ export function registerSettingsRoutes(api: Hono): void {
     });
 
     const connectionsAfterUpdate = listConnections();
+    const claudeAuthAfter = detectClaudeAuthStatus();
+    const codexAuthAfter = detectCodexAuthStatus();
     return c.json({
       anthropicApiKeyConfigured: !!settings.anthropicApiKey.trim(),
       anthropicModel: settings.anthropicModel || DEFAULT_ANTHROPIC_MODEL,
       claudeCodeOAuthTokenConfigured: !!settings.claudeCodeOAuthToken.trim(),
       openaiApiKeyConfigured: !!settings.openaiApiKey.trim(),
       codexDeviceAuthConfigured: hasContainerCodexAuth(),
+      claudeCliAuth: { ...claudeAuthAfter, oauthTokenConfigured: !!settings.claudeCodeOAuthToken.trim(), cliVersion: detectClaudeVersion() },
+      codexCliAuth: { ...codexAuthAfter, apiKeyConfigured: !!settings.openaiApiKey.trim(), cliVersion: detectCodexVersion() },
       onboardingCompleted: settings.onboardingCompleted,
       linearApiKeyConfigured: !!settings.linearApiKey.trim() || connectionsAfterUpdate.length > 0,
       linearConnectionCount: connectionsAfterUpdate.length,
@@ -237,6 +326,9 @@ export function registerSettingsRoutes(api: Hono): void {
       linearArchiveTransitionStateName: settings.linearArchiveTransitionStateName,
       linearOAuthConfigured: !!(settings.linearOAuthClientId.trim() && settings.linearOAuthClientSecret.trim() && settings.linearOAuthAccessToken.trim()),
       linearOAuthCredentialsSaved: !!(settings.linearOAuthClientId.trim() && settings.linearOAuthClientSecret.trim()),
+      geminiApiKeyConfigured: !!settings.geminiApiKey.trim(),
+      geminiVoice: settings.geminiVoice || "Kore",
+      assistantName: settings.assistantName || "",
       editorTabEnabled: settings.editorTabEnabled,
       aiValidationEnabled: settings.aiValidationEnabled,
       aiValidationAutoApprove: settings.aiValidationAutoApprove,

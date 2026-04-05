@@ -3,7 +3,7 @@ import type { ContentBlock } from "./types.js";
 import { captureEvent, captureException } from "./analytics.js";
 
 const BASE = "/api";
-const AUTH_STORAGE_KEY = "companion_auth_token";
+const AUTH_STORAGE_KEY = "heyhank_auth_token";
 
 function getAuthHeaders(): Record<string, string> {
   if (typeof window === "undefined") return {};
@@ -307,7 +307,7 @@ export interface WorktreeCreateResult {
   isNew: boolean;
 }
 
-export interface CompanionEnv {
+export interface HeyHankEnv {
   name: string;
   slug: string;
   variables: Record<string, string>;
@@ -315,7 +315,7 @@ export interface CompanionEnv {
   updatedAt: number;
 }
 
-export interface CompanionSandbox {
+export interface HeyHankSandbox {
   name: string;
   slug: string;
   initScript?: string;
@@ -415,6 +415,9 @@ export interface AppSettings {
   linearArchiveTransitionStateName: string;
   linearOAuthConfigured: boolean;
   linearOAuthCredentialsSaved: boolean;
+  geminiApiKeyConfigured: boolean;
+  geminiVoice: string;
+  assistantName: string;
   editorTabEnabled: boolean;
   aiValidationEnabled: boolean;
   aiValidationAutoApprove: boolean;
@@ -422,6 +425,10 @@ export interface AppSettings {
   publicUrl: string;
   updateChannel: "stable" | "prerelease";
   dockerAutoUpdate: boolean;
+  /** Enhanced Claude CLI auth detection */
+  claudeCliAuth?: { installed: boolean; loggedIn: boolean; oauthTokenConfigured: boolean; cliVersion: string | null };
+  /** Enhanced Codex CLI auth detection */
+  codexCliAuth?: { installed: boolean; loggedIn: boolean; apiKeyConfigured: boolean; cliVersion: string | null };
 }
 
 export interface LinearOAuthConnectionSummary {
@@ -705,6 +712,84 @@ export interface SavedPrompt {
   updatedAt: number;
 }
 
+// ─── Platform Types ─────────────────────────────────────────────────────────
+
+export interface PlatformMessage {
+  id: string;
+  from: string;
+  fromName?: string;
+  to?: string;
+  channel?: string;
+  type: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  readBy: string[];
+}
+
+export interface CostRecord {
+  agentId: string;
+  agentName: string;
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  estimatedCost: number;
+  createdAt: string;
+  closedAt: string | null;
+}
+
+export interface CostSummary {
+  allTimeCost: number;
+  allTimeTokensIn: number;
+  allTimeTokensOut: number;
+  totalRecords: number;
+}
+
+export interface KillSwitchState {
+  killed: boolean;
+  reason?: string;
+  activatedAt?: string;
+}
+
+export interface SharedContextFile {
+  filename: string;
+  content: string;
+  updatedAt: string;
+  sizeBytes: number;
+}
+
+export interface LLMProvider {
+  name: string;
+  status: string;
+  models?: string[];
+  endpoint?: string;
+  note?: string;
+}
+
+export interface OllamaModel {
+  name: string;
+  size: number;
+  modified_at: string;
+}
+
+export interface LLMChatResponse {
+  content: string;
+  model: string;
+  provider: string;
+  tokensIn?: number;
+  tokensOut?: number;
+  estimatedCost?: number;
+}
+
+export interface AutoApproveRule {
+  agentId: string;
+  allowedTools: string[];
+  deniedTools: string[];
+  autoApproveSafe: boolean;
+  autoDenyDangerous: boolean;
+  maxCostPerAction?: number;
+}
+
 // ─── Claude Config Browser ──────────────────────────────────────────────────
 
 export interface ClaudeConfigResponse {
@@ -843,6 +928,32 @@ export async function verifyAuthToken(token: string): Promise<boolean> {
   }
 }
 
+// ─── Federation Types ──────────────────────────────────────────────────────
+export interface FederationNodeStatus {
+  id: string;
+  url: string;
+  name: string;
+  secret?: string;
+  connected: boolean;
+  inboundConnected: boolean;
+  remoteNodeId: string | null;
+  remoteName: string | null;
+  sessionCount: number;
+  addedAt: string;
+}
+
+export interface FederationRemoteSession {
+  sessionId: string;
+  name?: string;
+  model?: string;
+  cwd?: string;
+  status?: string;
+  backendType?: string;
+  isConnected?: boolean;
+  nodeId: string;
+  nodeName: string;
+}
+
 export const api = {
   // Auth
   getAuthQr: () =>
@@ -903,33 +1014,33 @@ export const api = {
   getHome: () => get<{ home: string; cwd: string }>("/fs/home"),
 
   // Environments
-  listEnvs: () => get<CompanionEnv[]>("/envs"),
+  listEnvs: () => get<HeyHankEnv[]>("/envs"),
   getEnv: (slug: string) =>
-    get<CompanionEnv>(`/envs/${encodeURIComponent(slug)}`),
+    get<HeyHankEnv>(`/envs/${encodeURIComponent(slug)}`),
   createEnv: (name: string, variables: Record<string, string>) =>
-    post<CompanionEnv>("/envs", { name, variables }),
+    post<HeyHankEnv>("/envs", { name, variables }),
   updateEnv: (
     slug: string,
     data: {
       name?: string;
       variables?: Record<string, string>;
     },
-  ) => put<CompanionEnv>(`/envs/${encodeURIComponent(slug)}`, data),
+  ) => put<HeyHankEnv>(`/envs/${encodeURIComponent(slug)}`, data),
   deleteEnv: (slug: string) => del(`/envs/${encodeURIComponent(slug)}`),
 
   // Sandboxes
-  listSandboxes: () => get<CompanionSandbox[]>("/sandboxes"),
+  listSandboxes: () => get<HeyHankSandbox[]>("/sandboxes"),
   getSandbox: (slug: string) =>
-    get<CompanionSandbox>(`/sandboxes/${encodeURIComponent(slug)}`),
+    get<HeyHankSandbox>(`/sandboxes/${encodeURIComponent(slug)}`),
   createSandbox: (name: string, opts?: { initScript?: string }) =>
-    post<CompanionSandbox>("/sandboxes", { name, ...opts }),
+    post<HeyHankSandbox>("/sandboxes", { name, ...opts }),
   updateSandbox: (
     slug: string,
     data: {
       name?: string;
       initScript?: string;
     },
-  ) => put<CompanionSandbox>(`/sandboxes/${encodeURIComponent(slug)}`, data),
+  ) => put<HeyHankSandbox>(`/sandboxes/${encodeURIComponent(slug)}`, data),
   deleteSandbox: (slug: string) => del(`/sandboxes/${encodeURIComponent(slug)}`),
   testInitScript: (slug: string, cwd: string, initScript?: string) =>
     post<{ success: boolean; exitCode: number; output: string }>(
@@ -960,6 +1071,9 @@ export const api = {
     linearOAuthClientId?: string;
     linearOAuthClientSecret?: string;
     linearOAuthWebhookSecret?: string;
+    geminiApiKey?: string;
+    geminiVoice?: string;
+    assistantName?: string;
     editorTabEnabled?: boolean;
     publicUrl?: string;
     updateChannel?: "stable" | "prerelease";
@@ -1307,4 +1421,123 @@ export const api = {
     put<SavedPrompt>(`/prompts/${encodeURIComponent(id)}`, data),
   deletePrompt: (id: string) =>
     del<{ ok: boolean }>(`/prompts/${encodeURIComponent(id)}`),
+
+  // ─── Platform: Message Bus ──────────────────────────────────────────
+  listMessages: (opts?: { to?: string; from?: string; channel?: string; type?: string; unreadBy?: string; limit?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.to) params.set("to", opts.to);
+    if (opts?.from) params.set("from", opts.from);
+    if (opts?.channel) params.set("channel", opts.channel);
+    if (opts?.type) params.set("type", opts.type);
+    if (opts?.unreadBy) params.set("unreadBy", opts.unreadBy);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    return get<PlatformMessage[]>(`/messages${qs ? `?${qs}` : ""}`);
+  },
+  postMessage: (data: { from: string; fromName?: string; to?: string; channel?: string; type: string; content: string; metadata?: Record<string, unknown> }) =>
+    post<PlatformMessage>("/messages", data),
+  markMessageRead: (id: string, agentId: string) =>
+    post<{ ok: boolean }>(`/messages/${encodeURIComponent(id)}/read`, { agentId }),
+  getUnreadCount: (agentId: string) =>
+    get<{ count: number }>(`/messages/unread/${encodeURIComponent(agentId)}`),
+  deleteMessage: (id: string) =>
+    del<{ ok: boolean }>(`/messages/${encodeURIComponent(id)}`),
+  clearMessages: () => del<{ ok: boolean }>("/messages"),
+
+  // ─── Platform: Cost Tracker ─────────────────────────────────────────
+  getCosts: (limit?: number) =>
+    get<CostRecord[]>(`/costs${limit ? `?limit=${limit}` : ""}`),
+  getCostSummary: () =>
+    get<CostSummary>("/costs/summary"),
+  getSpendLimit: () =>
+    get<{ limit: number | null }>("/costs/limit"),
+  setSpendLimit: (limit: number | null) =>
+    put<{ ok: boolean }>("/costs/limit", { limit }),
+  resetCosts: () => del<{ deleted: number }>("/costs"),
+
+  // ─── Platform: Kill Switch ──────────────────────────────────────────
+  getKillSwitch: () =>
+    get<KillSwitchState>("/kill-switch"),
+  activateKillSwitch: (reason?: string) =>
+    post<KillSwitchState>("/kill-switch/activate", { reason }),
+  deactivateKillSwitch: () =>
+    post<KillSwitchState>("/kill-switch/deactivate"),
+
+  // ─── Platform: Shared Context ───────────────────────────────────────
+  listSharedContext: () =>
+    get<SharedContextFile[]>("/shared-context"),
+  getSharedContext: (filename: string) =>
+    get<SharedContextFile>(`/shared-context/${encodeURIComponent(filename)}`),
+  writeSharedContext: (filename: string, content: string) =>
+    put<SharedContextFile>(`/shared-context/${encodeURIComponent(filename)}`, { content }),
+  deleteSharedContext: (filename: string) =>
+    del<{ ok: boolean }>(`/shared-context/${encodeURIComponent(filename)}`),
+
+  // ─── Platform: LLM Providers ────────────────────────────────────────
+  getLLMProviders: () =>
+    get<{ providers: LLMProvider[] }>("/llm/providers"),
+  getOllamaModels: () =>
+    get<{ models: OllamaModel[] }>("/llm/ollama/models"),
+  pullOllamaModel: (model: string) =>
+    post<{ ok: boolean; model: string }>("/llm/ollama/pull", { model }),
+  chatLLM: (data: { provider: string; model: string; messages: { role: string; content: string }[]; temperature?: number; maxTokens?: number }) =>
+    post<LLMChatResponse>("/llm/chat", data),
+
+  // ─── Platform: Auto-Approve ─────────────────────────────────────────
+  getAutoApproveRules: () =>
+    get<{ rules: AutoApproveRule[] }>("/auto-approve/rules"),
+
+  // ─── Platform: Push Notifications ───────────────────────────────────
+  subscribePush: (subscription: PushSubscription) =>
+    post<{ ok: boolean }>("/push/subscribe", { subscription: subscription.toJSON() }),
+  unsubscribePush: () =>
+    post<{ ok: boolean }>("/push/unsubscribe"),
+  testPush: () =>
+    post<{ ok: boolean }>("/push/test"),
+
+  // ─── Media Generation ───────────────────────────────────────────────
+  generateImage: (prompt: string, opts?: { model?: string; aspectRatio?: string }) =>
+    post<{ ok: boolean; images: Array<{ filename: string; path: string; mimeType: string; prompt: string; model: string }> }>("/media/generate-image", { prompt, ...opts }),
+  generateVideo: (prompt: string, opts?: { model?: string; durationSeconds?: number; aspectRatio?: string }) =>
+    post<{ ok: boolean; operationName: string; status: string; prompt: string; model: string }>("/media/generate-video", { prompt, ...opts }),
+  pollVideoStatus: (operationName: string) =>
+    get<{ operationName: string; status: string; videoPath?: string }>(`/media/video-status/${operationName}`),
+  listMedia: () =>
+    get<{ files: Array<{ filename: string; path: string }> }>("/media"),
+
+  // ─── Federation ────────────────────────────────────────────────────
+  getFederationIdentity: () =>
+    get<{ nodeId: string; name: string; createdAt: string }>("/federation/identity"),
+  updateFederationIdentity: (name: string) =>
+    put<{ ok: boolean; nodeId: string; name: string }>("/federation/identity", { name }),
+  getFederationNodes: () =>
+    get<{ identity: { nodeId: string; name: string }; nodes: FederationNodeStatus[] }>("/federation/nodes"),
+  addFederationNode: (data: { url: string; secret: string; name?: string }) =>
+    post<{ ok: boolean; node: FederationNodeStatus }>("/federation/nodes", data),
+  removeFederationNode: (id: string) =>
+    del<{ ok: boolean }>(`/federation/nodes/${encodeURIComponent(id)}`),
+  testFederationNode: (id: string) =>
+    post<{ ok: boolean; connected: boolean; node: FederationNodeStatus }>(`/federation/nodes/${encodeURIComponent(id)}/test`),
+  getFederationRemoteSessions: () =>
+    get<{ sessions: FederationRemoteSession[] }>("/federation/remote-sessions"),
+  federationProxy: (sessionId: string, text: string) =>
+    post<{ result?: { replyText: string }; error?: string }>("/federation/proxy", { sessionId, text }),
+
+  // ─── Telephony ─────────────────────────────────────────────────────
+  startCall: (config: { phone: string; prompt: string; voice?: string }) =>
+    post<{ id: string; phone: string; status: string; error?: string }>("/telephony/calls", config),
+  getActiveCalls: () =>
+    get<{ calls: Array<{ id: string; phone: string; status: string; prompt: string; durationSeconds: number; startedAt: number; transcript: Array<{ speaker: string; text: string; ts: number }> }> }>("/telephony/calls"),
+  getCall: (id: string) =>
+    get<{ id: string; phone: string; status: string; prompt: string; transcript: Array<{ speaker: string; text: string; ts: number }>; summary: string | null; durationSeconds: number }>(`/telephony/calls/${encodeURIComponent(id)}`),
+  endCall: (id: string) =>
+    del<{ id: string; status: string; summary: string | null }>(`/telephony/calls/${encodeURIComponent(id)}`),
+  getCallHistory: (limit = 50) =>
+    get<{ calls: Array<{ id: string; phone: string; status: string; prompt: string; summary: string | null; durationSeconds: number; startedAt: number }> }>(`/telephony/history?limit=${limit}`),
+  getTelephonySettings: () =>
+    get<{ enabled: boolean; freeswitch: { eslHost: string; eslPort: number }; trunks: Array<{ id: string; name: string; provider: string; callerId: string; enabled: boolean }>; defaultVoice: string }>("/telephony/settings"),
+  updateTelephonySettings: (settings: Record<string, unknown>) =>
+    put<{ success: boolean }>("/telephony/settings", settings),
+  testFreeSwitchConnection: () =>
+    post<{ connected: boolean; status?: string; error?: string }>("/telephony/test-connection"),
 };

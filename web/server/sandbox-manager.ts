@@ -11,7 +11,7 @@ import { homedir } from "node:os";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-export interface CompanionSandbox {
+export interface HeyHankSandbox {
   name: string;
   slug: string;
   /** Shell script to run inside the container before the CLI session starts */
@@ -28,8 +28,8 @@ export interface SandboxUpdateFields {
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
-const COMPANION_DIR = join(homedir(), ".companion");
-const SANDBOXES_DIR = join(COMPANION_DIR, "sandboxes");
+const HEYHANK_DIR = join(homedir(), ".heyhank");
+const SANDBOXES_DIR = join(HEYHANK_DIR, "sandboxes");
 
 function ensureDir(): void {
   mkdirSync(SANDBOXES_DIR, { recursive: true });
@@ -60,11 +60,11 @@ function slugify(name: string): string {
 
 // ─── CRUD ───────────────────────────────────────────────────────────────────
 
-export function listSandboxes(): CompanionSandbox[] {
+export function listSandboxes(): HeyHankSandbox[] {
   ensureDir();
   try {
     const files = readdirSync(SANDBOXES_DIR).filter((f) => f.endsWith(".json"));
-    const sandboxes: CompanionSandbox[] = [];
+    const sandboxes: HeyHankSandbox[] = [];
     for (const file of files) {
       try {
         const raw = readFileSync(join(SANDBOXES_DIR, file), "utf-8");
@@ -80,11 +80,11 @@ export function listSandboxes(): CompanionSandbox[] {
   }
 }
 
-export function getSandbox(slug: string): CompanionSandbox | null {
+export function getSandbox(slug: string): HeyHankSandbox | null {
   ensureDir();
   try {
     const raw = readFileSync(filePath(slug), "utf-8");
-    return JSON.parse(raw) as CompanionSandbox;
+    return JSON.parse(raw) as HeyHankSandbox;
   } catch {
     return null;
   }
@@ -93,7 +93,7 @@ export function getSandbox(slug: string): CompanionSandbox | null {
 export function createSandbox(
   name: string,
   opts?: { initScript?: string },
-): CompanionSandbox {
+): HeyHankSandbox {
   if (!name || !name.trim()) throw new Error("Sandbox name is required");
   const slug = slugify(name.trim());
   if (!slug) throw new Error("Sandbox name must contain alphanumeric characters");
@@ -104,7 +104,7 @@ export function createSandbox(
   }
 
   const now = Date.now();
-  const sandbox: CompanionSandbox = {
+  const sandbox: HeyHankSandbox = {
     name: name.trim(),
     slug,
     createdAt: now,
@@ -123,7 +123,7 @@ export function createSandbox(
 export function updateSandbox(
   slug: string,
   updates: SandboxUpdateFields,
-): CompanionSandbox | null {
+): HeyHankSandbox | null {
   ensureDir();
   const existing = getSandbox(slug);
   if (!existing) return null;
@@ -137,7 +137,7 @@ export function updateSandbox(
     throw new Error(`A sandbox with a similar name already exists ("${newSlug}")`);
   }
 
-  const sandbox: CompanionSandbox = {
+  const sandbox: HeyHankSandbox = {
     ...existing,
     name: newName,
     slug: newSlug,

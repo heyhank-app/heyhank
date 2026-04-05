@@ -1,8 +1,8 @@
 // ─── Linear Agent Session Bridge ──────────────────────────────────────────────
-// Bridges Linear Agent Interaction SDK sessions with Companion CLI sessions.
+// Bridges Linear Agent Interaction SDK sessions with HeyHank CLI sessions.
 // When Linear sends an AgentSessionEvent webhook, this module:
 // 1. Acknowledges immediately (post a "thought" activity within 10s)
-// 2. Finds the right Companion agent to handle it (by oauthClientId)
+// 2. Finds the right HeyHank agent to handle it (by oauthClientId)
 // 3. Launches a CLI session via AgentExecutor
 // 4. Relays CLI output back to Linear as agent activities
 // 5. Relays TodoWrite → Linear plan checklist
@@ -17,7 +17,7 @@ import * as linearAgent from "./linear-agent.js";
 import type { AgentSessionEventPayload, AgentPlanItem, LinearOAuthCredentials } from "./linear-agent.js";
 import { buildLinearOAuthSystemPrompt } from "./linear-prompt-builder.js";
 import { getSettings } from "./settings-manager.js";
-import { companionBus } from "./event-bus.js";
+import { heyHankBus } from "./event-bus.js";
 import { findOAuthConnectionByClientId, getOAuthConnection, updateOAuthConnection } from "./linear-oauth-connections.js";
 
 /** Interval (ms) for flushing intermediate progress as ephemeral thoughts. */
@@ -144,9 +144,9 @@ export class LinearAgentBridge {
   private agentExecutor: AgentExecutor;
   private wsBridge: WsBridge;
 
-  /** Maps Linear agent session IDs to Companion session info */
-  private sessionMap = new Map<string, { companionSessionId: string; agentId: string }>();
-  /** Maps Companion session IDs back to Linear agent session IDs */
+  /** Maps Linear agent session IDs to HeyHank session info */
+  private sessionMap = new Map<string, { heyHankSessionId: string; agentId: string }>();
+  /** Maps HeyHank session IDs back to Linear agent session IDs */
   private reverseMap = new Map<string, string>();
   /** Track active session unsubscribers for cleanup */
   private sessionCleanups = new Map<string, Array<() => void>>();
@@ -157,14 +157,14 @@ export class LinearAgentBridge {
     this.restoreSessionMaps();
   }
 
-  /** Restore Linear<->Companion session mappings from persisted session state. */
+  /** Restore Linear<->HeyHank session mappings from persisted session state. */
   private restoreSessionMaps(): void {
     const mappings = this.wsBridge.getLinearSessionMappings();
     for (const { sessionId, linearSessionId } of mappings) {
       // Try to find the agent for this session from the session's execution history
       // Fallback: find any enabled Linear agent
       const agentId = this.findAnyLinearAgentId() || "";
-      this.sessionMap.set(linearSessionId, { companionSessionId: sessionId, agentId });
+      this.sessionMap.set(linearSessionId, { heyHankSessionId: sessionId, agentId });
       this.reverseMap.set(sessionId, linearSessionId);
     }
     if (mappings.length > 0) {
@@ -193,7 +193,7 @@ export class LinearAgentBridge {
 
     console.log(`[linear-agent-bridge] New agent session: ${linearSessionId}`);
 
-    // 1. Find the right Companion agent by OAuth client ID
+    // 1. Find the right HeyHank agent by OAuth client ID
     const agent = this.findLinearAgentByClientId(payload.oauthClientId);
     if (!agent) {
       // Can't post activity without credentials — just log
@@ -219,7 +219,7 @@ export class LinearAgentBridge {
     // 2. Immediately acknowledge with a thought (must be within 10s)
     linearAgent.postActivity(creds, linearSessionId, {
       type: "thought",
-      body: "Starting Companion session...",
+      body: "Starting HeyHank session...",
       ephemeral: true,
     }, onTokensRefreshed).catch((err) => console.error("[linear-agent-bridge] Failed to post initial thought:", err));
 
@@ -240,30 +240,30 @@ export class LinearAgentBridge {
           type: "error",
           body: isOverlap
             ? `Agent "${agent.name}" is currently busy with another session. Please wait for it to complete.`
-            : "Failed to start Companion session. Check The Companion for details.",
+            : "Failed to start HeyHank session. Check HeyHank for details.",
         }, onTokensRefreshed);
         return;
       }
 
-      const companionSessionId = sessionInfo.sessionId;
+      const heyHankSessionId = sessionInfo.sessionId;
 
       // 4. Map sessions and persist (include agentId for follow-up credential lookup)
-      this.sessionMap.set(linearSessionId, { companionSessionId, agentId: agent.id });
-      this.reverseMap.set(companionSessionId, linearSessionId);
-      this.wsBridge.setLinearSessionId(companionSessionId, linearSessionId);
+      this.sessionMap.set(linearSessionId, { heyHankSessionId, agentId: agent.id });
+      this.reverseMap.set(heyHankSessionId, linearSessionId);
+      this.wsBridge.setLinearSessionId(heyHankSessionId, linearSessionId);
 
-      // 5. Set external URL linking back to Companion
+      // 5. Set external URL linking back to HeyHank
       const settings = getSettings();
       const baseUrl = settings.publicUrl || "http://localhost:3456";
       linearAgent.updateSessionUrls(
         creds,
         linearSessionId,
-        [{ label: "Companion Session", url: `${baseUrl}/#/session/${companionSessionId}` }],
+        [{ label: "HeyHank Session", url: `${baseUrl}/#/session/${heyHankSessionId}` }],
         onTokensRefreshed,
       ).catch((err) => console.error("[linear-agent-bridge] Failed to set external URLs:", err));
 
       // 6. Set up response relay (pass agentId for credential lookup)
-      this.setupRelay(linearSessionId, companionSessionId, agent.id);
+      this.setupRelay(linearSessionId, heyHankSessionId, agent.id);
 
       await linearAgent.postActivity(creds, linearSessionId, {
         type: "thought",
@@ -318,18 +318,18 @@ export class LinearAgentBridge {
       return;
     }
 
-    const { companionSessionId, agentId } = mapping;
+    const { heyHankSessionId, agentId } = mapping;
 
-    console.log(`[linear-agent-bridge] Follow-up for session ${linearSessionId} → ${companionSessionId}`);
+    console.log(`[linear-agent-bridge] Follow-up for session ${linearSessionId} → ${heyHankSessionId}`);
 
-    // Check if the Companion session is still alive before injecting
-    const session = this.wsBridge.getSession(companionSessionId);
+    // Check if the HeyHank session is still alive before injecting
+    const session = this.wsBridge.getSession(heyHankSessionId);
     if (!session) {
-      console.log(`[linear-agent-bridge] Session ${companionSessionId} is dead, creating new`);
+      console.log(`[linear-agent-bridge] Session ${heyHankSessionId} is dead, creating new`);
       // Clean up stale mapping
       this.sessionMap.delete(linearSessionId);
-      this.reverseMap.delete(companionSessionId);
-      this.cleanupRelay(companionSessionId);
+      this.reverseMap.delete(heyHankSessionId);
+      this.cleanupRelay(heyHankSessionId);
       // Start a new session with the follow-up message as prompt context
       await this.handleCreated({
         ...payload,
@@ -355,16 +355,16 @@ export class LinearAgentBridge {
 
     // Re-establish relay for the new turn (resets pendingText accumulator).
     // setupRelay calls cleanupRelay internally first, so old listeners are removed.
-    this.setupRelay(linearSessionId, companionSessionId, agentId);
+    this.setupRelay(linearSessionId, heyHankSessionId, agentId);
 
-    // Inject user message into the running Companion session
-    this.wsBridge.injectUserMessage(companionSessionId, message);
+    // Inject user message into the running HeyHank session
+    this.wsBridge.injectUserMessage(heyHankSessionId, message);
   }
 
-  /** Set up bidirectional relay between a Companion session and a Linear agent session. */
-  private setupRelay(linearSessionId: string, companionSessionId: string, agentId: string): void {
+  /** Set up bidirectional relay between a HeyHank session and a Linear agent session. */
+  private setupRelay(linearSessionId: string, heyHankSessionId: string, agentId: string): void {
     // Clean up any existing relay
-    this.cleanupRelay(companionSessionId);
+    this.cleanupRelay(heyHankSessionId);
 
     // Look up current agent credentials for this relay session
     const agent = agentStore.getAgent(agentId);
@@ -386,8 +386,8 @@ export class LinearAgentBridge {
       pendingText += (pendingText ? "\n" : "") + text;
     };
 
-    const unsubStream = companionBus.on("message:stream_event", ({ sessionId, message }) => {
-      if (sessionId !== companionSessionId) return;
+    const unsubStream = heyHankBus.on("message:stream_event", ({ sessionId, message }) => {
+      if (sessionId !== heyHankSessionId) return;
       const delta = extractTextDeltaFromStreamEvent(message);
       if (!delta) return;
 
@@ -401,8 +401,8 @@ export class LinearAgentBridge {
     cleanups.push(unsubStream);
 
     // Relay assistant messages → Linear activities
-    const unsubAssistant = companionBus.on("message:assistant", ({ sessionId, message: msg }) => {
-      if (sessionId !== companionSessionId) return;
+    const unsubAssistant = heyHankBus.on("message:assistant", ({ sessionId, message: msg }) => {
+      if (sessionId !== heyHankSessionId) return;
       const text = extractTextFromAssistant(msg);
       if (text) {
         if (streamedTextForCurrentMessage && text.startsWith(streamedTextForCurrentMessage)) {
@@ -486,8 +486,8 @@ export class LinearAgentBridge {
     // Relay turn completion → post accumulated text as a response activity.
     // Do NOT clean up session mappings or relay — the Linear agent session
     // is long-lived and supports multi-turn follow-ups via "prompted" events.
-    const unsubResult = companionBus.on("message:result", async ({ sessionId }) => {
-      if (sessionId !== companionSessionId) return;
+    const unsubResult = heyHankBus.on("message:result", async ({ sessionId }) => {
+      if (sessionId !== heyHankSessionId) return;
       if (pendingText) {
         try {
           await linearAgent.postActivity(creds, linearSessionId, {
@@ -504,24 +504,24 @@ export class LinearAgentBridge {
     });
     cleanups.push(unsubResult);
 
-    // Auto-cleanup relay when the Companion session exits, restoring the
+    // Auto-cleanup relay when the HeyHank session exits, restoring the
     // implicit cleanup that the old per-session WsBridge listener Maps provided.
-    const unsubExited = companionBus.on("session:exited", ({ sessionId }) => {
-      if (sessionId === companionSessionId) {
-        this.cleanupRelay(companionSessionId);
+    const unsubExited = heyHankBus.on("session:exited", ({ sessionId }) => {
+      if (sessionId === heyHankSessionId) {
+        this.cleanupRelay(heyHankSessionId);
       }
     });
     cleanups.push(unsubExited);
 
-    this.sessionCleanups.set(companionSessionId, cleanups);
+    this.sessionCleanups.set(heyHankSessionId, cleanups);
   }
 
   /** Clean up listeners for a session. */
-  private cleanupRelay(companionSessionId: string): void {
-    const cleanups = this.sessionCleanups.get(companionSessionId);
+  private cleanupRelay(heyHankSessionId: string): void {
+    const cleanups = this.sessionCleanups.get(heyHankSessionId);
     if (cleanups) {
       cleanups.forEach((fn) => fn());
-      this.sessionCleanups.delete(companionSessionId);
+      this.sessionCleanups.delete(heyHankSessionId);
     }
   }
 
@@ -620,8 +620,8 @@ export class LinearAgentBridge {
 
   /** Clean up all session mappings and listeners. */
   shutdown(): void {
-    for (const [companionSessionId] of this.sessionCleanups) {
-      this.cleanupRelay(companionSessionId);
+    for (const [heyHankSessionId] of this.sessionCleanups) {
+      this.cleanupRelay(heyHankSessionId);
     }
     this.sessionMap.clear();
     this.reverseMap.clear();

@@ -52,7 +52,7 @@ beforeEach(() => {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-/** Minimal env fixture matching the CompanionEnv shape. */
+/** Minimal env fixture matching the HeyHankEnv shape. */
 function makeEnv(overrides: Record<string, unknown> = {}) {
   return {
     name: "Test Env",

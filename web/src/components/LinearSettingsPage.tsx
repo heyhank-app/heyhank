@@ -307,7 +307,7 @@ export function LinearSettingsPage({ embedded = false }: LinearSettingsPageProps
                 Turn issues into concrete session context
               </h2>
               <p className="mt-1.5 text-sm text-cc-muted max-w-2xl">
-                Search and attach the right Linear issue before the first prompt, so the companion starts with scope, state, and links.
+                Search and attach the right Linear issue before the first prompt, so HeyHank starts with scope, state, and links.
               </p>
               <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
                 <span className="px-2 py-1 rounded-md bg-cc-hover text-cc-muted">Issue lookup on Home</span>

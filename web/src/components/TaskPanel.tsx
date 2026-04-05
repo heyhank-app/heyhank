@@ -1,13 +1,11 @@
 import { useEffect, useState, useCallback, useRef, type ComponentType, type ReactNode } from "react";
 import { useStore } from "../store.js";
-import { api, type UsageLimits, type GitHubPRInfo, type LinearIssue, type LinearComment } from "../api.js";
+import { api, type UsageLimits, type GitHubPRInfo } from "../api.js";
 import type { TaskItem, SdkSessionInfo } from "../types.js";
 import { McpSection } from "./McpPanel.js";
-import { LinearLogo } from "./LinearLogo.js";
 import { ClaudeConfigBrowser } from "./ClaudeConfigBrowser.js";
 import { SECTION_DEFINITIONS } from "./task-panel-sections.js";
 import { formatResetTime, formatCodexResetTime, formatWindowDuration, formatTokenCount } from "../utils/format.js";
-import { timeAgo } from "../utils/time-ago.js";
 import { captureException } from "../analytics.js";
 import { SectionErrorBoundary } from "./SectionErrorBoundary.js";
 
@@ -461,343 +459,46 @@ function GitHubPRSection({ sessionId }: { sessionId: string }) {
   return <GitHubPRDisplay pr={prStatus.pr} />;
 }
 
-// ─── Linear Issue Section ───────────────────────────────────────────────────
+// ─── Federation Section ─────────────────────────────────────────────────────
 
-const LINEAR_POLL_INTERVAL = 60_000;
-
-function linearStatePill(stateType: string, stateName: string) {
-  switch (stateType) {
-    case "completed":
-      return { label: stateName || "Done", cls: "text-cc-success bg-cc-success/10" };
-    case "cancelled":
-      return { label: stateName || "Cancelled", cls: "text-cc-muted bg-cc-hover" };
-    case "started":
-      return { label: stateName || "In Progress", cls: "text-cc-info bg-cc-info/10" };
-    case "unstarted":
-      return { label: stateName || "Todo", cls: "text-cc-muted bg-cc-hover" };
-    case "backlog":
-      return { label: stateName || "Backlog", cls: "text-cc-muted bg-cc-hover" };
-    default:
-      return { label: stateName || stateType || "Unknown", cls: "text-cc-muted bg-cc-hover" };
-  }
-}
-
-function LinearIssueSection({ sessionId }: { sessionId: string }) {
-  const linkedIssue = useStore((s) => s.linkedLinearIssues.get(sessionId));
-  const [comments, setComments] = useState<LinearComment[]>([]);
-  const [assignee, setAssignee] = useState<{ name: string; avatarUrl?: string | null } | null>(null);
-  const [labels, setLabels] = useState<{ id: string; name: string; color: string }[]>([]);
-  const [commentText, setCommentText] = useState("");
-  const [sendingComment, setSendingComment] = useState(false);
-  const [showDoneWarning, setShowDoneWarning] = useState(false);
-  const [showSearch, setShowSearch] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<LinearIssue[]>([]);
-  const [searching, setSearching] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+function FederationSection({ sessionId: _sessionId }: { sessionId: string }) {
+  const [nodes, setNodes] = useState<{ id: string; name: string; url: string; connected: boolean }[]>([]);
 
   useEffect(() => {
-    api.getLinkedLinearIssue(sessionId).then((data) => {
-      if (data.issue) {
-        useStore.getState().setLinkedLinearIssue(sessionId, data.issue);
-      }
+    api.getFederationNodes().then((res) => {
+      setNodes(res.nodes);
     }).catch(() => {});
-  }, [sessionId]);
+  }, []);
 
-  const fetchIssueDetails = useCallback(async () => {
-    if (!linkedIssue) return;
-    try {
-      const data = await api.getLinkedLinearIssue(sessionId, true);
-      if (data.issue) {
-        useStore.getState().setLinkedLinearIssue(sessionId, data.issue);
-        if (data.issue.stateType === "completed") {
-          setShowDoneWarning(true);
-        }
-      }
-      if (data.comments) setComments(data.comments);
-      if (data.assignee !== undefined) setAssignee(data.assignee ?? null);
-      if (data.labels) setLabels(data.labels);
-    } catch {
-      // silent
-    }
-  }, [sessionId, linkedIssue]);
-
-  useEffect(() => {
-    if (!linkedIssue) return;
-    fetchIssueDetails();
-    const id = setInterval(fetchIssueDetails, LINEAR_POLL_INTERVAL);
-    return () => clearInterval(id);
-  }, [fetchIssueDetails, linkedIssue]);
-
-  useEffect(() => {
-    if (!showSearch) return;
-    const q = searchQuery.trim();
-    if (q.length < 2) { setSearchResults([]); return; }
-    let active = true;
-    setSearching(true);
-    const timer = setTimeout(() => {
-      api.searchLinearIssues(q, 6).then((res) => {
-        if (active) setSearchResults(res.issues);
-      }).catch(() => {
-        if (active) setSearchResults([]);
-      }).finally(() => {
-        if (active) setSearching(false);
-      });
-    }, 400);
-    return () => { active = false; clearTimeout(timer); };
-  }, [searchQuery, showSearch]);
-
-  useEffect(() => {
-    if (showSearch) {
-      setTimeout(() => searchInputRef.current?.focus(), 50);
-    }
-  }, [showSearch]);
-
-  async function handleSendComment() {
-    if (!linkedIssue || !commentText.trim() || sendingComment) return;
-    setSendingComment(true);
-    try {
-      const result = await api.addLinearComment(linkedIssue.id, commentText.trim());
-      setComments((prev) => [...prev, result.comment]);
-      setCommentText("");
-    } catch {
-      // silent
-    } finally {
-      setSendingComment(false);
-    }
-  }
-
-  async function handleUnlink() {
-    try {
-      await api.unlinkLinearIssue(sessionId);
-      useStore.getState().setLinkedLinearIssue(sessionId, null);
-      setComments([]);
-      setAssignee(null);
-      setLabels([]);
-      setShowDoneWarning(false);
-    } catch {
-      // silent
-    }
-  }
-
-  async function handleLinkIssue(issue: LinearIssue) {
-    try {
-      await api.linkLinearIssue(sessionId, issue);
-      useStore.getState().setLinkedLinearIssue(sessionId, issue);
-      setShowSearch(false);
-      setSearchQuery("");
-      setSearchResults([]);
-    } catch {
-      // silent
-    }
-  }
-
-  // No linked issue — show "Link" button or search
-  if (!linkedIssue) {
+  if (nodes.length === 0) {
     return (
       <div className="shrink-0 px-4 py-2.5">
-        {!showSearch ? (
-          <button
-            onClick={() => setShowSearch(true)}
-            className="flex items-center gap-1.5 text-[11px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
-          >
-            <LinearLogo className="w-3.5 h-3.5" />
-            Link Linear issue
-          </button>
-        ) : (
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5">
-              <LinearLogo className="w-3.5 h-3.5 text-cc-muted shrink-0" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search issues..."
-                aria-label="Search Linear issues"
-                className="flex-1 text-[11px] bg-transparent border border-cc-border rounded-md px-2 py-1.5 text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50"
-              />
-              <button
-                onClick={() => { setShowSearch(false); setSearchQuery(""); setSearchResults([]); }}
-                aria-label="Close search"
-                className="w-7 h-7 flex items-center justify-center rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
-              >
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
-                  <path d="M4 4l8 8M12 4l-8 8" />
-                </svg>
-              </button>
-            </div>
-            {searching && (
-              <p className="text-[10px] text-cc-muted">Searching...</p>
-            )}
-            {searchResults.length > 0 && (
-              <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                {searchResults.map((issue) => (
-                  <button
-                    key={issue.id}
-                    onClick={() => handleLinkIssue(issue)}
-                    className="w-full text-left px-2 py-1.5 rounded-md hover:bg-cc-hover transition-colors cursor-pointer"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] font-mono-code text-cc-primary shrink-0">{issue.identifier}</span>
-                      <span className={`text-[9px] font-medium px-1 rounded-full leading-[14px] ${linearStatePill(issue.stateType, issue.stateName).cls}`}>
-                        {linearStatePill(issue.stateType, issue.stateName).label}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-cc-muted truncate mt-0.5">{issue.title}</p>
-                  </button>
-                ))}
-              </div>
-            )}
-            {searchQuery.trim().length >= 2 && !searching && searchResults.length === 0 && (
-              <p className="text-[10px] text-cc-muted text-center py-2">No issues found</p>
-            )}
-          </div>
-        )}
+        <p className="text-[11px] text-cc-muted">No federation nodes configured.</p>
+        <button
+          onClick={() => { window.location.hash = "/settings"; }}
+          className="mt-1.5 text-[11px] text-cc-primary hover:text-cc-primary/80 transition-colors cursor-pointer"
+        >
+          Configure in Settings
+        </button>
       </div>
     );
   }
 
-  const pill = linearStatePill(linkedIssue.stateType, linkedIssue.stateName);
+  const connectedCount = nodes.filter((n) => n.connected).length;
 
   return (
-    <div className="shrink-0">
-      {/* Header: identifier + state pill + unlink */}
-      <div className="px-4 py-2.5 space-y-1.5">
-        <div className="flex items-center gap-1.5">
-          <LinearLogo className="w-3.5 h-3.5 text-cc-muted shrink-0" />
-          <a
-            href={linkedIssue.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[12px] font-semibold text-cc-fg hover:text-cc-primary transition-colors font-mono-code"
-          >
-            {linkedIssue.identifier}
-          </a>
-          <span className={`text-[9px] font-medium px-1.5 rounded-full leading-[16px] ${pill.cls}`}>
-            {pill.label}
-          </span>
-          <button
-            onClick={handleUnlink}
-            className="ml-auto flex items-center justify-center w-7 h-7 rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
-            title="Unlink issue"
-            aria-label="Unlink issue"
-          >
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3">
-              <path d="M4 4l8 8M12 4l-8 8" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Title */}
-        <p className="text-[11px] text-cc-muted truncate" title={linkedIssue.title}>
-          {linkedIssue.title}
-        </p>
-
-        {/* Metadata: priority + team + assignee */}
-        <div className="flex items-center gap-2 text-[10px] text-cc-muted">
-          {linkedIssue.priorityLabel && (
-            <span>{linkedIssue.priorityLabel}</span>
-          )}
-          {linkedIssue.teamName && (
-            <>
-              {linkedIssue.priorityLabel && <span>&middot;</span>}
-              <span>{linkedIssue.teamName}</span>
-            </>
-          )}
-          {assignee && (
-            <>
-              <span>&middot;</span>
-              <span>@ {assignee.name}</span>
-            </>
-          )}
-        </div>
-
-        {/* Labels */}
-        {labels.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {labels.map((l) => (
-              <span
-                key={l.id}
-                className="text-[9px] px-1.5 py-0.5 rounded-full"
-                style={{ backgroundColor: `${l.color}20`, color: l.color }}
-              >
-                {l.name}
-              </span>
-            ))}
-          </div>
-        )}
+    <div className="shrink-0 px-4 py-2.5 space-y-2">
+      <div className="flex items-center gap-2 text-[11px] text-cc-muted">
+        <span>{connectedCount}/{nodes.length} connected</span>
       </div>
-
-      {/* Done warning */}
-      {showDoneWarning && linkedIssue.stateType === "completed" && (
-        <div className="px-4 py-2 bg-cc-success/10 border-t border-cc-success/20 flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-[11px] text-cc-success font-medium">Issue completed</p>
-            <p className="text-[10px] text-cc-success/80">Ticket moved to done.</p>
+      <div className="space-y-1">
+        {nodes.map((node) => (
+          <div key={node.id} className="flex items-center gap-2 py-1">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${node.connected ? "bg-cc-success" : "bg-cc-muted/40"}`} />
+            <span className="text-[11px] text-cc-fg truncate flex-1">{node.name || node.id.slice(0, 8)}</span>
+            <span className="text-[10px] text-cc-muted truncate max-w-[100px]">{node.url.replace(/^https?:\/\//, "")}</span>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => setShowDoneWarning(false)}
-              className="text-[10px] text-cc-muted hover:text-cc-fg px-1.5 py-0.5 rounded cursor-pointer"
-            >
-              Dismiss
-            </button>
-            <button
-              onClick={async () => {
-                try {
-                  await api.archiveSession(sessionId);
-                  useStore.getState().newSession();
-                } catch {
-                  // silent
-                }
-              }}
-              className="text-[10px] text-cc-success font-medium px-2 py-0.5 rounded bg-cc-success/20 hover:bg-cc-success/30 cursor-pointer"
-            >
-              Close session
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Recent comments */}
-      {comments.length > 0 && (
-        <div className="px-4 py-2 space-y-1.5 max-h-36 overflow-y-auto">
-          <span className="text-[10px] text-cc-muted uppercase tracking-wider">Comments</span>
-          {comments.slice(-3).map((comment) => (
-            <div key={comment.id} className="text-[11px]">
-              <div className="flex items-center gap-1">
-                <span className="font-medium text-cc-fg">{comment.userName}</span>
-                <span className="text-[9px] text-cc-muted">{timeAgo(new Date(comment.createdAt).getTime())}</span>
-              </div>
-              <p className="text-cc-muted line-clamp-2">{comment.body}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Add comment input */}
-      <div className="px-4 py-2 flex items-center gap-1.5">
-        <input
-          type="text"
-          value={commentText}
-          onChange={(e) => setCommentText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendComment(); } }}
-          placeholder="Add a comment..."
-          aria-label="Add a comment"
-          className="flex-1 text-[11px] bg-transparent border border-cc-border rounded-md px-2 py-1.5 text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50"
-        />
-        <button
-          onClick={handleSendComment}
-          disabled={!commentText.trim() || sendingComment}
-          aria-label="Send comment"
-          className="flex items-center justify-center w-7 h-7 rounded-md text-cc-primary disabled:text-cc-muted cursor-pointer disabled:cursor-not-allowed transition-colors"
-          title="Send comment"
-        >
-          <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
-            <path d="M1.724 1.053a.5.5 0 0 0-.714.545l1.403 4.85a.5.5 0 0 0 .397.354l5.19.736-5.19.737a.5.5 0 0 0-.397.353L1.01 13.48a.5.5 0 0 0 .714.545l13-6.5a.5.5 0 0 0 0-.894l-13-6.5z" />
-          </svg>
-        </button>
+        ))}
       </div>
     </div>
   );
@@ -924,7 +625,7 @@ const SECTION_COMPONENTS: Record<string, ComponentType<{ sessionId: string }>> =
   "usage-limits": UsageLimitsRenderer,
   "git-branch": GitBranchSection,
   "github-pr": GitHubPRSection,
-  "linear-issue": LinearIssueSection,
+  "federation": FederationSection,
   "mcp-servers": McpSection,
   "tasks": TasksSection,
 };

@@ -9,6 +9,7 @@ import { Sidebar } from "./components/Sidebar.js";
 import { ChatView } from "./components/ChatView.js";
 import { TopBar } from "./components/TopBar.js";
 import { HomePage } from "./components/HomePage.js";
+import { SessionsDashboard } from "./components/SessionsDashboard.js";
 import { TaskPanel } from "./components/TaskPanel.js";
 import { DiffPanel } from "./components/DiffPanel.js";
 import { UpdateBanner } from "./components/UpdateBanner.js";
@@ -19,6 +20,7 @@ import { SessionBrowserPane } from "./components/SessionBrowserPane.js";
 import { UpdateOverlay } from "./components/UpdateOverlay.js";
 import { DockerUpdateDialog } from "./components/DockerUpdateDialog.js";
 import { OnboardingModal } from "./components/OnboardingModal.js";
+
 
 // Lazy-loaded route-level pages (not needed for initial render)
 const Playground = lazy(() => import("./components/Playground.js").then((m) => ({ default: m.Playground })));
@@ -35,6 +37,10 @@ const AgentsPage = lazy(() => import("./components/AgentsPage.js").then((m) => (
 const RunsPage = lazy(() => import("./components/RunsPage.js").then((m) => ({ default: m.RunsPage })));
 const TerminalPage = lazy(() => import("./components/TerminalPage.js").then((m) => ({ default: m.TerminalPage })));
 const ProcessPanel = lazy(() => import("./components/ProcessPanel.js").then((m) => ({ default: m.ProcessPanel })));
+const PlatformDashboard = lazy(() => import("./components/PlatformDashboard.js"));
+const MediaPage = lazy(() => import("./components/MediaPage.js").then((m) => ({ default: m.MediaPage })));
+const TelephonyPage = lazy(() => import("./components/TelephonyPage.js").then((m) => ({ default: m.TelephonyPage })));
+const HelpPage = lazy(() => import("./components/HelpPage.js").then((m) => ({ default: m.HelpPage })));
 
 
 function LazyFallback() {
@@ -80,7 +86,12 @@ export default function App() {
   const isScheduledPage = route.page === "scheduled";
   const isAgentsPage = route.page === "agents" || route.page === "agent-detail";
   const isRunsPage = route.page === "runs";
-  const isSessionView = route.page === "session" || route.page === "home";
+  const isPlatformPage = route.page === "platform";
+  const isMediaPage = route.page === "media";
+  const isTelephonyPage = route.page === "telephony";
+  const isHelpPage = route.page === "help";
+  const isNewSessionPage = route.page === "new-session";
+  const isSessionView = route.page === "session" || route.page === "new-session";
 
   useEffect(() => {
     capturePageView(hash || "#/");
@@ -101,14 +112,8 @@ export default function App() {
   // so the mount logic can use it even if the hash-sync branch would clear it.
   const restoredIdRef = useRef(useStore.getState().currentSessionId);
 
-  // Sync hash → store. On mount, restore a localStorage session into the URL first.
+  // Sync hash → store.
   useEffect(() => {
-    // On first mount with no session hash, restore from localStorage
-    if (restoredIdRef.current !== null && route.page === "home") {
-      navigateToSession(restoredIdRef.current, true);
-      restoredIdRef.current = null;
-      return; // navigateToSession triggers hashchange → this effect re-runs with the session route
-    }
     restoredIdRef.current = null;
 
     if (route.page === "session") {
@@ -117,7 +122,7 @@ export default function App() {
         store.setCurrentSession(route.sessionId);
       }
       connectSession(route.sessionId);
-    } else if (route.page === "home") {
+    } else if (route.page === "home" || route.page === "new-session") {
       const store = useStore.getState();
       if (store.currentSessionId !== null) {
         store.setCurrentSession(null);
@@ -177,8 +182,8 @@ export default function App() {
 
   // Show Docker image update dialog if an app update just completed
   useEffect(() => {
-    if (localStorage.getItem("companion_docker_prompt_pending") === "1") {
-      localStorage.removeItem("companion_docker_prompt_pending");
+    if (localStorage.getItem("heyhank_docker_prompt_pending") === "1") {
+      localStorage.removeItem("heyhank_docker_prompt_pending");
       useStore.getState().setDockerUpdateDialogOpen(true);
     }
   }, []);
@@ -289,6 +294,37 @@ export default function App() {
           {isRunsPage && (
             <div className="absolute inset-0">
               <Suspense fallback={<LazyFallback />}><RunsPage /></Suspense>
+            </div>
+          )}
+
+          {isPlatformPage && (
+            <div className="absolute inset-0 overflow-auto">
+              <Suspense fallback={<LazyFallback />}><PlatformDashboard /></Suspense>
+            </div>
+          )}
+
+          {isMediaPage && (
+            <div className="absolute inset-0">
+              <Suspense fallback={<LazyFallback />}><MediaPage embedded /></Suspense>
+            </div>
+          )}
+
+          {isTelephonyPage && (
+            <div className="absolute inset-0">
+              <Suspense fallback={<LazyFallback />}><TelephonyPage embedded /></Suspense>
+            </div>
+          )}
+
+          {isHelpPage && (
+            <div className="absolute inset-0">
+              <Suspense fallback={<LazyFallback />}><HelpPage /></Suspense>
+            </div>
+          )}
+
+          {/* Sessions Dashboard — shown when no session is selected (home route) */}
+          {route.page === "home" && !currentSessionId && (
+            <div className="absolute inset-0">
+              <SessionsDashboard />
             </div>
           )}
 

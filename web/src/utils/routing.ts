@@ -2,6 +2,7 @@ import { installClipboardWriteFallback } from "./clipboard.js";
 
 export type Route =
   | { page: "home" }
+  | { page: "new-session" }
   | { page: "session"; sessionId: string }
   | { page: "settings" }
   | { page: "integrations" }
@@ -16,6 +17,10 @@ export type Route =
   | { page: "agents" }
   | { page: "agent-detail"; agentId: string }
   | { page: "runs" }
+  | { page: "platform" }
+  | { page: "media" }
+  | { page: "telephony" }
+  | { page: "help" }
   | { page: "playground" };
 
 const SESSION_PREFIX = "#/session/";
@@ -46,6 +51,11 @@ export function parseHash(hash: string): Route {
   // #/scheduled redirects to #/agents (cron absorbed into agents)
   if (hash === "#/scheduled") return { page: "agents" };
   if (hash === "#/runs") return { page: "runs" };
+  if (hash === "#/platform") return { page: "platform" };
+  if (hash === "#/media") return { page: "media" };
+  if (hash === "#/telephony") return { page: "telephony" };
+  if (hash === "#/help") return { page: "help" };
+  if (hash === "#/new") return { page: "new-session" };
   if (hash === "#/playground") return { page: "playground" };
   // Strip query params from hash for matching (OAuth callback appends ?oauth_success=true, ?setup=linear)
   const hashPath = hash.split("?")[0];

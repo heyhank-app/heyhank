@@ -21,15 +21,15 @@ export interface AgentConfig {
   icon?: string;
 
   // ── Session Config ──
-  /** "claude" or "codex" */
-  backendType: "claude" | "codex";
+  /** "claude", "codex", "ollama", "openrouter", or "gemini" */
+  backendType: "claude" | "codex" | "ollama" | "openrouter" | "gemini";
   /** Model to use (e.g. "claude-sonnet-4-6") */
   model: string;
   /** Permission mode — "bypassPermissions" for Claude auto mode */
   permissionMode: string;
   /** Working directory path, or "temp" for an auto-created temp dir */
   cwd: string;
-  /** Optional environment slug (references ~/.companion/envs/) */
+  /** Optional environment slug (references ~/.heyhank/envs/) */
   envSlug?: string;
   /** Extra environment variables */
   env?: Record<string, string>;

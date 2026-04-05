@@ -8,7 +8,7 @@ import type { Session } from "./ws-bridge-types.js";
 import { appendHistory } from "./ws-bridge-persist.js";
 import { validatePermission } from "./ai-validator.js";
 import { getEffectiveAiValidation } from "./ai-validation-settings.js";
-import { companionBus } from "./event-bus.js";
+import { heyHankBus } from "./event-bus.js";
 
 /**
  * @deprecated This file is no longer used in production. Codex adapters are now
@@ -43,7 +43,7 @@ export function attachCodexAdapterHandlers(
       // Preserve pre-populated commands/skills when adapter sends empty arrays
       // (Codex does not provide its own commands/skills)
       // Exclude session_id: the adapter may report its own internal session ID
-      // which differs from the Companion's session ID.  Allowing it to overwrite
+      // which differs from the HeyHank's session ID.  Allowing it to overwrite
       // session.state.session_id causes duplicate sidebar entries.
       const { slash_commands, skills, session_id: _cliSessionId, ...rest } = msg.session;
       session.state = {
@@ -82,11 +82,11 @@ export function attachCodexAdapterHandlers(
       const assistantMsg = { ...msg, timestamp: msg.timestamp || Date.now() };
       appendHistory(session, assistantMsg);
       deps.persistSession(session);
-      companionBus.emit("message:assistant", { sessionId, message: assistantMsg });
+      heyHankBus.emit("message:assistant", { sessionId, message: assistantMsg });
     } else if (msg.type === "result") {
       appendHistory(session, msg);
       deps.persistSession(session);
-      companionBus.emit("message:result", { sessionId, message: msg });
+      heyHankBus.emit("message:result", { sessionId, message: msg });
       session.stateMachine.transition("ready", "codex_turn_completed");
     }
 
@@ -146,14 +146,14 @@ export function attachCodexAdapterHandlers(
       deps.autoNamingAttempted.add(session.id);
       const firstUserMsg = session.messageHistory.find((m) => m.type === "user_message");
       if (firstUserMsg && firstUserMsg.type === "user_message") {
-        companionBus.emit("session:first-turn-completed", { sessionId: session.id, firstUserMessage: firstUserMsg.content });
+        heyHankBus.emit("session:first-turn-completed", { sessionId: session.id, firstUserMessage: firstUserMsg.content });
       }
     }
   });
 
   adapter.onSessionMeta((meta) => {
     if (meta.cliSessionId) {
-      companionBus.emit("session:cli-id-received", { sessionId: session.id, cliSessionId: meta.cliSessionId });
+      heyHankBus.emit("session:cli-id-received", { sessionId: session.id, cliSessionId: meta.cliSessionId });
     }
     if (meta.model) session.state.model = meta.model;
     if (meta.cwd) session.state.cwd = meta.cwd;
@@ -183,7 +183,7 @@ export function attachCodexAdapterHandlers(
     // at a dead session when the transport drops mid-conversation).
     if (session.browserSockets.size > 0) {
       console.log(`[ws-bridge] Auto-relaunching Codex for session ${sessionId} (${session.browserSockets.size} browser(s) connected)`);
-      companionBus.emit("session:relaunch-needed", { sessionId });
+      heyHankBus.emit("session:relaunch-needed", { sessionId });
     }
   });
 

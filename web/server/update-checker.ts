@@ -11,7 +11,7 @@ const currentVersion: string = JSON.parse(
   readFileSync(packageJsonPath, "utf-8"),
 ).version;
 
-const NPM_REGISTRY_BASE = "https://registry.npmjs.org/the-companion";
+const NPM_REGISTRY_BASE = "https://registry.npmjs.org/heyhank";
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const INITIAL_DELAY_MS = 10_000; // 10 seconds after boot
 
@@ -94,8 +94,8 @@ export function setUpdateInProgress(inProgress: boolean): void {
 }
 
 export function isUpdateAvailable(): boolean {
-  if (!state.latestVersion) return false;
-  return isNewerVersion(state.latestVersion, currentVersion);
+  if (!state.latestVersion || !state.currentVersion) return false;
+  return isNewerVersion(state.latestVersion, state.currentVersion);
 }
 
 /**
@@ -175,12 +175,10 @@ export function isNewerVersion(a: string, b: string): boolean {
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
 export function startPeriodicCheck(): void {
-  // Initial check after a short delay
+  if (intervalId) return;
   setTimeout(() => {
     checkForUpdate();
   }, INITIAL_DELAY_MS);
-
-  // Periodic checks
   intervalId = setInterval(() => {
     checkForUpdate();
   }, CHECK_INTERVAL_MS);

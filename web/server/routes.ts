@@ -6,7 +6,7 @@ import { resolveBinary } from "./path-resolver.js";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { COMPANION_HOME } from "./paths.js";
+import { HEYHANK_HOME } from "./paths.js";
 import { existsSync, readFileSync } from "node:fs";
 import type { SessionOrchestrator } from "./session-orchestrator.js";
 import type { CliLauncher } from "./cli-launcher.js";
@@ -28,10 +28,16 @@ import { registerSettingsRoutes } from "./routes/settings-routes.js";
 import { registerTailscaleRoutes } from "./routes/tailscale-routes.js";
 import { registerGitRoutes } from "./routes/git-routes.js";
 import { registerSystemRoutes } from "./routes/system-routes.js";
+import { registerPlatformRoutes } from "./routes/platform-routes.js";
+import { registerLLMRoutes } from "./routes/llm-routes.js";
+import { registerMediaRoutes } from "./routes/media-routes.js";
 import { isRecordingHubEnabled } from "./recording-hub/hub-config.js";
 import { registerHubRoutes } from "./recording-hub/hub-routes.js";
 import { registerLinearRoutes, fetchLinearTeamStates } from "./routes/linear-routes.js";
 import { registerLinearConnectionRoutes } from "./routes/linear-connection-routes.js";
+import { registerFederationRoutes } from "./routes/federation-routes.js";
+import { registerTelephonyRoutes } from "./routes/telephony-routes.js";
+import { nodeManager } from "./federation/node-manager.js";
 import { getConnection, resolveApiKey } from "./linear-connections.js";
 import { registerLinearOAuthConnectionRoutes } from "./routes/linear-oauth-connection-routes.js";
 import { getSettings } from "./settings-manager.js";
@@ -44,7 +50,7 @@ import { VSCODE_EDITOR_CONTAINER_PORT, NOVNC_CONTAINER_PORT } from "./constants.
 const UPDATE_CHECK_STALE_MS = 5 * 60 * 1000;
 const ROUTES_DIR = dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = dirname(ROUTES_DIR);
-const VSCODE_EDITOR_HOST_PORT = Number(process.env.COMPANION_EDITOR_PORT || "13338");
+const VSCODE_EDITOR_HOST_PORT = Number(process.env.HEYHANK_EDITOR_PORT || process.env.COMPANION_EDITOR_PORT || "13338");
 
 function shellEscapeArg(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
@@ -71,7 +77,7 @@ export function createRoutes(
     if (verifyToken(body.token)) {
       // Set cookie so the dynamic manifest can embed the token in start_url.
       // This bridges auth from Safari to standalone PWA on iOS (isolated storage).
-      setCookie(c, "companion_auth", body.token!, {
+      setCookie(c, "heyhank_auth", body.token!, {
         path: "/",
         httpOnly: true,
         sameSite: "Strict",
@@ -96,14 +102,32 @@ export function createRoutes(
     // Build QR codes for each remote address (skip localhost — it auto-auths).
     // Each QR encodes the full login URL so the native iPhone Camera app can
     // open it directly: scan → tap popup → Safari opens → auto-authenticated.
+    //
+    // If the request arrives via a public domain (reverse proxy), prefer that
+    // domain with HTTPS so the QR code works from any network.
+    const reqHost = c.req.header("Host") || "";
+    const isPublicDomain = reqHost && !reqHost.match(/^(localhost|127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/);
+
     const addresses = getAllAddresses().filter((a) => a.ip !== "localhost");
-    const qrCodes = await Promise.all(
+    const qrCodes: { label: string; url: string; qrDataUrl: string }[] = [];
+
+    // If accessed via public domain, add it as the first (preferred) QR code
+    if (isPublicDomain) {
+      const domain = reqHost.replace(/:\d+$/, ""); // strip port if present
+      const loginUrl = `https://${domain}/?token=${authToken}`;
+      const qrDataUrl = await QRCode.toDataURL(loginUrl, { width: 256, margin: 2 });
+      qrCodes.push({ label: domain, url: `https://${domain}`, qrDataUrl });
+    }
+
+    // Also include LAN/Tailscale addresses as fallback options
+    const lanQrCodes = await Promise.all(
       addresses.map(async (a) => {
         const loginUrl = `http://${a.ip}:${port}/?token=${authToken}`;
         const qrDataUrl = await QRCode.toDataURL(loginUrl, { width: 256, margin: 2 });
         return { label: a.label, url: `http://${a.ip}:${port}`, qrDataUrl };
       }),
     );
+    qrCodes.push(...lanQrCodes);
 
     return c.json({ qrCodes });
   });
@@ -113,9 +137,16 @@ export function createRoutes(
   // auto-authenticate without a token. This makes first-launch seamless.
 
   // Check if the request comes from localhost (same machine as the server).
-  // Uses Bun's requestIP which returns the actual TCP source address.
-  // Returns false in test environments where c.env is not a Bun server.
-  function isLocalhostRequest(c: { env: unknown; req: { raw: Request } }): boolean {
+  // When behind a reverse proxy (Nginx), check X-Real-IP / X-Forwarded-For
+  // headers first, since the TCP source will always be 127.0.0.1 from the proxy.
+  function isLocalhostRequest(c: { env: unknown; req: { raw: Request; header: (name: string) => string | undefined } }): boolean {
+    // If a reverse proxy set X-Real-IP, use that (this is the real client IP)
+    const realIp = c.req.header("x-real-ip");
+    if (realIp) {
+      const trimmed = realIp.trim();
+      return trimmed === "127.0.0.1" || trimmed === "::1" || trimmed === "::ffff:127.0.0.1";
+    }
+    // Fallback to TCP socket address (direct connections without proxy)
     const bunServer = c.env as { requestIP?: (req: Request) => { address: string } | null };
     const ip = bunServer?.requestIP?.(c.req.raw);
     const addr = ip?.address ?? "";
@@ -125,7 +156,7 @@ export function createRoutes(
   api.get("/auth/auto", (c) => {
     if (isLocalhostRequest(c)) {
       const token = getToken();
-      setCookie(c, "companion_auth", token, {
+      setCookie(c, "heyhank_auth", token, {
         path: "/",
         httpOnly: true,
         sameSite: "Strict",
@@ -137,7 +168,7 @@ export function createRoutes(
   });
 
   // ─── Linear Agent SDK webhook route (exempt from auth middleware) ────────
-  // Uses HMAC-SHA256 signature verification, not Companion auth tokens.
+  // Uses HMAC-SHA256 signature verification, not HeyHank auth tokens.
   if (linearAgentBridge) {
     registerLinearAgentWebhookRoute(api, linearAgentBridge);
   }
@@ -157,9 +188,9 @@ export function createRoutes(
 
     const authHeader = c.req.header("Authorization");
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    // Also check the companion_auth cookie — iframes (browser preview) can't
+    // Also check the heyhank_auth cookie — iframes (browser preview) can't
     // send Authorization headers, but browsers do forward cookies automatically.
-    const cookieToken = getCookie(c, "companion_auth") ?? null;
+    const cookieToken = getCookie(c, "heyhank_auth") ?? null;
     if (!verifyToken(token) && !verifyToken(cookieToken)) {
       return c.json({ error: "unauthorized" }, 401);
     }
@@ -249,7 +280,25 @@ export function createRoutes(
         totalLinesRemoved: bridge?.total_lines_removed || 0,
       };
     });
-    return c.json(enriched);
+    // Merge remote federation sessions
+    const remoteSessions = nodeManager.getRemoteSessions().map((rs) => ({
+      sessionId: rs.sessionId,
+      state: rs.status === "running" ? "running" : "connected",
+      model: rs.model || "",
+      cwd: rs.cwd || "",
+      name: rs.name || rs.sessionId.slice(0, 8),
+      createdAt: 0,
+      backendType: rs.backendType || "claude",
+      nodeId: rs.nodeId,
+      nodeName: rs.nodeName,
+      gitBranch: "",
+      gitAhead: 0,
+      gitBehind: 0,
+      totalLinesAdded: 0,
+      totalLinesRemoved: 0,
+    }));
+
+    return c.json([...enriched, ...remoteSessions]);
   });
 
   api.get("/sessions/:id", (c) => {
@@ -257,6 +306,49 @@ export function createRoutes(
     const session = launcher.getSession(id);
     if (!session) return c.json({ error: "Session not found" }, 404);
     return c.json(session);
+  });
+
+  /** Rich session status for Gemini agent monitoring — includes phase, pending permissions, recent activity */
+  api.get("/sessions/:id/agent-status", (c) => {
+    const id = c.req.param("id");
+    const session = launcher.getSession(id);
+    if (!session) return c.json({ error: "Session not found" }, 404);
+
+    const bridgeSession = wsBridge.getSession(id);
+    const phase = bridgeSession?.stateMachine?.phase || "unknown";
+    const pendingPerms = bridgeSession?.pendingPermissions
+      ? Array.from(bridgeSession.pendingPermissions.values()).map((p) => ({
+          requestId: p.request_id,
+          toolName: p.tool_name,
+          description: p.description || "",
+        }))
+      : [];
+
+    // Get last few messages for context
+    const history = bridgeSession?.messageHistory || [];
+    const recentMessages = history.slice(-5).map((m) => {
+      const msg = m as Record<string, unknown>;
+      return {
+        type: msg.type || msg.subtype || "unknown",
+        text: typeof msg.markdown === "string" ? msg.markdown.slice(0, 200) : undefined,
+        tool: msg.tool_name || undefined,
+      };
+    });
+
+    return c.json({
+      sessionId: id,
+      state: session.state,
+      phase,
+      agentId: session.agentId || null,
+      agentName: session.agentName || null,
+      model: session.model || "unknown",
+      cwd: session.cwd,
+      needsInput: pendingPerms.length > 0,
+      pendingPermissions: pendingPerms,
+      isCompleted: phase === "terminated",
+      isWorking: phase === "streaming" || phase === "initializing" || phase === "compacting",
+      recentActivity: recentMessages,
+    });
   });
 
   api.get("/claude/sessions/discover", (c) => {
@@ -327,7 +419,7 @@ export function createRoutes(
 
           const startCmd = [
             `if ! pgrep -f ${shellEscapeArg(`code-server.*--bind-addr 0.0.0.0:${VSCODE_EDITOR_CONTAINER_PORT}`)} >/dev/null 2>&1; then`,
-            `nohup code-server --auth none --disable-telemetry --bind-addr 0.0.0.0:${VSCODE_EDITOR_CONTAINER_PORT} /workspace >/tmp/companion-code-server.log 2>&1 &`,
+            `nohup code-server --auth none --disable-telemetry --bind-addr 0.0.0.0:${VSCODE_EDITOR_CONTAINER_PORT} /workspace >/tmp/heyhank-code-server.log 2>&1 &`,
             "fi",
           ].join(" ");
           containerManager.execInContainer(container.containerId, ["sh", "-lc", startCmd], 10_000);
@@ -381,13 +473,13 @@ export function createRoutes(
     const editorPathSuffix = `?folder=${encodeURIComponent(hostFallbackCwd)}`;
 
     try {
-      const logFile = join(COMPANION_HOME, "code-server-host.log");
+      const logFile = join(HEYHANK_HOME, "code-server-host.log");
       const startCmd = [
         `if ! pgrep -f ${shellEscapeArg(`code-server.*--bind-addr 127.0.0.1:${VSCODE_EDITOR_HOST_PORT}`)} >/dev/null 2>&1; then`,
         `nohup ${shellEscapeArg(hostCodeServer)} --auth none --disable-telemetry --bind-addr 127.0.0.1:${VSCODE_EDITOR_HOST_PORT} ${shellEscapeArg(hostFallbackCwd)} >> ${shellEscapeArg(logFile)} 2>&1 &`,
         "fi",
       ].join(" ");
-      const startHostCmd = `mkdir -p ${shellEscapeArg(COMPANION_HOME)} && ${startCmd}`;
+      const startHostCmd = `mkdir -p ${shellEscapeArg(HEYHANK_HOME)} && ${startCmd}`;
       execSync(startHostCmd, { encoding: "utf-8", timeout: 10_000 });
 
       // Wait for code-server to be ready (up to 5s)
@@ -520,8 +612,8 @@ export function createRoutes(
       }
       const launchChrome = [
         "export DISPLAY=:99",
-        'if ! pgrep -f "chromium.*--user-data-dir=/tmp/companion-chrome" >/dev/null 2>&1; then',
-        `  nohup chromium --no-sandbox --disable-gpu --disable-dev-shm-usage --user-data-dir=/tmp/companion-chrome --window-size=1280,720 --window-position=0,0 ${shellEscapeArg(targetUrl)} &>/dev/null &`,
+        'if ! pgrep -f "chromium.*--user-data-dir=/tmp/heyhank-chrome" >/dev/null 2>&1; then',
+        `  nohup chromium --no-sandbox --disable-gpu --disable-dev-shm-usage --user-data-dir=/tmp/heyhank-chrome --window-size=1280,720 --window-position=0,0 ${shellEscapeArg(targetUrl)} &>/dev/null &`,
         "fi",
       ].join("\n");
 
@@ -617,7 +709,7 @@ export function createRoutes(
     }
   });
 
-  // HTTP proxy for noVNC static files — serves through the companion's port
+  // HTTP proxy for noVNC static files — serves through HeyHank's port
   api.get("/sessions/:id/browser/proxy/*", async (c) => {
     const id = c.req.param("id");
     const session = launcher.getSession(id);
@@ -662,7 +754,7 @@ export function createRoutes(
   });
 
 
-  // HTTP proxy for host browser preview — proxies localhost requests through the companion’s port
+  // HTTP proxy for host browser preview — proxies localhost requests through HeyHank’s port
   const HOP_BY_HOP = new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "proxy-connection", "te", "trailer"]);
   api.all("/sessions/:id/browser/host-proxy/:port/*", async (c) => {
     const id = c.req.param("id");
@@ -1032,9 +1124,9 @@ export function createRoutes(
     const session = launcher.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
 
-    // Safety: don't allow killing the Companion server or Claude CLI process itself
+    // Safety: don't allow killing the HeyHank server or Claude CLI process itself
     if (pid === process.pid) {
-      return c.json({ error: "Cannot kill the Companion server" }, 403);
+      return c.json({ error: "Cannot kill the HeyHank server" }, 403);
     }
     if (session.pid === pid) {
       return c.json({ error: "Use the session kill endpoint to terminate Claude" }, 403);
@@ -1264,8 +1356,44 @@ export function createRoutes(
   registerCronRoutes(api, cronScheduler);
   registerAgentRoutes(api, agentExecutor);
   registerMetricsRoutes(api, { gaugeProvider: wsBridge });
+  registerPlatformRoutes(api);
+  registerFederationRoutes(api);
+  registerTelephonyRoutes(api);
 
-  // ─── Recording Hub (hidden feature: COMPANION_RECORDING_HUB=1) ──────
+  // ─── Gemini → Session bridge ───────────────────────────────────────
+  // Allows Gemini voice chat tool calls to send messages to active sessions
+  api.post("/gemini/send-to-session", async (c) => {
+    const body = await c.req.json().catch(() => ({} as { sessionId?: string; message?: string }));
+    const { sessionId, message } = body;
+    if (!sessionId || !message) {
+      return c.json({ error: "sessionId and message are required" }, 400);
+    }
+
+    // Wait for session to be connected (up to 10s for newly created sessions)
+    let attempts = 0;
+    const maxAttempts = 20;
+    while (attempts < maxAttempts) {
+      if (wsBridge.hasConnectedCli(sessionId)) break;
+      attempts++;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    if (!wsBridge.hasConnectedCli(sessionId)) {
+      return c.json({ error: "Session not connected or not found" }, 404);
+    }
+
+    try {
+      wsBridge.injectUserMessage(sessionId, message);
+      return c.json({ success: true });
+    } catch {
+      return c.json({ error: "Failed to send message to session" }, 500);
+    }
+  });
+
+  registerLLMRoutes(api);
+  registerMediaRoutes(api);
+
+  // ─── Recording Hub (hidden feature: HEYHANK_RECORDING_HUB=1) ──────
   if (isRecordingHubEnabled()) {
     registerHubRoutes(api, {
       wsBridge,

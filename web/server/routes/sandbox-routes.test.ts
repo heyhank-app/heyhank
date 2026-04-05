@@ -46,7 +46,7 @@ beforeEach(() => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-/** Minimal sandbox fixture matching the CompanionSandbox shape. */
+/** Minimal sandbox fixture matching the HeyHankSandbox shape. */
 function makeSandbox(overrides: Record<string, unknown> = {}) {
   return {
     name: "My Sandbox",

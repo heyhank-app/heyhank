@@ -9,6 +9,7 @@ import * as agentStore from "./agent-store.js";
 import * as envManager from "./env-manager.js";
 import * as sessionNames from "./session-names.js";
 import { ExecutionStore } from "./execution-store.js";
+import { notifyAgentAlert } from "./push-notifications.js";
 
 /** Max consecutive failures before auto-disabling an agent */
 const MAX_CONSECUTIVE_FAILURES = 5;
@@ -156,7 +157,7 @@ export class AgentExecutor {
       // Resolve working directory
       let cwd = agent.cwd;
       if (cwd === "temp" || !cwd) {
-        cwd = mkdtempSync(join(tmpdir(), `companion-agent-${agent.id}-`));
+        cwd = mkdtempSync(join(tmpdir(), `heyhank-agent-${agent.id}-`));
       }
 
       // Launch the session via CliLauncher.
@@ -330,6 +331,16 @@ export class AgentExecutor {
           success: exec.success,
           error: exec.error,
         });
+
+        // Send push notification for agent completion
+        const agent = agentStore.getAgent(exec.agentId);
+        const agentName = agent?.name || exec.agentId;
+        if (exec.success) {
+          notifyAgentAlert(agentName, `Aufgabe erfolgreich abgeschlossen.`, "info").catch(() => {});
+        } else {
+          notifyAgentAlert(agentName, `Aufgabe fehlgeschlagen: ${exec.error || "Unbekannter Fehler"}`, "error").catch(() => {});
+        }
+
         break;
       }
     }

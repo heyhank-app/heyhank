@@ -1,11 +1,11 @@
 // ─── Relay Client ────────────────────────────────────────────────────────────
-// Connects The Companion to a cloud relay worker via outbound WebSocket.
-// This allows a Companion instance running behind a firewall (NAT, no public IP)
+// Connects HeyHank to a cloud relay worker via outbound WebSocket.
+// This allows a HeyHank instance running behind a firewall (NAT, no public IP)
 // to receive external webhooks relayed through a cloud worker.
 //
 // Flow:
-//   Companion --[outbound WS]--> Relay Worker <--[HTTPS webhooks]-- External platforms
-//   Companion receives webhook_request messages, processes them locally,
+//   HeyHank --[outbound WS]--> Relay Worker <--[HTTPS webhooks]-- External platforms
+//   HeyHank receives webhook_request messages, processes them locally,
 //   and sends webhook_response messages back through the same WebSocket.
 
 type WebhookHandler = (req: Request, opts?: { waitUntil?: (task: Promise<unknown>) => void }) => Promise<Response>;

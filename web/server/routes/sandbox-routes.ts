@@ -99,7 +99,7 @@ export function registerSandboxRoutes(
 
       await containerManager.copyWorkspaceToContainer(containerId, cwd);
 
-      const initTimeout = Number(process.env.COMPANION_INIT_SCRIPT_TIMEOUT) || 120_000;
+      const initTimeout = Number(process.env.HEYHANK_INIT_SCRIPT_TIMEOUT || process.env.COMPANION_INIT_SCRIPT_TIMEOUT) || 120_000;
       const result = await containerManager.execInContainerAsync(
         containerId,
         ["sh", "-lc", initScript],

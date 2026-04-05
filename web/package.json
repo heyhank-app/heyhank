@@ -1,13 +1,12 @@
 {
-  "name": "the-companion",
+  "name": "heyhank",
   "version": "0.94.0",
   "type": "module",
   "description": "Web UI for launching and interacting with Claude Code agents",
   "license": "MIT",
   "author": "The Vibe Company",
   "bin": {
-    "the-companion": "./bin/cli.ts",
-    "companion": "./bin/cli.ts"
+    "heyhank": "./bin/cli.ts"
   },
   "files": [
     "bin/",
@@ -61,8 +60,14 @@
     "diff": "^8.0.3",
     "fzf": "^0.5.2",
     "hono": "^4.7.0",
+    "ical-generator": "^10.1.0",
+    "ical.js": "^2.2.1",
+    "imapflow": "^1.2.18",
+    "nodemailer": "^8.0.4",
     "posthog-js": "^1.347.2",
     "qrcode": "^1.5.4",
+    "tsdav": "^2.1.8",
+    "web-push": "^3.6.7",
     "ws": "^8.19.0"
   },
   "devDependencies": {
@@ -71,6 +76,7 @@
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/bun": "^1.2.5",
+    "@types/nodemailer": "^7.0.11",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

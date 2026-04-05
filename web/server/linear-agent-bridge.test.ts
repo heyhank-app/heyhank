@@ -4,7 +4,7 @@
 // session persistence, plan relay, enriched prompts, tool results, and progress flush.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { companionBus } from "./event-bus.js";
+import { heyHankBus } from "./event-bus.js";
 
 // Mock dependencies
 vi.mock("./agent-store.js", () => ({
@@ -100,7 +100,7 @@ describe("LinearAgentBridge", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    companionBus.clear();
+    heyHankBus.clear();
     vi.useFakeTimers();
     // Default: getAgent returns the testAgent (needed for setupRelay credential lookup)
     vi.mocked(agentStore.getAgent).mockReturnValue(testAgent as ReturnType<typeof agentStore.getAgent>);
@@ -147,8 +147,8 @@ describe("LinearAgentBridge", () => {
       );
 
       // Should set up relay listeners on the event bus
-      expect(companionBus.listenerCount("message:assistant")).toBeGreaterThan(0);
-      expect(companionBus.listenerCount("message:result")).toBeGreaterThan(0);
+      expect(heyHankBus.listenerCount("message:assistant")).toBeGreaterThan(0);
+      expect(heyHankBus.listenerCount("message:result")).toBeGreaterThan(0);
 
       // Should post "session started" thought
       expect(linearAgent.postActivity).toHaveBeenCalledWith(
@@ -488,7 +488,7 @@ describe("LinearAgentBridge", () => {
 
   describe("relay — assistant message callbacks", () => {
     // These tests exercise the relay subscriptions that are registered
-    // inside setupRelay via companionBus. We emit events on the bus directly
+    // inside setupRelay via heyHankBus. We emit events on the bus directly
     // with synthetic BrowserIncomingMessage payloads.
 
     async function createSessionAndSetupRelay() {
@@ -501,11 +501,11 @@ describe("LinearAgentBridge", () => {
 
     /** Emit an assistant message for the test session via the bus. */
     function emitAssistant(msg: unknown) {
-      companionBus.emit("message:assistant", { sessionId: "comp-sess-1", message: msg } as any);
+      heyHankBus.emit("message:assistant", { sessionId: "comp-sess-1", message: msg } as any);
     }
 
     function emitStreamText(text: string) {
-      companionBus.emit("message:stream_event", {
+      heyHankBus.emit("message:stream_event", {
         sessionId: "comp-sess-1",
         message: {
           type: "stream_event",
@@ -520,7 +520,7 @@ describe("LinearAgentBridge", () => {
 
     /** Emit a result message for the test session via the bus. */
     async function emitResult(msg: unknown = {}) {
-      companionBus.emit("message:result", { sessionId: "comp-sess-1", message: msg } as any);
+      heyHankBus.emit("message:result", { sessionId: "comp-sess-1", message: msg } as any);
       // Allow async result handler to settle
       await vi.advanceTimersByTimeAsync(0);
     }
@@ -740,11 +740,11 @@ describe("LinearAgentBridge", () => {
     }
 
     function emitAssistant(msg: unknown) {
-      companionBus.emit("message:assistant", { sessionId: "comp-sess-1", message: msg } as any);
+      heyHankBus.emit("message:assistant", { sessionId: "comp-sess-1", message: msg } as any);
     }
 
     async function emitResult(msg: unknown = {}) {
-      companionBus.emit("message:result", { sessionId: "comp-sess-1", message: msg } as any);
+      heyHankBus.emit("message:result", { sessionId: "comp-sess-1", message: msg } as any);
       await vi.advanceTimersByTimeAsync(0);
     }
 
@@ -825,7 +825,7 @@ describe("LinearAgentBridge", () => {
     }
 
     function emitAssistant(msg: unknown) {
-      companionBus.emit("message:assistant", { sessionId: "comp-sess-1", message: msg } as any);
+      heyHankBus.emit("message:assistant", { sessionId: "comp-sess-1", message: msg } as any);
     }
 
     it("posts tool result as action activity when tool_result block matches a pending tool_use", async () => {
@@ -895,11 +895,11 @@ describe("LinearAgentBridge", () => {
     }
 
     function emitAssistant(msg: unknown) {
-      companionBus.emit("message:assistant", { sessionId: "comp-sess-1", message: msg } as any);
+      heyHankBus.emit("message:assistant", { sessionId: "comp-sess-1", message: msg } as any);
     }
 
     async function emitResult(msg: unknown = {}) {
-      companionBus.emit("message:result", { sessionId: "comp-sess-1", message: msg } as any);
+      heyHankBus.emit("message:result", { sessionId: "comp-sess-1", message: msg } as any);
       await vi.advanceTimersByTimeAsync(0);
     }
 
@@ -989,7 +989,7 @@ describe("LinearAgentBridge", () => {
       vi.mocked(agentStore.getAgent).mockReturnValue(testAgent as ReturnType<typeof agentStore.getAgent>);
 
       // Trigger turn completion via event bus
-      companionBus.emit("message:result", { sessionId: "comp-sess-1", message: {} } as any);
+      heyHankBus.emit("message:result", { sessionId: "comp-sess-1", message: {} } as any);
       await vi.advanceTimersByTimeAsync(0);
 
       // Now send a follow-up — should inject into existing session, NOT create new
@@ -1006,8 +1006,8 @@ describe("LinearAgentBridge", () => {
       await bridge.handleEvent(makeCreatedEvent());
 
       // First turn: simulate response and turn completion via bus
-      companionBus.emit("message:assistant", { sessionId: "comp-sess-1", message: { type: "assistant", message: { content: [{ type: "text", text: "First response" }] } } } as any);
-      companionBus.emit("message:result", { sessionId: "comp-sess-1", message: {} } as any);
+      heyHankBus.emit("message:assistant", { sessionId: "comp-sess-1", message: { type: "assistant", message: { content: [{ type: "text", text: "First response" }] } } } as any);
+      heyHankBus.emit("message:result", { sessionId: "comp-sess-1", message: {} } as any);
       await vi.advanceTimersByTimeAsync(0);
 
       vi.clearAllMocks();
@@ -1018,14 +1018,14 @@ describe("LinearAgentBridge", () => {
       await bridge.handleEvent(makePromptedEvent("linear-session-1", "Follow up"));
 
       // setupRelay should have registered new listeners on the bus
-      expect(companionBus.listenerCount("message:assistant")).toBeGreaterThan(0);
-      expect(companionBus.listenerCount("message:result")).toBeGreaterThan(0);
+      expect(heyHankBus.listenerCount("message:assistant")).toBeGreaterThan(0);
+      expect(heyHankBus.listenerCount("message:result")).toBeGreaterThan(0);
 
       // Simulate second turn response via bus
       vi.clearAllMocks();
 
-      companionBus.emit("message:assistant", { sessionId: "comp-sess-1", message: { type: "assistant", message: { content: [{ type: "text", text: "Second response" }] } } } as any);
-      companionBus.emit("message:result", { sessionId: "comp-sess-1", message: {} } as any);
+      heyHankBus.emit("message:assistant", { sessionId: "comp-sess-1", message: { type: "assistant", message: { content: [{ type: "text", text: "Second response" }] } } } as any);
+      heyHankBus.emit("message:result", { sessionId: "comp-sess-1", message: {} } as any);
       await vi.advanceTimersByTimeAsync(0);
 
       // The second response should be forwarded to Linear
@@ -1047,16 +1047,16 @@ describe("LinearAgentBridge", () => {
       await bridge.handleEvent(makeCreatedEvent());
 
       // Should have listeners registered
-      const beforeAssistant = companionBus.listenerCount("message:assistant");
-      const beforeResult = companionBus.listenerCount("message:result");
+      const beforeAssistant = heyHankBus.listenerCount("message:assistant");
+      const beforeResult = heyHankBus.listenerCount("message:result");
       expect(beforeAssistant).toBeGreaterThan(0);
       expect(beforeResult).toBeGreaterThan(0);
 
       bridge.shutdown();
 
       // After shutdown, listeners should have been removed
-      expect(companionBus.listenerCount("message:assistant")).toBeLessThan(beforeAssistant);
-      expect(companionBus.listenerCount("message:result")).toBeLessThan(beforeResult);
+      expect(heyHankBus.listenerCount("message:assistant")).toBeLessThan(beforeAssistant);
+      expect(heyHankBus.listenerCount("message:result")).toBeLessThan(beforeResult);
     });
   });
 });

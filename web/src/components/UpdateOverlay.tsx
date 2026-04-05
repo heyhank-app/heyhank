@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 /** Read the auth token from localStorage for the poll request.
  *  Intentionally local — exporting from api.ts would trigger the coverage gate on that file. */
 function getAuthHeaders(): Record<string, string> {
-  const token = localStorage.getItem("companion_auth_token");
+  const token = localStorage.getItem("heyhank_auth_token");
   if (!token) return {};
   return { Authorization: `Bearer ${token}` };
 }
@@ -96,7 +96,7 @@ function UpdateOverlayVisual({ phase, className }: { phase: Phase; className?: s
           <div className="absolute inset-0 -m-4 rounded-full bg-cc-primary/10 animate-pulse" />
         )}
         <img
-          src="/logo.svg"
+          src="/logo.png"
           alt="Updating"
           className={`w-20 h-20 relative z-10 transition-transform duration-500 ${
             isReady ? "" : "scale-110"

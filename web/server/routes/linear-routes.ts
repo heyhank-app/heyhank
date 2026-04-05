@@ -38,7 +38,7 @@ export async function transitionLinearIssue(
       },
       body: JSON.stringify({
         query: `
-          mutation CompanionTransitionIssue($issueId: String!, $stateId: String!) {
+          mutation HeyHankTransitionIssue($issueId: String!, $stateId: String!) {
             issueUpdate(id: $issueId, input: { stateId: $stateId }) {
               success
               issue {
@@ -122,7 +122,7 @@ export async function fetchLinearTeamStates(linearApiKey: string, cachePrefix?: 
         },
         body: JSON.stringify({
           query: `
-            query CompanionWorkflowStates {
+            query HeyHankWorkflowStates {
               teams {
                 nodes {
                   id
@@ -208,7 +208,7 @@ export function registerLinearRoutes(api: Hono): void {
           },
           body: JSON.stringify({
             query: `
-              query CompanionIssueSearch($term: String!, $first: Int!) {
+              query HeyHankIssueSearch($term: String!, $first: Int!) {
                 searchIssues(term: $term, first: $first) {
                   nodes {
                     id
@@ -326,7 +326,7 @@ export function registerLinearRoutes(api: Hono): void {
         },
         body: JSON.stringify({
           query: `
-            mutation CompanionCreateIssue($input: IssueCreateInput!) {
+            mutation HeyHankCreateIssue($input: IssueCreateInput!) {
               issueCreate(input: $input) {
                 success
                 issue {
@@ -430,7 +430,7 @@ export function registerLinearRoutes(api: Hono): void {
           },
           body: JSON.stringify({
             query: `
-              query CompanionLinearConnection {
+              query HeyHankLinearConnection {
                 viewer { id name email }
                 teams(first: 1) { nodes { id key name } }
               }
@@ -522,7 +522,7 @@ export function registerLinearRoutes(api: Hono): void {
           },
           body: JSON.stringify({
             query: `
-              query CompanionIssueFetch($id: String!) {
+              query HeyHankIssueFetch($id: String!) {
                 issue(id: $id) {
                   id identifier title description url branchName priorityLabel
                   state { name type }
@@ -643,7 +643,7 @@ export function registerLinearRoutes(api: Hono): void {
       },
       body: JSON.stringify({
         query: `
-          mutation CompanionAddComment($issueId: String!, $body: String!) {
+          mutation HeyHankAddComment($issueId: String!, $body: String!) {
             commentCreate(input: { issueId: $issueId, body: $body }) {
               success
               comment { id body createdAt user { name displayName } }
@@ -735,7 +735,7 @@ export function registerLinearRoutes(api: Hono): void {
           },
           body: JSON.stringify({
             query: `
-              query CompanionListProjects {
+              query HeyHankListProjects {
                 projects(first: 50, orderBy: updatedAt) {
                   nodes { id name state }
                 }
@@ -797,7 +797,7 @@ export function registerLinearRoutes(api: Hono): void {
           },
           body: JSON.stringify({
             query: `
-              query CompanionProjectIssues($projectId: ID!, $first: Int!) {
+              query HeyHankProjectIssues($projectId: ID!, $first: Int!) {
                 issues(
                   filter: {
                     project: { id: { eq: $projectId } }

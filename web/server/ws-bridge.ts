@@ -47,7 +47,7 @@ import {
 } from "./ws-bridge-browser.js";
 import { validatePermission } from "./ai-validator.js";
 import { getEffectiveAiValidation } from "./ai-validation-settings.js";
-import { companionBus } from "./event-bus.js";
+import { heyHankBus } from "./event-bus.js";
 import { SessionStateMachine } from "./session-state-machine.js";
 import { metricsCollector } from "./metrics-collector.js";
 import { log } from "./logger.js";
@@ -67,7 +67,7 @@ export class WsBridge {
   /** Maximum number of queued browser→backend messages per session to prevent unbounded memory growth. */
   private static readonly PENDING_MESSAGES_LIMIT = 200;
   private static readonly DISCONNECT_DEBOUNCE_MS = Number(
-    process.env.COMPANION_DISCONNECT_DEBOUNCE_MS || "15000",
+    process.env.HEYHANK_DISCONNECT_DEBOUNCE_MS || process.env.COMPANION_DISCONNECT_DEBOUNCE_MS || "15000",
   );
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private idleKillTimers = new Map<string, ReturnType<typeof setInterval>>();
@@ -85,7 +85,7 @@ export class WsBridge {
     "git_behind",
   ];
 
-  /** Set the Linear agent session ID on a Companion session and persist it. */
+  /** Set the Linear agent session ID on a HeyHank session and persist it. */
   setLinearSessionId(sessionId: string, linearSessionId: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
@@ -242,7 +242,7 @@ export class WsBridge {
     }
 
     if (options.notifyPoller && session.state.git_branch && session.state.cwd) {
-      companionBus.emit("session:git-info-ready", { sessionId: session.id, cwd: session.state.cwd, branch: session.state.git_branch });
+      heyHankBus.emit("session:git-info-ready", { sessionId: session.id, cwd: session.state.cwd, branch: session.state.git_branch });
     }
   }
 
@@ -333,7 +333,7 @@ export class WsBridge {
     // Unsubscribe any previous listener (e.g. from session restoration) to prevent leaks
     session.unsubscribeStateMachine?.();
     session.unsubscribeStateMachine = session.stateMachine.onTransition((event) => {
-      companionBus.emit("session:phase-changed", {
+      heyHankBus.emit("session:phase-changed", {
         sessionId: event.sessionId,
         from: event.from,
         to: event.to,
@@ -411,7 +411,7 @@ export class WsBridge {
       // -- session_init: merge into session state, broadcast, persist -----
       if (msg.type === "session_init") {
         // Exclude session_id from the spread: the CLI reports its own internal
-        // session ID which differs from the Companion's session ID.  Allowing
+        // session ID which differs from the HeyHank's session ID.  Allowing
         // it to overwrite session.state.session_id causes the browser to key
         // the session under the wrong ID, producing duplicate sidebar entries.
         const { slash_commands, skills, session_id: _cliSessionId, ...rest } = msg.session;
@@ -483,11 +483,11 @@ export class WsBridge {
         const assistantMsg = { ...msg, timestamp: msg.timestamp || Date.now() };
         this.appendHistory(session, assistantMsg);
         this.persistSession(session);
-        companionBus.emit("message:assistant", { sessionId: session.id, message: assistantMsg });
+        heyHankBus.emit("message:assistant", { sessionId: session.id, message: assistantMsg });
       }
 
       if (msg.type === "stream_event") {
-        companionBus.emit("message:stream_event", { sessionId: session.id, message: msg });
+        heyHankBus.emit("message:stream_event", { sessionId: session.id, message: msg });
       }
 
       // -- result: update session cost/turns, refresh git, notify listeners
@@ -515,7 +515,7 @@ export class WsBridge {
         this.appendHistory(session, msg);
         session.stateMachine.transition("ready", "turn_completed");
         this.persistSession(session);
-        companionBus.emit("message:result", { sessionId: session.id, message: msg });
+        heyHankBus.emit("message:result", { sessionId: session.id, message: msg });
 
         // Trigger auto-naming after first successful result
         if (
@@ -525,7 +525,7 @@ export class WsBridge {
           this.autoNamingAttempted.add(session.id);
           const firstUserMsg = session.messageHistory.find((m) => m.type === "user_message");
           if (firstUserMsg && firstUserMsg.type === "user_message") {
-            companionBus.emit("session:first-turn-completed", { sessionId: session.id, firstUserMessage: firstUserMsg.content });
+            heyHankBus.emit("session:first-turn-completed", { sessionId: session.id, firstUserMessage: firstUserMsg.content });
           }
         }
       }
@@ -587,7 +587,7 @@ export class WsBridge {
     // ── onSessionMeta — metadata updates (CLI session ID, model, cwd) ────
     adapter.onSessionMeta((meta) => {
       if (meta.cliSessionId) {
-        companionBus.emit("session:cli-id-received", { sessionId: session.id, cliSessionId: meta.cliSessionId });
+        heyHankBus.emit("session:cli-id-received", { sessionId: session.id, cliSessionId: meta.cliSessionId });
       }
       if (meta.model) session.state.model = meta.model;
       // For containerized sessions, the CLI reports the container's cwd (e.g. /workspace).
@@ -630,7 +630,7 @@ export class WsBridge {
       // Auto-relaunch if browsers are still connected
       if (session.browserSockets.size > 0) {
         console.log(`[ws-bridge] Auto-relaunching backend for session ${sessionId} (${session.browserSockets.size} browser(s) connected)`);
-        companionBus.emit("session:relaunch-needed", { sessionId });
+        heyHankBus.emit("session:relaunch-needed", { sessionId });
       }
     });
 
@@ -891,7 +891,7 @@ export class WsBridge {
       // (CLI may be mid-reconnect — avoid UI flap and spurious relaunch)
       this.sendToBrowser(ws, { type: "cli_disconnected" });
       console.log(`[ws-bridge] Browser connected but backend is dead for session ${sessionId}, requesting relaunch`);
-      companionBus.emit("session:relaunch-needed", { sessionId });
+      heyHankBus.emit("session:relaunch-needed", { sessionId });
     }
   }
 
@@ -909,6 +909,12 @@ export class WsBridge {
     if (!msg) return;
 
     this.routeBrowserMessage(session, msg, ws);
+  }
+
+  /** Check if a session has a connected CLI backend */
+  hasConnectedCli(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId);
+    return !!session && !!session.backendAdapter && session.backendAdapter.isConnected();
   }
 
   /** Send a user message into a session programmatically (no browser required).
@@ -972,8 +978,8 @@ export class WsBridge {
   // ── Idle kill watchdog ─────────────────────────────────────────────────
 
   private static readonly IDLE_KILL_THRESHOLD_MS = Number(
-    process.env.COMPANION_IDLE_KILL_MINUTES
-      ? Number(process.env.COMPANION_IDLE_KILL_MINUTES) * 60_000
+    (process.env.HEYHANK_IDLE_KILL_MINUTES || process.env.COMPANION_IDLE_KILL_MINUTES)
+      ? Number(process.env.HEYHANK_IDLE_KILL_MINUTES || process.env.COMPANION_IDLE_KILL_MINUTES) * 60_000
       : 24 * 60 * 60_000, // 24 hours default
   );
   private static readonly IDLE_CHECK_INTERVAL_MS = 60_000; // check every 60s
@@ -1022,7 +1028,7 @@ export class WsBridge {
     // Truly idle with no browsers — kill
     console.log(`[ws-bridge] Idle kill triggered for ${sessionId} (idle ${Math.round(idleMs / 60_000)}min, 0 browsers)`);
     this.stopIdleKillWatchdog(sessionId);
-    companionBus.emit("session:idle-kill", { sessionId });
+    heyHankBus.emit("session:idle-kill", { sessionId });
   }
 
   /** Append to messageHistory with cap. Delegates to ws-bridge-persist. */
