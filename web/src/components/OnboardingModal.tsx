@@ -2,9 +2,9 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api.js";
 
-type Step = "welcome" | "claude" | "codex" | "done";
+type Step = "welcome" | "claude" | "codex" | "gemini" | "done";
 
-const STEPS: Step[] = ["welcome", "claude", "codex", "done"];
+const STEPS: Step[] = ["welcome", "claude", "codex", "gemini", "done"];
 
 /** Shared selector for focusable, non-disabled elements (M1 fix) */
 const FOCUSABLE_SELECTOR =
@@ -24,10 +24,12 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
   const [step, setStep] = useState<Step>("welcome");
   const [claudeToken, setClaudeToken] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
+  const [geminiKey, setGeminiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [claudeConfigured, setClaudeConfigured] = useState(false);
   const [codexConfigured, setCodexConfigured] = useState(false);
+  const [geminiConfigured, setGeminiConfigured] = useState(false);
   const [entered, setEntered] = useState(prefersReducedMotion);
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -102,7 +104,7 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
       const settings = await api.getSettings();
       if (settings.codexDeviceAuthConfigured) {
         setCodexConfigured(true);
-        await finishOnboarding();
+        setStep("gemini");
       } else {
         setError("No Codex auth found. Run codex --login in your terminal first.");
       }
@@ -119,13 +121,31 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
     try {
       await api.updateSettings({ openaiApiKey: openaiKey.trim() });
       setCodexConfigured(true);
-      await finishOnboarding();
+      setStep("gemini");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save API key");
     } finally {
       setSaving(false);
     }
   }, [openaiKey]);
+
+  const handleSaveGemini = useCallback(async () => {
+    if (!geminiKey.trim()) {
+      await finishOnboarding();
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await api.updateSettings({ geminiApiKey: geminiKey.trim() });
+      setGeminiConfigured(true);
+      await finishOnboarding();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save API key");
+    } finally {
+      setSaving(false);
+    }
+  }, [geminiKey, finishOnboarding]);
 
   const finishOnboarding = useCallback(async () => {
     try {
@@ -193,7 +213,7 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
             role="status"
             aria-label={`Step ${stepIndex + 1} of ${STEPS.length - 1}`}
           >
-            {STEPS.slice(0, 3).map((s, i) => (
+            {STEPS.slice(0, 4).map((s, i) => (
               <div
                 key={s}
                 className="h-[3px] rounded-full transition-[transform,background,opacity] duration-300"
@@ -241,8 +261,19 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
               onApiKeyChange={setOpenaiKey}
               onCheckAuth={handleCheckCodexAuth}
               onSaveApiKey={handleSaveCodexApiKey}
-              onSkip={() => finishOnboarding()}
+              onSkip={() => goToStep("gemini")}
               onBack={() => goToStep("claude")}
+              saving={saving}
+              error={error}
+            />
+          )}
+          {step === "gemini" && (
+            <GeminiSetupStep
+              apiKey={geminiKey}
+              onApiKeyChange={setGeminiKey}
+              onSave={handleSaveGemini}
+              onSkip={() => finishOnboarding()}
+              onBack={() => goToStep("codex")}
               saving={saving}
               error={error}
             />
@@ -251,6 +282,7 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
             <DoneStep
               claudeConfigured={claudeConfigured}
               codexConfigured={codexConfigured}
+              geminiConfigured={geminiConfigured}
               onDone={handleDone}
             />
           )}
@@ -291,7 +323,7 @@ function WelcomeStep({
           Welcome to HeyHank
         </h2>
         <p className="text-sm text-cc-muted mt-1.5 leading-relaxed">
-          Connect your AI providers to start coding. Configure one or both.
+          Connect your AI providers to get started. Configure one or more.
         </p>
       </div>
 
@@ -379,7 +411,7 @@ function ClaudeSetupStep({
     <div className="p-7 pb-6">
       <div className="mb-5">
         <div className="text-[10px] uppercase tracking-[0.12em] text-cc-muted font-medium mb-2">
-          Step 1 of 2
+          Step 1 of 3
         </div>
         <h2 className="text-xl font-semibold text-cc-fg leading-tight">
           Set up Claude Code
@@ -489,7 +521,7 @@ function CodexSetupStep({
     <div className="p-7 pb-6">
       <div className="mb-5">
         <div className="text-[10px] uppercase tracking-[0.12em] text-cc-muted font-medium mb-2">
-          Step 2 of 2
+          Step 2 of 3
         </div>
         <h2 className="text-xl font-semibold text-cc-fg leading-tight">
           Set up Codex
@@ -606,18 +638,141 @@ function CodexSetupStep({
   );
 }
 
+/* ── Gemini Setup ────────────────────────────────────────────────────────── */
+
+function GeminiSetupStep({
+  apiKey,
+  onApiKeyChange,
+  onSave,
+  onSkip,
+  onBack,
+  saving,
+  error,
+}: {
+  apiKey: string;
+  onApiKeyChange: (v: string) => void;
+  onSave: () => void;
+  onSkip: () => void;
+  onBack: () => void;
+  saving: boolean;
+  error: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const errorId = "gemini-key-error";
+
+  return (
+    <div className="p-7 pb-6">
+      <div className="mb-5">
+        <div className="text-[10px] uppercase tracking-[0.12em] text-cc-muted font-medium mb-2">
+          Step 3 of 3
+        </div>
+        <h2 className="text-xl font-semibold text-cc-fg leading-tight">
+          Set up Gemini
+        </h2>
+        <p className="text-sm text-cc-muted mt-1.5 leading-relaxed">
+          Gemini powers voice chat, image/video generation, and AI phone calls. Get a free API key:
+        </p>
+      </div>
+
+      {/* Link to AI Studio */}
+      <div
+        className="rounded-lg overflow-hidden mb-4 border border-cc-border"
+        style={{ background: "var(--color-cc-code-bg)" }}
+      >
+        <div className="px-3.5 py-3">
+          <a
+            href="https://aistudio.google.com/apikey"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[13px] font-mono-code text-cc-primary hover:underline"
+          >
+            aistudio.google.com/apikey
+          </a>
+          <p className="text-[11px] text-cc-muted mt-1">Create a key and paste it below.</p>
+        </div>
+      </div>
+
+      {/* API key input */}
+      <div className="mb-4">
+        <label htmlFor="gemini-key" className="text-xs text-cc-muted block mb-1.5">
+          Gemini API Key
+        </label>
+        <input
+          ref={inputRef}
+          id="gemini-key"
+          type="password"
+          value={apiKey}
+          onChange={(e) => onApiKeyChange(e.target.value)}
+          placeholder="AIza..."
+          aria-describedby={error ? errorId : undefined}
+          aria-invalid={error ? true : undefined}
+          className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg border border-cc-border text-cc-fg placeholder:text-cc-muted/60 focus:outline-none focus:ring-1 focus:ring-cc-primary focus:border-cc-primary font-mono-code transition-shadow duration-150"
+        />
+      </div>
+
+      <p className="text-[11px] text-cc-muted mb-4">
+        Enables: Gemini Live voice assistant, Imagen image generation, Veo video generation, AI telephony.
+      </p>
+
+      {error && (
+        <div id={errorId} role="alert" className="flex items-start gap-2 mb-4 text-xs text-cc-error">
+          <svg className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 8v4m0 4h.01" />
+          </svg>
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          onClick={onBack}
+          className="px-3 py-2.5 min-h-[44px] min-w-[44px] rounded-lg text-sm text-cc-muted hover:text-cc-fg transition-colors flex items-center gap-1"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          Back
+        </button>
+        <div className="flex-1" />
+        <button
+          onClick={onSkip}
+          className="px-4 py-2.5 min-h-[44px] rounded-lg text-sm text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors"
+        >
+          Skip
+        </button>
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="btn-primary-aa px-5 py-2.5 min-h-[44px] rounded-lg text-sm font-medium text-white transition-[background,opacity] duration-150 disabled:opacity-50"
+          style={{ boxShadow: saving ? "none" : "0 1px 3px var(--color-cc-primary-btn)" }}
+        >
+          {saving ? "Saving..." : apiKey.trim() ? "Save & Finish" : "Finish"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ── Done ─────────────────────────────────────────────────────────────────── */
 
 function DoneStep({
   claudeConfigured,
   codexConfigured,
+  geminiConfigured,
   onDone,
 }: {
   claudeConfigured: boolean;
   codexConfigured: boolean;
+  geminiConfigured: boolean;
   onDone: () => void;
 }) {
-  const noneConfigured = !claudeConfigured && !codexConfigured;
+  const noneConfigured = !claudeConfigured && !codexConfigured && !geminiConfigured;
   const skipMotion = prefersReducedMotion();
   const [visible, setVisible] = useState(skipMotion);
 
@@ -669,6 +824,7 @@ function DoneStep({
             <>
               {claudeConfigured && <span className="block">Claude Code is ready.</span>}
               {codexConfigured && <span className="block">Codex is ready.</span>}
+              {geminiConfigured && <span className="block">Gemini is ready (voice, media, telephony).</span>}
               <span className="block mt-1 text-xs">You can update these anytime in Settings.</span>
             </>
           )

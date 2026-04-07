@@ -28,42 +28,14 @@ vi.mock("./session-names.js", () => ({
   removeName: vi.fn(),
 }));
 
-vi.mock("./session-linear-issues.js", () => ({
-  getLinearIssue: vi.fn(() => undefined),
-  setLinearIssue: vi.fn(),
-  removeLinearIssue: vi.fn(),
-  getAllLinearIssues: vi.fn(() => ({})),
-}));
-
 vi.mock("./settings-manager.js", () => ({
   getSettings: vi.fn(() => ({
     anthropicApiKey: "",
     anthropicModel: "claude-sonnet-4-6",
-    linearApiKey: "",
-    linearAutoTransition: false,
-    linearAutoTransitionStateId: "",
-    linearAutoTransitionStateName: "",
-    linearArchiveTransition: false,
-    linearArchiveTransitionStateId: "",
-    linearArchiveTransitionStateName: "",
     claudeCodeOAuthToken: "",
     openaiApiKey: "",
     onboardingCompleted: false,
   })),
-}));
-
-vi.mock("./linear-connections.js", () => ({
-  getConnection: vi.fn(() => null),
-  resolveApiKey: vi.fn(() => null),
-}));
-
-vi.mock("./linear-prompt-builder.js", () => ({
-  buildLinearSystemPrompt: vi.fn(() => ""),
-}));
-
-vi.mock("./routes/linear-routes.js", () => ({
-  transitionLinearIssue: vi.fn(async () => ({ ok: true })),
-  fetchLinearTeamStates: vi.fn(async () => []),
 }));
 
 vi.mock("./claude-container-auth.js", () => ({
@@ -134,14 +106,11 @@ import * as envManager from "./env-manager.js";
 import * as sandboxManager from "./sandbox-manager.js";
 import * as gitUtils from "./git-utils.js";
 import * as sessionNames from "./session-names.js";
-import * as sessionLinearIssues from "./session-linear-issues.js";
 import * as settingsManager from "./settings-manager.js";
-import { resolveApiKey } from "./linear-connections.js";
-import { transitionLinearIssue, fetchLinearTeamStates } from "./routes/linear-routes.js";
 import { hasContainerClaudeAuth } from "./claude-container-auth.js";
 import { hasContainerCodexAuth } from "./codex-container-auth.js";
 import { generateSessionTitle } from "./auto-namer.js";
-import { companionBus } from "./event-bus.js";
+import { heyHankBus } from "./event-bus.js";
 
 // ── Mock factories ──────────────────────────────────────────────────────────
 
@@ -220,7 +189,7 @@ describe("SessionOrchestrator", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    companionBus.clear();
+    heyHankBus.clear();
     mockImagePullIsReady.mockReturnValue(true);
     // Re-establish mocks that may have been overridden by mockImplementation in
     // previous tests (clearAllMocks resets calls/results but NOT implementations).
@@ -249,24 +218,24 @@ describe("SessionOrchestrator", () => {
   // ── Initialization / Event wiring ─────────────────────────────────────────
 
   describe("initialize()", () => {
-    it("registers all expected event listeners on companionBus", () => {
+    it("registers all expected event listeners on heyHankBus", () => {
       // Verifies that initialize() wires up all event handlers on the bus
       orchestrator.initialize();
 
-      expect(companionBus.listenerCount("session:cli-id-received")).toBeGreaterThan(0);
-      expect(companionBus.listenerCount("backend:codex-adapter-created")).toBeGreaterThan(0);
-      expect(companionBus.listenerCount("session:exited")).toBeGreaterThan(0);
-      expect(companionBus.listenerCount("session:git-info-ready")).toBeGreaterThan(0);
-      expect(companionBus.listenerCount("session:relaunch-needed")).toBeGreaterThan(0);
-      expect(companionBus.listenerCount("session:idle-kill")).toBeGreaterThan(0);
-      expect(companionBus.listenerCount("session:first-turn-completed")).toBeGreaterThan(0);
+      expect(heyHankBus.listenerCount("session:cli-id-received")).toBeGreaterThan(0);
+      expect(heyHankBus.listenerCount("backend:codex-adapter-created")).toBeGreaterThan(0);
+      expect(heyHankBus.listenerCount("session:exited")).toBeGreaterThan(0);
+      expect(heyHankBus.listenerCount("session:git-info-ready")).toBeGreaterThan(0);
+      expect(heyHankBus.listenerCount("session:relaunch-needed")).toBeGreaterThan(0);
+      expect(heyHankBus.listenerCount("session:idle-kill")).toBeGreaterThan(0);
+      expect(heyHankBus.listenerCount("session:first-turn-completed")).toBeGreaterThan(0);
     });
 
     it("CLI session ID callback delegates to launcher.setCLISessionId", () => {
       orchestrator.initialize();
 
       // Emit event on the bus instead of extracting callback
-      companionBus.emit("session:cli-id-received", { sessionId: "s1", cliSessionId: "cli-id-123" });
+      heyHankBus.emit("session:cli-id-received", { sessionId: "s1", cliSessionId: "cli-id-123" });
 
       expect(deps.launcher.setCLISessionId).toHaveBeenCalledWith("s1", "cli-id-123");
     });
@@ -274,7 +243,7 @@ describe("SessionOrchestrator", () => {
     it("session exit callback notifies agentExecutor", () => {
       orchestrator.initialize();
 
-      companionBus.emit("session:exited", { sessionId: "s1", exitCode: 0 });
+      heyHankBus.emit("session:exited", { sessionId: "s1", exitCode: 0 });
 
       expect(deps.agentExecutor.handleSessionExited).toHaveBeenCalledWith("s1", 0);
     });
@@ -282,7 +251,7 @@ describe("SessionOrchestrator", () => {
     it("git info ready callback starts PR polling", () => {
       orchestrator.initialize();
 
-      companionBus.emit("session:git-info-ready", { sessionId: "s1", cwd: "/repo", branch: "main" });
+      heyHankBus.emit("session:git-info-ready", { sessionId: "s1", cwd: "/repo", branch: "main" });
 
       expect(deps.prPoller.watch).toHaveBeenCalledWith("s1", "/repo", "main");
     });
@@ -291,7 +260,7 @@ describe("SessionOrchestrator", () => {
       deps.launcher.getSession.mockReturnValue({ archived: true });
       orchestrator.initialize();
 
-      companionBus.emit("session:idle-kill", { sessionId: "s1" });
+      heyHankBus.emit("session:idle-kill", { sessionId: "s1" });
       await new Promise(r => setTimeout(r, 0));
 
       // Should not kill because session is archived
@@ -302,7 +271,7 @@ describe("SessionOrchestrator", () => {
       deps.launcher.getSession.mockReturnValue({ archived: false });
       orchestrator.initialize();
 
-      companionBus.emit("session:idle-kill", { sessionId: "s1" });
+      heyHankBus.emit("session:idle-kill", { sessionId: "s1" });
       await new Promise(r => setTimeout(r, 0));
 
       expect(deps.launcher.kill).toHaveBeenCalledWith("s1");
@@ -326,13 +295,13 @@ describe("SessionOrchestrator", () => {
       orchestrator.initialize();
 
       // 1. Idle-kill fires — CLI killed, container preserved
-      companionBus.emit("session:idle-kill", { sessionId: "s1" });
+      heyHankBus.emit("session:idle-kill", { sessionId: "s1" });
       await vi.advanceTimersByTimeAsync(0);
       expect(deps.launcher.kill).toHaveBeenCalledWith("s1");
       expect(containerManager.removeContainer).not.toHaveBeenCalled();
 
       // 2. Browser reconnects — triggers auto-relaunch
-      companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+      heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
       await vi.advanceTimersByTimeAsync(15_000);
       await vi.advanceTimersByTimeAsync(0);
 
@@ -355,14 +324,14 @@ describe("SessionOrchestrator", () => {
 
       // Exhaust 2 of 3 relaunch attempts
       for (let i = 0; i < 2; i++) {
-        companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+        heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
         await vi.advanceTimersByTimeAsync(15_000);
         await vi.advanceTimersByTimeAsync(0);
       }
       expect(deps.launcher.relaunch).toHaveBeenCalledTimes(2);
 
       // Now idle-kill the session — this should clear the counter
-      companionBus.emit("session:idle-kill", { sessionId: "s1" });
+      heyHankBus.emit("session:idle-kill", { sessionId: "s1" });
       await vi.advanceTimersByTimeAsync(0);
 
       // After idle-kill, we should get a fresh budget of 3 relaunch attempts.
@@ -371,7 +340,7 @@ describe("SessionOrchestrator", () => {
       deps.launcher.relaunch.mockResolvedValue({ ok: false, error: "failed" });
 
       for (let i = 0; i < 3; i++) {
-        companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+        heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
         await vi.advanceTimersByTimeAsync(15_000);
         await vi.advanceTimersByTimeAsync(0);
       }
@@ -386,23 +355,23 @@ describe("SessionOrchestrator", () => {
       // all event handlers to fire multiple times per event.
       orchestrator.initialize();
       const countsAfterFirst = {
-        cliId: companionBus.listenerCount("session:cli-id-received"),
-        codex: companionBus.listenerCount("backend:codex-adapter-created"),
-        exited: companionBus.listenerCount("session:exited"),
-        relaunch: companionBus.listenerCount("session:relaunch-needed"),
-        idleKill: companionBus.listenerCount("session:idle-kill"),
-        firstTurn: companionBus.listenerCount("session:first-turn-completed"),
+        cliId: heyHankBus.listenerCount("session:cli-id-received"),
+        codex: heyHankBus.listenerCount("backend:codex-adapter-created"),
+        exited: heyHankBus.listenerCount("session:exited"),
+        relaunch: heyHankBus.listenerCount("session:relaunch-needed"),
+        idleKill: heyHankBus.listenerCount("session:idle-kill"),
+        firstTurn: heyHankBus.listenerCount("session:first-turn-completed"),
       };
 
       orchestrator.initialize();
 
       // Listener counts should not have doubled after the second initialize()
-      expect(companionBus.listenerCount("session:cli-id-received")).toBe(countsAfterFirst.cliId);
-      expect(companionBus.listenerCount("backend:codex-adapter-created")).toBe(countsAfterFirst.codex);
-      expect(companionBus.listenerCount("session:exited")).toBe(countsAfterFirst.exited);
-      expect(companionBus.listenerCount("session:relaunch-needed")).toBe(countsAfterFirst.relaunch);
-      expect(companionBus.listenerCount("session:idle-kill")).toBe(countsAfterFirst.idleKill);
-      expect(companionBus.listenerCount("session:first-turn-completed")).toBe(countsAfterFirst.firstTurn);
+      expect(heyHankBus.listenerCount("session:cli-id-received")).toBe(countsAfterFirst.cliId);
+      expect(heyHankBus.listenerCount("backend:codex-adapter-created")).toBe(countsAfterFirst.codex);
+      expect(heyHankBus.listenerCount("session:exited")).toBe(countsAfterFirst.exited);
+      expect(heyHankBus.listenerCount("session:relaunch-needed")).toBe(countsAfterFirst.relaunch);
+      expect(heyHankBus.listenerCount("session:idle-kill")).toBe(countsAfterFirst.idleKill);
+      expect(heyHankBus.listenerCount("session:first-turn-completed")).toBe(countsAfterFirst.firstTurn);
     });
   });
 
@@ -1048,112 +1017,6 @@ describe("SessionOrchestrator", () => {
       expect(deps.sessionStore.setArchived).toHaveBeenCalledWith("s1", true);
     });
 
-    it("performs Linear transition when linearTransition=backlog", async () => {
-      // Set up linked issue
-      vi.mocked(sessionLinearIssues.getLinearIssue).mockReturnValue({
-        id: "issue-1",
-        identifier: "ENG-42",
-        teamId: "team-1",
-        connectionId: "conn-1",
-      } as any);
-      vi.mocked(resolveApiKey).mockReturnValue({ apiKey: "lin_api_123", connectionId: "conn-1" });
-      vi.mocked(fetchLinearTeamStates).mockResolvedValue([
-        {
-          id: "team-1",
-          key: "ENG",
-          name: "Engineering",
-          states: [
-            { id: "state-backlog", name: "Backlog", type: "backlog" },
-            { id: "state-done", name: "Done", type: "completed" },
-          ],
-        },
-      ]);
-      vi.mocked(transitionLinearIssue).mockResolvedValue({
-        ok: true,
-        issue: { id: "issue-1", identifier: "ENG-42", stateName: "Backlog", stateType: "backlog" },
-      } as any);
-
-      const result = await orchestrator.archiveSession("s1", { linearTransition: "backlog" });
-
-      expect(result.ok).toBe(true);
-      expect(fetchLinearTeamStates).toHaveBeenCalledWith("lin_api_123");
-      expect(transitionLinearIssue).toHaveBeenCalledWith("issue-1", "state-backlog", "lin_api_123", "conn-1");
-      // Session should still be archived even with transition
-      expect(deps.launcher.setArchived).toHaveBeenCalledWith("s1", true);
-    });
-
-    it("archives even when Linear transition fails", async () => {
-      vi.mocked(sessionLinearIssues.getLinearIssue).mockReturnValue({
-        id: "issue-1",
-        identifier: "ENG-42",
-        teamId: "team-1",
-        connectionId: "conn-1",
-      } as any);
-      vi.mocked(resolveApiKey).mockReturnValue({ apiKey: "lin_api_123", connectionId: "conn-1" });
-      vi.mocked(fetchLinearTeamStates).mockResolvedValue([{
-        id: "team-1",
-        key: "ENG",
-        name: "Engineering",
-        states: [{ id: "state-backlog", name: "Backlog", type: "backlog" }],
-      }]);
-      vi.mocked(transitionLinearIssue).mockResolvedValue({ ok: false, error: "API error" });
-
-      const result = await orchestrator.archiveSession("s1", { linearTransition: "backlog" });
-
-      expect(result.ok).toBe(true);
-      expect(result.linearTransition?.ok).toBe(false);
-      expect(deps.launcher.setArchived).toHaveBeenCalledWith("s1", true);
-    });
-
-    it("catches thrown transition errors and still archives", async () => {
-      // When transitionLinearIssue throws, archiveSession should catch it
-      // and continue with the archive operation.
-      vi.mocked(sessionLinearIssues.getLinearIssue).mockReturnValue({
-        id: "issue-1",
-        identifier: "ENG-42",
-        teamId: "team-1",
-        connectionId: "conn-1",
-      } as any);
-      vi.mocked(resolveApiKey).mockReturnValue({ apiKey: "lin_api_123", connectionId: "conn-1" });
-      vi.mocked(fetchLinearTeamStates).mockResolvedValue([{
-        id: "team-1",
-        key: "ENG",
-        name: "Engineering",
-        states: [{ id: "state-backlog", name: "Backlog", type: "backlog" }],
-      }]);
-      vi.mocked(transitionLinearIssue).mockRejectedValue(new Error("Network error"));
-
-      const result = await orchestrator.archiveSession("s1", { linearTransition: "backlog" });
-
-      expect(result.ok).toBe(true);
-      expect(result.linearTransition).toEqual({ ok: false, error: "Transition failed unexpectedly" });
-      expect(deps.launcher.setArchived).toHaveBeenCalledWith("s1", true);
-    });
-
-    it("skips transition when no target state found", async () => {
-      // When the target state cannot be found (e.g., team has no backlog state),
-      // linearTransition should be marked as skipped.
-      vi.mocked(sessionLinearIssues.getLinearIssue).mockReturnValue({
-        id: "issue-1",
-        identifier: "ENG-42",
-        teamId: "team-1",
-        connectionId: "conn-1",
-      } as any);
-      vi.mocked(resolveApiKey).mockReturnValue({ apiKey: "lin_api_123", connectionId: "conn-1" });
-      vi.mocked(fetchLinearTeamStates).mockResolvedValue([{
-        id: "team-1",
-        key: "ENG",
-        name: "Engineering",
-        states: [{ id: "state-done", name: "Done", type: "completed" }],
-        // No backlog state
-      }]);
-
-      const result = await orchestrator.archiveSession("s1", { linearTransition: "backlog" });
-
-      expect(result.ok).toBe(true);
-      expect(result.linearTransition).toEqual({ ok: true, skipped: true });
-    });
-
     it("cleans up worktree during archive", async () => {
       deps.worktreeTracker.getBySession.mockReturnValue({
         sessionId: "s1",
@@ -1177,14 +1040,13 @@ describe("SessionOrchestrator", () => {
   // ── Delete ────────────────────────────────────────────────────────────────
 
   describe("deleteSession()", () => {
-    it("performs full cleanup: kill, container, worktree, PR, Linear, bridge", async () => {
+    it("performs full cleanup: kill, container, worktree, PR, bridge", async () => {
       const result = await orchestrator.deleteSession("s1");
 
       expect(result.ok).toBe(true);
       expect(deps.launcher.kill).toHaveBeenCalledWith("s1");
       expect(containerManager.removeContainer).toHaveBeenCalledWith("s1");
       expect(deps.prPoller.unwatch).toHaveBeenCalledWith("s1");
-      expect(sessionLinearIssues.removeLinearIssue).toHaveBeenCalledWith("s1");
       expect(deps.launcher.removeSession).toHaveBeenCalledWith("s1");
       expect(deps.wsBridge.closeSession).toHaveBeenCalledWith("s1");
     });
@@ -1260,7 +1122,7 @@ describe("SessionOrchestrator", () => {
       vi.mocked(generateSessionTitle).mockResolvedValue("Test Title");
 
       orchestrator.initialize();
-      companionBus.emit("session:first-turn-completed", { sessionId: "s1", firstUserMessage: "Hello world" });
+      heyHankBus.emit("session:first-turn-completed", { sessionId: "s1", firstUserMessage: "Hello world" });
       await new Promise(r => setTimeout(r, 0));
 
       expect(generateSessionTitle).toHaveBeenCalledWith("Hello world", "claude-sonnet-4-6");
@@ -1273,7 +1135,7 @@ describe("SessionOrchestrator", () => {
       vi.mocked(sessionNames.getName).mockReturnValue("Existing Name");
 
       orchestrator.initialize();
-      companionBus.emit("session:first-turn-completed", { sessionId: "s1", firstUserMessage: "Hello" });
+      heyHankBus.emit("session:first-turn-completed", { sessionId: "s1", firstUserMessage: "Hello" });
       await new Promise(r => setTimeout(r, 0));
 
       expect(generateSessionTitle).not.toHaveBeenCalled();
@@ -1283,7 +1145,7 @@ describe("SessionOrchestrator", () => {
       vi.mocked(settingsManager.getSettings).mockReturnValue({ anthropicApiKey: "" } as any);
 
       orchestrator.initialize();
-      companionBus.emit("session:first-turn-completed", { sessionId: "s1", firstUserMessage: "Hello" });
+      heyHankBus.emit("session:first-turn-completed", { sessionId: "s1", firstUserMessage: "Hello" });
       await new Promise(r => setTimeout(r, 0));
 
       expect(generateSessionTitle).not.toHaveBeenCalled();
@@ -1439,7 +1301,7 @@ describe("SessionOrchestrator", () => {
       deps.launcher.getSession.mockReturnValue({ archived: true } as any);
       orchestrator.initialize();
 
-      companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+      heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
       // Advance past the grace period and flush microtasks for the async handler
       await vi.advanceTimersByTimeAsync(15_000);
       await vi.advanceTimersByTimeAsync(0);
@@ -1453,7 +1315,7 @@ describe("SessionOrchestrator", () => {
       deps.wsBridge.isCliConnected.mockReturnValue(true);
       orchestrator.initialize();
 
-      companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+      heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
       await vi.advanceTimersByTimeAsync(15_000);
       await vi.advanceTimersByTimeAsync(0);
 
@@ -1468,7 +1330,7 @@ describe("SessionOrchestrator", () => {
       deps.wsBridge.isCliConnected.mockReturnValue(false);
       orchestrator.initialize();
 
-      companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+      heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
       await vi.advanceTimersByTimeAsync(15_000);
       await vi.advanceTimersByTimeAsync(0);
 
@@ -1484,7 +1346,7 @@ describe("SessionOrchestrator", () => {
       deps.wsBridge.isCliConnected.mockReturnValue(false);
       orchestrator.initialize();
 
-      companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+      heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
       await vi.advanceTimersByTimeAsync(15_000);
       await vi.advanceTimersByTimeAsync(0);
 
@@ -1502,7 +1364,7 @@ describe("SessionOrchestrator", () => {
       deps.wsBridge.isCliConnected.mockReturnValue(false);
       orchestrator.initialize();
 
-      companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+      heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
       await vi.advanceTimersByTimeAsync(15_000);
       await vi.advanceTimersByTimeAsync(0);
 
@@ -1522,7 +1384,7 @@ describe("SessionOrchestrator", () => {
       deps.wsBridge.isCliConnected.mockReturnValue(false);
       orchestrator.initialize();
 
-      companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+      heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
       await vi.advanceTimersByTimeAsync(15_000);
       await vi.advanceTimersByTimeAsync(0);
 
@@ -1541,7 +1403,7 @@ describe("SessionOrchestrator", () => {
       deps.wsBridge.isCliConnected.mockReturnValue(false);
       orchestrator.initialize();
 
-      companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+      heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
       await vi.advanceTimersByTimeAsync(15_000);
       await vi.advanceTimersByTimeAsync(0);
 
@@ -1557,7 +1419,7 @@ describe("SessionOrchestrator", () => {
       deps.wsBridge.isCliConnected.mockReturnValue(false);
       orchestrator.initialize();
 
-      companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+      heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
       // Advance past grace (10s) + cooldown (5s) and flush microtasks
       await vi.advanceTimersByTimeAsync(15_000);
       await vi.advanceTimersByTimeAsync(0);
@@ -1575,13 +1437,13 @@ describe("SessionOrchestrator", () => {
 
       // Trigger 3 silent-failure relaunches (the max)
       for (let i = 0; i < 3; i++) {
-        companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+        heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
         await vi.advanceTimersByTimeAsync(15_000);
         await vi.advanceTimersByTimeAsync(0);
       }
 
       // 4th attempt should hit the MAX_AUTO_RELAUNCHES limit
-      companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+      heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
       await vi.advanceTimersByTimeAsync(15_000);
       await vi.advanceTimersByTimeAsync(0);
 
@@ -1601,13 +1463,13 @@ describe("SessionOrchestrator", () => {
       // Trigger 3 relaunches (the max). Each needs the relaunchingSet cooldown
       // to clear before the next attempt can proceed.
       for (let i = 0; i < 3; i++) {
-        companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+        heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
         await vi.advanceTimersByTimeAsync(15_000);
         await vi.advanceTimersByTimeAsync(0);
       }
 
       // 4th attempt should be rejected since count reached MAX_AUTO_RELAUNCHES
-      companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+      heyHankBus.emit("session:relaunch-needed", { sessionId: "s1" });
       await vi.advanceTimersByTimeAsync(15_000);
       await vi.advanceTimersByTimeAsync(0);
 

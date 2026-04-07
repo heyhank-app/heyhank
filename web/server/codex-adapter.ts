@@ -175,7 +175,7 @@ export interface CodexAdapterOptions {
   recorder?: RecorderManager;
   /** Callback to kill the underlying process/connection on disconnect. */
   killProcess?: () => Promise<void> | void;
-  /** Optional system prompt injected into thread/start as instructions (e.g. Linear context). */
+  /** Optional system prompt injected into thread/start as instructions. */
   systemPrompt?: string;
 }
 

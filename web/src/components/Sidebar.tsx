@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useStore } from "../store.js";
-import { api, type ArchiveInfo } from "../api.js";
-import { ArchiveLinearModal, type LinearTransitionChoice } from "./ArchiveLinearModal.js";
+import { api } from "../api.js";
 import { connectAllSessions, disconnectSession } from "../ws.js";
 import { navigateToSession, navigateHome, parseHash } from "../utils/routing.js";
 import { ProjectGroup } from "./ProjectGroup.js";
@@ -106,6 +105,22 @@ const NAV_ITEMS: NavItem[] = [
     iconPath: "M14.29 11.59l-2.5-1.5a1 1 0 00-1.15.1l-1.14.95a8.35 8.35 0 01-3.64-3.64l.95-1.14a1 1 0 00.1-1.15l-1.5-2.5A1 1 0 004.56 2.1l-1.87.75A1 1 0 002 3.82a12.08 12.08 0 0010.18 10.18 1 1 0 00.97-.69l.75-1.87a1 1 0 00-.61-.85z",
   },
   {
+    id: "socialmedia",
+    label: "Social Media",
+    hash: "#/socialmedia",
+    activePages: ["socialmedia"],
+    viewBox: "0 0 16 16",
+    iconPath: "M8 0a8 8 0 100 16A8 8 0 008 0zm3.5 5.3l-1 4.5a.75.75 0 01-.37.47.73.73 0 01-.58.05L7.7 9.58l-1.22 1.18a.25.25 0 01-.43-.17V9.13L10.5 5l-4.4 3.56-1.7-.56a.5.5 0 01-.02-.94l8.5-3.5a.5.5 0 01.62.74z",
+  },
+  {
+    id: "assistant",
+    label: "Assistant",
+    hash: "#/assistant",
+    activePages: ["assistant"],
+    viewBox: "0 0 16 16",
+    iconPath: "M2 3.5A1.5 1.5 0 013.5 2h9A1.5 1.5 0 0114 3.5v1a.5.5 0 01-1 0v-1a.5.5 0 00-.5-.5h-9a.5.5 0 00-.5.5v9a.5.5 0 00.5.5h9a.5.5 0 00.5-.5v-1a.5.5 0 011 0v1a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 12.5v-9zM5 6.5a.5.5 0 01.5-.5h5a.5.5 0 010 1h-5a.5.5 0 01-.5-.5zM5.5 8a.5.5 0 000 1h3a.5.5 0 000-1h-3zm0 2a.5.5 0 000 1h4a.5.5 0 000-1h-4z",
+  },
+  {
     id: "platform",
     label: "Platform",
     hash: "#/platform",
@@ -134,7 +149,7 @@ const NAV_ITEMS: NavItem[] = [
 
 const NAV_SECTIONS = [
   { id: "workbench", label: "Workbench", itemIds: ["prompts", "integrations", "terminal"] },
-  { id: "workspace", label: "Workspace", itemIds: ["environments", "sandboxes", "agents", "media", "telephony", "platform", "settings", "help"] },
+  { id: "workspace", label: "Workspace", itemIds: ["environments", "sandboxes", "agents", "media", "telephony", "socialmedia", "assistant", "platform", "settings", "help"] },
 ] as const;
 
 const NAV_ITEMS_BY_ID = new Map(NAV_ITEMS.map((item) => [item.id, item]));
@@ -144,9 +159,10 @@ export function Sidebar() {
   const [editingName, setEditingName] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null);
-  const [archiveModalSessionId, setArchiveModalSessionId] = useState<string | null>(null);
-  const [archiveModalInfo, setArchiveModalInfo] = useState<ArchiveInfo | null>(null);
-  const [archiveModalContainerized, setArchiveModalContainerized] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Array<{ sessionId: string; sessionName: string; matches: Array<{ role: string; text: string }> }> | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [hash, setHash] = useState(() => (typeof window !== "undefined" ? window.location.hash : ""));
@@ -163,7 +179,6 @@ export function Sidebar() {
   const recentlyRenamed = useStore((s) => s.recentlyRenamed);
   const clearRecentlyRenamed = useStore((s) => s.clearRecentlyRenamed);
   const pendingPermissions = useStore((s) => s.pendingPermissions);
-  const linkedLinearIssues = useStore((s) => s.linkedLinearIssues);
   const collapsedProjects = useStore((s) => s.collapsedProjects);
   const toggleProjectCollapse = useStore((s) => s.toggleProjectCollapse);
   const route = parseHash(hash);
@@ -223,6 +238,29 @@ export function Sidebar() {
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
+
+  // Debounced session search
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    const q = searchQuery.trim();
+    if (!q) {
+      setSearchResults(null);
+      setSearchLoading(false);
+      return;
+    }
+    if (q.length < 2) return;
+    setSearchLoading(true);
+    searchTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await api.searchSessions(q);
+        setSearchResults(res.results);
+      } catch {
+        setSearchResults([]);
+      }
+      setSearchLoading(false);
+    }, 300);
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [searchQuery]);
 
   function handleSelectSession(sessionId: string) {
     useStore.getState().closeTerminal();
@@ -360,40 +398,18 @@ export function Sidebar() {
     const bridgeState = sessions.get(sessionId);
     const isContainerized = bridgeState?.is_containerized || !!sdkInfo?.containerId || false;
 
-    // Check if session has a linked non-done Linear issue
-    const linkedIssue = linkedLinearIssues.get(sessionId);
-    const stateType = (linkedIssue?.stateType || "").toLowerCase();
-    const isIssueDone = stateType === "completed" || stateType === "canceled" || stateType === "cancelled";
-
-    if (linkedIssue && !isIssueDone) {
-      // Fetch archive info (backlog availability, configured transition state)
-      try {
-        const info = await api.getArchiveInfo(sessionId);
-        if (info.issueNotDone) {
-          setArchiveModalSessionId(sessionId);
-          setArchiveModalInfo(info);
-          setArchiveModalContainerized(isContainerized);
-          return;
-        }
-      } catch {
-        // Fall through to normal archive flow on error
-      }
-    }
-
-    // No linked non-done issue — use existing container-only confirmation or direct archive
     if (isContainerized) {
       setConfirmArchiveId(sessionId);
       return;
     }
     doArchive(sessionId);
-  }, [sdkSessions, sessions, linkedLinearIssues]);
+  }, [sdkSessions, sessions]);
 
-  const doArchive = useCallback(async (sessionId: string, force?: boolean, linearTransition?: LinearTransitionChoice) => {
+  const doArchive = useCallback(async (sessionId: string, force?: boolean) => {
     try {
       disconnectSession(sessionId);
-      const opts: { force?: boolean; linearTransition?: LinearTransitionChoice } = {};
+      const opts: { force?: boolean } = {};
       if (force) opts.force = true;
-      if (linearTransition && linearTransition !== "none") opts.linearTransition = linearTransition;
       await api.archiveSession(sessionId, Object.keys(opts).length > 0 ? opts : undefined);
     } catch {
       // best-effort
@@ -419,19 +435,6 @@ export function Sidebar() {
 
   const cancelArchive = useCallback(() => {
     setConfirmArchiveId(null);
-  }, []);
-
-  const handleArchiveModalConfirm = useCallback((choice: LinearTransitionChoice, force?: boolean) => {
-    if (archiveModalSessionId) {
-      doArchive(archiveModalSessionId, force, choice);
-      setArchiveModalSessionId(null);
-      setArchiveModalInfo(null);
-    }
-  }, [archiveModalSessionId, doArchive]);
-
-  const handleArchiveModalCancel = useCallback(() => {
-    setArchiveModalSessionId(null);
-    setArchiveModalInfo(null);
   }, []);
 
   const handleUnarchiveSession = useCallback(async (e: React.MouseEvent, sessionId: string) => {
@@ -538,6 +541,16 @@ export function Sidebar() {
               <path d="M8 3v10M3 8h10" />
             </svg>
           </button>
+          <button
+            onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
+            className="hidden md:flex items-center gap-1 px-2 py-1 rounded-md text-[10px] text-cc-muted bg-cc-hover hover:bg-cc-active transition-colors cursor-pointer"
+            title="Search (⌘K)"
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+              <path d="M11.742 10.344a6.5 6.5 0 10-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 001.415-1.414l-3.85-3.85a1.007 1.007 0 00-.115-.1zM12 6.5a5.5 5.5 0 11-11 0 5.5 5.5 0 0111 0z" />
+            </svg>
+            ⌘K
+          </button>
           {/* Close button — mobile only (sidebar is full-width on mobile, so no backdrop to tap) */}
           <button
             onClick={() => useStore.getState().setSidebarOpen(false)}
@@ -548,6 +561,32 @@ export function Sidebar() {
               <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
             </svg>
           </button>
+        </div>
+      </div>
+
+      {/* Search */}
+      <div className="px-2.5 pb-1">
+        <div className="relative shadow-sm rounded-lg">
+          <svg viewBox="0 0 16 16" fill="currentColor" className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-cc-muted">
+            <path d="M11.742 10.344a6.5 6.5 0 10-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 001.415-1.414l-3.85-3.85a1.007 1.007 0 00-.115-.1zM12 6.5a5.5 5.5 0 11-11 0 5.5 5.5 0 0111 0z" />
+          </svg>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search sessions..."
+            className="w-full pl-7 pr-7 py-1.5 text-xs bg-cc-hover rounded-lg border border-transparent focus:border-cc-primary/30 focus:outline-none text-cc-fg placeholder:text-cc-muted/60"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => { setSearchQuery(""); setSearchResults(null); }}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center rounded text-cc-muted hover:text-cc-fg cursor-pointer"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
 
@@ -583,7 +622,36 @@ export function Sidebar() {
 
       {/* Session list */}
       <div className="flex-1 overflow-y-auto px-2.5 pb-2" data-sidebar-sessions>
-        {activeSessions.length === 0 && cronSessions.length === 0 && archivedSessions.length === 0 ? (
+        {/* Search results overlay */}
+        {searchQuery.trim().length >= 2 ? (
+          <div className="space-y-1">
+            {searchLoading ? (
+              <p className="px-3 py-4 text-xs text-cc-muted text-center">Searching...</p>
+            ) : searchResults && searchResults.length > 0 ? (
+              <>
+                <p className="px-2 py-1 text-[10px] text-cc-muted">{searchResults.length} session{searchResults.length !== 1 ? "s" : ""} found</p>
+                {searchResults.map((r) => (
+                  <button
+                    key={r.sessionId}
+                    onClick={() => { handleSelectSession(r.sessionId); setSearchQuery(""); setSearchResults(null); }}
+                    className={`w-full text-left px-2.5 py-2 rounded-lg text-xs transition-colors hover:bg-cc-hover cursor-pointer ${
+                      currentSessionId === r.sessionId ? "bg-cc-hover" : ""
+                    }`}
+                  >
+                    <div className="font-medium text-cc-fg truncate">{r.sessionName || r.sessionId.slice(0, 8)}</div>
+                    {r.matches.slice(0, 2).map((m, i) => (
+                      <p key={i} className="text-[10px] text-cc-muted mt-0.5 truncate">
+                        <span className="text-cc-fg/50">{m.role}:</span> {m.text.slice(0, 120)}
+                      </p>
+                    ))}
+                  </button>
+                ))}
+              </>
+            ) : searchResults ? (
+              <p className="px-3 py-4 text-xs text-cc-muted text-center">No matches found</p>
+            ) : null}
+          </div>
+        ) : activeSessions.length === 0 && cronSessions.length === 0 && archivedSessions.length === 0 ? (
           <p className="px-3 py-8 text-xs text-cc-muted text-center leading-relaxed">
             No sessions yet.
           </p>
@@ -598,7 +666,7 @@ export function Sidebar() {
               <svg viewBox="0 0 16 16" fill="currentColor" className={`w-2 h-2 text-cc-muted/50 transition-transform duration-150 ${showSessions ? "rotate-90" : ""}`}>
                 <path d="M6 4l4 4-4 4" />
               </svg>
-              Sessions ({activeSessions.length})
+              Sessions <span className="ml-1 px-1.5 py-0.5 text-[9px] font-bold bg-cc-hover rounded-full leading-none">{activeSessions.length}</span>
             </button>
             {showSessions && projectGroups.map((group, i) => (
               <ProjectGroup
@@ -625,7 +693,7 @@ export function Sidebar() {
                   <svg viewBox="0 0 16 16" fill="currentColor" className={`w-2 h-2 text-cc-muted/50 transition-transform duration-150 ${showCronSessions ? "rotate-90" : ""}`}>
                     <path d="M6 4l4 4-4 4" />
                   </svg>
-                  Scheduled Runs ({cronSessions.length})
+                  Scheduled Runs <span className="ml-1 px-1.5 py-0.5 text-[9px] font-bold bg-cc-hover rounded-full leading-none">{cronSessions.length}</span>
                 </button>
                 {showCronSessions && (
                   <div className="mt-0.5">
@@ -655,7 +723,7 @@ export function Sidebar() {
                   <svg viewBox="0 0 16 16" fill="currentColor" className={`w-2 h-2 text-cc-muted/50 transition-transform duration-150 ${showAgentSessions ? "rotate-90" : ""}`}>
                     <path d="M6 4l4 4-4 4" />
                   </svg>
-                  Agent Runs ({agentSessions.length})
+                  Agent Runs <span className="ml-1 px-1.5 py-0.5 text-[9px] font-bold bg-cc-hover rounded-full leading-none">{agentSessions.length}</span>
                 </button>
                 {showAgentSessions && (
                   <div className="mt-0.5">
@@ -716,7 +784,7 @@ export function Sidebar() {
                     <svg viewBox="0 0 16 16" fill="currentColor" className={`w-2 h-2 text-cc-muted/50 transition-transform duration-150 ${showArchived ? "rotate-90" : ""}`}>
                       <path d="M6 4l4 4-4 4" />
                     </svg>
-                    Archived ({archivedSessions.length})
+                    Archived <span className="ml-1 px-1.5 py-0.5 text-[9px] font-bold bg-cc-hover rounded-full leading-none">{archivedSessions.length}</span>
                   </button>
                   {showArchived && archivedSessions.length > 1 && (
                     <button
@@ -750,18 +818,46 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* Mobile FAB — New Session button in thumb zone */}
-      <div className="md:hidden flex justify-end px-4 pb-2">
-        <button
-          onClick={handleNewSession}
-          title="New Session"
-          aria-label="New Session"
-          className="w-12 h-12 rounded-full bg-cc-primary hover:bg-cc-primary-hover text-white flex items-center justify-center shadow-lg transition-colors duration-150 cursor-pointer"
-        >
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-5 h-5">
-            <path d="M8 3v10M3 8h10" />
-          </svg>
-        </button>
+      {/* Mobile bottom navigation */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-cc-sidebar border-t border-cc-border/50 pb-safe">
+        <nav className="flex items-center justify-around px-2 py-1.5" aria-label="Mobile navigation">
+          <button
+            onClick={() => { window.location.hash = ""; useStore.getState().setCurrentSession(null); if (window.innerWidth < 768) useStore.getState().setSidebarOpen(false); }}
+            className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors ${route.page === "home" ? "text-cc-primary" : "text-cc-muted"}`}
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" className="w-5 h-5">
+              <path d="M8.156 1.313a.25.25 0 00-.312 0l-5.75 4.6A.25.25 0 002 6.063V13.5c0 .138.112.25.25.25h3.5a.25.25 0 00.25-.25V9.5a.75.75 0 01.75-.75h2.5a.75.75 0 01.75.75v4a.25.25 0 00.25.25h3.5a.25.25 0 00.25-.25V6.063a.25.25 0 00-.094-.15l-5.75-4.6z" />
+            </svg>
+            <span className="text-[9px] font-medium">Home</span>
+          </button>
+          <button
+            onClick={handleNewSession}
+            className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg text-cc-muted"
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" className="w-5 h-5">
+              <path d="M7.75 2a.75.75 0 01.75.75V7h4.25a.75.75 0 010 1.5H8.5v4.25a.75.75 0 01-1.5 0V8.5H2.75a.75.75 0 010-1.5H7V2.75A.75.75 0 017.75 2z" />
+            </svg>
+            <span className="text-[9px] font-medium">New</span>
+          </button>
+          <button
+            onClick={() => { window.location.hash = "/agents"; if (window.innerWidth < 768) useStore.getState().setSidebarOpen(false); }}
+            className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors ${route.page === "agents" ? "text-cc-primary" : "text-cc-muted"}`}
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" className="w-5 h-5">
+              <path d="M8 0a8 8 0 100 16A8 8 0 008 0zm0 2a2.5 2.5 0 110 5 2.5 2.5 0 010-5zM4 12.5c0-2 1.79-3 4-3s4 1 4 3v.5H4v-.5z" />
+            </svg>
+            <span className="text-[9px] font-medium">Agents</span>
+          </button>
+          <button
+            onClick={() => { window.location.hash = "/settings"; if (window.innerWidth < 768) useStore.getState().setSidebarOpen(false); }}
+            className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors ${route.page === "settings" ? "text-cc-primary" : "text-cc-muted"}`}
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" className="w-5 h-5">
+              <path fillRule="evenodd" d="M7.429 1.525a3.5 3.5 0 011.142 0c.036.003.108.036.137.146l.289 1.105c.147.56.55.967.997 1.189.174.086.341.183.501.29.417.278.97.423 1.53.27l1.102-.303c.11-.03.175.016.195.046a3.5 3.5 0 01.571.99c.02.058.006.15-.096.226l-.814.802a1.865 1.865 0 00-.572 1.38c0 .085.002.17.006.256a1.865 1.865 0 00.566 1.124l.814.802c.102.076.116.168.096.226a3.5 3.5 0 01-.57.99c-.021.03-.086.077-.196.046l-1.102-.303a1.862 1.862 0 00-1.53.27c-.16.107-.327.204-.5.29-.449.222-.851.628-.998 1.189l-.289 1.105c-.029.11-.1.143-.137.146a3.5 3.5 0 01-1.142 0 .209.209 0 01-.137-.146l-.289-1.105c-.147-.56-.55-.967-.997-1.189a4.002 4.002 0 01-.501-.29c-.417-.278-.97-.423-1.53-.27l-1.102.303c-.11.03-.175-.016-.195-.046a3.5 3.5 0 01-.571-.99c-.02-.058-.006-.15.096-.226l.814-.802c.37-.365.573-.854.572-1.38a6.49 6.49 0 01-.006-.256 1.865 1.865 0 00-.566-1.124l-.814-.802c-.102-.076-.116-.168-.096-.226a3.5 3.5 0 01.57-.99c.021-.03.086-.077.196-.046l1.102.303a1.862 1.862 0 001.53-.27c.16-.107.327-.204.5-.29.449-.222.851-.628.998-1.189l.289-1.105c.029-.11.1-.143.137-.146zM8 11a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+            </svg>
+            <span className="text-[9px] font-medium">Settings</span>
+          </button>
+        </nav>
       </div>
 
       {/* Footer — compact icon bar on mobile, full list on desktop */}
@@ -946,19 +1042,6 @@ export function Sidebar() {
             </div>
           </div>
         </div>
-      )}
-      {/* Archive Linear transition modal */}
-      {archiveModalSessionId && archiveModalInfo && (
-        <ArchiveLinearModal
-          issueIdentifier={archiveModalInfo.issue?.identifier || ""}
-          issueStateName={archiveModalInfo.issue?.stateName || ""}
-          isContainerized={archiveModalContainerized}
-          archiveTransitionConfigured={archiveModalInfo.archiveTransitionConfigured || false}
-          archiveTransitionStateName={archiveModalInfo.archiveTransitionStateName}
-          hasBacklogState={archiveModalInfo.hasBacklogState || false}
-          onConfirm={handleArchiveModalConfirm}
-          onCancel={handleArchiveModalCancel}
-        />
       )}
     </aside>
   );

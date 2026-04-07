@@ -10,8 +10,6 @@ import { containerManager } from "./container-manager.js";
 import { hasContainerClaudeAuth } from "./claude-container-auth.js";
 import { hasContainerCodexAuth } from "./codex-container-auth.js";
 import { imagePullManager } from "./image-pull-manager.js";
-import { getConnection } from "./linear-connections.js";
-import { buildLinearSystemPrompt } from "./linear-prompt-builder.js";
 import { discoverCommandsAndSkills } from "./commands-discovery.js";
 import { VSCODE_EDITOR_CONTAINER_PORT, CODEX_APP_SERVER_CONTAINER_PORT, NOVNC_CONTAINER_PORT } from "./constants.js";
 
@@ -105,16 +103,6 @@ export async function executeSessionCreation(
   const sandbox = body.sandboxSlug ? sandboxManager.getSandbox(body.sandboxSlug as string) : null;
   if (sandboxEnabled && body.sandboxSlug && !sandbox) {
     throw new SessionCreationError(`Sandbox "${body.sandboxSlug}" not found`, 404, "resolving_env");
-  }
-
-  // Inject LINEAR_API_KEY if a Linear connection is specified
-  let linearSystemPrompt: string | undefined;
-  if (body.linearConnectionId) {
-    const conn = getConnection(body.linearConnectionId as string);
-    if (conn?.apiKey) {
-      envVars = { ...envVars, LINEAR_API_KEY: conn.apiKey };
-      linearSystemPrompt = buildLinearSystemPrompt(conn, body.linearIssue as Parameters<typeof buildLinearSystemPrompt>[1]);
-    }
   }
 
   // Resolve Docker image early
@@ -427,7 +415,7 @@ export async function executeSessionCreation(
       containerCwd: containerInfo?.containerCwd,
       resumeSessionAt,
       forkSession,
-      systemPrompt: backend === "codex" ? linearSystemPrompt : undefined,
+      systemPrompt: undefined,
       sandboxSlug: sandboxEnabled ? ((body.sandboxSlug as string) || undefined) : undefined,
     });
   } catch (err) {
@@ -455,10 +443,6 @@ export async function executeSessionCreation(
       worktreePath: worktreeInfo.worktreePath,
       createdAt: Date.now(),
     });
-  }
-
-  if (linearSystemPrompt && backend === "claude") {
-    wsBridge.injectSystemPrompt(session.sessionId, linearSystemPrompt);
   }
 
   const discovered = await discoverCommandsAndSkills(cwd).catch(() => ({

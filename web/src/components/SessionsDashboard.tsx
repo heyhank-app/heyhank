@@ -6,6 +6,14 @@ import { connectSession } from "../ws.js";
 import type { SessionItem as SessionItemType } from "../utils/project-grouping.js";
 import type { AgentInfo } from "../api.js";
 
+interface GeminiConversationSummary {
+  id: string;
+  title: string;
+  createdAt: string;
+  duration?: number;
+  messages: Array<{ role: string; text: string; ts: number }>;
+}
+
 type DerivedStatus = "awaiting" | "running" | "reconnecting" | "idle" | "exited";
 
 function deriveStatus(s: SessionItemType, permCount: number): DerivedStatus {
@@ -38,8 +46,9 @@ function statusColor(status: DerivedStatus): string {
 
 function StatusDot({ status }: { status: DerivedStatus }) {
   const isPulsing = status === "running" || status === "awaiting";
+  const dotClass = status === "running" ? "status-dot-running" : status === "awaiting" ? "status-dot-awaiting" : "";
   return (
-    <span className="relative shrink-0 w-2.5 h-2.5">
+    <span className={`relative shrink-0 w-2.5 h-2.5 ${dotClass}`}>
       {isPulsing && (
         <span className={`absolute inset-0 rounded-full ${statusColor(status)} animate-ping opacity-50`} />
       )}
@@ -50,7 +59,6 @@ function StatusDot({ status }: { status: DerivedStatus }) {
 
 function formatCwd(cwd: string): string {
   if (!cwd) return "";
-  // Show last two path segments
   const parts = cwd.replace(/\/$/, "").split("/");
   return parts.length > 2 ? parts.slice(-2).join("/") : cwd;
 }
@@ -80,7 +88,7 @@ function SessionCard({ session, sessionName, onClick }: {
     <button
       type="button"
       onClick={onClick}
-      className="w-full text-left p-4 rounded-xl bg-cc-hover/50 border border-cc-border/50 hover:border-cc-border hover:bg-cc-hover transition-all cursor-pointer group"
+      className="card-hover w-full text-left p-4 rounded-xl bg-cc-hover/50 border border-cc-border/50 hover:border-cc-border hover:bg-cc-hover transition-all cursor-pointer group"
     >
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex items-center gap-2 min-w-0">
@@ -152,6 +160,8 @@ export function SessionsDashboard() {
   const [dashboardAgents, setDashboardAgents] = useState<AgentInfo[]>([]);
   const [federationNodeCount, setFederationNodeCount] = useState<{ total: number; connected: number } | null>(null);
   const [geminiReady, setGeminiReady] = useState<boolean | null>(null);
+  const [geminiConversations, setGeminiConversations] = useState<GeminiConversationSummary[]>([]);
+  const [expandedConvo, setExpandedConvo] = useState<string | null>(null);
 
   // Poll sessions
   useEffect(() => {
@@ -173,6 +183,7 @@ export function SessionsDashboard() {
     api.getSettings().then((s) => {
       setGeminiReady(s.geminiApiKeyConfigured);
     }).catch(() => {});
+    api.listGeminiConversations().then(setGeminiConversations).catch(() => {});
   }, []);
 
   const allSessions = useMemo(() => {
@@ -233,112 +244,173 @@ export function SessionsDashboard() {
     window.location.hash = "/new";
   }, []);
 
+  const enabledAgents = dashboardAgents.filter((a) => a.enabled !== false);
+
   return (
     <div className="h-full overflow-auto">
       <div className="max-w-4xl mx-auto px-4 py-8 sm:px-6">
         {/* ── Dashboard Header ── */}
-        <div className="flex flex-col items-center mb-8">
-          <video
-            autoPlay
-            muted
-            playsInline
-            loop
-            poster="/heyhank-mascot-poster.png"
-            className="w-16 h-16 sm:w-20 sm:h-20 mb-3 object-contain"
-          >
-            <source src="/heyhank-mascot.webm" type="video/webm" />
-            <source src="/heyhank-mascot.mp4" type="video/mp4" />
-            <img src="/heyhank-mascot-poster.png" alt="HeyHank" className="w-16 h-16 sm:w-20 sm:h-20" />
-          </video>
-          <h1 className="text-xl font-semibold tracking-tight text-cc-fg mb-1">HeyHank</h1>
-          <p className="text-xs text-cc-muted">
-            {activeSessions.length} session{activeSessions.length !== 1 ? "s" : ""}
-            {runningSessions.length > 0 && ` · ${runningSessions.length} active`}
-          </p>
-        </div>
-
-        {/* ── Status Cards ── */}
-        <div className="grid grid-cols-3 gap-3 mb-6">
-          <div className="bg-cc-card border border-cc-border rounded-xl px-4 py-3">
-            <p className="text-[11px] text-cc-muted mb-1">Active Sessions</p>
-            <p className="text-lg font-semibold text-cc-fg">{runningSessions.length}</p>
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight text-cc-fg">HeyHank</h1>
+            <p className="text-xs text-cc-muted mt-0.5">Your AI agent platform</p>
           </div>
-          <div className="bg-cc-card border border-cc-border rounded-xl px-4 py-3">
-            <p className="text-[11px] text-cc-muted mb-1">Nodes</p>
-            <p className="text-lg font-semibold text-cc-fg">
-              {federationNodeCount ? (
-                <>{federationNodeCount.connected}<span className="text-xs font-normal text-cc-muted">/{federationNodeCount.total}</span></>
-              ) : (
-                <span className="text-cc-muted">—</span>
-              )}
-            </p>
-          </div>
-          <div className="bg-cc-card border border-cc-border rounded-xl px-4 py-3">
-            <p className="text-[11px] text-cc-muted mb-1">Gemini</p>
-            <p className="text-lg font-semibold">
-              {geminiReady === null ? (
-                <span className="text-cc-muted">—</span>
-              ) : geminiReady ? (
-                <span className="flex items-center gap-1.5 text-cc-success">
-                  <span className="w-2 h-2 rounded-full bg-cc-success inline-block" />
-                  Ready
-                </span>
-              ) : (
-                <span className="flex items-center gap-1.5 text-cc-muted">
-                  <span className="w-2 h-2 rounded-full bg-cc-muted/40 inline-block" />
-                  Off
-                </span>
-              )}
-            </p>
-          </div>
-        </div>
-
-        {/* ── Agents Overview ── */}
-        {dashboardAgents.length > 0 && (
-          <div className="bg-cc-card border border-cc-border rounded-xl p-4 mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Agents</h3>
-              <button
-                type="button"
-                onClick={() => { window.location.hash = "/agents"; }}
-                className="text-[11px] text-cc-primary hover:text-cc-primary/80 transition-colors cursor-pointer"
-              >
-                View all
-              </button>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-              {dashboardAgents.slice(0, 6).map((agent) => (
-                <div
-                  key={agent.id}
-                  className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-cc-hover/50 transition-colors"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-cc-primary/40" />
-                  <span className="text-xs text-cc-fg truncate flex-1">{agent.name}</span>
-                  <span className="text-[10px] text-cc-muted shrink-0">{agent.backend || ""}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── New Session Button ── */}
-        <div className="flex justify-end mb-6">
           <button
             type="button"
             onClick={handleNewSession}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-cc-primary text-white hover:opacity-90 transition-opacity cursor-pointer"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-cc-primary text-white hover:opacity-90 transition-opacity cursor-pointer shadow-sm"
           >
-            <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+            <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
               <path d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z" />
             </svg>
             New Session
           </button>
         </div>
 
-        {/* Active Sessions */}
+        {/* ── KPI Status Cards ── */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          {/* Live Sessions */}
+          <a href="#/sessions" className="kpi-card rounded-xl px-4 py-3 block no-underline">
+            <div className="flex items-center gap-2 mb-2">
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-cc-primary opacity-70">
+                <path d="M8 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM2 8a6 6 0 1 1 12 0A6 6 0 0 1 2 8Z" />
+                <path d="M8 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" />
+              </svg>
+              <span className="text-[11px] font-medium text-cc-muted uppercase tracking-wider">Live Sessions</span>
+            </div>
+            <p className="text-xl font-bold text-cc-fg">{activeSessions.length}</p>
+            <p className="text-[11px] text-cc-muted mt-0.5">{runningSessions.length} running</p>
+          </a>
+
+          {/* Agents */}
+          <a href="#/agents" className="kpi-card rounded-xl px-4 py-3 block no-underline">
+            <div className="flex items-center gap-2 mb-2">
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-cc-primary opacity-70">
+                <path d="M10.5 5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0ZM2 13.149C2 10.22 4.279 8 7.044 8h1.912C11.721 8 14 10.22 14 13.149a.85.85 0 0 1-.851.851H2.851A.85.85 0 0 1 2 13.149Z" />
+              </svg>
+              <span className="text-[11px] font-medium text-cc-muted uppercase tracking-wider">Agents</span>
+            </div>
+            <p className="text-xl font-bold text-cc-fg">{enabledAgents.length}</p>
+            <p className="text-[11px] text-cc-muted mt-0.5">{dashboardAgents.length} total</p>
+          </a>
+
+          {/* Gemini */}
+          <a href="#/settings#gemini" className="kpi-card rounded-xl px-4 py-3 block no-underline">
+            <div className="flex items-center gap-2 mb-2">
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-cc-primary opacity-70">
+                <path d="M8 1a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 1ZM3.172 3.172a.75.75 0 0 1 1.06 0l1.06 1.06a.75.75 0 0 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.06ZM1 8a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 1 8Zm11.75-.75a.75.75 0 0 0 0 1.5h1.5a.75.75 0 0 0 0-1.5h-1.5ZM3.172 12.828a.75.75 0 0 1 0-1.06l1.06-1.06a.75.75 0 1 1 1.06 1.06l-1.06 1.06a.75.75 0 0 1-1.06 0ZM8 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13Zm3.536-1.232a.75.75 0 0 1 1.06 0l1.06 1.06a.75.75 0 0 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.06Zm1.06-6.536a.75.75 0 1 0-1.06-1.06l-1.06 1.06a.75.75 0 0 0 1.06 1.06l1.06-1.06ZM8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z" />
+              </svg>
+              <span className="text-[11px] font-medium text-cc-muted uppercase tracking-wider">Gemini</span>
+            </div>
+            <p className="text-xl font-bold text-cc-fg">
+              {geminiReady === null ? "..." : geminiReady ? "Ready" : "Off"}
+            </p>
+            <p className="text-[11px] text-cc-muted mt-0.5">Voice assistant</p>
+          </a>
+
+          {/* Federation */}
+          <a href="#/settings#federation" className="kpi-card rounded-xl px-4 py-3 block no-underline">
+            <div className="flex items-center gap-2 mb-2">
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-cc-primary opacity-70">
+                <path d="M8 2a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3ZM4.5 8a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3ZM11.5 8a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3ZM8 4.5a.75.75 0 0 1 .75.75v2h2.5a.75.75 0 0 1 0 1.5h-2.5v2a.75.75 0 0 1-1.5 0v-2h-2.5a.75.75 0 0 1 0-1.5h2.5v-2A.75.75 0 0 1 8 4.5Z" />
+              </svg>
+              <span className="text-[11px] font-medium text-cc-muted uppercase tracking-wider">Federation</span>
+            </div>
+            <p className="text-xl font-bold text-cc-fg">
+              {federationNodeCount ? (
+                <>{federationNodeCount.connected}<span className="text-sm font-normal text-cc-muted">/{federationNodeCount.total}</span></>
+              ) : (
+                "0"
+              )}
+            </p>
+            <p className="text-[11px] text-cc-muted mt-0.5">Nodes</p>
+          </a>
+        </div>
+
+        {/* ── Quick Actions ── */}
+        <div className="flex items-center gap-2 mb-8">
+          <button
+            type="button"
+            onClick={handleNewSession}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-cc-hover border border-cc-border/50 text-cc-fg hover:bg-cc-hover/80 transition-colors cursor-pointer"
+          >
+            New Session
+          </button>
+          <button
+            type="button"
+            onClick={() => { window.location.hash = "/agents"; }}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-cc-hover border border-cc-border/50 text-cc-fg hover:bg-cc-hover/80 transition-colors cursor-pointer"
+          >
+            View Agents
+          </button>
+          <button
+            type="button"
+            onClick={() => { window.location.hash = "/settings"; }}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-cc-hover border border-cc-border/50 text-cc-fg hover:bg-cc-hover/80 transition-colors cursor-pointer"
+          >
+            Settings
+          </button>
+        </div>
+
+        {/* ── Gemini Conversations ── */}
+        {geminiConversations.length > 0 && (
+          <div className="bg-cc-card border border-cc-border rounded-xl p-4 mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Gemini History</h3>
+              <span className="text-[10px] text-cc-muted px-2 py-0.5 rounded-full bg-cc-hover">{geminiConversations.length}</span>
+            </div>
+            <div className="space-y-1">
+              {geminiConversations.slice(0, 8).map((convo) => (
+                <div key={convo.id}>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedConvo(expandedConvo === convo.id ? null : convo.id)}
+                    className="card-hover w-full text-left flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-cc-hover/50 transition-colors cursor-pointer"
+                  >
+                    <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-primary/50 shrink-0">
+                      <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8z" />
+                      <path d="M8 4a.75.75 0 01.75.75v2.5h2.5a.75.75 0 010 1.5h-2.5v2.5a.75.75 0 01-1.5 0v-2.5h-2.5a.75.75 0 010-1.5h2.5v-2.5A.75.75 0 018 4z" />
+                    </svg>
+                    <span className="text-xs text-cc-fg truncate flex-1">{convo.title}</span>
+                    <span className="text-[10px] text-cc-muted shrink-0">{timeAgo(new Date(convo.createdAt).getTime())}</span>
+                    {convo.duration && <span className="text-[10px] text-cc-muted shrink-0">{Math.round(convo.duration / 60)}m</span>}
+                  </button>
+                  {expandedConvo === convo.id && (
+                    <div className="ml-8 mr-2 mb-2 mt-1 space-y-1">
+                      <div className="max-h-48 overflow-y-auto rounded-lg bg-cc-bg/50 p-2 space-y-1">
+                        {convo.messages.map((msg, i) => (
+                          <div key={i} className={`text-[11px] ${msg.role === "user" ? "text-cc-fg" : "text-cc-muted"}`}>
+                            <span className="font-medium">{msg.role === "user" ? "You" : "Gemini"}:</span>{" "}
+                            <span>{msg.text.slice(0, 200)}{msg.text.length > 200 ? "..." : ""}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const msgs = convo.messages.map((m) => ({ role: m.role, text: m.text }));
+                          window.dispatchEvent(new CustomEvent("gemini-resume", { detail: { messages: msgs } }));
+                          setExpandedConvo(null);
+                        }}
+                        className="mt-1 px-2.5 py-1 text-[10px] font-medium rounded-md bg-cc-primary text-white hover:bg-cc-primary-hover transition-colors cursor-pointer"
+                      >
+                        Continue conversation
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Active Sessions ── */}
         {runningSessions.length > 0 && (
           <section className="mb-8">
-            <h2 className="text-xs font-medium text-cc-muted uppercase tracking-wider mb-3">Active</h2>
+            <div className="flex items-center gap-2 mb-3 border-t border-cc-border/30 pt-4">
+              <h2 className="text-xs font-medium text-cc-muted uppercase tracking-wider">Active</h2>
+              <span className="text-[10px] text-cc-muted px-1.5 py-0.5 rounded-full bg-cc-hover font-medium">{runningSessions.length}</span>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {runningSessions.map((s) => (
                 <SessionCard
@@ -352,10 +424,13 @@ export function SessionsDashboard() {
           </section>
         )}
 
-        {/* Agent Sessions */}
+        {/* ── Agent Sessions ── */}
         {agentSessions.length > 0 && (
           <section className="mb-8">
-            <h2 className="text-xs font-medium text-cc-muted uppercase tracking-wider mb-3">Agents</h2>
+            <div className="flex items-center gap-2 mb-3 border-t border-cc-border/30 pt-4">
+              <h2 className="text-xs font-medium text-cc-muted uppercase tracking-wider">Agents</h2>
+              <span className="text-[10px] text-cc-muted px-1.5 py-0.5 rounded-full bg-cc-hover font-medium">{agentSessions.length}</span>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {agentSessions.map((s) => (
                 <SessionCard
@@ -369,10 +444,13 @@ export function SessionsDashboard() {
           </section>
         )}
 
-        {/* Scheduled Sessions */}
+        {/* ── Scheduled Sessions ── */}
         {cronSessions.length > 0 && (
           <section className="mb-8">
-            <h2 className="text-xs font-medium text-cc-muted uppercase tracking-wider mb-3">Scheduled</h2>
+            <div className="flex items-center gap-2 mb-3 border-t border-cc-border/30 pt-4">
+              <h2 className="text-xs font-medium text-cc-muted uppercase tracking-wider">Scheduled</h2>
+              <span className="text-[10px] text-cc-muted px-1.5 py-0.5 rounded-full bg-cc-hover font-medium">{cronSessions.length}</span>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {cronSessions.map((s) => (
                 <SessionCard
@@ -386,10 +464,13 @@ export function SessionsDashboard() {
           </section>
         )}
 
-        {/* Stopped Sessions */}
+        {/* ── Stopped Sessions ── */}
         {stoppedSessions.length > 0 && (
           <section className="mb-8">
-            <h2 className="text-xs font-medium text-cc-muted uppercase tracking-wider mb-3">Stopped</h2>
+            <div className="flex items-center gap-2 mb-3 border-t border-cc-border/30 pt-4">
+              <h2 className="text-xs font-medium text-cc-muted uppercase tracking-wider">Stopped</h2>
+              <span className="text-[10px] text-cc-muted px-1.5 py-0.5 rounded-full bg-cc-hover font-medium">{stoppedSessions.length}</span>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {stoppedSessions.map((s) => (
                 <SessionCard
@@ -403,7 +484,7 @@ export function SessionsDashboard() {
           </section>
         )}
 
-        {/* Empty state */}
+        {/* ── Empty state ── */}
         {activeSessions.length === 0 && agentSessions.length === 0 && cronSessions.length === 0 && (
           <div className="text-center py-16">
             <p className="text-sm text-cc-muted mb-4">No sessions yet</p>

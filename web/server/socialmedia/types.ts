@@ -1,0 +1,89 @@
+// Social Media Types
+
+export type SocialBackendId = "postiz" | "ayrshare" | "buffer";
+
+export type SocialPlatform = "twitter" | "instagram" | "linkedin" | "facebook" | "tiktok" | "threads";
+
+export interface SocialBackendConfig {
+  url?: string;        // For Postiz (self-hosted URL)
+  apiKey: string;
+}
+
+export interface SocialProfile {
+  id: string;
+  platform: SocialPlatform;
+  name: string;
+  picture?: string | null;
+}
+
+export interface CreatePostInput {
+  text: string;
+  platforms: SocialPlatform[];
+  scheduledAt?: string | null;
+  mediaUrls?: string[];
+  // Rich post fields (Buffer-style)
+  title?: string;
+  firstComment?: string;
+  videoUrl?: string;
+  thumbnailUrl?: string;
+  isDraft?: boolean;
+}
+
+export interface SocialPost {
+  id: string;
+  text: string;
+  platforms: SocialPlatform[];
+  scheduledAt?: string | null;
+  mediaUrls: string[];
+  status: "published" | "scheduled" | "failed" | "draft";
+  backendId: SocialBackendId | null;
+  backendPostId?: string | null;
+  backendData?: unknown;
+  createdAt: string;
+  updatedAt: string;
+  // Rich post fields
+  title?: string;
+  firstComment?: string;
+  videoUrl?: string;
+  thumbnailUrl?: string;
+  createdBy?: "user" | "gemini" | "agent";
+}
+
+export interface PostAnalytics {
+  impressions: number;
+  likes: number;
+  shares: number;
+  comments: number;
+}
+
+export interface AccountAnalytics {
+  followers: number;
+  following: number;
+  posts: number;
+}
+
+export interface SocialComment {
+  id: string;
+  author: string;
+  text: string;
+  createdAt?: string;
+  likes?: number;
+}
+
+export interface SocialMediaSettings {
+  backend: SocialBackendId | null;
+  backends: Partial<Record<SocialBackendId, SocialBackendConfig>>;
+  defaultPlatforms: SocialPlatform[];
+}
+
+export interface ListPostsOpts {
+  status?: string;
+  platform?: string;
+  limit?: number;
+}
+
+export const DEFAULT_SOCIAL_SETTINGS: SocialMediaSettings = {
+  backend: null,
+  backends: {},
+  defaultPlatforms: [],
+};

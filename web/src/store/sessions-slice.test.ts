@@ -42,7 +42,7 @@ vi.hoisted(() => {
 
 import { useStore } from "../store.js";
 import type { SessionState, ChatMessage, PermissionRequest, TaskItem, SdkSessionInfo } from "../types.js";
-import type { PRStatusResponse, LinearIssue } from "../api.js";
+import type { PRStatusResponse } from "../api.js";
 
 function makeSession(id: string): SessionState {
   return {
@@ -321,36 +321,6 @@ describe("PR status", () => {
     useStore.getState().setPRStatus("s1", second);
 
     expect(useStore.getState().prStatus.get("s1")!.available).toBe(true);
-  });
-});
-
-// ─── Linear issues ───────────────────────────────────────────────────────────
-
-describe("Linear issues", () => {
-  const mockIssue: LinearIssue = {
-    id: "issue-1",
-    identifier: "ENG-123",
-    title: "Fix bug",
-    description: "Some description",
-    url: "https://linear.app/team/issue/ENG-123",
-    branchName: "fix/bug",
-    priorityLabel: "High",
-    stateName: "In Progress",
-    stateType: "started",
-    teamName: "Engineering",
-    teamKey: "ENG",
-    teamId: "team-1",
-  };
-
-  it("setLinkedLinearIssue: stores issue for a session", () => {
-    useStore.getState().setLinkedLinearIssue("s1", mockIssue);
-    expect(useStore.getState().linkedLinearIssues.get("s1")).toEqual(mockIssue);
-  });
-
-  it("setLinkedLinearIssue(null): removes the issue for a session", () => {
-    useStore.getState().setLinkedLinearIssue("s1", mockIssue);
-    useStore.getState().setLinkedLinearIssue("s1", null);
-    expect(useStore.getState().linkedLinearIssues.has("s1")).toBe(false);
   });
 });
 

@@ -11,7 +11,7 @@ export function PublicUrlBanner({ publicUrl }: { publicUrl: string }) {
     <div className="mb-4 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs flex items-start justify-between gap-3" role="alert">
       <div>
         <strong>No public URL configured.</strong>{" "}
-        Webhook URLs currently use your browser address, which external services like Linear may not be able to reach.{" "}
+        Webhook URLs currently use your browser address, which external services may not be able to reach.{" "}
         <a href="#/settings" className="underline hover:text-amber-300">Set your public URL in Settings</a>.
       </div>
       <button

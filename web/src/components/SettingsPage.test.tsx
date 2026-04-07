@@ -107,9 +107,6 @@ beforeEach(() => {
   mockApi.getSettings.mockResolvedValue({
     anthropicApiKeyConfigured: true,
     anthropicModel: "claude-sonnet-4-6",
-    linearApiKeyConfigured: false,
-    linearAutoTransition: false,
-    linearAutoTransitionStateName: "",
     editorTabEnabled: false,
     updateChannel: "stable",
     publicUrl: "",
@@ -117,9 +114,6 @@ beforeEach(() => {
   mockApi.updateSettings.mockResolvedValue({
     anthropicApiKeyConfigured: true,
     anthropicModel: "claude-sonnet-4-6",
-    linearApiKeyConfigured: false,
-    linearAutoTransition: false,
-    linearAutoTransitionStateName: "",
     editorTabEnabled: false,
     updateChannel: "stable",
     publicUrl: "",
@@ -176,9 +170,6 @@ describe("SettingsPage", () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: false,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       updateChannel: "stable",
     });
@@ -309,9 +300,6 @@ describe("SettingsPage", () => {
     let resolveSave: ((value: {
       anthropicApiKeyConfigured: boolean;
       anthropicModel: string;
-      linearApiKeyConfigured: boolean;
-      linearAutoTransition: boolean;
-      linearAutoTransitionStateName: string;
       editorTabEnabled: boolean;
     }) => void) | undefined;
     mockApi.updateSettings.mockReturnValueOnce(
@@ -340,9 +328,6 @@ describe("SettingsPage", () => {
     resolveSave?.({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
     });
 
@@ -715,9 +700,6 @@ describe("SettingsPage", () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: false,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       updateChannel: "stable",
     });
@@ -740,9 +722,6 @@ describe("SettingsPage", () => {
     mockApi.updateSettings.mockResolvedValue({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       aiValidationEnabled: true,
       aiValidationAutoApprove: true,
@@ -766,9 +745,6 @@ describe("SettingsPage", () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       aiValidationEnabled: true,
       aiValidationAutoApprove: true,
@@ -789,9 +765,6 @@ describe("SettingsPage", () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
@@ -812,9 +785,6 @@ describe("SettingsPage", () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       aiValidationEnabled: true,
       aiValidationAutoApprove: true,
@@ -824,9 +794,6 @@ describe("SettingsPage", () => {
     mockApi.updateSettings.mockResolvedValue({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       aiValidationEnabled: true,
       aiValidationAutoApprove: false,
@@ -850,9 +817,6 @@ describe("SettingsPage", () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       aiValidationEnabled: true,
       aiValidationAutoApprove: true,
@@ -862,9 +826,6 @@ describe("SettingsPage", () => {
     mockApi.updateSettings.mockResolvedValue({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       aiValidationEnabled: true,
       aiValidationAutoApprove: true,
@@ -937,9 +898,6 @@ describe("SettingsPage", () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       updateChannel: "prerelease",
     });
@@ -955,9 +913,6 @@ describe("SettingsPage", () => {
     mockApi.updateSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       updateChannel: "prerelease",
     });
@@ -1003,9 +958,6 @@ describe("SettingsPage", () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       updateChannel: "stable",
       dockerAutoUpdate: false,
@@ -1032,9 +984,6 @@ describe("SettingsPage", () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       updateChannel: "stable",
       dockerAutoUpdate: false,
@@ -1062,9 +1011,6 @@ describe("SettingsPage", () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       updateChannel: "stable",
       dockerAutoUpdate: true,
@@ -1119,9 +1065,6 @@ describe("SettingsPage", () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       updateChannel: "stable",
       publicUrl: "https://my-companion.example.com",
@@ -1139,9 +1082,6 @@ describe("SettingsPage", () => {
     mockApi.updateSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKeyConfigured: false,
-      linearAutoTransition: false,
-      linearAutoTransitionStateName: "",
       editorTabEnabled: false,
       updateChannel: "stable",
       publicUrl: "https://my-companion.example.com",

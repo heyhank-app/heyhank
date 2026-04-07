@@ -3,6 +3,7 @@ import { api } from "../api.js";
 import { useStore } from "../store.js";
 import { navigateToSession, navigateHome } from "../utils/routing.js";
 import { FederationSettings } from "./FederationSettings.js";
+import { ProviderGrid } from "./ProviderGrid.js";
 import { subscribeToPush, unsubscribeFromPush } from "../sw-register.js";
 
 interface SettingsPageProps {
@@ -11,20 +12,19 @@ interface SettingsPageProps {
 
 const CATEGORIES = [
   { id: "general", label: "General" },
-  { id: "webhooks", label: "Webhooks" },
+  { id: "connectivity", label: "Connectivity" },
   { id: "authentication", label: "Authentication" },
   { id: "notifications", label: "Notifications" },
   { id: "providers", label: "Providers" },
   { id: "gemini", label: "Gemini" },
   { id: "email", label: "Email" },
   { id: "calendar", label: "Calendar" },
-  { id: "anthropic", label: "Anthropic" },
-  { id: "ai-validation", label: "AI Validation" },
+  { id: "ai-features", label: "HeyHank AI" },
   { id: "updates", label: "Updates" },
   { id: "appearance", label: "Appearance" },
-  { id: "telephony", label: "Telephony" },
   { id: "environments", label: "Environments" },
   { id: "federation", label: "Federation" },
+  { id: "backup", label: "Backup" },
 ] as const;
 
 type CategoryId = (typeof CATEGORIES)[number]["id"];
@@ -144,6 +144,8 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [geminiVoiceOriginal, setGeminiVoiceOriginal] = useState("Kore");
   const [assistantName, setAssistantName] = useState("");
   const [assistantNameOriginal, setAssistantNameOriginal] = useState("");
+  const [userName, setUserName] = useState("");
+  const [userNameOriginal, setUserNameOriginal] = useState("");
   const [geminiKeyFocused, setGeminiKeyFocused] = useState(false);
   const [geminiSaving, setGeminiSaving] = useState(false);
   const [geminiSaved, setGeminiSaved] = useState(false);
@@ -255,6 +257,10 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
       .getSettings()
       .then((s) => {
         setConfigured(s.anthropicApiKeyConfigured);
+        // Also check if any additional provider is enabled (for AI Features status)
+        api.getProviders().then((providers) => {
+          if (providers.some((p) => p.configured && p.enabled)) setConfigured(true);
+        }).catch(() => {});
         setClaudeCodeTokenConfigured(s.claudeCodeOAuthTokenConfigured);
         setOpenaiApiKeyConfigured(s.openaiApiKeyConfigured);
         if (s.claudeCliAuth) setClaudeCliAuth(s.claudeCliAuth);
@@ -262,6 +268,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
         setGeminiApiKeyConfigured(s.geminiApiKeyConfigured);
         if (s.geminiVoice) { setGeminiVoice(s.geminiVoice); setGeminiVoiceOriginal(s.geminiVoice); }
         if (typeof s.assistantName === "string") { setAssistantName(s.assistantName); setAssistantNameOriginal(s.assistantName); }
+        if (typeof s.userName === "string") { setUserName(s.userName); setUserNameOriginal(s.userName); }
         setAnthropicModel(s.anthropicModel || "claude-sonnet-4-6");
         setEditorTabEnabled(s.editorTabEnabled);
         setStoreEditorTabEnabled(s.editorTabEnabled);
@@ -680,28 +687,20 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
               </div>
             </section>
 
-            {/* Webhooks */}
-            <section id="webhooks" ref={setSectionRef("webhooks")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Webhooks</h2>
+            {/* Connectivity */}
+            <section id="connectivity" ref={setSectionRef("connectivity")}>
+              <h2 className="text-sm font-semibold text-cc-fg mb-4">Connectivity</h2>
               <div className="space-y-4">
                 <p className="text-xs text-cc-muted">
-                  The public URL is used for webhook URLs that external services (Linear, GitHub) send events to.
-                  Set this to the externally-reachable address of your HeyHank instance.
+                  HeyHank needs an externally-reachable HTTPS URL for mobile access (PWA), webhooks (GitHub), and OAuth callbacks.
                 </p>
-                <p className="text-xs text-cc-muted">
-                  Tip:{" "}
-                  <a
-                    href="#/integrations/tailscale"
-                    className="text-cc-primary hover:underline"
-                  >
-                    Use the Tailscale integration
-                  </a>{" "}
-                  to get an HTTPS URL automatically.
-                </p>
-                <div>
-                  <label className="block text-xs font-medium text-cc-fg mb-1.5" htmlFor="public-url">
-                    Public URL
-                  </label>
+
+                {/* Public URL */}
+                <div className="bg-cc-hover/50 rounded-lg p-3 space-y-3">
+                  <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Public URL</h3>
+                  <p className="text-[11px] text-cc-muted">
+                    If you have your own domain with a reverse proxy (nginx, Caddy), enter the URL here.
+                  </p>
                   <input
                     id="public-url"
                     type="url"
@@ -711,34 +710,57 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     placeholder="https://your-domain.example.com"
                     className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg border border-cc-border text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary font-mono-code"
                   />
-                  <p className="mt-1.5 text-[10px] text-cc-muted">
-                    {publicUrl
-                      ? `Using: ${publicUrl}`
-                      : `Fallback: ${typeof window !== "undefined" ? window.location.origin : "http://localhost:3456"}`}
-                  </p>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setSaving(true);
+                        setError("");
+                        try {
+                          const res = await api.updateSettings({ publicUrl: publicUrl.trim() });
+                          setPublicUrl(res.publicUrl);
+                          useStore.getState().setPublicUrl(res.publicUrl);
+                          setSaved(true);
+                          setTimeout(() => setSaved(false), 1800);
+                        } catch (err: unknown) {
+                          setError(err instanceof Error ? err.message : String(err));
+                        } finally {
+                          setSaving(false);
+                        }
+                      }}
+                      disabled={saving}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-cc-primary text-white hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer"
+                    >
+                      {saving ? "Saving..." : saved ? "Saved!" : "Save"}
+                    </button>
+                    {publicUrl && (
+                      <span className="text-[11px] text-green-500 font-medium">Active: {publicUrl}</span>
+                    )}
+                    {!publicUrl && (
+                      <span className="text-[11px] text-cc-muted">Not set — using {typeof window !== "undefined" ? window.location.origin : "http://localhost:3456"}</span>
+                    )}
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setSaving(true);
-                    setError("");
-                    try {
-                      const res = await api.updateSettings({ publicUrl: publicUrl.trim() });
-                      setPublicUrl(res.publicUrl);
-                      useStore.getState().setPublicUrl(res.publicUrl);
-                      setSaved(true);
-                      setTimeout(() => setSaved(false), 1800);
-                    } catch (err: unknown) {
-                      setError(err instanceof Error ? err.message : String(err));
-                    } finally {
-                      setSaving(false);
-                    }
-                  }}
-                  disabled={saving}
-                  className="px-4 py-2 min-h-[44px] rounded-lg text-sm font-medium bg-cc-primary text-white hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer"
-                >
-                  {saving ? "Saving..." : saved ? "Saved!" : "Save Public URL"}
-                </button>
+
+                {/* Tailscale */}
+                <div className="bg-cc-hover/50 rounded-lg p-3 space-y-3">
+                  <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Tailscale (no domain needed)</h3>
+                  <p className="text-[11px] text-cc-muted">
+                    No domain? Tailscale Funnel gives you a free HTTPS URL automatically. Install Tailscale on your server, then enable Funnel here.
+                  </p>
+                  <TailscaleStatusInline />
+                </div>
+
+                {/* What this enables */}
+                <div className="bg-cc-hover/50 rounded-lg p-3 space-y-2">
+                  <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">What the Public URL enables</h3>
+                  <ul className="text-[11px] text-cc-muted space-y-1 list-disc pl-4">
+                    <li>Mobile access — install HeyHank as PWA on your phone</li>
+                    <li>Webhooks — receive events from GitHub and other services</li>
+                    <li>OAuth callbacks — authenticate with external services</li>
+                    <li>Federation — connect multiple HeyHank instances</li>
+                  </ul>
+                </div>
               </div>
             </section>
 
@@ -931,10 +953,10 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
               <h2 className="text-sm font-semibold text-cc-fg mb-4">Providers</h2>
               <div className="space-y-6">
                 <p className="text-xs text-cc-muted">
-                  Connect AI backends to power your agent sessions. Each provider needs authentication — either via CLI login on the server or by entering a token/key below.
+                  Connect AI backends to power your agent sessions. Configure CLI backends (Claude Code, Codex) and additional model providers for Claude Code's <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">--provider</code> flag.
                 </p>
 
-                {/* Claude Code */}
+                {/* Claude Code — primary backend */}
                 <div className="space-y-3 p-4 bg-cc-bg rounded-lg border border-cc-border">
                   <div className="flex items-center justify-between">
                     <div>
@@ -943,7 +965,6 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                         <p className="text-xs text-cc-muted mt-0.5">{claudeCliAuth.cliVersion}</p>
                       )}
                     </div>
-                    {/* Status badge */}
                     {claudeCliAuth?.authenticated || claudeCodeTokenConfigured ? (
                       <span className="px-2 py-0.5 text-xs rounded-full bg-cc-success/15 text-cc-success border border-cc-success/20">
                         Authenticated
@@ -954,140 +975,77 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                       </span>
                     )}
                   </div>
-
-                  {/* Auth method info */}
                   {claudeCliAuth?.authenticated && (
                     <div className="px-3 py-2 rounded-lg bg-cc-success/5 border border-cc-success/10 text-xs text-cc-muted">
-                      {claudeCliAuth.method === "cli_login" && (
-                        <>Authenticated via <strong className="text-cc-fg">CLI login</strong> (credentials found on server). Sessions will authenticate automatically.</>
-                      )}
-                      {claudeCliAuth.method === "env_api_key" && (
-                        <>Authenticated via <strong className="text-cc-fg">ANTHROPIC_API_KEY</strong> environment variable.</>
-                      )}
-                      {claudeCliAuth.method === "env_oauth" && (
-                        <>Authenticated via <strong className="text-cc-fg">CLAUDE_CODE_OAUTH_TOKEN</strong> environment variable.</>
-                      )}
-                      {claudeCliAuth.method === "env_auth_token" && (
-                        <>Authenticated via <strong className="text-cc-fg">ANTHROPIC_AUTH_TOKEN</strong> environment variable.</>
-                      )}
-                      {claudeCodeTokenConfigured && (
-                        <> Additionally, a dashboard OAuth token is configured.</>
-                      )}
+                      {claudeCliAuth.method === "cli_login" && <>Authenticated via <strong className="text-cc-fg">CLI login</strong>. Sessions authenticate automatically.</>}
+                      {claudeCliAuth.method === "env_api_key" && <>Authenticated via <strong className="text-cc-fg">ANTHROPIC_API_KEY</strong> env var.</>}
+                      {claudeCliAuth.method === "env_oauth" && <>Authenticated via <strong className="text-cc-fg">CLAUDE_CODE_OAUTH_TOKEN</strong> env var.</>}
+                      {claudeCliAuth.method === "env_auth_token" && <>Authenticated via <strong className="text-cc-fg">ANTHROPIC_AUTH_TOKEN</strong> env var.</>}
                     </div>
                   )}
-
                   {!claudeCliAuth?.authenticated && !claudeCodeTokenConfigured && (
-                    <div className="px-3 py-2.5 rounded-lg bg-cc-primary/5 border border-cc-primary/15 text-xs text-cc-muted space-y-2">
-                      <p className="font-medium text-cc-fg">Setup options (choose one):</p>
-                      <div className="space-y-1.5 ml-1">
-                        <p><strong>Option 1 — CLI Login (recommended):</strong> Run <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">claude login</code> on the server. This stores credentials locally and all sessions authenticate automatically.</p>
-                        <p><strong>Option 2 — OAuth Token:</strong> Run <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">claude setup-token</code> on any machine, copy the token, and paste it below. The token is injected into every Claude session.</p>
-                        <p><strong>Option 3 — API Key:</strong> Set <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">ANTHROPIC_API_KEY</code> as an environment variable on the server.</p>
-                      </div>
+                    <div className="px-3 py-2.5 rounded-lg bg-cc-primary/5 border border-cc-primary/15 text-xs text-cc-muted space-y-1.5">
+                      <p><strong>CLI Login:</strong> Run <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">claude login</code> on the server.</p>
+                      <p><strong>OAuth Token:</strong> Paste a token from <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">claude setup-token</code> below.</p>
                     </div>
                   )}
-
-                  {/* Token input (always available as override) */}
                   <div className="space-y-1.5">
-                    <label className="block text-xs text-cc-muted" htmlFor="claude-code-token">
-                      OAuth Token {claudeCliAuth?.authenticated ? "(optional override)" : ""}
-                    </label>
-                    <input
-                      id="claude-code-token"
-                      type="password"
+                    <label className="block text-xs text-cc-muted" htmlFor="claude-code-token">OAuth Token {claudeCliAuth?.authenticated ? "(optional)" : ""}</label>
+                    <input id="claude-code-token" type="password"
                       value={claudeCodeTokenConfigured && !claudeTokenFocused && !claudeCodeToken ? "••••••••••••••••" : claudeCodeToken}
                       onChange={(e) => setClaudeCodeToken(e.target.value)}
-                      onFocus={() => setClaudeTokenFocused(true)}
-                      onBlur={() => setClaudeTokenFocused(false)}
+                      onFocus={() => setClaudeTokenFocused(true)} onBlur={() => setClaudeTokenFocused(false)}
                       placeholder={claudeCodeTokenConfigured ? "Enter a new token to replace" : "Paste token from claude setup-token"}
-                      className="w-full px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
-                    />
+                      className="w-full px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow" />
                   </div>
                 </div>
 
-                {/* OpenAI / Codex */}
+                {/* OpenAI Codex — primary backend */}
                 <div className="space-y-3 p-4 bg-cc-bg rounded-lg border border-cc-border">
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="text-sm font-medium text-cc-fg">OpenAI Codex</h3>
-                      {codexCliAuth?.cliVersion && (
-                        <p className="text-xs text-cc-muted mt-0.5">{codexCliAuth.cliVersion}</p>
-                      )}
+                      {codexCliAuth?.cliVersion && <p className="text-xs text-cc-muted mt-0.5">{codexCliAuth.cliVersion}</p>}
                     </div>
-                    {/* Status badge */}
                     {codexCliAuth?.authenticated || openaiApiKeyConfigured ? (
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-cc-success/15 text-cc-success border border-cc-success/20">
-                        Authenticated
-                      </span>
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-cc-success/15 text-cc-success border border-cc-success/20">Authenticated</span>
                     ) : (
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-cc-error/15 text-cc-error border border-cc-error/20">
-                        Not configured
-                      </span>
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-cc-error/15 text-cc-error border border-cc-error/20">Not configured</span>
                     )}
                   </div>
-
-                  {/* Auth method info */}
                   {codexCliAuth?.authenticated && (
                     <div className="px-3 py-2 rounded-lg bg-cc-success/5 border border-cc-success/10 text-xs text-cc-muted">
-                      {codexCliAuth.method === "cli_login" && (
-                        <>Authenticated via <strong className="text-cc-fg">device login</strong> (auth.json found on server). Sessions will authenticate automatically.</>
-                      )}
-                      {codexCliAuth.method === "env_api_key" && (
-                        <>Authenticated via <strong className="text-cc-fg">OPENAI_API_KEY</strong> environment variable.</>
-                      )}
-                      {openaiApiKeyConfigured && (
-                        <> Additionally, a dashboard API key is configured.</>
-                      )}
+                      {codexCliAuth.method === "cli_login" && <>Authenticated via <strong className="text-cc-fg">device login</strong>.</>}
+                      {codexCliAuth.method === "env_api_key" && <>Authenticated via <strong className="text-cc-fg">OPENAI_API_KEY</strong> env var.</>}
                     </div>
                   )}
-
                   {!codexCliAuth?.authenticated && !openaiApiKeyConfigured && (
-                    <div className="px-3 py-2.5 rounded-lg bg-cc-primary/5 border border-cc-primary/15 text-xs text-cc-muted space-y-2">
-                      <p className="font-medium text-cc-fg">Setup options (choose one):</p>
-                      <div className="space-y-1.5 ml-1">
-                        <p><strong>Option 1 — Device Login (recommended):</strong> Run <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">codex --login</code> on the server. This opens a browser-based auth flow and stores credentials locally.</p>
-                        <p><strong>Option 2 — API Key:</strong> Enter your OpenAI API key below. Get one from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-cc-primary hover:underline">platform.openai.com/api-keys</a>. The key is injected into every Codex session.</p>
-                      </div>
+                    <div className="px-3 py-2.5 rounded-lg bg-cc-primary/5 border border-cc-primary/15 text-xs text-cc-muted space-y-1.5">
+                      <p><strong>Device Login:</strong> Run <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">codex --login</code> on the server.</p>
+                      <p><strong>API Key:</strong> Enter your key below from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-cc-primary hover:underline">platform.openai.com</a>.</p>
                     </div>
                   )}
-
-                  {/* API Key input */}
                   <div className="space-y-1.5">
-                    <label className="block text-xs text-cc-muted" htmlFor="openai-api-key">
-                      API Key {codexCliAuth?.authenticated ? "(optional override)" : ""}
-                    </label>
-                    <input
-                      id="openai-api-key"
-                      type="password"
+                    <label className="block text-xs text-cc-muted" htmlFor="openai-api-key">API Key {codexCliAuth?.authenticated ? "(optional)" : ""}</label>
+                    <input id="openai-api-key" type="password"
                       value={openaiApiKeyConfigured && !openaiKeyFocused && !openaiApiKey ? "••••••••••••••••" : openaiApiKey}
                       onChange={(e) => setOpenaiApiKey(e.target.value)}
-                      onFocus={() => setOpenaiKeyFocused(true)}
-                      onBlur={() => setOpenaiKeyFocused(false)}
+                      onFocus={() => setOpenaiKeyFocused(true)} onBlur={() => setOpenaiKeyFocused(false)}
                       placeholder={openaiApiKeyConfigured ? "Enter a new key to replace" : "sk-..."}
-                      className="w-full px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
-                    />
+                      className="w-full px-3 py-2 text-sm bg-cc-input-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow" />
                   </div>
                 </div>
 
                 {providerError && (
-                  <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
-                    {providerError}
-                  </div>
+                  <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">{providerError}</div>
                 )}
-
                 {providerSaved && (
-                  <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
-                    Provider settings saved.
-                  </div>
+                  <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">Provider settings saved.</div>
                 )}
-
-                <button
-                  type="button"
+                <button type="button"
                   disabled={providerSaving || (!claudeCodeToken.trim() && !openaiApiKey.trim())}
                   onClick={async () => {
-                    setProviderSaving(true);
-                    setProviderError("");
-                    setProviderSaved(false);
+                    setProviderSaving(true); setProviderError(""); setProviderSaved(false);
                     try {
                       const payload: { claudeCodeOAuthToken?: string; openaiApiKey?: string } = {};
                       if (claudeCodeToken.trim()) payload.claudeCodeOAuthToken = claudeCodeToken.trim();
@@ -1097,24 +1055,35 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                       setOpenaiApiKeyConfigured(res.openaiApiKeyConfigured);
                       if (res.claudeCliAuth) setClaudeCliAuth(res.claudeCliAuth);
                       if (res.codexCliAuth) setCodexCliAuth(res.codexCliAuth);
-                      setClaudeCodeToken("");
-                      setOpenaiApiKey("");
-                      setProviderSaved(true);
-                      setTimeout(() => setProviderSaved(false), 1800);
-                    } catch (err: unknown) {
-                      setProviderError(err instanceof Error ? err.message : String(err));
-                    } finally {
-                      setProviderSaving(false);
-                    }
+                      setClaudeCodeToken(""); setOpenaiApiKey("");
+                      setProviderSaved(true); setTimeout(() => setProviderSaved(false), 1800);
+                    } catch (err: unknown) { setProviderError(err instanceof Error ? err.message : String(err)); }
+                    finally { setProviderSaving(false); }
                   }}
                   className={`px-4 py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors ${
                     providerSaving || (!claudeCodeToken.trim() && !openaiApiKey.trim())
                       ? "bg-cc-hover text-cc-muted cursor-not-allowed"
                       : "bg-cc-primary-btn hover:bg-cc-primary-btn-hover text-white cursor-pointer"
                   }`}
-                >
-                  {providerSaving ? "Saving..." : "Save Provider Settings"}
-                </button>
+                >{providerSaving ? "Saving..." : "Save CLI Backend Settings"}</button>
+
+                {/* Additional Model Providers — collapsible */}
+                <details className="border-t border-cc-border pt-4 group">
+                  <summary className="flex items-center justify-between cursor-pointer list-none">
+                    <div>
+                      <h3 className="text-sm font-medium text-cc-fg">Additional Providers</h3>
+                      <p className="text-xs text-cc-muted mt-0.5">
+                        Configure model providers for Claude Code's <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg text-[10px]">--provider</code> flag.
+                      </p>
+                    </div>
+                    <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-cc-muted transition-transform group-open:rotate-180">
+                      <path fillRule="evenodd" d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" />
+                    </svg>
+                  </summary>
+                  <div className="mt-4">
+                    <ProviderGrid />
+                  </div>
+                </details>
               </div>
             </section>
 
@@ -1167,6 +1136,24 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   </p>
                 </div>
 
+                {/* User Name */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium" htmlFor="user-name">
+                    Your Name
+                  </label>
+                  <input
+                    id="user-name"
+                    type="text"
+                    value={userName}
+                    onChange={(e) => setUserName(e.target.value)}
+                    placeholder="e.g. Markus"
+                    className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
+                  />
+                  <p className="text-xs text-cc-muted">
+                    Your name so Gemini knows who it's talking to.
+                  </p>
+                </div>
+
                 {/* Voice Selection */}
                 <div className="space-y-2">
                   <label className="block text-sm font-medium" htmlFor="gemini-voice">
@@ -1203,20 +1190,22 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
 
                 <button
                   type="button"
-                  disabled={geminiSaving || (!geminiApiKey.trim() && geminiVoice === geminiVoiceOriginal && assistantName === assistantNameOriginal)}
+                  disabled={geminiSaving || (!geminiApiKey.trim() && geminiVoice === geminiVoiceOriginal && assistantName === assistantNameOriginal && userName === userNameOriginal)}
                   onClick={async () => {
                     setGeminiSaving(true);
                     setGeminiError("");
                     setGeminiSaved(false);
                     try {
-                      const payload: { geminiApiKey?: string; geminiVoice?: string; assistantName?: string } = {};
+                      const payload: { geminiApiKey?: string; geminiVoice?: string; assistantName?: string; userName?: string } = {};
                       if (geminiApiKey.trim()) payload.geminiApiKey = geminiApiKey.trim();
                       payload.assistantName = assistantName;
+                      payload.userName = userName;
                       payload.geminiVoice = geminiVoice;
                       const res = await api.updateSettings(payload);
                       setGeminiApiKeyConfigured(res.geminiApiKeyConfigured);
                       if (res.geminiVoice) { setGeminiVoice(res.geminiVoice); setGeminiVoiceOriginal(res.geminiVoice); }
                       if (typeof res.assistantName === "string") { setAssistantName(res.assistantName); setAssistantNameOriginal(res.assistantName); }
+                      if (typeof res.userName === "string") { setUserName(res.userName); setUserNameOriginal(res.userName); }
                       setGeminiApiKey("");
                       setGeminiSaved(true);
                       setTimeout(() => setGeminiSaved(false), 1800);
@@ -1669,174 +1658,70 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
               )}
             </section>
 
-            {/* Anthropic */}
-            <section id="anthropic" ref={setSectionRef("anthropic")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Anthropic</h2>
-              <form onSubmit={onSave} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" htmlFor="anthropic-key">
-                    Anthropic API Key
-                  </label>
-                  <input
-                    id="anthropic-key"
-                    type="password"
-                    value={configured && !apiKeyFocused && !anthropicApiKey ? "••••••••••••••••" : anthropicApiKey}
-                    onChange={(e) => { setAnthropicApiKey(e.target.value); setVerifyResult(null); }}
-                    onFocus={() => setApiKeyFocused(true)}
-                    onBlur={() => setApiKeyFocused(false)}
-                    placeholder={configured ? "Enter a new key to replace" : "sk-ant-api03-..."}
-                    className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
-                  />
-                  <p className="mt-1.5 text-xs text-cc-muted">
-                    Auto-renaming is disabled until this key is configured.
+            {/* AI Features */}
+            <section id="ai-features" ref={setSectionRef("ai-features")}>
+              <h2 className="text-sm font-semibold text-cc-fg mb-4">HeyHank AI Features</h2>
+              <div className="space-y-4">
+                <p className="text-xs text-cc-muted leading-relaxed">
+                  These features use any enabled provider configured under Providers → Additional Providers above.
+                </p>
+
+                {/* Auto-Renaming info */}
+                <div className="px-3 py-2.5 rounded-lg bg-cc-hover/50 border border-cc-border">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-cc-fg">Auto-Rename Sessions</span>
+                    <span className={`text-xs font-medium ${configured ? "text-cc-success" : "text-cc-muted"}`}>
+                      {configured ? "Active" : "No provider"}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-cc-muted mt-1">
+                    Automatically generates a short title for new sessions based on the first message.
                   </p>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" htmlFor="anthropic-model">
-                    Anthropic Model
-                  </label>
-                  <input
-                    id="anthropic-model"
-                    type="text"
-                    value={anthropicModel}
-                    onChange={(e) => setAnthropicModel(e.target.value)}
-                    placeholder="claude-sonnet-4-6"
-                    className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
-                  />
+                {/* AI Validation */}
+                <div className="space-y-3 p-3 bg-cc-bg rounded-lg border border-cc-border">
+                  <h3 className="text-xs font-medium text-cc-fg">AI Validation</h3>
+                  <p className="text-[11px] text-cc-muted leading-relaxed">
+                    An AI model evaluates tool calls before execution. Safe ops are auto-approved, dangerous ones blocked.
+                    Uses any configured provider. Per-session overrides via the shield icon.
+                  </p>
+
+                  <button type="button"
+                    onClick={() => toggleAiValidation("aiValidationEnabled")}
+                    className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-cc-hover hover:bg-cc-active text-cc-fg transition-colors cursor-pointer"
+                  >
+                    <span className="text-sm">AI Validation</span>
+                    <span className={`text-xs font-medium ${aiValidationEnabled ? "text-cc-success" : "text-cc-muted"}`}>
+                      {aiValidationEnabled ? "On" : "Off"}
+                    </span>
+                  </button>
+
+                  {aiValidationEnabled && (
+                    <>
+                      <button type="button" onClick={() => toggleAiValidation("aiValidationAutoApprove")}
+                        className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-cc-hover hover:bg-cc-active text-cc-fg transition-colors cursor-pointer">
+                        <div>
+                          <span className="text-sm">Auto-approve safe tools</span>
+                          <p className="text-[11px] text-cc-muted mt-0.5">Allow read-only tools automatically</p>
+                        </div>
+                        <span className={`text-xs font-medium ${aiValidationAutoApprove ? "text-cc-success" : "text-cc-muted"}`}>
+                          {aiValidationAutoApprove ? "On" : "Off"}
+                        </span>
+                      </button>
+                      <button type="button" onClick={() => toggleAiValidation("aiValidationAutoDeny")}
+                        className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-cc-hover hover:bg-cc-active text-cc-fg transition-colors cursor-pointer">
+                        <div>
+                          <span className="text-sm">Auto-deny dangerous tools</span>
+                          <p className="text-[11px] text-cc-muted mt-0.5">Block destructive commands like rm -rf</p>
+                        </div>
+                        <span className={`text-xs font-medium ${aiValidationAutoDeny ? "text-cc-success" : "text-cc-muted"}`}>
+                          {aiValidationAutoDeny ? "On" : "Off"}
+                        </span>
+                      </button>
+                    </>
+                  )}
                 </div>
-
-                {error && (
-                  <div className="px-3 py-2 rounded-lg bg-cc-error/10 border border-cc-error/20 text-xs text-cc-error">
-                    {error}
-                  </div>
-                )}
-
-                {saved && (
-                  <div className="px-3 py-2 rounded-lg bg-cc-success/10 border border-cc-success/20 text-xs text-cc-success">
-                    Settings saved.
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-cc-muted">
-                    {loading ? "Loading..." : configured ? "Anthropic key configured" : "Anthropic key not configured"}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={verifying || !anthropicApiKey.trim()}
-                      onClick={async () => {
-                        setVerifying(true);
-                        setVerifyResult(null);
-                        try {
-                          const result = await api.verifyAnthropicKey(anthropicApiKey.trim());
-                          setVerifyResult(result);
-                          setTimeout(() => setVerifyResult(null), 5000);
-                        } catch (err: unknown) {
-                          setVerifyResult({ valid: false, error: err instanceof Error ? err.message : String(err) });
-                          setTimeout(() => setVerifyResult(null), 5000);
-                        } finally {
-                          setVerifying(false);
-                        }
-                      }}
-                      className={`px-3 py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors ${
-                        verifying || !anthropicApiKey.trim()
-                          ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                          : "bg-cc-hover hover:bg-cc-active text-cc-fg cursor-pointer"
-                      }`}
-                    >
-                      {verifying ? "Verifying..." : "Verify"}
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={saving || loading}
-                      className={`px-3 py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors ${
-                        saving || loading
-                          ? "bg-cc-hover text-cc-muted cursor-not-allowed"
-                          : "bg-cc-primary-btn hover:bg-cc-primary-btn-hover text-white cursor-pointer"
-                      }`}
-                    >
-                      {saving ? "Saving..." : "Save"}
-                    </button>
-                  </div>
-                </div>
-
-                {verifyResult && (
-                  <div className={`px-3 py-2 rounded-lg text-xs ${
-                    verifyResult.valid
-                      ? "bg-cc-success/10 border border-cc-success/20 text-cc-success"
-                      : "bg-cc-error/10 border border-cc-error/20 text-cc-error"
-                  }`}>
-                    {verifyResult.valid ? "API key is valid." : `Invalid API key${verifyResult.error ? `: ${verifyResult.error}` : "."}`}
-                  </div>
-                )}
-              </form>
-            </section>
-
-            {/* AI Validation */}
-            <section id="ai-validation" ref={setSectionRef("ai-validation")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">AI Validation</h2>
-              <div className="space-y-3">
-                <p className="text-xs text-cc-muted leading-relaxed">
-                  When enabled, an AI model evaluates tool calls before they execute.
-                  Safe operations are auto-approved, dangerous ones are blocked,
-                  and uncertain cases are shown to you with a recommendation.
-                  Requires an Anthropic API key. These settings serve as defaults
-                  for new sessions. Each session can override AI validation
-                  independently via the shield icon in the session header.
-                </p>
-
-                <button
-                  type="button"
-                  onClick={() => toggleAiValidation("aiValidationEnabled")}
-                  disabled={!configured}
-                  className={`w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg transition-colors ${
-                    !configured
-                      ? "bg-cc-hover text-cc-muted cursor-not-allowed opacity-60"
-                      : "bg-cc-hover hover:bg-cc-active text-cc-fg cursor-pointer"
-                  }`}
-                >
-                  <span className="text-sm">AI Validation Mode</span>
-                  <span className={`text-xs font-medium ${aiValidationEnabled && configured ? "text-cc-success" : "text-cc-muted"}`}>
-                    {aiValidationEnabled && configured ? "On" : "Off"}
-                  </span>
-                </button>
-                {!configured && (
-                  <p className="text-[11px] text-cc-warning">Configure an Anthropic API key above to enable AI validation.</p>
-                )}
-
-                {aiValidationEnabled && configured && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => toggleAiValidation("aiValidationAutoApprove")}
-                      className="w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg bg-cc-hover hover:bg-cc-active text-cc-fg transition-colors cursor-pointer"
-                    >
-                      <div>
-                        <span className="text-sm">Auto-approve safe tools</span>
-                        <p className="text-[11px] text-cc-muted mt-0.5">Automatically allow read-only tools and benign commands</p>
-                      </div>
-                      <span className={`text-xs font-medium ${aiValidationAutoApprove ? "text-cc-success" : "text-cc-muted"}`}>
-                        {aiValidationAutoApprove ? "On" : "Off"}
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => toggleAiValidation("aiValidationAutoDeny")}
-                      className="w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg bg-cc-hover hover:bg-cc-active text-cc-fg transition-colors cursor-pointer"
-                    >
-                      <div>
-                        <span className="text-sm">Auto-deny dangerous tools</span>
-                        <p className="text-[11px] text-cc-muted mt-0.5">Automatically block destructive commands like rm -rf</p>
-                      </div>
-                      <span className={`text-xs font-medium ${aiValidationAutoDeny ? "text-cc-success" : "text-cc-muted"}`}>
-                        {aiValidationAutoDeny ? "On" : "Off"}
-                      </span>
-                    </button>
-                  </>
-                )}
               </div>
             </section>
 
@@ -2002,42 +1887,88 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
             {/* Appearance */}
             <section id="appearance" ref={setSectionRef("appearance")}>
               <h2 className="text-sm font-semibold text-cc-fg mb-4">Appearance</h2>
-              <div className="space-y-3">
-                <p className="text-xs text-cc-muted">
-                  Adjust the UI font size to your preference.
-                </p>
-                <div className="flex items-center gap-3">
-                  <label htmlFor="font-size-slider" className="text-xs text-cc-fg shrink-0 w-16">Font Size</label>
-                  <input
-                    id="font-size-slider"
-                    type="range"
-                    min="12"
-                    max="20"
-                    step="1"
-                    value={parseInt(localStorage.getItem("cc-font-size") || "14", 10)}
-                    onChange={(e) => {
-                      const size = e.target.value;
-                      localStorage.setItem("cc-font-size", size);
-                      document.documentElement.style.fontSize = `${size}px`;
-                    }}
-                    className="flex-1 accent-cc-primary cursor-pointer"
-                  />
-                  <span className="text-xs text-cc-muted tabular-nums w-8 text-right">
-                    {localStorage.getItem("cc-font-size") || "14"}px
-                  </span>
+              <div className="space-y-4">
+                {/* Theme toggle */}
+                <div>
+                  <label className="text-xs text-cc-fg font-medium block mb-2">Theme</label>
+                  <div className="flex items-center gap-2">
+                    {(["light", "dark", "system"] as const).map((mode) => {
+                      const isActive = mode === "system"
+                        ? localStorage.getItem("cc-dark-mode") === null
+                        : mode === "dark"
+                          ? darkMode && localStorage.getItem("cc-dark-mode") !== null
+                          : !darkMode && localStorage.getItem("cc-dark-mode") !== null;
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => {
+                            if (mode === "system") {
+                              localStorage.removeItem("cc-dark-mode");
+                              const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+                              useStore.getState().setDarkMode(prefersDark);
+                              // Re-set without persisting
+                              localStorage.removeItem("cc-dark-mode");
+                            } else {
+                              useStore.getState().setDarkMode(mode === "dark");
+                            }
+                          }}
+                          className={`flex items-center gap-2 px-3 py-2 min-h-[44px] rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                            isActive
+                              ? "bg-cc-primary/15 text-cc-primary border border-cc-primary/30"
+                              : "bg-cc-hover text-cc-muted border border-transparent hover:text-cc-fg"
+                          }`}
+                        >
+                          {mode === "light" && (
+                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+                          )}
+                          {mode === "dark" && (
+                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+                          )}
+                          {mode === "system" && (
+                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                          )}
+                          {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    localStorage.removeItem("cc-font-size");
-                    document.documentElement.style.fontSize = "";
-                    // Force re-render
-                    window.dispatchEvent(new Event("storage"));
-                  }}
-                  className="text-xs text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
-                >
-                  Reset to default
-                </button>
+
+                {/* Font size */}
+                <div>
+                  <label className="text-xs text-cc-fg font-medium block mb-2">Font Size</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      id="font-size-slider"
+                      type="range"
+                      min="12"
+                      max="20"
+                      step="1"
+                      value={parseInt(localStorage.getItem("cc-font-size") || "14", 10)}
+                      onChange={(e) => {
+                        const size = e.target.value;
+                        localStorage.setItem("cc-font-size", size);
+                        document.documentElement.style.fontSize = `${size}px`;
+                      }}
+                      className="flex-1 accent-cc-primary cursor-pointer"
+                    />
+                    <span className="text-xs text-cc-muted tabular-nums w-8 text-right">
+                      {localStorage.getItem("cc-font-size") || "14"}px
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      localStorage.removeItem("cc-font-size");
+                      document.documentElement.style.fontSize = "";
+                      window.dispatchEvent(new Event("storage"));
+                    }}
+                    className="text-xs text-cc-muted hover:text-cc-fg transition-colors cursor-pointer mt-1"
+                  >
+                    Reset to default
+                  </button>
+                </div>
               </div>
             </section>
 
@@ -2060,17 +1991,6 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
               </div>
             </section>
 
-            {/* Telephony */}
-            <section id="telephony" ref={setSectionRef("telephony")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Telephony</h2>
-              <div className="space-y-3">
-                <p className="text-xs text-cc-muted">
-                  AI-powered phone calls via FreeSWITCH + Gemini Live.
-                </p>
-                <TelephonySettingsSection />
-              </div>
-            </section>
-
             {/* Federation */}
             <section id="federation" ref={setSectionRef("federation")}>
               <h2 className="text-sm font-semibold text-cc-fg mb-4">Federation</h2>
@@ -2081,6 +2001,13 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                 <FederationSettings />
               </div>
             </section>
+
+
+            {/* ─── Backup ─────────────────────────────────────────────── */}
+            <section id="backup" ref={setSectionRef("backup")}>
+              <h2 className="text-sm font-semibold text-cc-fg mb-4">Export &amp; Backup</h2>
+              <BackupSection />
+            </section>
           </div>
         </div>
       </div>
@@ -2088,262 +2015,194 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   );
 }
 
-// ─── Telephony Settings ─────────────────────────────────────────────────────
+// ─── Backup Section ─────────────────────────────────────────────────────────
 
-function TelephonySettingsSection() {
-  const [settings, setSettings] = useState<{
-    enabled: boolean;
-    freeswitch: { eslHost: string; eslPort: number; eslPassword?: string };
-    trunks: Array<{ id: string; name: string; provider: string; username?: string; password?: string; server?: string; callerId: string; enabled: boolean }>;
-    defaultVoice: string;
-    maxCallDurationSeconds?: number;
-  } | null>(null);
+// ─── Tailscale Inline Status ────────────────────────────────────────────────
+
+function TailscaleStatusInline() {
+  const [status, setStatus] = useState<{ installed?: boolean; connected?: boolean; funnelActive?: boolean; funnelUrl?: string | null; dnsName?: string | null; error?: string | null; needsOperatorMode?: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [testResult, setTestResult] = useState<{ connected: boolean; status?: string; error?: string } | null>(null);
-  const [showAddTrunk, setShowAddTrunk] = useState(false);
-  const [newTrunk, setNewTrunk] = useState({ name: "peoplefone", provider: "peoplefone", username: "", password: "", server: "sip.peoplefone.at", callerId: "", enabled: true });
+  const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
-    api.getTelephonySettings().then((s) => {
-      setSettings(s as typeof settings);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    api.getTailscaleStatus()
+      .then((s) => setStatus(s))
+      .catch(() => setStatus(null))
+      .finally(() => setLoading(false));
   }, []);
 
-  async function save(updates: Record<string, unknown>) {
-    setSaving(true);
+  async function enableFunnel() {
+    setActionLoading(true);
     try {
-      await api.updateTelephonySettings(updates);
-      const fresh = await api.getTelephonySettings();
-      setSettings(fresh as typeof settings);
+      const result = await api.startTailscaleFunnel();
+      setStatus(result);
+      if (result.funnelUrl && !result.error) {
+        useStore.getState().setPublicUrl(result.funnelUrl);
+      }
     } catch { /* silent */ }
-    setSaving(false);
+    setActionLoading(false);
   }
 
-  async function testConnection() {
-    setTestResult(null);
-    const result = await api.testFreeSwitchConnection();
-    setTestResult(result);
-  }
-
-  async function addTrunk() {
-    if (!newTrunk.username || !newTrunk.password || !newTrunk.server) return;
+  async function disableFunnel() {
+    setActionLoading(true);
     try {
-      await fetch("/api/telephony/trunks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newTrunk),
-      });
-      const fresh = await api.getTelephonySettings();
-      setSettings(fresh as typeof settings);
-      setShowAddTrunk(false);
-      setNewTrunk({ name: "peoplefone", provider: "peoplefone", username: "", password: "", server: "sip.peoplefone.at", callerId: "", enabled: true });
+      const result = await api.stopTailscaleFunnel();
+      setStatus(result);
+      const currentUrl = useStore.getState().publicUrl;
+      if (!currentUrl || currentUrl === status?.funnelUrl) {
+        useStore.getState().setPublicUrl("");
+      }
     } catch { /* silent */ }
+    setActionLoading(false);
   }
 
-  async function removeTrunk(id: string) {
-    try {
-      await fetch(`/api/telephony/trunks/${encodeURIComponent(id)}`, { method: "DELETE" });
-      const fresh = await api.getTelephonySettings();
-      setSettings(fresh as typeof settings);
-    } catch { /* silent */ }
+  if (loading) return <p className="text-[11px] text-cc-muted">Checking Tailscale...</p>;
+
+  if (!status || !status.installed) {
+    return (
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-cc-muted" />
+          <span className="text-xs text-cc-muted">Not installed</span>
+        </div>
+        <a href="https://tailscale.com/download" target="_blank" rel="noopener noreferrer"
+          className="text-[11px] text-cc-primary hover:underline">Install Tailscale</a>
+      </div>
+    );
   }
 
-  if (loading) return <p className="text-xs text-cc-muted">Loading...</p>;
-  if (!settings) return <p className="text-xs text-cc-muted">Failed to load settings.</p>;
+  if (!status.connected) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-amber-500" />
+          <span className="text-xs text-cc-muted">Installed but not connected</span>
+        </div>
+        <div className="rounded-lg bg-cc-bg border border-cc-border px-3 py-1.5 font-mono text-[11px] text-cc-fg">
+          sudo tailscale up
+        </div>
+      </div>
+    );
+  }
 
+  if (status.funnelActive) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-green-500" />
+            <span className="text-xs text-green-500 font-medium">Funnel active</span>
+          </div>
+          <button onClick={disableFunnel} disabled={actionLoading}
+            className="text-[11px] text-red-400 hover:text-red-300 transition-colors cursor-pointer disabled:opacity-50">
+            {actionLoading ? "Stopping..." : "Disable"}
+          </button>
+        </div>
+        <p className="text-[11px] text-cc-fg font-mono">{status.funnelUrl}</p>
+        <p className="text-[10px] text-cc-muted">This URL was automatically set as your Public URL.</p>
+      </div>
+    );
+  }
+
+  // Connected but Funnel not active
   return (
-    <div className="space-y-4">
-      {/* Enable/Disable */}
-      <button
-        type="button"
-        onClick={() => save({ enabled: !settings.enabled })}
-        disabled={saving}
-        className="w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg text-sm bg-cc-hover text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
-      >
-        <span>Enable Telephony</span>
-        <span className={`w-8 h-5 rounded-full transition-colors relative ${settings.enabled ? "bg-green-500" : "bg-cc-muted/30"}`}>
-          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${settings.enabled ? "translate-x-3.5" : "translate-x-0.5"}`} />
-        </span>
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="w-2 h-2 rounded-full bg-amber-500" />
+        <span className="text-xs text-cc-muted">Connected as {status.dnsName}</span>
+      </div>
+      {status.needsOperatorMode && (
+        <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 space-y-1">
+          <p className="text-[11px] text-amber-500 font-medium">Setup needed: operator mode</p>
+          <div className="font-mono text-[11px] text-cc-fg">sudo tailscale set --operator=$USER</div>
+        </div>
+      )}
+      <button onClick={enableFunnel} disabled={actionLoading}
+        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-cc-primary text-white hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50">
+        {actionLoading ? "Starting..." : "Enable HTTPS via Funnel"}
       </button>
-
-      {settings.enabled && (
-        <>
-          {/* FreeSWITCH Connection */}
-          <div className="bg-cc-hover/50 rounded-lg p-3 space-y-2">
-            <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">FreeSWITCH ESL</h3>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-[11px] text-cc-muted">Host</label>
-                <input
-                  type="text"
-                  value={settings.freeswitch.eslHost}
-                  onChange={(e) => setSettings({ ...settings, freeswitch: { ...settings.freeswitch, eslHost: e.target.value } })}
-                  onBlur={() => save({ freeswitch: settings.freeswitch })}
-                  className="w-full px-2 py-1.5 text-xs bg-cc-bg border border-cc-border rounded text-cc-fg"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] text-cc-muted">Port</label>
-                <input
-                  type="number"
-                  value={settings.freeswitch.eslPort}
-                  onChange={(e) => setSettings({ ...settings, freeswitch: { ...settings.freeswitch, eslPort: parseInt(e.target.value) || 8021 } })}
-                  onBlur={() => save({ freeswitch: settings.freeswitch })}
-                  className="w-full px-2 py-1.5 text-xs bg-cc-bg border border-cc-border rounded text-cc-fg"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="text-[11px] text-cc-muted">ESL Password</label>
-              <input
-                type="password"
-                value={settings.freeswitch.eslPassword || ""}
-                onChange={(e) => setSettings({ ...settings, freeswitch: { ...settings.freeswitch, eslPassword: e.target.value } })}
-                onBlur={() => save({ freeswitch: settings.freeswitch })}
-                placeholder="heyhank_esl_secret"
-                className="w-full px-2 py-1.5 text-xs bg-cc-bg border border-cc-border rounded text-cc-fg"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={testConnection}
-                className="px-3 py-1.5 text-xs rounded bg-cc-primary text-white hover:opacity-90 transition-opacity cursor-pointer"
-              >
-                Test Connection
-              </button>
-              {testResult && (
-                <span className={`text-xs ${testResult.connected ? "text-green-500" : "text-red-400"}`}>
-                  {testResult.connected ? "Connected" : testResult.error || "Failed"}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* SIP Trunks */}
-          <div className="bg-cc-hover/50 rounded-lg p-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">SIP Trunks</h3>
-              <button
-                onClick={() => setShowAddTrunk(!showAddTrunk)}
-                className="text-xs text-cc-primary hover:text-cc-primary/80 transition-colors cursor-pointer"
-              >
-                {showAddTrunk ? "Cancel" : "+ Add Trunk"}
-              </button>
-            </div>
-
-            {/* Existing trunks */}
-            {settings.trunks.length === 0 && !showAddTrunk && (
-              <p className="text-xs text-cc-muted">No SIP trunks configured.</p>
-            )}
-            {settings.trunks.map((trunk) => (
-              <div key={trunk.id} className="flex items-center justify-between bg-cc-bg rounded-lg px-3 py-2 border border-cc-border">
-                <div>
-                  <p className="text-xs font-medium text-cc-fg">{trunk.name} <span className="text-cc-muted">({trunk.provider})</span></p>
-                  <p className="text-[11px] text-cc-muted">{trunk.callerId || "No caller ID"}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${trunk.enabled ? "bg-green-500" : "bg-cc-muted"}`} />
-                  <button
-                    onClick={() => removeTrunk(trunk.id)}
-                    className="text-[11px] text-red-400 hover:text-red-300 transition-colors cursor-pointer"
-                  >
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ))}
-
-            {/* Add trunk form */}
-            {showAddTrunk && (
-              <div className="bg-cc-bg rounded-lg p-3 border border-cc-border space-y-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[11px] text-cc-muted">Name</label>
-                    <input type="text" value={newTrunk.name} onChange={(e) => setNewTrunk({ ...newTrunk, name: e.target.value })}
-                      className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-cc-muted">Provider</label>
-                    <select value={newTrunk.provider} onChange={(e) => {
-                      const p = e.target.value;
-                      const servers: Record<string, string> = { peoplefone: "sip.peoplefone.at", easybell: "sip.easybell.de", sipgate: "sipconnect.sipgate.de" };
-                      setNewTrunk({ ...newTrunk, provider: p, name: p, server: servers[p] || "" });
-                    }} className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg">
-                      <option value="peoplefone">peoplefone (AT)</option>
-                      <option value="easybell">easybell (DE)</option>
-                      <option value="sipgate">sipgate (DE)</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-[11px] text-cc-muted">SIP Server</label>
-                  <input type="text" value={newTrunk.server} onChange={(e) => setNewTrunk({ ...newTrunk, server: e.target.value })}
-                    className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[11px] text-cc-muted">SIP Username</label>
-                    <input type="text" value={newTrunk.username} onChange={(e) => setNewTrunk({ ...newTrunk, username: e.target.value })}
-                      className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-cc-muted">SIP Password</label>
-                    <input type="password" value={newTrunk.password} onChange={(e) => setNewTrunk({ ...newTrunk, password: e.target.value })}
-                      className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-[11px] text-cc-muted">Caller ID (your phone number, E.164)</label>
-                  <input type="text" value={newTrunk.callerId} onChange={(e) => setNewTrunk({ ...newTrunk, callerId: e.target.value })}
-                    placeholder="+43..."
-                    className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
-                </div>
-                <button
-                  onClick={addTrunk}
-                  disabled={!newTrunk.username || !newTrunk.password || !newTrunk.server}
-                  className="px-3 py-1.5 text-xs rounded bg-green-600 text-white hover:bg-green-500 transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  Add Trunk
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Voice & Limits */}
-          <div className="bg-cc-hover/50 rounded-lg p-3 space-y-2">
-            <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Defaults</h3>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-[11px] text-cc-muted">Default Voice</label>
-                <select
-                  value={settings.defaultVoice || "Kore"}
-                  onChange={(e) => save({ defaultVoice: e.target.value })}
-                  className="w-full px-2 py-1.5 text-xs bg-cc-bg border border-cc-border rounded text-cc-fg"
-                >
-                  <option value="Kore">Kore (male)</option>
-                  <option value="Puck">Puck (male)</option>
-                  <option value="Charon">Charon (male)</option>
-                  <option value="Aoede">Aoede (female)</option>
-                  <option value="Fenrir">Fenrir (male)</option>
-                  <option value="Leda">Leda (female)</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-[11px] text-cc-muted">Max Call Duration (sec)</label>
-                <input
-                  type="number"
-                  value={settings.maxCallDurationSeconds || 600}
-                  onChange={(e) => save({ maxCallDurationSeconds: parseInt(e.target.value) || 600 })}
-                  className="w-full px-2 py-1.5 text-xs bg-cc-bg border border-cc-border rounded text-cc-fg"
-                />
-              </div>
-            </div>
-          </div>
-        </>
+      {status.error && !status.needsOperatorMode && (
+        <p className="text-[11px] text-red-400">{status.error}</p>
       )}
     </div>
   );
 }
+
+function BackupSection() {
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const data = await api.exportAll();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `heyhank-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      /* silent */
+    }
+    setExporting(false);
+  }
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const result = await api.importData({
+        agents: data.agents,
+        notes: data.notes,
+        todos: data.todos,
+      });
+      const parts = Object.entries(result.imported).map(([k, v]) => `${v} ${k}`);
+      setImportResult(`Imported: ${parts.join(", ") || "nothing new"}`);
+    } catch {
+      setImportResult("Import failed — invalid file format");
+    }
+    setImporting(false);
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-cc-muted">
+        Export all agents, settings, notes, todos, and Gemini conversations as a JSON file. Import to restore on a new instance.
+      </p>
+      <div className="flex gap-2">
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="px-3 py-2 text-xs font-medium rounded-lg bg-cc-primary text-white hover:bg-cc-primary-hover transition-colors cursor-pointer disabled:opacity-50"
+        >
+          {exporting ? "Exporting..." : "Export Backup"}
+        </button>
+        <label className="px-3 py-2 text-xs font-medium rounded-lg bg-cc-hover text-cc-fg hover:bg-cc-active transition-colors cursor-pointer">
+          {importing ? "Importing..." : "Import Backup"}
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".json"
+            onChange={handleImport}
+            className="hidden"
+          />
+        </label>
+      </div>
+      {importResult && (
+        <p className={`text-xs ${importResult.startsWith("Import failed") ? "text-cc-error" : "text-cc-success"}`}>
+          {importResult}
+        </p>
+      )}
+    </div>
+  );
+}
+

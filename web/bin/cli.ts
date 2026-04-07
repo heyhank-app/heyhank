@@ -15,7 +15,7 @@ const CTL_COMMANDS = new Set([
 
 function printUsage(): void {
   console.log(`
-Usage: companion [command]
+Usage: heyhank [command]
 
 Server commands:
   (none)      Start the server in foreground (default)
@@ -112,7 +112,7 @@ switch (command) {
         console.log(`  URL: http://localhost:${result.port}`);
       } else {
         console.log("The Companion is installed but not running.");
-        console.log("Check logs at ~/.companion/logs/");
+        console.log("Check logs at ~/.heyhank/logs/");
       }
     }
     break;
@@ -134,15 +134,15 @@ switch (command) {
     const { join } = await import("node:path");
     const { homedir } = await import("node:os");
     const { spawn } = await import("node:child_process");
-    const logFile = join(homedir(), ".companion/logs/companion.log");
-    const errFile = join(homedir(), ".companion/logs/companion.error.log");
+    const logFile = join(homedir(), ".heyhank/logs/heyhank.log");
+    const errFile = join(homedir(), ".heyhank/logs/heyhank.error.log");
     const { existsSync } = await import("node:fs");
     if (!existsSync(logFile) && !existsSync(errFile)) {
-      console.error("No log files found at ~/.companion/logs/");
+      console.error("No log files found at ~/.heyhank/logs/");
       console.error("The service may not have been started yet.");
       process.exit(1);
     }
-    console.log("Tailing logs from ~/.companion/logs/");
+    console.log("Tailing logs from ~/.heyhank/logs/");
     const tail = spawn("tail", ["-f", logFile, errFile], { stdio: "inherit" });
     tail.on("exit", () => process.exit(0));
     break;

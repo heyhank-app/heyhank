@@ -10,7 +10,6 @@ import {
   type GitBranchInfo,
   type BackendInfo,
   type ImagePullState,
-  type LinearIssue,
 } from "../api.js";
 import { connectSession, createClientMessageId, waitForConnection, sendToSession } from "../ws.js";
 import { disconnectSession } from "../ws.js";
@@ -22,7 +21,6 @@ import type { BackendType } from "../types.js";
 import { EnvManager } from "./EnvManager.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { readFileAsBase64, type ImageAttachment } from "../utils/image.js";
-import { LinearSection } from "./home/LinearSection.js";
 import { BranchPicker } from "./home/BranchPicker.js";
 import { MentionMenu } from "./MentionMenu.js";
 import { useMentionMenu } from "../utils/use-mention-menu.js";
@@ -91,6 +89,71 @@ function formatTimeAgo(timestamp: number): string {
   return `${Math.max(1, months)}mo ago`;
 }
 
+// ─── Connected Services Widget ───────────────────────────────────────────────
+
+function ConnectedServices() {
+  const [services, setServices] = useState<Array<{ name: string; status: "connected" | "not_configured"; detail?: string; href: string }>>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    const items: typeof services = [];
+
+    Promise.allSettled([
+      api.getSettings().then((s) => {
+        items.push({
+          name: "Gemini",
+          status: s.geminiApiKeyConfigured ? "connected" : "not_configured",
+          detail: s.geminiApiKeyConfigured ? "API Key configured" : undefined,
+          href: "#/settings",
+        });
+      }),
+      api.getSocialSettings().then((s: any) => {
+        const backendLabel: Record<string, string> = { postiz: "Postiz", buffer: "Buffer", ayrshare: "Ayrshare" };
+        items.push({
+          name: "Social Media",
+          status: s.backend ? "connected" : "not_configured",
+          detail: s.backend ? backendLabel[s.backend] || s.backend : undefined,
+          href: "#/socialmedia",
+        });
+      }),
+      api.getTelephonySettings().then((s: any) => {
+        items.push({
+          name: "Telephony",
+          status: s.enabled ? "connected" : "not_configured",
+          detail: s.enabled ? `${s.trunks?.length || 0} trunk${(s.trunks?.length || 0) !== 1 ? "s" : ""}` : undefined,
+          href: "#/telephony",
+        });
+      }),
+    ]).then(() => {
+      setServices(items);
+      setLoaded(true);
+    });
+  }, []);
+
+  if (!loaded) return null;
+
+  const connected = services.filter((s) => s.status === "connected");
+  if (connected.length === 0) return null;
+
+  return (
+    <div className="mt-4">
+      <div className="flex flex-wrap gap-2">
+        {connected.map((s) => (
+          <a
+            key={s.name}
+            href={s.href}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cc-card/60 border border-cc-border/40 hover:border-cc-accent/30 transition-colors text-[11px] text-cc-muted hover:text-cc-fg"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_4px_rgba(74,222,128,0.4)]" />
+            <span className="font-medium text-cc-fg">{s.name}</span>
+            {s.detail && <span className="text-cc-muted">{s.detail}</span>}
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function HomePage() {
   const [text, setText] = useState("");
   const [backend, setBackend] = useState<BackendType>(() =>
@@ -108,9 +171,6 @@ export function HomePage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [dynamicModels, setDynamicModels] = useState<ModelOption[] | null>(null);
-  const [linearConfigured, setLinearConfigured] = useState(false);
-  const [selectedLinearIssue, setSelectedLinearIssue] = useState<LinearIssue | null>(null);
-  const [selectedLinearConnectionId, setSelectedLinearConnectionId] = useState<string | null>(null);
   const [showOnboardingTip, setShowOnboardingTip] = useState(
     () => localStorage.getItem("cc-onboarding-dismissed") !== "true",
   );
@@ -151,7 +211,7 @@ export function HomePage() {
   const [visibleResumeCandidateRows, setVisibleResumeCandidateRows] = useState(INITIAL_VISIBLE_SESSION_ROWS);
   const [resumeSearchQuery, setResumeSearchQuery] = useState("");
 
-  // Git branch state (owned here, driven by BranchPicker + LinearSection)
+  // Git branch state (owned here, driven by BranchPicker)
   const [gitRepoInfo, setGitRepoInfo] = useState<GitRepoInfo | null>(null);
   const [useWorktree, setUseWorktree] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState("");
@@ -206,9 +266,6 @@ export function HomePage() {
     api.listEnvs().then(setEnvs).catch(() => {});
     api.listSandboxes().then(setSandboxes).catch(() => {});
     api.getBackends().then(setBackends).catch(() => {});
-    api.getSettings().then((s) => {
-      setLinearConfigured(s.linearApiKeyConfigured);
-    }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When backend changes, reset model and mode to defaults
@@ -553,19 +610,7 @@ export function HomePage() {
   }
 
   function buildInitialMessage(msg: string): string {
-    if (!selectedLinearIssue) return msg;
-    const description = (selectedLinearIssue.description ?? "").trim();
-    const context = [
-      "Linear issue context:",
-      `- Identifier: ${selectedLinearIssue.identifier}`,
-      `- Title: ${selectedLinearIssue.title}`,
-      selectedLinearIssue.stateName ? `- State: ${selectedLinearIssue.stateName}` : "",
-      selectedLinearIssue.priorityLabel ? `- Priority: ${selectedLinearIssue.priorityLabel}` : "",
-      selectedLinearIssue.teamName ? `- Team: ${selectedLinearIssue.teamName}` : "",
-      `- URL: ${selectedLinearIssue.url}`,
-      description ? `- Description:\n${description}` : "",
-    ].filter(Boolean).join("\n");
-    return `${context}\n\nUser request:\n${msg}`;
+    return msg;
   }
 
   async function handleSend() {
@@ -639,14 +684,6 @@ export function HomePage() {
           codexInternetAccess: backend === "codex" ? true : undefined,
           resumeSessionAt: effectiveResumeSessionAt,
           forkSession: effectiveForkSession,
-          linearConnectionId: selectedLinearIssue ? (selectedLinearConnectionId || undefined) : undefined,
-          linearIssue: selectedLinearIssue ? {
-            identifier: selectedLinearIssue.identifier,
-            title: selectedLinearIssue.title,
-            stateName: selectedLinearIssue.stateName,
-            teamName: selectedLinearIssue.teamName,
-            url: selectedLinearIssue.url,
-          } : undefined,
         },
         (progress) => {
           useStore.getState().addCreationProgress(progress);
@@ -717,16 +754,6 @@ export function HomePage() {
         });
       }
 
-      // Auto-link Linear issue if one was selected
-      if (selectedLinearIssue) {
-        api.linkLinearIssue(sessionId, selectedLinearIssue, selectedLinearConnectionId || undefined)
-          .then(() => useStore.getState().setLinkedLinearIssue(sessionId, selectedLinearIssue))
-          .catch(() => { /* fire-and-forget: linking is best-effort */ });
-        // Fire-and-forget: transition Linear issue to configured status
-        api.transitionLinearIssue(selectedLinearIssue.id, selectedLinearConnectionId || undefined).catch(() => {
-          /* fire-and-forget: status transition is best-effort */
-        });
-      }
 
       // Clear progress on success
       useStore.getState().clearCreation();
@@ -805,23 +832,9 @@ export function HomePage() {
     setIsNewBranch(isNew);
   }, []);
 
-  const handleBranchFromIssue = useCallback((branch: string, isNew: boolean) => {
-    setSelectedBranch(branch);
-    setIsNewBranch(isNew);
-  }, []);
-
   const handleBranchesLoaded = useCallback((loadedBranches: GitBranchInfo[]) => {
     setBranches(loadedBranches);
   }, []);
-
-  const handleIssueSelect = useCallback((issue: LinearIssue | null) => {
-    setSelectedLinearIssue(issue);
-    if (!issue && gitRepoInfo) {
-      // Revert branch to current when clearing Linear issue
-      setSelectedBranch(gitRepoInfo.currentBranch);
-      setIsNewBranch(false);
-    }
-  }, [gitRepoInfo]);
 
   const canSend = text.trim().length > 0 && !sending;
 
@@ -860,24 +873,9 @@ export function HomePage() {
             menuRef={mention.mentionMenuRef}
             className="absolute left-2 right-2 bottom-full mb-1"
           />
-          {/* Context badges (Linear issue, images) — inside card to avoid external shift */}
-          {(selectedLinearIssue || images.length > 0) && (
+          {/* Context badges (images) — inside card to avoid external shift */}
+          {images.length > 0 && (
             <div className="flex items-center gap-2 px-4 pt-3 flex-wrap">
-              {selectedLinearIssue && (
-                <div className="inline-flex max-w-full items-center gap-2 rounded-md border border-cc-border bg-cc-hover/60 px-2.5 py-1.5 text-[11px] text-cc-muted">
-                  <span className="shrink-0">Linear</span>
-                  <span className="font-mono-code shrink-0">{selectedLinearIssue.identifier}</span>
-                  <span className="truncate">{selectedLinearIssue.title}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleIssueSelect(null)}
-                    className="shrink-0 rounded px-1 text-cc-muted hover:text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
-                    title="Remove Linear issue"
-                  >
-                    ×
-                  </button>
-                </div>
-              )}
               {images.map((img, i) => (
                 <div key={i} className="relative group">
                   <img
@@ -1505,15 +1503,6 @@ export function HomePage() {
               </div>
             )}
 
-            <LinearSection
-              cwd={cwd}
-              gitRepoInfo={gitRepoInfo}
-              linearConfigured={linearConfigured}
-              selectedLinearIssue={selectedLinearIssue}
-              onIssueSelect={handleIssueSelect}
-              onBranchFromIssue={handleBranchFromIssue}
-              onConnectionSelect={setSelectedLinearConnectionId}
-            />
           </div>
 
         {/* Branch behind remote warning */}
@@ -1578,6 +1567,10 @@ export function HomePage() {
             <p className="text-xs text-cc-error">{error}</p>
           </div>
         )}
+
+        {/* Connected Services */}
+        <ConnectedServices />
+
       </div>
 
       {/* Environment manager modal */}

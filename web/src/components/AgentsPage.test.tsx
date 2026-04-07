@@ -17,8 +17,6 @@ const mockApi = {
   regenerateAgentWebhookSecret: vi.fn(),
   listSkills: vi.fn(),
   listEnvs: vi.fn(),
-  getLinearOAuthStatus: vi.fn(),
-  listLinearOAuthConnections: vi.fn(),
 };
 
 vi.mock("../api.js", () => ({
@@ -35,8 +33,6 @@ vi.mock("../api.js", () => ({
       mockApi.regenerateAgentWebhookSecret(...args),
     listSkills: (...args: unknown[]) => mockApi.listSkills(...args),
     listEnvs: (...args: unknown[]) => mockApi.listEnvs(...args),
-    getLinearOAuthStatus: (...args: unknown[]) => mockApi.getLinearOAuthStatus(...args),
-    listLinearOAuthConnections: (...args: unknown[]) => mockApi.listLinearOAuthConnections(...args),
   },
 }));
 
@@ -93,8 +89,6 @@ beforeEach(() => {
   // Default: no skills or envs fetched
   mockApi.listSkills.mockResolvedValue([]);
   mockApi.listEnvs.mockResolvedValue([]);
-  mockApi.getLinearOAuthStatus.mockResolvedValue({ configured: false, hasClientId: false, hasClientSecret: false, hasWebhookSecret: false, hasAccessToken: false });
-  mockApi.listLinearOAuthConnections.mockResolvedValue({ connections: [] });
   window.location.hash = "#/agents";
   // Reset publicUrl mock to empty (no public URL configured)
   mockPublicUrl = "";
@@ -2278,29 +2272,6 @@ describe("AgentsPage", () => {
 
   // ── Filter Tabs ──────────────────────────────────────────────────────────
 
-  it("filter tabs appear when agents exist", async () => {
-    // When agents are loaded, filter tabs (All, Linear, Scheduled, Webhook)
-    // should appear with counts.
-    const agents = [
-      makeAgent({ id: "a1", name: "Agent 1" }),
-      makeAgent({
-        id: "a2",
-        name: "Linear Agent",
-        triggers: { linear: { enabled: true, oauthClientId: "c1", hasAccessToken: true } },
-      }),
-    ];
-    mockApi.listAgents.mockResolvedValue(agents);
-    render(<AgentsPage route={defaultRoute} />);
-
-    await screen.findByText("Agent 1");
-    const tabs = screen.getByTestId("filter-tabs");
-    expect(tabs).toBeInTheDocument();
-
-    // Tab labels with counts
-    expect(screen.getByText("All (2)")).toBeInTheDocument();
-    expect(screen.getByText("Linear (1)")).toBeInTheDocument();
-  });
-
   it("filter tabs do not appear when no agents exist", async () => {
     // When there are no agents, filter tabs should not be rendered.
     mockApi.listAgents.mockResolvedValue([]);
@@ -2310,70 +2281,6 @@ describe("AgentsPage", () => {
       expect(screen.getByText("No agents yet")).toBeInTheDocument();
     });
     expect(screen.queryByTestId("filter-tabs")).not.toBeInTheDocument();
-  });
-
-  it("clicking Linear filter shows only Linear agents", async () => {
-    // When the Linear filter tab is clicked, only agents with linear
-    // triggers should be displayed.
-    const agents = [
-      makeAgent({ id: "a1", name: "Regular Agent" }),
-      makeAgent({
-        id: "a2",
-        name: "My Linear Bot",
-        triggers: { linear: { enabled: true, oauthClientId: "c1", hasAccessToken: true } },
-      }),
-    ];
-    mockApi.listAgents.mockResolvedValue(agents);
-    render(<AgentsPage route={defaultRoute} />);
-
-    await screen.findByText("Regular Agent");
-    expect(screen.getByText("My Linear Bot")).toBeInTheDocument();
-
-    // Click the "Linear" filter tab
-    fireEvent.click(screen.getByText("Linear (1)"));
-
-    // Only the Linear-triggered agent should be visible
-    expect(screen.getByText("My Linear Bot")).toBeInTheDocument();
-    expect(screen.queryByText("Regular Agent")).not.toBeInTheDocument();
-  });
-
-  it("Linear agents appear only once (no duplication)", async () => {
-    // Previous bug: Linear agents appeared both in LinearAgentSection and
-    // in the regular agent list. With the unified design, each agent
-    // should appear exactly once.
-    const agents = [
-      makeAgent({
-        id: "linear-1",
-        name: "My Linear Agent",
-        triggers: { linear: { enabled: true, oauthClientId: "c1", hasAccessToken: true } },
-      }),
-    ];
-    mockApi.listAgents.mockResolvedValue(agents);
-    render(<AgentsPage route={defaultRoute} />);
-
-    await screen.findByText("My Linear Agent");
-    // Should appear exactly once
-    const matches = screen.getAllByText("My Linear Agent");
-    expect(matches).toHaveLength(1);
-  });
-
-  it("filter empty state shows setup CTA for Linear filter", async () => {
-    // When the Linear filter is active and there are no Linear agents,
-    // a specific empty state with "Setup Linear Agent" CTA should appear.
-    const agents = [
-      makeAgent({ id: "a1", name: "Regular Agent" }),
-    ];
-    mockApi.listAgents.mockResolvedValue(agents);
-    render(<AgentsPage route={defaultRoute} />);
-
-    await screen.findByText("Regular Agent");
-
-    // Click the "Linear" filter tab
-    fireEvent.click(screen.getByText("Linear (0)"));
-
-    // Empty state for Linear filter
-    expect(screen.getByText("No Linear agents")).toBeInTheDocument();
-    expect(screen.getByText("Setup Linear Agent")).toBeInTheDocument();
   });
 
   it("filter empty state shows message for Scheduled filter", async () => {
@@ -2391,59 +2298,6 @@ describe("AgentsPage", () => {
     fireEvent.click(screen.getByText("Scheduled (0)"));
 
     expect(screen.getByText("No scheduled agents")).toBeInTheDocument();
-  });
-
-  it("clicking All filter tab shows all agents again", async () => {
-    // After filtering, clicking "All" should show all agents.
-    const agents = [
-      makeAgent({ id: "a1", name: "Agent One" }),
-      makeAgent({
-        id: "a2",
-        name: "My Linear Bot",
-        triggers: { linear: { enabled: true, oauthClientId: "c1", hasAccessToken: true } },
-      }),
-    ];
-    mockApi.listAgents.mockResolvedValue(agents);
-    render(<AgentsPage route={defaultRoute} />);
-
-    await screen.findByText("Agent One");
-
-    // Filter to Linear only
-    fireEvent.click(screen.getByText("Linear (1)"));
-    expect(screen.queryByText("Agent One")).not.toBeInTheDocument();
-
-    // Switch back to All
-    fireEvent.click(screen.getByText("All (2)"));
-    expect(screen.getByText("Agent One")).toBeInTheDocument();
-    expect(screen.getByText("My Linear Bot")).toBeInTheDocument();
-  });
-
-  // ── Delete confirmation for Linear agents ─────────────────────────────────
-
-  it("delete confirmation uses Linear-specific message for Linear agents", async () => {
-    // When deleting a Linear agent, the confirmation message should
-    // mention that the agent will no longer respond to @mentions.
-    const agent = makeAgent({
-      id: "linear-del",
-      name: "Linear Delete",
-      triggers: { linear: { enabled: true, oauthClientId: "c1", hasAccessToken: true } },
-    });
-    mockApi.listAgents.mockResolvedValue([agent]);
-    mockApi.deleteAgent.mockResolvedValue({});
-    window.confirm = vi.fn().mockReturnValue(true);
-
-    render(<AgentsPage route={defaultRoute} />);
-    await screen.findByText("Linear Delete");
-
-    // Open overflow menu, then click Delete
-    fireEvent.click(screen.getByLabelText("More actions"));
-    fireEvent.click(screen.getByText("Delete"));
-
-    await waitFor(() => {
-      expect(window.confirm).toHaveBeenCalledWith(
-        "Delete this Linear agent? It will no longer respond to @mentions in Linear.",
-      );
-    });
   });
 
 });

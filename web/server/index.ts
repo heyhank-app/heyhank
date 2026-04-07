@@ -28,9 +28,8 @@ import { CronScheduler } from "./cron-scheduler.js";
 import { AgentExecutor } from "./agent-executor.js";
 import { SessionOrchestrator } from "./session-orchestrator.js";
 import { migrateCronJobsToAgents } from "./agent-cron-migrator.js";
-import { migrateLinearCredentialsToAgents } from "./linear-credential-migration.js";
+import { migrateAnthropicApiKeyToProvider } from "./anthropic-provider-migration.js";
 import { authenticateManagedWebSocket } from "./ws-auth.js";
-import { LinearAgentBridge } from "./linear-agent-bridge.js";
 import { NoVncProxy } from "./novnc-proxy.js";
 import { nodeManager } from "./federation/node-manager.js";
 import { callManager } from "./telephony/call-manager.js";
@@ -64,8 +63,6 @@ const prPoller = new PRPoller(wsBridge);
 const recorder = new RecorderManager();
 const cronScheduler = new CronScheduler(launcher, wsBridge);
 const agentExecutor = new AgentExecutor(launcher, wsBridge);
-const linearAgentBridge = new LinearAgentBridge(agentExecutor, wsBridge);
-
 const orchestrator = new SessionOrchestrator({
   launcher, wsBridge, sessionStore, worktreeTracker,
   prPoller, agentExecutor,
@@ -75,7 +72,7 @@ const orchestrator = new SessionOrchestrator({
 // The relay forwards platform webhooks (e.g. GitHub, Slack) to the HeyHank
 // instance via an outbound WebSocket. Currently no webhook handlers are
 // registered (Chat SDK was removed). The relay is left disabled until handlers
-// are wired up (e.g. LinearAgentBridge or future platform integrations).
+// are wired up (e.g. future platform integrations).
 const relayUrl = process.env.HEYHANK_RELAY_URL || process.env.COMPANION_RELAY_URL;
 const relaySecret = process.env.HEYHANK_RELAY_SECRET || process.env.COMPANION_RELAY_SECRET;
 if (relayUrl && relaySecret) {
@@ -136,7 +133,7 @@ if (managedAuthEnabled) {
 }
 
 app.use("/api/*", cors());
-app.route("/api", createRoutes(orchestrator, launcher, wsBridge, terminalManager, prPoller, recorder, cronScheduler, agentExecutor, linearAgentBridge, port));
+app.route("/api", createRoutes(orchestrator, launcher, wsBridge, terminalManager, prPoller, recorder, cronScheduler, agentExecutor, port));
 
 // Dynamic manifest — embeds auth token in start_url so PWA auto-authenticates
 // on first launch. iOS gives standalone PWAs isolated storage from Safari,
@@ -420,7 +417,7 @@ cronScheduler.startAll();
 
 // ── Agent system ────────────────────────────────────────────────────────────
 migrateCronJobsToAgents();
-migrateLinearCredentialsToAgents();
+migrateAnthropicApiKeyToProvider();
 agentExecutor.startAll();
 
 // ── Agent Platform extensions ──────────────────────────────────────────────

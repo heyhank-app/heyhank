@@ -80,22 +80,6 @@ export interface AgentConfig {
       /** true = recurring cron, false = one-shot */
       recurring: boolean;
     };
-    /** Linear Agent Interaction SDK trigger (per-agent OAuth app) */
-    linear?: {
-      enabled: boolean;
-      /** Reference to a LinearOAuthConnection by ID (new model) */
-      oauthConnectionId?: string;
-      /** @deprecated OAuth app client ID from Linear — use oauthConnectionId instead */
-      oauthClientId?: string;
-      /** @deprecated OAuth app client secret — use oauthConnectionId instead */
-      oauthClientSecret?: string;
-      /** @deprecated Webhook signing secret — use oauthConnectionId instead */
-      webhookSecret?: string;
-      /** @deprecated OAuth access token — use oauthConnectionId instead */
-      accessToken?: string;
-      /** @deprecated OAuth refresh token — use oauthConnectionId instead */
-      refreshToken?: string;
-    };
   };
 
   // ── Tracking ──
@@ -126,7 +110,7 @@ export interface AgentExecution {
   /** The agent ID that triggered this */
   agentId: string;
   /** Trigger type that initiated this execution */
-  triggerType: "manual" | "webhook" | "schedule" | "linear";
+  triggerType: "manual" | "webhook" | "schedule";
   /** When the execution started */
   startedAt: number;
   /** When the execution completed */

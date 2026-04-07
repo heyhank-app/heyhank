@@ -253,10 +253,22 @@ function extractProcessesFromBlocks(sessionId: string, blocks: ContentBlock[]) {
   }
 }
 
-function sendBrowserNotification(title: string, body: string, tag: string) {
+function sendBrowserNotification(title: string, body: string, tag: string, sessionId?: string) {
   if (typeof Notification === "undefined") return;
   if (Notification.permission !== "granted") return;
-  new Notification(title, { body, tag });
+  const n = new Notification(title, {
+    body,
+    tag,
+    icon: "/heyhank-mascot-poster.png",
+    badge: "/heyhank-mascot-poster.png",
+  });
+  if (sessionId) {
+    n.onclick = () => {
+      window.focus();
+      window.location.hash = `#/session/${sessionId}`;
+      n.close();
+    };
+  }
 }
 
 function summarizeSystemEvent(
@@ -761,7 +773,8 @@ function handleParsedMessage(
         playNotificationSound();
       }
       if (!document.hasFocus() && store.notificationDesktop) {
-        sendBrowserNotification("Session completed", "Claude finished the task", sessionId);
+        const sessionName = store.sessionNames.get(sessionId) || sessionId.slice(0, 8);
+        sendBrowserNotification("Task completed", `${sessionName} finished`, sessionId, sessionId);
       }
       if (r.is_error && r.errors?.length) {
         store.appendMessage(sessionId, {
@@ -778,10 +791,12 @@ function handleParsedMessage(
       store.addPermission(sessionId, data.request);
       if (!document.hasFocus() && store.notificationDesktop) {
         const req = data.request;
+        const sessionName = store.sessionNames.get(sessionId) || sessionId.slice(0, 8);
         sendBrowserNotification(
           "Permission needed",
-          `${req.tool_name}: approve or deny`,
+          `${sessionName}: ${req.tool_name}`,
           req.request_id,
+          sessionId,
         );
       }
       // Also extract tasks and changed files from permission requests

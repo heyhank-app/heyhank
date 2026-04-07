@@ -1,0 +1,208 @@
+// ─── Social Media Routes ─────────────────────────────────────────────────────
+// REST API for social media posting, scheduling, analytics, and comments.
+
+import type { Hono } from "hono";
+import * as store from "../socialmedia/store.js";
+import * as manager from "../socialmedia/manager.js";
+
+export function registerSocialMediaRoutes(api: Hono): void {
+  // ─── Settings ───────────────────────────────────────────────────────
+
+  /** Get settings (API keys masked) */
+  api.get("/socialmedia/settings", (c) => {
+    try {
+      const settings = store.getSettings();
+      // Mask API keys
+      const masked = JSON.parse(JSON.stringify(settings));
+      for (const [, cfg] of Object.entries(masked.backends || {})) {
+        const conf = cfg as { apiKey?: string };
+        if (conf.apiKey) conf.apiKey = conf.apiKey.slice(0, 4) + "••••••••";
+      }
+      return c.json(masked);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "failed" }, 500);
+    }
+  });
+
+  /** Save settings (restore masked keys from existing) */
+  api.put("/socialmedia/settings", async (c) => {
+    try {
+      const body = await c.req.json();
+      const existing = store.getSettings();
+      // Restore masked keys from existing settings
+      for (const [key, cfg] of Object.entries(body.backends || {})) {
+        const conf = cfg as { apiKey?: string };
+        if (conf.apiKey && conf.apiKey.includes("••••")) {
+          const existingKey = (existing.backends as Record<string, { apiKey?: string }>)?.[key]?.apiKey;
+          if (existingKey) conf.apiKey = existingKey;
+        }
+      }
+      store.saveSettings(body);
+      return c.json({ ok: true });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "bad request" }, 400);
+    }
+  });
+
+  // ─── Connection ─────────────────────────────────────────────────────
+
+  /** Test backend connection */
+  api.post("/socialmedia/test-connection", async (c) => {
+    try {
+      const result = await manager.testConnection();
+      return c.json(result);
+    } catch (e) {
+      return c.json({ ok: false, error: e instanceof Error ? e.message : "failed" });
+    }
+  });
+
+  /** Get connected profiles */
+  api.get("/socialmedia/profiles", async (c) => {
+    try {
+      const profiles = await manager.getProfiles();
+      return c.json({ profiles });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "failed" }, 500);
+    }
+  });
+
+  // ─── Posts ──────────────────────────────────────────────────────────
+
+  /** Create post */
+  api.post("/socialmedia/posts", async (c) => {
+    try {
+      const body = await c.req.json();
+      const text = (body.text || "").trim();
+      if (!text) return c.json({ error: "text required" }, 400);
+      const result = await manager.createPost({
+        text,
+        platforms: body.platforms || [],
+        scheduledAt: body.scheduledAt || null,
+        mediaUrls: body.mediaUrls || [],
+      });
+      return c.json(result, 201);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "failed" }, 500);
+    }
+  });
+
+  /** List posts */
+  api.get("/socialmedia/posts", async (c) => {
+    const opts: { status?: string; platform?: string; limit?: number } = {};
+    const status = c.req.query("status");
+    const platform = c.req.query("platform");
+    const limit = c.req.query("limit");
+    if (status) opts.status = status;
+    if (platform) opts.platform = platform;
+    if (limit) opts.limit = parseInt(limit, 10);
+    const posts = await manager.listPosts(opts);
+    return c.json({ posts });
+  });
+
+  /** Get single post */
+  api.get("/socialmedia/posts/:id", async (c) => {
+    const post = await manager.getPost(c.req.param("id"));
+    if (!post) return c.json({ error: "post not found" }, 404);
+    return c.json(post);
+  });
+
+  /** Update/reschedule post */
+  api.patch("/socialmedia/posts/:id", async (c) => {
+    try {
+      const id = c.req.param("id");
+      const body = await c.req.json();
+      const post = store.getPost(id);
+      if (!post) return c.json({ error: "post not found" }, 404);
+      if (body.text !== undefined) post.text = body.text;
+      if (body.scheduledAt !== undefined) post.scheduledAt = body.scheduledAt;
+      if (body.platforms !== undefined) post.platforms = body.platforms;
+      if (body.scheduledAt && post.status === "published") post.status = "scheduled";
+      store.savePost(post);
+      return c.json(post);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "bad request" }, 400);
+    }
+  });
+
+  /** Publish draft */
+  api.post("/socialmedia/posts/:id/publish", async (c) => {
+    try {
+      const smManager = await import("../socialmedia/manager.js");
+      const post = await smManager.publishDraft(c.req.param("id"));
+      return c.json(post);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Failed to publish" }, 400);
+    }
+  });
+
+  /** Delete post */
+  api.delete("/socialmedia/posts/:id", async (c) => {
+    const ok = await manager.deletePost(c.req.param("id"));
+    return c.json({ ok }, ok ? 200 : 404);
+  });
+
+  /** Get post analytics */
+  api.get("/socialmedia/posts/:id/analytics", async (c) => {
+    try {
+      const analytics = await manager.getPostAnalytics(c.req.param("id"));
+      return c.json(analytics);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "failed" }, 500);
+    }
+  });
+
+  /** Get post comments */
+  api.get("/socialmedia/posts/:id/comments", async (c) => {
+    try {
+      const comments = await manager.getComments(c.req.param("id"));
+      return c.json({ comments });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "failed" }, 500);
+    }
+  });
+
+  /** Reply to comment */
+  api.post("/socialmedia/posts/:id/comments", async (c) => {
+    try {
+      const body = await c.req.json();
+      const text = (body.text || "").trim();
+      if (!text) return c.json({ error: "text required" }, 400);
+      const result = await manager.replyToComment(c.req.param("id"), body.commentId || null, text);
+      return c.json(result);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "failed" }, 500);
+    }
+  });
+
+  // ─── Calendar View ──────────────────────────────────────────────────
+
+  /** Get posts grouped by day for a month */
+  api.get("/socialmedia/calendar", (c) => {
+    try {
+      const month = c.req.query("month") || new Date().toISOString().slice(0, 7);
+      const allPosts = store.listLocalPosts({});
+      const grouped: Record<string, typeof allPosts> = {};
+      for (const p of allPosts) {
+        const dateStr = (p.scheduledAt || p.createdAt || "").slice(0, 10);
+        if (!dateStr.startsWith(month)) continue;
+        if (!grouped[dateStr]) grouped[dateStr] = [];
+        grouped[dateStr].push(p);
+      }
+      return c.json({ month, days: grouped });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "failed" }, 500);
+    }
+  });
+
+  // ─── Account Analytics ──────────────────────────────────────────────
+
+  /** Get account analytics for a profile */
+  api.get("/socialmedia/analytics/:profileId", async (c) => {
+    try {
+      const analytics = await manager.getAccountAnalytics(c.req.param("profileId"));
+      return c.json(analytics);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "failed" }, 500);
+    }
+  });
+}

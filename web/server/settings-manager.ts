@@ -20,30 +20,17 @@ export interface HeyHankSettings {
   openaiApiKey: string;
   /** Whether the onboarding wizard has been completed */
   onboardingCompleted: boolean;
-  linearApiKey: string;
-  linearAutoTransition: boolean;
-  linearAutoTransitionStateId: string;
-  linearAutoTransitionStateName: string;
-  linearArchiveTransition: boolean;
-  linearArchiveTransitionStateId: string;
-  linearArchiveTransitionStateName: string;
-  /** @deprecated Used only as staging during wizard flow. Per-agent credentials are in AgentConfig.triggers.linear. */
-  linearOAuthClientId: string;
-  /** @deprecated Used only as staging during wizard flow. Per-agent credentials are in AgentConfig.triggers.linear. */
-  linearOAuthClientSecret: string;
-  /** @deprecated Used only as staging during wizard flow. Per-agent credentials are in AgentConfig.triggers.linear. */
-  linearOAuthWebhookSecret: string;
-  /** @deprecated Used only as staging during wizard flow. Per-agent credentials are in AgentConfig.triggers.linear. */
-  linearOAuthAccessToken: string;
-  /** @deprecated Used only as staging during wizard flow. Per-agent credentials are in AgentConfig.triggers.linear. */
-  linearOAuthRefreshToken: string;
   /** Gemini API key for voice chat */
   geminiApiKey: string;
   /** Gemini Live voice name (e.g. Kore, Puck, Charon, Fenrir, Aoede, Leda, Orus, Zephyr) */
   geminiVoice: string;
   /** Custom name for the voice assistant (e.g. "Jarvis", "Friday") */
   assistantName: string;
+  /** User's display name so the assistant knows who it's talking to */
+  userName: string;
   editorTabEnabled: boolean;
+  /** Provider ID for internal AI features (auto-renaming, AI validation). Empty = auto-detect. */
+  internalAiProvider: string;
   aiValidationEnabled: boolean;
   aiValidationAutoApprove: boolean;
   aiValidationAutoDeny: boolean;
@@ -63,22 +50,12 @@ let settings: HeyHankSettings = {
   claudeCodeOAuthToken: "",
   openaiApiKey: "",
   onboardingCompleted: false,
-  linearApiKey: "",
-  linearAutoTransition: false,
-  linearAutoTransitionStateId: "",
-  linearAutoTransitionStateName: "",
-  linearArchiveTransition: false,
-  linearArchiveTransitionStateId: "",
-  linearArchiveTransitionStateName: "",
-  linearOAuthClientId: "",
-  linearOAuthClientSecret: "",
-  linearOAuthWebhookSecret: "",
-  linearOAuthAccessToken: "",
-  linearOAuthRefreshToken: "",
   geminiApiKey: "",
   geminiVoice: "Kore",
   assistantName: "",
+  userName: "",
   editorTabEnabled: false,
+  internalAiProvider: "",
   aiValidationEnabled: false,
   aiValidationAutoApprove: true,
   aiValidationAutoDeny: false,
@@ -98,22 +75,12 @@ function normalize(raw: Partial<HeyHankSettings> | null | undefined): HeyHankSet
     claudeCodeOAuthToken: typeof raw?.claudeCodeOAuthToken === "string" ? raw.claudeCodeOAuthToken : "",
     openaiApiKey: typeof raw?.openaiApiKey === "string" ? raw.openaiApiKey : "",
     onboardingCompleted: typeof raw?.onboardingCompleted === "boolean" ? raw.onboardingCompleted : false,
-    linearApiKey: typeof raw?.linearApiKey === "string" ? raw.linearApiKey : "",
-    linearAutoTransition: typeof raw?.linearAutoTransition === "boolean" ? raw.linearAutoTransition : false,
-    linearAutoTransitionStateId: typeof raw?.linearAutoTransitionStateId === "string" ? raw.linearAutoTransitionStateId : "",
-    linearAutoTransitionStateName: typeof raw?.linearAutoTransitionStateName === "string" ? raw.linearAutoTransitionStateName : "",
-    linearArchiveTransition: typeof raw?.linearArchiveTransition === "boolean" ? raw.linearArchiveTransition : false,
-    linearArchiveTransitionStateId: typeof raw?.linearArchiveTransitionStateId === "string" ? raw.linearArchiveTransitionStateId : "",
-    linearArchiveTransitionStateName: typeof raw?.linearArchiveTransitionStateName === "string" ? raw.linearArchiveTransitionStateName : "",
-    linearOAuthClientId: typeof raw?.linearOAuthClientId === "string" ? raw.linearOAuthClientId : "",
-    linearOAuthClientSecret: typeof raw?.linearOAuthClientSecret === "string" ? raw.linearOAuthClientSecret : "",
-    linearOAuthWebhookSecret: typeof raw?.linearOAuthWebhookSecret === "string" ? raw.linearOAuthWebhookSecret : "",
-    linearOAuthAccessToken: typeof raw?.linearOAuthAccessToken === "string" ? raw.linearOAuthAccessToken : "",
-    linearOAuthRefreshToken: typeof raw?.linearOAuthRefreshToken === "string" ? raw.linearOAuthRefreshToken : "",
     geminiApiKey: typeof raw?.geminiApiKey === "string" ? raw.geminiApiKey : "",
     geminiVoice: typeof raw?.geminiVoice === "string" && raw.geminiVoice.trim() ? raw.geminiVoice : "Kore",
     assistantName: typeof raw?.assistantName === "string" ? raw.assistantName.trim() : "",
+    userName: typeof raw?.userName === "string" ? raw.userName.trim() : "",
     editorTabEnabled: typeof raw?.editorTabEnabled === "boolean" ? raw.editorTabEnabled : false,
+    internalAiProvider: typeof raw?.internalAiProvider === "string" ? raw.internalAiProvider.trim() : "",
     aiValidationEnabled: typeof raw?.aiValidationEnabled === "boolean" ? raw.aiValidationEnabled : false,
     aiValidationAutoApprove: typeof raw?.aiValidationAutoApprove === "boolean" ? raw.aiValidationAutoApprove : true,
     aiValidationAutoDeny: typeof raw?.aiValidationAutoDeny === "boolean" ? raw.aiValidationAutoDeny : false,
@@ -148,7 +115,7 @@ export function getSettings(): HeyHankSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<HeyHankSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "geminiApiKey" | "geminiVoice" | "assistantName" | "editorTabEnabled" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate">>,
+  patch: Partial<Pick<HeyHankSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "geminiApiKey" | "geminiVoice" | "assistantName" | "userName" | "editorTabEnabled" | "internalAiProvider" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate">>,
 ): HeyHankSettings {
   ensureLoaded();
   settings = normalize({
@@ -157,22 +124,12 @@ export function updateSettings(
     claudeCodeOAuthToken: patch.claudeCodeOAuthToken ?? settings.claudeCodeOAuthToken,
     openaiApiKey: patch.openaiApiKey ?? settings.openaiApiKey,
     onboardingCompleted: patch.onboardingCompleted ?? settings.onboardingCompleted,
-    linearApiKey: patch.linearApiKey ?? settings.linearApiKey,
-    linearAutoTransition: patch.linearAutoTransition ?? settings.linearAutoTransition,
-    linearAutoTransitionStateId: patch.linearAutoTransitionStateId ?? settings.linearAutoTransitionStateId,
-    linearAutoTransitionStateName: patch.linearAutoTransitionStateName ?? settings.linearAutoTransitionStateName,
-    linearArchiveTransition: patch.linearArchiveTransition ?? settings.linearArchiveTransition,
-    linearArchiveTransitionStateId: patch.linearArchiveTransitionStateId ?? settings.linearArchiveTransitionStateId,
-    linearArchiveTransitionStateName: patch.linearArchiveTransitionStateName ?? settings.linearArchiveTransitionStateName,
-    linearOAuthClientId: patch.linearOAuthClientId ?? settings.linearOAuthClientId,
-    linearOAuthClientSecret: patch.linearOAuthClientSecret ?? settings.linearOAuthClientSecret,
-    linearOAuthWebhookSecret: patch.linearOAuthWebhookSecret ?? settings.linearOAuthWebhookSecret,
-    linearOAuthAccessToken: patch.linearOAuthAccessToken ?? settings.linearOAuthAccessToken,
-    linearOAuthRefreshToken: patch.linearOAuthRefreshToken ?? settings.linearOAuthRefreshToken,
     geminiApiKey: patch.geminiApiKey ?? settings.geminiApiKey,
     geminiVoice: patch.geminiVoice ?? settings.geminiVoice,
     assistantName: patch.assistantName ?? settings.assistantName,
+    userName: patch.userName ?? settings.userName,
     editorTabEnabled: patch.editorTabEnabled ?? settings.editorTabEnabled,
+    internalAiProvider: patch.internalAiProvider ?? settings.internalAiProvider,
     aiValidationEnabled: patch.aiValidationEnabled ?? settings.aiValidationEnabled,
     aiValidationAutoApprove: patch.aiValidationAutoApprove ?? settings.aiValidationAutoApprove,
     aiValidationAutoDeny: patch.aiValidationAutoDeny ?? settings.aiValidationAutoDeny,

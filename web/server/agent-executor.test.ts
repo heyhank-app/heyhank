@@ -582,51 +582,51 @@ describe("AgentExecutor", () => {
 
     it("merges additional env vars and injects a Claude system prompt when provided", async () => {
       const agent = makeAgent({
-        id: "linear-agent",
-        name: "Linear Agent",
+        id: "env-inject-agent",
+        name: "Env Inject Agent",
         backendType: "claude",
       });
       mockAgentStore.getAgent.mockReturnValue(agent);
 
-      await executor.executeAgent("linear-agent", "Handle this issue", {
-        triggerType: "linear",
+      await executor.executeAgent("env-inject-agent", "Handle this issue", {
+        triggerType: "webhook",
         additionalEnv: {
-          LINEAR_OAUTH_ACCESS_TOKEN: "lin_oauth_test",
-          LINEAR_API_KEY: "lin_oauth_test",
+          CUSTOM_TOKEN: "token_test",
+          CUSTOM_KEY: "key_test",
         },
-        systemPrompt: "Use the Linear OAuth token for GraphQL requests.",
+        systemPrompt: "Use the custom token for API requests.",
       });
 
       expect(launcher.launch).toHaveBeenCalledWith(
         expect.objectContaining({
           env: expect.objectContaining({
-            LINEAR_OAUTH_ACCESS_TOKEN: "lin_oauth_test",
-            LINEAR_API_KEY: "lin_oauth_test",
+            CUSTOM_TOKEN: "token_test",
+            CUSTOM_KEY: "key_test",
           }),
         }),
       );
       expect(wsBridge.injectSystemPrompt).toHaveBeenCalledWith(
         "session-123",
-        "Use the Linear OAuth token for GraphQL requests.",
+        "Use the custom token for API requests.",
       );
     });
 
     it("passes the extra system prompt directly to Codex launches", async () => {
       const agent = makeAgent({
-        id: "linear-codex-agent",
-        name: "Linear Codex Agent",
+        id: "codex-prompt-agent",
+        name: "Codex Prompt Agent",
         backendType: "codex",
       });
       mockAgentStore.getAgent.mockReturnValue(agent);
 
-      await executor.executeAgent("linear-codex-agent", "Handle this issue", {
-        triggerType: "linear",
-        systemPrompt: "Codex linear context",
+      await executor.executeAgent("codex-prompt-agent", "Handle this issue", {
+        triggerType: "webhook",
+        systemPrompt: "Codex extra context",
       });
 
       expect(launcher.launch).toHaveBeenCalledWith(
         expect.objectContaining({
-          systemPrompt: "Codex linear context",
+          systemPrompt: "Codex extra context",
         }),
       );
       expect(wsBridge.injectSystemPrompt).not.toHaveBeenCalled();

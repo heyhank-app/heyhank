@@ -1,106 +1,101 @@
 <p align="center">
-  <img src="screenshot.png" alt="The Companion" width="100%" />
+  <img src="web/public/logo.svg" alt="HeyHank" width="80" />
 </p>
 
-<h1 align="center">The Companion</h1>
-<p align="center"><strong>Web UI for Claude Code and Codex sessions.</strong></p>
-<p align="center">Run multiple agents, inspect every tool call, and gate risky actions with explicit approvals.</p>
+<h1 align="center">HeyHank</h1>
+<p align="center"><strong>Self-hosted web UI for running Claude Code and Codex agents.</strong></p>
+<p align="center">Multi-session management with streaming, tool call visibility, and permission control.</p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/the-companion"><img src="https://img.shields.io/npm/v/the-companion.svg" alt="npm version" /></a>
-  <a href="https://www.npmjs.com/package/the-companion"><img src="https://img.shields.io/npm/dm/the-companion.svg" alt="npm downloads" /></a>
+  <a href="https://www.npmjs.com/package/heyhank"><img src="https://img.shields.io/npm/v/heyhank.svg" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/heyhank"><img src="https://img.shields.io/npm/dm/heyhank.svg" alt="npm downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
 </p>
 
-## Quick start
+## Quick Start
 
-**Requirements:** [Bun](https://bun.sh) + [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and/or [Codex](https://github.com/openai/codex) CLI.
-
-### Try it instantly
+**Requirements:** [Bun](https://bun.sh) v1.0+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and/or [Codex](https://github.com/openai/codex) CLI.
 
 ```bash
-bunx the-companion
+bunx heyhank
 ```
 
 Open [http://localhost:3456](http://localhost:3456).
 
-### Install globally
+### Install Globally
 
 ```bash
-bun install -g the-companion
+bun install -g heyhank
 
 # Register as a background service (launchd on macOS, systemd on Linux)
-the-companion install
+heyhank install
 
 # Start the service
-the-companion start
+heyhank start
 ```
 
-Open [http://localhost:3456](http://localhost:3456). The server runs in the background and survives reboots.
+## Features
 
-## CLI commands
+- **Multi-Session Chat** — Run multiple Claude Code / Codex sessions simultaneously
+- **Gemini Live Voice Assistant** — Hands-free voice control with tool calling
+- **Scheduled Agents** — Cron-based agent automation
+- **Media Generation** — Image (Imagen 4) and video (Veo 3.1) generation
+- **Social Media** — Multi-backend posting (Postiz, Buffer, Ayrshare)
+- **Email Integration** — Multi-account IMAP/SMTP email via UI and voice
+- **Telephony** — Voice calls via FreeSWITCH SIP integration
+- **Personal Assistant** — Todos, notes, and reminders managed by voice or UI
+- **Federation** — Connect multiple HeyHank instances across machines
+- **Tailscale Funnel** — Public HTTPS access without port forwarding
+- **PWA** — Installable on mobile and desktop
+
+## CLI Commands
 
 | Command | Description |
 |---|---|
-| `the-companion` | Start server in foreground (default) |
-| `the-companion serve` | Start server in foreground (explicit) |
-| `the-companion install` | Register as a background service (launchd/systemd) |
-| `the-companion start` | Start the background service |
-| `the-companion stop` | Stop the background service |
-| `the-companion restart` | Restart the background service |
-| `the-companion uninstall` | Remove the background service |
-| `the-companion status` | Show service status |
-| `the-companion logs` | Tail service log files |
+| `heyhank` | Start server in foreground (default) |
+| `heyhank serve` | Start server in foreground (explicit) |
+| `heyhank install` | Register as a background service (launchd/systemd) |
+| `heyhank start` | Start the background service |
+| `heyhank stop` | Stop the background service |
+| `heyhank restart` | Restart the background service |
+| `heyhank uninstall` | Remove the background service |
+| `heyhank status` | Show service status |
+| `heyhank logs` | Tail service log files |
 
 **Options:** `--port <n>` overrides the default port (3456).
 
-## Why this is useful
-- **Parallel sessions**: work on multiple tasks without juggling terminals.
-- **Full visibility**: see streaming output, tool calls, and tool results in one timeline.
-- **Permission control**: approve/deny sensitive operations from the UI.
-- **Session recovery**: restore work after process/server restarts.
-- **Dual-engine support**: designed for both Claude Code and Codex-backed flows.
+## Architecture
 
-## Screenshots
-| Chat + tool timeline | Permission flow |
-|---|---|
-| <img src="screenshot.png" alt="Main workspace" width="100%" /> | <img src="web/docs/screenshots/notification-section.png" alt="Permission and notifications" width="100%" /> |
-
-## Architecture (simple)
-```text
+```
 Browser (React)
   <-> ws://localhost:3456/ws/browser/:session
-Companion server (Bun + Hono)
+HeyHank Server (Bun + Hono)
   <-> ws://localhost:3456/ws/cli/:session
 Claude Code / Codex CLI
 ```
 
-The bridge uses the CLI `--sdk-url` websocket path and NDJSON events.
+The server bridges the CLI's `--sdk-url` WebSocket (NDJSON) to a browser-friendly WebSocket.
 
 ## Authentication
 
-The server auto-generates an auth token on first start, stored at `~/.companion/auth.json`. You can also manage tokens manually:
+The server auto-generates an auth token on first start, stored at `~/.heyhank/auth.json`.
 
 ```bash
-# Show the current token (or auto-generate one)
+# Show the current token
 cd web && bun run generate-token
 
 # Force-regenerate a new token
 cd web && bun run generate-token --force
 ```
 
-Or set a token via environment variable (takes priority over the file):
+Or set via environment variable:
 
 ```bash
-COMPANION_AUTH_TOKEN="my-secret-token" bunx the-companion
+HEYHANK_AUTH_TOKEN="my-secret-token" bunx heyhank
 ```
 
 ## Development
-```bash
-make dev
-```
 
-Manual:
 ```bash
 cd web
 bun install
@@ -108,32 +103,13 @@ bun run dev
 ```
 
 Checks:
+
 ```bash
 cd web
 bun run typecheck
 bun run test
 ```
 
-## Preview / Prerelease
-
-Every push to `main` publishes a preview artifact:
-
-| Artifact | Tag / dist-tag | Example |
-|---|---|---|
-| Docker image (moving) | `preview-main` | `docker.io/stangirard/the-companion:preview-main` |
-| Docker image (immutable) | `preview-<sha>` | `docker.io/stangirard/the-companion:preview-abc1234...` |
-| npm package | `next` | `bunx the-companion@next` |
-
-Preview builds use a patch-core bump (e.g. `0.68.1-preview.*` when stable is `0.68.0`) so the in-app update checker can detect them as semver-ahead of the current stable release. They are **not** production-stable — use `latest` / semver tags for stable releases.
-
-### Tracking prerelease updates in-app
-
-In **Settings > Updates**, switch the update channel to **Prerelease** to receive preview builds. The default channel is **Stable** (semver releases only). Switching channels takes effect immediately on the next update check.
-
-## Docs
-- **Full documentation**: [`docs/`](docs/) (Mintlify — run `cd docs && mint dev` to preview locally)
-- Protocol reverse engineering: [`WEBSOCKET_PROTOCOL_REVERSED.md`](WEBSOCKET_PROTOCOL_REVERSED.md)
-- Contributor and architecture guide: [`CLAUDE.md`](CLAUDE.md)
-
 ## License
+
 MIT

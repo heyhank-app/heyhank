@@ -175,15 +175,10 @@ describe("reset", () => {
 // ─── removeSession: comprehensive cleanup ────────────────────────────────────
 
 describe("removeSession: comprehensive cleanup", () => {
-  it("cleans up all session-related maps including linkedLinearIssues, chatTabReentry, diffPanelSelectedFile, toolProgress, prStatus", () => {
+  it("cleans up all session-related maps including chatTabReentry, diffPanelSelectedFile, toolProgress, prStatus", () => {
     // Set up a session with data in every possible map
     useStore.getState().addSession(makeSession("s1"));
     useStore.getState().setCurrentSession("s1");
-    useStore.getState().setLinkedLinearIssue("s1", {
-      id: "i1", identifier: "ENG-1", title: "t", description: "d",
-      url: "u", branchName: "b", priorityLabel: "p", stateName: "s",
-      stateType: "st", teamName: "tm", teamKey: "ENG", teamId: "t1",
-    });
     useStore.getState().markChatTabReentry("s1");
     useStore.getState().setDiffPanelSelectedFile("s1", "file.ts");
     useStore.getState().setToolProgress("s1", "t1", { toolName: "Bash", elapsedSeconds: 1 });
@@ -198,7 +193,6 @@ describe("removeSession: comprehensive cleanup", () => {
     useStore.getState().removeSession("s1");
 
     const state = useStore.getState();
-    expect(state.linkedLinearIssues.has("s1")).toBe(false);
     expect(state.chatTabReentryTickBySession.has("s1")).toBe(false);
     expect(state.diffPanelSelectedFile.has("s1")).toBe(false);
     expect(state.toolProgress.has("s1")).toBe(false);

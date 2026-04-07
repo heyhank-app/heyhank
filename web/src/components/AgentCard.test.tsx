@@ -4,13 +4,6 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import type { AgentInfo } from "../api.js";
 
-// Mock LinearLogo since it's an SVG component
-vi.mock("./LinearLogo.js", () => ({
-  LinearLogo: (props: Record<string, unknown>) => (
-    <svg data-testid="linear-logo" {...props} />
-  ),
-}));
-
 import { AgentCard, humanizeSchedule, getWebhookUrl } from "./AgentCard.js";
 
 // ─── Test Helpers ────────────────────────────────────────────────────────────
@@ -114,31 +107,6 @@ describe("AgentCard", () => {
     expect(screen.getByText("Codex")).toBeInTheDocument();
   });
 
-  // Test 6: Linear badge present when linear trigger is enabled
-  it("shows Linear badge when linear trigger is enabled", () => {
-    render(<AgentCard {...makeProps({
-      agent: makeAgent({
-        triggers: {
-          linear: { enabled: true, oauthClientId: "c1", hasAccessToken: true },
-        },
-      }),
-    })} />);
-
-    expect(screen.getByText("Linear")).toBeInTheDocument();
-    expect(screen.getByTestId("linear-logo")).toBeInTheDocument();
-  });
-
-  // Test 7: Linear badge absent when no linear trigger
-  it("does not show Linear badge when linear trigger is not enabled", () => {
-    render(<AgentCard {...makeProps({
-      agent: makeAgent({
-        triggers: { webhook: { enabled: false, secret: "" } },
-      }),
-    })} />);
-
-    expect(screen.queryByText("Linear")).not.toBeInTheDocument();
-  });
-
   // Test 8: Description not rendered when empty
   it("does not render description when it is empty", () => {
     const { container } = render(<AgentCard {...makeProps({
@@ -197,19 +165,6 @@ describe("AgentCard", () => {
     })} />);
 
     expect(screen.getByText("Daily at 8:00 AM")).toBeInTheDocument();
-  });
-
-  // Test 14: Linear Agent trigger badge when linear is enabled
-  it("shows 'Linear Agent' trigger badge when linear is enabled", () => {
-    render(<AgentCard {...makeProps({
-      agent: makeAgent({
-        triggers: {
-          linear: { enabled: true, oauthClientId: "c1", hasAccessToken: true },
-        },
-      }),
-    })} />);
-
-    expect(screen.getByText("Linear Agent")).toBeInTheDocument();
   });
 
   // ── Stats ─────────────────────────────────────────────────────────────────

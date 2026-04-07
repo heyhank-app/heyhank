@@ -591,13 +591,22 @@ export function registerPlatformRoutes(api: Hono): void {
       nodeName: ra.nodeName,
     }));
 
+    // Load phone contacts for Gemini
+    let contacts: { name: string; phone: string; notes?: string }[] = [];
+    try {
+      const telStore = await import("../telephony/telephony-store.js");
+      contacts = telStore.getContacts().map((c) => ({ name: c.name, phone: c.phone, notes: c.notes }));
+    } catch { /* ignore */ }
+
     return c.json({
       apiKey,
       voice: settings.geminiVoice || "Kore",
       assistantName: settings.assistantName || "",
+      userName: settings.userName || "",
       agents: [...agents, ...remoteAgents],
       recentConversations: contextNotes.map((n) => ({ title: n.title, content: n.content })),
       activeSessions: [...activeSessions, ...remoteSessionsList],
+      contacts,
     });
   });
 
@@ -615,6 +624,7 @@ export function registerPlatformRoutes(api: Hono): void {
     const base = `http://127.0.0.1:${process.env.PORT || 3100}/api`;
 
     console.log(`[gemini-tool] ${name}`, JSON.stringify(args || {}).slice(0, 200));
+    const toolStart = Date.now();
 
     try {
       switch (name) {
@@ -701,6 +711,8 @@ export function registerPlatformRoutes(api: Hono): void {
               model: agentModel,
               permissionMode: "auto-accept",
               cwd: agentCwd,
+              version: 1,
+              enabled: true,
             });
 
             let sessionId: string | null = null;
@@ -965,7 +977,17 @@ export function registerPlatformRoutes(api: Hono): void {
           const account = emailService.getAccount(accountId);
           if (!account) return c.json({ result: { error: `Account "${accountId}" not found` } });
           const email = await emailService.readEmail(account, uid);
-          return c.json({ result: email ? { email } : { error: "Email not found" } });
+          if (!email) return c.json({ result: { error: "Email not found" } });
+          // Clean up body for voice readability: strip encoding artifacts, excessive whitespace
+          let body = email.textBody || "(empty)";
+          // Remove common MIME/encoding artifacts
+          body = body.replace(/=\r?\n/g, "");
+          body = body.replace(/=([0-9A-Fa-f]{2})/g, (_m, hex) => String.fromCharCode(parseInt(hex, 16)));
+          body = body.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+          body = body.replace(/\s+/g, " ").trim();
+          // Limit for Gemini tool response (keep it voice-friendly)
+          if (body.length > 1500) body = body.slice(0, 1500) + "...";
+          return c.json({ result: { subject: email.subject, from: email.from, to: email.to, date: email.date, body } });
         }
 
         case "search_emails": {
@@ -1075,12 +1097,23 @@ export function registerPlatformRoutes(api: Hono): void {
 
         // ─── Telephony ──────────────────────────────────────────────────
         case "make_call": {
-          const phone = (args?.phone as string) || "";
+          let phone = (args?.phone as string) || "";
           const task = (args?.task as string) || "";
           if (!phone || !task) {
             return c.json({ result: { error: "phone and task are required" } });
           }
           try {
+            // Resolve contact name to phone number if input doesn't look like a number
+            const stripped = phone.replace(/[\s\-().]/g, "");
+            if (!stripped.startsWith("+") && !/^\d{4,}$/.test(stripped)) {
+              const { resolveContactByName } = await import("../telephony/telephony-store.js");
+              const contact = resolveContactByName(phone);
+              if (contact) {
+                phone = contact.phone;
+              } else {
+                return c.json({ result: { error: `Contact "${phone}" not found. Use a phone number in E.164 format or add the contact in Settings > Telephony.` } });
+              }
+            }
             const { callManager } = await import("../telephony/call-manager.js");
             const call = await callManager.startCall({ phone, prompt: task, voice: args?.voice as string });
             return c.json({
@@ -1140,11 +1173,207 @@ export function registerPlatformRoutes(api: Hono): void {
           }
         }
 
+        // ─── Social Media ──────────────────────────────────────────────
+        case "prepare_social_post": {
+          const postText = (args?.text as string) || "";
+          const postPlatforms = (args?.platforms as string[]) || [];
+          if (!postText) return c.json({ result: { error: "text is required" } });
+          if (!postPlatforms.length) return c.json({ result: { error: "platforms array is required" } });
+          try {
+            const smManager = await import("../socialmedia/manager.js");
+            const post = await smManager.createDraft({
+              text: postText,
+              platforms: postPlatforms as import("../socialmedia/types.js").SocialPlatform[],
+              scheduledAt: (args?.scheduledAt as string) || null,
+              mediaUrls: (args?.mediaUrls as string[]) || [],
+              title: (args?.title as string) || undefined,
+              firstComment: (args?.firstComment as string) || undefined,
+              videoUrl: (args?.videoUrl as string) || undefined,
+              thumbnailUrl: (args?.thumbnailUrl as string) || undefined,
+              createdBy: "gemini",
+            });
+            return c.json({
+              result: {
+                success: true,
+                postId: post.id,
+                status: "draft",
+                platforms: post.platforms,
+                message: `Draft post prepared for ${postPlatforms.join(", ")}. The user can review and publish it from the Social Media page.`,
+              },
+            });
+          } catch (err) {
+            return c.json({ result: { error: err instanceof Error ? err.message : "Failed to prepare post" } });
+          }
+        }
+        case "create_social_post": {
+          const postText = (args?.text as string) || "";
+          const postPlatforms = (args?.platforms as string[]) || [];
+          if (!postText) return c.json({ result: { error: "text is required" } });
+          if (!postPlatforms.length) return c.json({ result: { error: "platforms array is required" } });
+          try {
+            const smManager = await import("../socialmedia/manager.js");
+            const post = await smManager.createPost({
+              text: postText,
+              platforms: postPlatforms as import("../socialmedia/types.js").SocialPlatform[],
+              scheduledAt: (args?.scheduledAt as string) || null,
+              mediaUrls: [],
+            });
+            return c.json({
+              result: {
+                success: true,
+                postId: post.id,
+                status: post.status,
+                platforms: post.platforms,
+                message: `Post created on ${postPlatforms.join(", ")}. Status: ${post.status}.`,
+              },
+            });
+          } catch (err) {
+            return c.json({ result: { error: err instanceof Error ? err.message : "Failed to create post" } });
+          }
+        }
+
+        case "list_social_posts": {
+          try {
+            const smManager = await import("../socialmedia/manager.js");
+            const posts = await smManager.listPosts({
+              limit: (args?.limit as number) || 10,
+              status: (args?.status as string) || undefined,
+            });
+            return c.json({
+              result: {
+                posts: posts.map((p) => ({
+                  id: p.id,
+                  text: p.text.slice(0, 100),
+                  status: p.status,
+                  platforms: p.platforms,
+                  createdAt: p.createdAt,
+                })),
+                message: posts.length > 0
+                  ? `${posts.length} post(s) found.`
+                  : "No posts found.",
+              },
+            });
+          } catch (err) {
+            return c.json({ result: { error: err instanceof Error ? err.message : "Failed to list posts" } });
+          }
+        }
+
+        case "get_social_analytics": {
+          const profileId = (args?.profileId as string) || "";
+          if (!profileId) return c.json({ result: { error: "profileId is required" } });
+          try {
+            const smManager = await import("../socialmedia/manager.js");
+            const analytics = await smManager.getAccountAnalytics(profileId);
+            return c.json({ result: { ...analytics, message: `Followers: ${analytics.followers}, Following: ${analytics.following}, Posts: ${analytics.posts}` } });
+          } catch (err) {
+            return c.json({ result: { error: err instanceof Error ? err.message : "Failed to get analytics" } });
+          }
+        }
+
+        case "reply_to_social_comment": {
+          const smPostId = (args?.postId as string) || "";
+          const smCommentId = (args?.commentId as string) || null;
+          const smText = (args?.text as string) || "";
+          if (!smPostId || !smText) return c.json({ result: { error: "postId and text are required" } });
+          try {
+            const smManager = await import("../socialmedia/manager.js");
+            const result = await smManager.replyToComment(smPostId, smCommentId, smText);
+            return c.json({ result: { ...result, message: result.ok ? "Reply sent." : `Failed: ${result.error}` } });
+          } catch (err) {
+            return c.json({ result: { error: err instanceof Error ? err.message : "Failed to reply" } });
+          }
+        }
+
         default:
           return c.json({ result: { error: `Unknown tool: ${name}` } });
       }
     } catch (err) {
       return c.json({ result: { error: err instanceof Error ? err.message : String(err) } });
     }
+  });
+
+  // ─── Gemini Conversation History ──────────────────────────────────────────
+
+  api.get("/gemini/conversations", (c) => {
+    return c.json(assistantStore.listGeminiConversations());
+  });
+
+  api.get("/gemini/conversations/:id", (c) => {
+    const convo = assistantStore.getGeminiConversation(c.req.param("id"));
+    if (!convo) return c.json({ error: "Not found" }, 404);
+    return c.json(convo);
+  });
+
+  api.post("/gemini/conversations", async (c) => {
+    const body = await c.req.json<{
+      messages: Array<{ role: "user" | "gemini" | "system"; text: string; ts: number }>;
+      duration?: number;
+    }>();
+    if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
+      return c.json({ error: "messages required" }, 400);
+    }
+    const convo = assistantStore.saveGeminiConversation(body.messages, body.duration);
+    return c.json(convo);
+  });
+
+  api.delete("/gemini/conversations/:id", (c) => {
+    const ok = assistantStore.deleteGeminiConversation(c.req.param("id"));
+    return c.json({ ok });
+  });
+
+  // ─── Export / Import (Backup) ─────────────────────────────────────────────
+
+  api.get("/export", (c) => {
+    const agents = listAgents();
+    const settings = getSettings();
+    const notes = assistantStore.listNotes();
+    const todos = assistantStore.listTodos();
+    const reminders = assistantStore.listReminders(true);
+    const conversations = assistantStore.listGeminiConversations();
+    return c.json({
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      agents,
+      settings,
+      notes,
+      todos,
+      reminders,
+      geminiConversations: conversations,
+    });
+  });
+
+  api.post("/import", async (c) => {
+    const body = await c.req.json<{
+      agents?: unknown[];
+      notes?: unknown[];
+      todos?: unknown[];
+      reminders?: unknown[];
+    }>();
+    const imported: Record<string, number> = {};
+    if (Array.isArray(body.agents)) {
+      for (const a of body.agents) {
+        try {
+          createAgent(a as Parameters<typeof createAgent>[0]);
+          imported.agents = (imported.agents || 0) + 1;
+        } catch {}
+      }
+    }
+    if (Array.isArray(body.notes)) {
+      for (const n of body.notes as Array<{ title?: string; content?: string; tags?: string[] }>) {
+        if (n.title && n.content) {
+          assistantStore.addNote(n.title, n.content, n.tags || []);
+          imported.notes = (imported.notes || 0) + 1;
+        }
+      }
+    }
+    if (Array.isArray(body.todos)) {
+      for (const t of body.todos as Array<{ text?: string; priority?: string; category?: string }>) {
+        if (t.text) {
+          assistantStore.addTodo(t.text, t.priority || "medium", t.category);
+          imported.todos = (imported.todos || 0) + 1;
+        }
+      }
+    }
+    return c.json({ imported });
   });
 }

@@ -1,7 +1,7 @@
 import type { StateCreator } from "zustand";
 import type { AppState } from "./index.js";
 import type { SessionState, SdkSessionInfo, McpServerDetail } from "../types.js";
-import type { PRStatusResponse, LinearIssue } from "../api.js";
+import type { PRStatusResponse } from "../api.js";
 import { deleteFromMap, deleteFromSet } from "./utils.js";
 
 function getInitialSessionNames(): Map<string, string> {
@@ -39,7 +39,6 @@ export interface SessionsSlice {
   sessionNames: Map<string, string>;
   recentlyRenamed: Set<string>;
   prStatus: Map<string, PRStatusResponse>;
-  linkedLinearIssues: Map<string, LinearIssue>;
   mcpServers: Map<string, McpServerDetail[]>;
   collapsedProjects: Set<string>;
 
@@ -57,7 +56,6 @@ export interface SessionsSlice {
   markRecentlyRenamed: (sessionId: string) => void;
   clearRecentlyRenamed: (sessionId: string) => void;
   setPRStatus: (sessionId: string, status: PRStatusResponse) => void;
-  setLinkedLinearIssue: (sessionId: string, issue: LinearIssue | null) => void;
   setMcpServers: (sessionId: string, servers: McpServerDetail[]) => void;
   toggleProjectCollapse: (projectKey: string) => void;
   setSessionAiValidation: (sessionId: string, settings: { aiValidationEnabled?: boolean | null; aiValidationAutoApprove?: boolean | null; aiValidationAutoDeny?: boolean | null }) => void;
@@ -75,7 +73,6 @@ export const createSessionsSlice: StateCreator<AppState, [], [], SessionsSlice> 
   sessionNames: getInitialSessionNames(),
   recentlyRenamed: new Set(),
   prStatus: new Map(),
-  linkedLinearIssues: new Map(),
   mcpServers: new Map(),
   collapsedProjects: getInitialCollapsedProjects(),
 
@@ -126,7 +123,6 @@ export const createSessionsSlice: StateCreator<AppState, [], [], SessionsSlice> 
         recentlyRenamed: deleteFromSet(s.recentlyRenamed, sessionId),
         mcpServers: deleteFromMap(s.mcpServers, sessionId),
         prStatus: deleteFromMap(s.prStatus, sessionId),
-        linkedLinearIssues: deleteFromMap(s.linkedLinearIssues, sessionId),
         sdkSessions: s.sdkSessions.filter((sdk) => sdk.sessionId !== sessionId),
         currentSessionId: s.currentSessionId === sessionId ? null : s.currentSessionId,
         // Chat slice fields
@@ -218,17 +214,6 @@ export const createSessionsSlice: StateCreator<AppState, [], [], SessionsSlice> 
       const prStatus = new Map(s.prStatus);
       prStatus.set(sessionId, status);
       return { prStatus };
-    }),
-
-  setLinkedLinearIssue: (sessionId, issue) =>
-    set((s) => {
-      const linkedLinearIssues = new Map(s.linkedLinearIssues);
-      if (issue) {
-        linkedLinearIssues.set(sessionId, issue);
-      } else {
-        linkedLinearIssues.delete(sessionId);
-      }
-      return { linkedLinearIssues };
     }),
 
   setMcpServers: (sessionId, servers) =>

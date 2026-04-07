@@ -73,11 +73,20 @@ export type CallEvent =
   | { type: "transcript"; callId: string; entry: TranscriptEntry }
   | { type: "ended"; callId: string; summary: string | null };
 
+/** A phone contact that Gemini can look up and call by name */
+export interface TelephonyContact {
+  id: string;
+  name: string; // Display name (e.g. "Mama", "Restaurant Steirereck")
+  phone: string; // E.164 format (e.g. "+4366412345")
+  notes?: string; // Optional context (e.g. "Mon-Sat 10-18 Uhr")
+}
+
 /** Telephony settings stored in ~/.heyhank/telephony.json */
 export interface TelephonySettings {
   enabled: boolean;
   freeswitch: FreeSwitchConfig;
   trunks: SipTrunkConfig[];
+  contacts: TelephonyContact[];
   defaultTrunkId: string | null;
   defaultVoice: string;
   maxCallDurationSeconds: number;
@@ -92,6 +101,7 @@ export const DEFAULT_TELEPHONY_SETTINGS: TelephonySettings = {
     eslPassword: "ClueCon",
   },
   trunks: [],
+  contacts: [],
   defaultTrunkId: null,
   defaultVoice: "Kore",
   maxCallDurationSeconds: 600, // 10 min safety limit

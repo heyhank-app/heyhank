@@ -4,6 +4,7 @@
 // Draggable + collapsible without losing context/session.
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { api } from "../api.js";
 
 type VoiceChatState = "idle" | "connecting" | "listening" | "speaking" | "toolCall";
 
@@ -115,7 +116,8 @@ function captureVideoFrame(video: HTMLVideoElement, quality = 0.7): { base64: st
   return { base64, dataUrl };
 }
 
-/** Draggable position hook for both mouse and touch */
+/** Draggable position hook for both mouse and touch.
+ *  Tracks the overlay's top-left corner directly. */
 function useDraggable(initialX: number, initialY: number) {
   const [pos, setPos] = useState({ x: initialX, y: initialY });
   const dragging = useRef(false);
@@ -160,7 +162,9 @@ export function VoiceChat() {
   const [geminiTextBuffer, setGeminiTextBuffer] = useState("");
   const [displayName, setDisplayName] = useState("Gemini Live");
   const [cameraActive, setCameraActive] = useState(false);
+  const [textInput, setTextInput] = useState("");
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const textInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
@@ -169,11 +173,18 @@ export function VoiceChat() {
   const recorderRef = useRef<AudioRecorderType | null>(null);
   const streamerRef = useRef<AudioStreamerType | null>(null);
   const clientRef = useRef<GeminiLiveClientType | null>(null);
+  const sessionStartRef = useRef<number>(0);
 
-  // Draggable position — start at bottom-right
-  const { pos, onPointerDown, didDrag } = useDraggable(
+  // Draggable position for collapsed mic button — start at bottom-right
+  const { pos, setPos: setMicPos, onPointerDown, didDrag } = useDraggable(
     typeof window !== "undefined" ? window.innerWidth - 80 : 0,
     typeof window !== "undefined" ? window.innerHeight - 80 : 0,
+  );
+
+  // Draggable position for expanded overlay panel
+  const { pos: overlayPos, onPointerDown: onOverlayPointerDown, setPos: setOverlayPos } = useDraggable(
+    typeof window !== "undefined" ? window.innerWidth - 340 : 0,
+    typeof window !== "undefined" ? Math.max(20, window.innerHeight - 520) : 0,
   );
 
   // Auto-scroll transcript
@@ -226,6 +237,7 @@ export function VoiceChat() {
         setState("listening");
         setError(null);
         addTranscript("system", "Connected");
+        sessionStartRef.current = Date.now();
         break;
       case "audio":
         setState("speaking");
@@ -299,11 +311,13 @@ export function VoiceChat() {
     }
   }, [addTranscript, flushGeminiBuffer, stopCamera]);
 
-  const startSession = useCallback(async () => {
+  const startSession = useCallback(async (resumeHistory?: Array<{ role: string; text: string }>) => {
     setError(null);
     setState("connecting");
     setExpanded(true);
-    setTranscript([]);
+    setTranscript(resumeHistory
+      ? resumeHistory.map((m) => ({ role: m.role as TranscriptEntry["role"], text: m.text, ts: Date.now() }))
+      : []);
     setGeminiTextBuffer("");
 
     try {
@@ -313,7 +327,7 @@ export function VoiceChat() {
       if (!res.ok) {
         throw new Error("Failed to get Gemini config");
       }
-      const { apiKey, voice, assistantName, agents, recentConversations, activeSessions } = await res.json();
+      const { apiKey, voice, assistantName, userName, agents, recentConversations, activeSessions, contacts } = await res.json();
       if (!apiKey) {
         throw new Error("Gemini API key not configured. Add it in Settings → Gemini.");
       }
@@ -326,7 +340,7 @@ export function VoiceChat() {
 
       const client = new clientMod.GeminiLiveClient(handleEvent);
       clientRef.current = client;
-      client.connect(apiKey, voice || "Kore", { assistantName, agents, recentConversations, activeSessions });
+      client.connect(apiKey, voice || "Kore", { assistantName, userName, agents, recentConversations, activeSessions, contacts, resumeHistory });
 
       const recorder = new audioMod.AudioRecorder();
       recorderRef.current = recorder;
@@ -345,7 +359,31 @@ export function VoiceChat() {
     }
   }, [handleEvent]);
 
+  // Listen for resume events from other components (e.g. dashboard "Continue" button)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { messages?: Array<{ role: string; text: string }> } | undefined;
+      if (detail?.messages && state === "idle") {
+        startSession(detail.messages);
+      }
+    };
+    window.addEventListener("gemini-resume", handler);
+    return () => window.removeEventListener("gemini-resume", handler);
+  }, [startSession, state]);
+
   const endSession = useCallback(() => {
+    // Save conversation history if there are user/gemini messages
+    setTranscript((prev) => {
+      const meaningful = prev.filter((m) => m.role === "user" || m.role === "gemini");
+      if (meaningful.length >= 2) {
+        const duration = sessionStartRef.current ? Math.round((Date.now() - sessionStartRef.current) / 1000) : undefined;
+        api.saveGeminiConversation(
+          prev.map((m) => ({ role: m.role, text: m.text, ts: m.ts })),
+          duration,
+        ).catch(() => {});
+      }
+      return prev;
+    });
     recorderRef.current?.stop();
     recorderRef.current = null;
     streamerRef.current?.destroy();
@@ -370,6 +408,15 @@ export function VoiceChat() {
     });
   }, []);
 
+  // ─── Text input ──────────────────────────────────────────────────────────
+  const sendTextMessage = useCallback(() => {
+    const msg = textInput.trim();
+    if (!msg || !clientRef.current?.isReady) return;
+    clientRef.current.sendText(msg);
+    addTranscript("user", msg);
+    setTextInput("");
+  }, [textInput, addTranscript]);
+
   // ─── Media Input: File upload ──────────────────────────────────────────────
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -377,11 +424,19 @@ export function VoiceChat() {
 
     for (const file of Array.from(files)) {
       try {
-        // Images: send directly
+        // Images: send to Gemini + upload to server for media library
         if (file.type.startsWith("image/")) {
           const { base64, mimeType, dataUrl } = await fileToBase64(file);
           clientRef.current.sendImage(base64, mimeType);
-          addTranscript("user", `📷 ${file.name}`, dataUrl);
+          // Upload to server so the image can be referenced in social media drafts
+          try {
+            const upload = await api.uploadMedia(base64, mimeType, file.name);
+            // Tell Gemini the image URL so it can use it in posts
+            clientRef.current.sendText(`[Image uploaded and available at: ${upload.url}]`);
+            addTranscript("user", `📷 ${file.name}`, dataUrl);
+          } catch {
+            addTranscript("user", `📷 ${file.name} (not saved to server)`, dataUrl);
+          }
         }
         // Videos: extract frames and send
         else if (file.type.startsWith("video/")) {
@@ -466,10 +521,13 @@ export function VoiceChat() {
     }
   }, [cameraActive, stopCamera, addTranscript]);
 
-  // Minimize: collapse UI but keep session alive
+  // Minimize: collapse UI but keep session alive.
+  // Move the mic button to where the overlay was so it doesn't jump away.
   const handleMinimize = useCallback(() => {
+    // Place mic button at top-right corner of overlay
+    setMicPos({ x: overlayPos.x + 320 - 56, y: overlayPos.y });
     setExpanded(false);
-  }, []);
+  }, [overlayPos, setMicPos]);
 
   // Close: end session AND collapse
   const handleClose = useCallback(() => {
@@ -480,6 +538,32 @@ export function VoiceChat() {
   }, [state, endSession]);
 
   const isSessionActive = state !== "idle";
+
+  // Overlay dimensions
+  const overlayWidth = 320;
+  const overlayMaxHeight = typeof window !== "undefined"
+    ? Math.min(cameraActive ? 580 : 480, window.innerHeight - 40)
+    : 480;
+
+  // When expanding, position overlay near the mic button
+  useEffect(() => {
+    if (expanded && typeof window !== "undefined") {
+      let ox = pos.x - overlayWidth + 56;
+      let oy = pos.y - overlayMaxHeight - 8;
+      if (ox < 8) ox = 8;
+      if (oy < 8) oy = pos.y + 64;
+      if (ox + overlayWidth > window.innerWidth - 8) ox = window.innerWidth - overlayWidth - 8;
+      setOverlayPos({ x: ox, y: oy });
+    }
+  }, [expanded]);
+
+  // Clamp overlay position
+  const clampedLeft = typeof window !== "undefined"
+    ? Math.max(8, Math.min(overlayPos.x, window.innerWidth - overlayWidth - 8))
+    : 8;
+  const clampedTop = typeof window !== "undefined"
+    ? Math.max(8, Math.min(overlayPos.y, window.innerHeight - 80))
+    : 8;
 
   // Collapsed state: floating mic button (draggable)
   if (!expanded) {
@@ -520,35 +604,9 @@ export function VoiceChat() {
     );
   }
 
-  // Compute overlay position
-  const overlayWidth = 320;
-  const overlayMaxHeight = Math.min(cameraActive ? 580 : 480, window.innerHeight - 40);
-  let overlayLeft = pos.x - overlayWidth + 56;
-  let overlayTop = pos.y - overlayMaxHeight - 8;
-
-  if (overlayLeft < 8) overlayLeft = 8;
-  if (overlayTop < 8) {
-    overlayTop = pos.y + 64;
-  }
-  if (overlayLeft + overlayWidth > window.innerWidth - 8) {
-    overlayLeft = window.innerWidth - overlayWidth - 8;
-  }
-
   // Expanded overlay
   return (
     <>
-      {/* Collapsed button stays visible behind the overlay for dragging */}
-      <button
-        type="button"
-        onPointerDown={onPointerDown}
-        className="fixed z-[9999] w-14 h-14 rounded-full bg-green-600 text-white shadow-lg flex items-center justify-center touch-none select-none"
-        style={{ left: pos.x, top: pos.y }}
-        title="Drag to move"
-      >
-        <span className="absolute inset-0 rounded-full bg-green-500/40 animate-ping" style={{ animationDuration: "2s" }} />
-        <MicIcon className="w-6 h-6 relative z-10" />
-      </button>
-
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
@@ -562,10 +620,12 @@ export function VoiceChat() {
       {/* Overlay panel */}
       <div
         className="fixed z-[10000] rounded-xl border border-cc-border bg-cc-bg shadow-2xl overflow-hidden flex flex-col"
-        style={{ left: overlayLeft, top: overlayTop, width: overlayWidth, maxHeight: overlayMaxHeight }}
+        style={{ left: clampedLeft, top: clampedTop, width: overlayWidth, maxHeight: overlayMaxHeight }}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-cc-border bg-cc-card">
+        {/* Header — drag handle */}
+        <div
+          onPointerDown={onOverlayPointerDown}
+          className="flex items-center justify-between px-4 py-3 border-b border-cc-border bg-cc-card cursor-grab active:cursor-grabbing touch-none select-none">
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${state === "idle" ? "bg-cc-muted" : state === "connecting" ? "bg-yellow-500 animate-pulse" : state === "toolCall" ? "bg-blue-500 animate-pulse" : "bg-green-500"}`} />
             <span className="text-sm font-medium text-cc-fg">{displayName}</span>
@@ -664,6 +724,32 @@ export function VoiceChat() {
             </div>
           )}
         </div>
+
+        {/* Text input */}
+        {state !== "idle" && (
+          <div className="px-3 py-2 border-t border-cc-border">
+            <div className="flex gap-1.5">
+              <input
+                ref={textInputRef}
+                type="text"
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendTextMessage(); } }}
+                placeholder="Type a message..."
+                className="flex-1 px-2.5 py-1.5 text-xs bg-cc-bg rounded-lg border border-cc-border text-cc-fg placeholder:text-cc-muted/60 focus:outline-none focus:ring-1 focus:ring-cc-primary"
+              />
+              <button
+                type="button"
+                onClick={sendTextMessage}
+                disabled={!textInput.trim()}
+                className="px-2.5 py-1.5 rounded-lg bg-cc-primary text-white text-xs disabled:opacity-30 hover:bg-cc-primary-hover transition-colors"
+                title="Send text message"
+              >
+                <SendIcon className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Error */}
         {error && (
@@ -770,6 +856,15 @@ function ImageIcon({ className }: { className?: string }) {
       <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
       <circle cx="8.5" cy="8.5" r="1.5" />
       <polyline points="21 15 16 10 5 21" />
+    </svg>
+  );
+}
+
+function SendIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="22" y1="2" x2="11" y2="13" />
+      <polygon points="22 2 15 22 11 13 2 9 22 2" />
     </svg>
   );
 }

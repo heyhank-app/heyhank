@@ -18,7 +18,7 @@ import type { CodexAdapter } from "./codex-adapter.js";
 import type { CodexAttachDeps } from "./ws-bridge-codex.js";
 import * as settingsManager from "./settings-manager.js";
 import * as aiValidator from "./ai-validator.js";
-import { companionBus } from "./event-bus.js";
+import { heyHankBus } from "./event-bus.js";
 import { SessionStateMachine } from "./session-state-machine.js";
 
 // ── Mock Factories ──────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ describe("attachCodexAdapterHandlers", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    companionBus.clear();
+    heyHankBus.clear();
     session = createMockSession();
     adapter = createMockAdapter();
     deps = createMockDeps();
@@ -114,18 +114,6 @@ describe("attachCodexAdapterHandlers", () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKey: "",
-      linearAutoTransition: false,
-      linearAutoTransitionStateId: "",
-      linearAutoTransitionStateName: "",
-    linearArchiveTransition: false,
-    linearArchiveTransitionStateId: "",
-    linearArchiveTransitionStateName: "",
-      linearOAuthClientId: "",
-      linearOAuthClientSecret: "",
-      linearOAuthWebhookSecret: "",
-      linearOAuthAccessToken: "",
-      linearOAuthRefreshToken: "",
       claudeCodeOAuthToken: "",
       openaiApiKey: "",
       onboardingCompleted: false,
@@ -137,6 +125,11 @@ describe("attachCodexAdapterHandlers", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       updatedAt: 0,
+      geminiApiKey: "",
+      geminiVoice: "Kore",
+      assistantName: "",
+      userName: "",
+      internalAiProvider: "",
     });
   });
 
@@ -588,7 +581,7 @@ describe("attachCodexAdapterHandlers", () => {
     // When a non-error result arrives and auto-naming hasn't been attempted yet,
     // the handler should emit session:first-turn-completed with the first user_message content.
     const onFirstTurnCompleted = vi.fn();
-    companionBus.on("session:first-turn-completed", onFirstTurnCompleted);
+    heyHankBus.on("session:first-turn-completed", onFirstTurnCompleted);
 
     session.messageHistory.push({
       type: "user_message",
@@ -628,7 +621,7 @@ describe("attachCodexAdapterHandlers", () => {
     // Auto-naming should only fire once per session. Subsequent results should not
     // re-trigger the event.
     const onFirstTurnCompleted = vi.fn();
-    companionBus.on("session:first-turn-completed", onFirstTurnCompleted);
+    heyHankBus.on("session:first-turn-completed", onFirstTurnCompleted);
 
     session.messageHistory.push({
       type: "user_message",
@@ -665,7 +658,7 @@ describe("attachCodexAdapterHandlers", () => {
   it("result does NOT trigger session:first-turn-completed when result is an error", () => {
     // Error results should not trigger auto-naming.
     const onFirstTurnCompleted = vi.fn();
-    companionBus.on("session:first-turn-completed", onFirstTurnCompleted);
+    heyHankBus.on("session:first-turn-completed", onFirstTurnCompleted);
 
     session.messageHistory.push({
       type: "user_message",
@@ -699,7 +692,7 @@ describe("attachCodexAdapterHandlers", () => {
     // If there's no user_message in the history, the event should not be emitted
     // even on a successful result.
     const onFirstTurnCompleted = vi.fn();
-    companionBus.on("session:first-turn-completed", onFirstTurnCompleted);
+    heyHankBus.on("session:first-turn-completed", onFirstTurnCompleted);
 
     attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
 
@@ -785,7 +778,7 @@ describe("attachCodexAdapterHandlers", () => {
     // When the meta includes a cliSessionId, the bus event should be emitted
     // to track the mapping from our session ID to the Codex thread ID.
     const onCLISessionId = vi.fn();
-    companionBus.on("session:cli-id-received", onCLISessionId);
+    heyHankBus.on("session:cli-id-received", onCLISessionId);
 
     attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
 
@@ -800,7 +793,7 @@ describe("attachCodexAdapterHandlers", () => {
   it("onSessionMeta does not emit session:cli-id-received when cliSessionId is absent", () => {
     // If no cliSessionId in the meta, the bus event should not be emitted.
     const onCLISessionId = vi.fn();
-    companionBus.on("session:cli-id-received", onCLISessionId);
+    heyHankBus.on("session:cli-id-received", onCLISessionId);
 
     attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
 
@@ -937,7 +930,7 @@ describe("attachCodexAdapterHandlers", () => {
     // When the transport drops mid-conversation and browsers are still connected,
     // the session should be auto-relaunched instead of leaving users with a dead session.
     const onRelaunchNeeded = vi.fn();
-    companionBus.on("session:relaunch-needed", onRelaunchNeeded);
+    heyHankBus.on("session:relaunch-needed", onRelaunchNeeded);
 
     session.backendAdapter = adapter as unknown as CodexAdapter;
     // Simulate a connected browser
@@ -954,7 +947,7 @@ describe("attachCodexAdapterHandlers", () => {
     // If no browsers are watching, don't waste resources relaunching — the relaunch
     // will happen when a browser reconnects via handleBrowserOpen.
     const onRelaunchNeeded = vi.fn();
-    companionBus.on("session:relaunch-needed", onRelaunchNeeded);
+    heyHankBus.on("session:relaunch-needed", onRelaunchNeeded);
 
     session.backendAdapter = adapter as unknown as CodexAdapter;
     expect(session.browserSockets.size).toBe(0);
@@ -983,7 +976,7 @@ describe("attachCodexAdapterHandlers", () => {
     // When a stale adapter disconnects after being replaced, it should not
     // trigger a relaunch (the new adapter is already active).
     const onRelaunchNeeded = vi.fn();
-    companionBus.on("session:relaunch-needed", onRelaunchNeeded);
+    heyHankBus.on("session:relaunch-needed", onRelaunchNeeded);
 
     const oldAdapter = createMockAdapter();
     const newAdapter = createMockAdapter();
@@ -1101,18 +1094,6 @@ describe("attachCodexAdapterHandlers", () => {
       vi.mocked(settingsManager.getSettings).mockReturnValue({
         anthropicApiKey: "test-api-key",
         anthropicModel: "claude-sonnet-4-6",
-        linearApiKey: "",
-        linearAutoTransition: false,
-        linearAutoTransitionStateId: "",
-        linearAutoTransitionStateName: "",
-    linearArchiveTransition: false,
-    linearArchiveTransitionStateId: "",
-    linearArchiveTransitionStateName: "",
-        linearOAuthClientId: "",
-        linearOAuthClientSecret: "",
-        linearOAuthWebhookSecret: "",
-        linearOAuthAccessToken: "",
-        linearOAuthRefreshToken: "",
         claudeCodeOAuthToken: "",
         openaiApiKey: "",
         onboardingCompleted: false,
@@ -1124,6 +1105,11 @@ describe("attachCodexAdapterHandlers", () => {
         updateChannel: "stable",
         dockerAutoUpdate: false,
         updatedAt: 0,
+        geminiApiKey: "",
+        geminiVoice: "Kore",
+        assistantName: "",
+        userName: "",
+        internalAiProvider: "",
       });
     }
 
@@ -1278,18 +1264,6 @@ describe("attachCodexAdapterHandlers", () => {
       vi.mocked(settingsManager.getSettings).mockReturnValue({
         anthropicApiKey: "test-api-key",
         anthropicModel: "claude-sonnet-4-6",
-        linearApiKey: "",
-        linearAutoTransition: false,
-        linearAutoTransitionStateId: "",
-        linearAutoTransitionStateName: "",
-    linearArchiveTransition: false,
-    linearArchiveTransitionStateId: "",
-    linearArchiveTransitionStateName: "",
-        linearOAuthClientId: "",
-        linearOAuthClientSecret: "",
-        linearOAuthWebhookSecret: "",
-        linearOAuthAccessToken: "",
-        linearOAuthRefreshToken: "",
         claudeCodeOAuthToken: "",
         openaiApiKey: "",
         onboardingCompleted: false,
@@ -1301,6 +1275,11 @@ describe("attachCodexAdapterHandlers", () => {
         updateChannel: "stable",
         dockerAutoUpdate: false,
         updatedAt: 0,
+        geminiApiKey: "",
+        geminiVoice: "Kore",
+        assistantName: "",
+        userName: "",
+        internalAiProvider: "",
       });
 
       attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
@@ -1325,18 +1304,6 @@ describe("attachCodexAdapterHandlers", () => {
       vi.mocked(settingsManager.getSettings).mockReturnValue({
         anthropicApiKey: "",  // empty
         anthropicModel: "claude-sonnet-4-6",
-        linearApiKey: "",
-        linearAutoTransition: false,
-        linearAutoTransitionStateId: "",
-        linearAutoTransitionStateName: "",
-    linearArchiveTransition: false,
-    linearArchiveTransitionStateId: "",
-    linearArchiveTransitionStateName: "",
-        linearOAuthClientId: "",
-        linearOAuthClientSecret: "",
-        linearOAuthWebhookSecret: "",
-        linearOAuthAccessToken: "",
-        linearOAuthRefreshToken: "",
         claudeCodeOAuthToken: "",
         openaiApiKey: "",
         onboardingCompleted: false,
@@ -1348,6 +1315,11 @@ describe("attachCodexAdapterHandlers", () => {
         updateChannel: "stable",
         dockerAutoUpdate: false,
         updatedAt: 0,
+        geminiApiKey: "",
+        geminiVoice: "Kore",
+        assistantName: "",
+        userName: "",
+        internalAiProvider: "",
       });
 
       attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
@@ -1437,18 +1409,6 @@ describe("attachCodexAdapterHandlers", () => {
       vi.mocked(settingsManager.getSettings).mockReturnValue({
         anthropicApiKey: "test-api-key",
         anthropicModel: "claude-sonnet-4-6",
-        linearApiKey: "",
-        linearAutoTransition: false,
-        linearAutoTransitionStateId: "",
-        linearAutoTransitionStateName: "",
-    linearArchiveTransition: false,
-    linearArchiveTransitionStateId: "",
-    linearArchiveTransitionStateName: "",
-        linearOAuthClientId: "",
-        linearOAuthClientSecret: "",
-        linearOAuthWebhookSecret: "",
-        linearOAuthAccessToken: "",
-        linearOAuthRefreshToken: "",
         claudeCodeOAuthToken: "",
         openaiApiKey: "",
         onboardingCompleted: false,
@@ -1460,6 +1420,11 @@ describe("attachCodexAdapterHandlers", () => {
         updateChannel: "stable",
         dockerAutoUpdate: false,
         updatedAt: 0,
+        geminiApiKey: "",
+        geminiVoice: "Kore",
+        assistantName: "",
+        userName: "",
+        internalAiProvider: "",
       });
 
       vi.mocked(aiValidator.validatePermission).mockResolvedValue({
@@ -1568,18 +1533,6 @@ describe("attachCodexAdapterHandlers", () => {
       vi.mocked(settingsManager.getSettings).mockReturnValue({
         anthropicApiKey: "test-api-key",
         anthropicModel: "claude-sonnet-4-6",
-        linearApiKey: "",
-        linearAutoTransition: false,
-        linearAutoTransitionStateId: "",
-        linearAutoTransitionStateName: "",
-    linearArchiveTransition: false,
-    linearArchiveTransitionStateId: "",
-    linearArchiveTransitionStateName: "",
-        linearOAuthClientId: "",
-        linearOAuthClientSecret: "",
-        linearOAuthWebhookSecret: "",
-        linearOAuthAccessToken: "",
-        linearOAuthRefreshToken: "",
         claudeCodeOAuthToken: "",
         openaiApiKey: "",
         onboardingCompleted: false,
@@ -1591,6 +1544,11 @@ describe("attachCodexAdapterHandlers", () => {
         updateChannel: "stable",
         dockerAutoUpdate: false,
         updatedAt: 0,
+        geminiApiKey: "",
+        geminiVoice: "Kore",
+        assistantName: "",
+        userName: "",
+        internalAiProvider: "",
       });
 
       vi.mocked(aiValidator.validatePermission).mockResolvedValue({
@@ -1628,7 +1586,7 @@ describe("attachCodexAdapterHandlers", () => {
       // to external platforms. The Codex path must emit these just like the
       // Claude Code path does.
       const listener = vi.fn();
-      companionBus.on("message:assistant", ({ sessionId, message }) => {
+      heyHankBus.on("message:assistant", ({ sessionId, message }) => {
         if (sessionId === "test-session") listener(message);
       });
 
@@ -1663,7 +1621,7 @@ describe("attachCodexAdapterHandlers", () => {
       // Result events signal turn completion so chat relay can post
       // accumulated text back to the platform.
       const listener = vi.fn();
-      companionBus.on("message:result", ({ sessionId, message }) => {
+      heyHankBus.on("message:result", ({ sessionId, message }) => {
         if (sessionId === "test-session") listener(message);
       });
 
@@ -1697,7 +1655,7 @@ describe("attachCodexAdapterHandlers", () => {
       // Bus subscribers that filter by sessionId should not fire when
       // messages arrive for a different session.
       const listener = vi.fn();
-      companionBus.on("message:assistant", ({ sessionId, message }) => {
+      heyHankBus.on("message:assistant", ({ sessionId, message }) => {
         if (sessionId === "other-session") listener(message);
       });
 

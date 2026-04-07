@@ -426,8 +426,6 @@ export interface SessionState {
   aiValidationAutoApprove?: boolean | null;
   /** Per-session auto-deny override. null/undefined = use global default */
   aiValidationAutoDeny?: boolean | null;
-  /** If this session is linked to a Linear agent session */
-  linearSessionId?: string;
   /** Federation: remote node ID if this session originates from a peer */
   nodeId?: string;
   /** Federation: remote node display name */

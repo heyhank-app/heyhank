@@ -20,7 +20,7 @@ const CLI_CONNECT_POLL_MS = 500;
 
 export interface ExecuteAgentOptions {
   force?: boolean;
-  triggerType?: "manual" | "webhook" | "schedule" | "linear";
+  triggerType?: "manual" | "webhook" | "schedule";
   additionalEnv?: Record<string, string>;
   systemPrompt?: string;
 }

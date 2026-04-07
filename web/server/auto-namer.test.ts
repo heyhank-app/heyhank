@@ -16,18 +16,6 @@ beforeEach(() => {
   vi.mocked(settingsManager.getSettings).mockReturnValue({
     anthropicApiKey: "sk-ant-key",
     anthropicModel: "claude-sonnet-4-6",
-    linearApiKey: "",
-    linearAutoTransition: false,
-    linearAutoTransitionStateId: "",
-    linearAutoTransitionStateName: "",
-    linearArchiveTransition: false,
-    linearArchiveTransitionStateId: "",
-    linearArchiveTransitionStateName: "",
-    linearOAuthClientId: "",
-    linearOAuthClientSecret: "",
-    linearOAuthWebhookSecret: "",
-    linearOAuthAccessToken: "",
-    linearOAuthRefreshToken: "",
     claudeCodeOAuthToken: "",
     openaiApiKey: "",
     onboardingCompleted: false,
@@ -42,6 +30,8 @@ beforeEach(() => {
     geminiApiKey: "",
     geminiVoice: "Puck",
     assistantName: "Maxx",
+    userName: "",
+    internalAiProvider: "",
   });
 });
 
@@ -63,18 +53,6 @@ describe("generateSessionTitle", () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
       anthropicModel: "claude-sonnet-4-6",
-      linearApiKey: "",
-      linearAutoTransition: false,
-      linearAutoTransitionStateId: "",
-      linearAutoTransitionStateName: "",
-    linearArchiveTransition: false,
-    linearArchiveTransitionStateId: "",
-    linearArchiveTransitionStateName: "",
-      linearOAuthClientId: "",
-      linearOAuthClientSecret: "",
-      linearOAuthWebhookSecret: "",
-      linearOAuthAccessToken: "",
-      linearOAuthRefreshToken: "",
       claudeCodeOAuthToken: "",
       openaiApiKey: "",
       onboardingCompleted: false,
@@ -89,6 +67,8 @@ describe("generateSessionTitle", () => {
       geminiApiKey: "",
       geminiVoice: "Puck",
       assistantName: "Maxx",
+      userName: "",
+      internalAiProvider: "",
     });
 
     const title = await generateSessionTitle("Fix login", "claude-sonnet-4-6");
@@ -117,18 +97,6 @@ describe("generateSessionTitle", () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "sk-ant-key",
       anthropicModel: "claude-haiku-3",
-      linearApiKey: "",
-      linearAutoTransition: false,
-      linearAutoTransitionStateId: "",
-      linearAutoTransitionStateName: "",
-    linearArchiveTransition: false,
-    linearArchiveTransitionStateId: "",
-    linearArchiveTransitionStateName: "",
-      linearOAuthClientId: "",
-      linearOAuthClientSecret: "",
-      linearOAuthWebhookSecret: "",
-      linearOAuthAccessToken: "",
-      linearOAuthRefreshToken: "",
       claudeCodeOAuthToken: "",
       openaiApiKey: "",
       onboardingCompleted: false,
@@ -143,6 +111,8 @@ describe("generateSessionTitle", () => {
       geminiApiKey: "",
       geminiVoice: "Puck",
       assistantName: "Maxx",
+      userName: "",
+      internalAiProvider: "",
     });
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -200,18 +170,6 @@ describe("generateSessionTitle", () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "sk-ant-key",
       anthropicModel: "",
-      linearApiKey: "",
-      linearAutoTransition: false,
-      linearAutoTransitionStateId: "",
-      linearAutoTransitionStateName: "",
-    linearArchiveTransition: false,
-    linearArchiveTransitionStateId: "",
-    linearArchiveTransitionStateName: "",
-      linearOAuthClientId: "",
-      linearOAuthClientSecret: "",
-      linearOAuthWebhookSecret: "",
-      linearOAuthAccessToken: "",
-      linearOAuthRefreshToken: "",
       claudeCodeOAuthToken: "",
       openaiApiKey: "",
       onboardingCompleted: false,
@@ -226,6 +184,8 @@ describe("generateSessionTitle", () => {
       geminiApiKey: "",
       geminiVoice: "Puck",
       assistantName: "Maxx",
+      userName: "",
+      internalAiProvider: "",
     });
     mockFetch.mockResolvedValueOnce({
       ok: true,

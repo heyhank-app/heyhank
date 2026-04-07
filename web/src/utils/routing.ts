@@ -6,8 +6,6 @@ export type Route =
   | { page: "session"; sessionId: string }
   | { page: "settings" }
   | { page: "integrations" }
-  | { page: "integration-linear" }
-  | { page: "integration-linear-oauth" }
   | { page: "integration-tailscale" }
   | { page: "prompts" }
   | { page: "terminal" }
@@ -20,6 +18,8 @@ export type Route =
   | { page: "platform" }
   | { page: "media" }
   | { page: "telephony" }
+  | { page: "socialmedia" }
+  | { page: "assistant" }
   | { page: "help" }
   | { page: "playground" };
 
@@ -41,8 +41,6 @@ export function parseHash(hash: string): Route {
 
   if (hash === "#/settings") return { page: "settings" };
   if (hash === "#/integrations") return { page: "integrations" };
-  if (hash === "#/integrations/linear") return { page: "integration-linear" };
-  if (hash === "#/integrations/linear-oauth") return { page: "integration-linear-oauth" };
   if (hash === "#/integrations/tailscale") return { page: "integration-tailscale" };
   if (hash === "#/prompts") return { page: "prompts" };
   if (hash === "#/terminal") return { page: "terminal" };
@@ -54,10 +52,12 @@ export function parseHash(hash: string): Route {
   if (hash === "#/platform") return { page: "platform" };
   if (hash === "#/media") return { page: "media" };
   if (hash === "#/telephony") return { page: "telephony" };
+  if (hash === "#/socialmedia") return { page: "socialmedia" };
+  if (hash === "#/assistant") return { page: "assistant" };
   if (hash === "#/help") return { page: "help" };
   if (hash === "#/new") return { page: "new-session" };
   if (hash === "#/playground") return { page: "playground" };
-  // Strip query params from hash for matching (OAuth callback appends ?oauth_success=true, ?setup=linear)
+  // Strip query params from hash for matching (OAuth callback appends ?oauth_success=true)
   const hashPath = hash.split("?")[0];
   if (hashPath === "#/agents") return { page: "agents" };
 

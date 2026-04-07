@@ -1,6 +1,5 @@
 import { AgentIcon } from "./AgentIcon.js";
 import { AgentCardMenu } from "./AgentCardMenu.js";
-import { LinearLogo } from "./LinearLogo.js";
 import type { AgentInfo } from "../api.js";
 import { timeAgo } from "../utils/time-ago.js";
 
@@ -74,10 +73,6 @@ export function AgentCard({
       agent.triggers.schedule.recurring,
     ));
   }
-  if (agent.triggers?.linear?.enabled) triggers.push("Linear Agent");
-
-  const isLinear = agent.triggers?.linear?.enabled;
-
   return (
     <div className={`
       group relative rounded-xl border bg-cc-card p-4
@@ -112,12 +107,6 @@ export function AgentCard({
               <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-cc-hover text-cc-muted font-medium leading-none">
                 {agent.backendType === "codex" ? "Codex" : "Claude"}
               </span>
-              {isLinear && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full bg-violet-500/10 text-violet-400 font-medium leading-none">
-                  <LinearLogo className="w-2.5 h-2.5" />
-                  Linear
-                </span>
-              )}
             </div>
             {agent.description && (
               <p className="text-xs text-cc-muted mt-0.5 truncate max-w-md">{agent.description}</p>
@@ -159,7 +148,11 @@ export function AgentCard({
         <div className="flex items-center gap-3 text-[10px] text-cc-muted">
           {agent.totalRuns > 0 && <span>{agent.totalRuns} run{agent.totalRuns !== 1 ? "s" : ""}</span>}
           {agent.lastRunAt && <span>Last: {timeAgo(agent.lastRunAt)}</span>}
-          {agent.nextRunAt && <span>Next: {timeAgo(agent.nextRunAt)}</span>}
+          {agent.nextRunAt && (
+            <span className="text-cc-primary font-medium">
+              Next: {timeAgo(agent.nextRunAt)}
+            </span>
+          )}
         </div>
       </div>
     </div>

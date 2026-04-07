@@ -75,7 +75,7 @@ export class CallManager {
 
     // Resolve Gemini API key
     const mainSettings = getMainSettings();
-    const geminiKey = telSettings.geminiApiKey || (mainSettings as Record<string, unknown>).geminiApiKey as string;
+    const geminiKey = telSettings.geminiApiKey || mainSettings.geminiApiKey;
     if (!geminiKey) {
       throw new Error("Gemini API key not configured.");
     }

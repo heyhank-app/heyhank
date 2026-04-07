@@ -113,12 +113,12 @@ describe("ExecutionStore", () => {
     it("filters by triggerType", () => {
       const store = new ExecutionStore(testDir);
       store.append(makeExecution({ triggerType: "manual", startedAt: 1000 }));
-      store.append(makeExecution({ triggerType: "webhook", startedAt: 2000 }));
-      store.append(makeExecution({ triggerType: "linear", startedAt: 3000 }));
+      store.append(makeExecution({ triggerType: "schedule", startedAt: 2000 }));
+      store.append(makeExecution({ triggerType: "webhook", startedAt: 3000 }));
 
-      const result = store.list({ triggerType: "linear" });
+      const result = store.list({ triggerType: "webhook" });
       expect(result.executions).toHaveLength(1);
-      expect(result.executions[0].triggerType).toBe("linear");
+      expect(result.executions[0].triggerType).toBe("webhook");
     });
 
     it("filters by status: running (no completedAt)", () => {

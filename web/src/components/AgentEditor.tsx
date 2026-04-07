@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { api, type McpServerConfigAgent, type HeyHankEnv, type LinearOAuthConnectionSummary } from "../api.js";
+import { api, type McpServerConfigAgent, type HeyHankEnv } from "../api.js";
 import { getModelsForBackend, getDefaultModel, getAgentModesForBackend, getDefaultAgentMode } from "../utils/backends.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { AgentIcon, AGENT_ICON_OPTIONS } from "./AgentIcon.js";
@@ -43,9 +43,6 @@ export interface AgentFormData {
   scheduleEnabled: boolean;
   scheduleExpression: string;
   scheduleRecurring: boolean;
-  // Linear Agent SDK trigger
-  linearEnabled: boolean;
-  linearOAuthConnectionId: string;
 }
 
 export const EMPTY_FORM: AgentFormData = {
@@ -70,8 +67,6 @@ export const EMPTY_FORM: AgentFormData = {
   scheduleEnabled: false,
   scheduleExpression: "0 8 * * *",
   scheduleRecurring: true,
-  linearEnabled: false,
-  linearOAuthConnectionId: "",
 };
 
 const CRON_PRESETS: { label: string; value: string }[] = [
@@ -104,7 +99,6 @@ export function AgentEditor({
   saving,
   onSave,
   onCancel,
-  linearOAuthConfigured,
 }: {
   form: AgentFormData;
   setForm: (f: AgentFormData | ((prev: AgentFormData) => AgentFormData)) => void;
@@ -114,7 +108,6 @@ export function AgentEditor({
   saving: boolean;
   onSave: () => void;
   onCancel: () => void;
-  linearOAuthConfigured: boolean;
 }) {
   const models = getModelsForBackend(form.backendType);
   const modes = getAgentModesForBackend(form.backendType);
@@ -131,8 +124,6 @@ export function AgentEditor({
   });
   const [availableSkills, setAvailableSkills] = useState<{ slug: string; name: string; description: string }[]>([]);
   const [envProfiles, setEnvProfiles] = useState<HeyHankEnv[]>([]);
-  const [linearConnections, setLinearConnections] = useState<LinearOAuthConnectionSummary[]>([]);
-  const [linearConnectionsLoading, setLinearConnectionsLoading] = useState(false);
   const [allowedToolInput, setAllowedToolInput] = useState("");
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showModeDropdown, setShowModeDropdown] = useState(false);
@@ -149,23 +140,6 @@ export function AgentEditor({
     api.listSkills().then(setAvailableSkills).catch(() => {});
     api.listEnvs().then(setEnvProfiles).catch(() => {});
   }, []);
-
-  // Fetch Linear OAuth connections when Linear trigger is enabled
-  useEffect(() => {
-    if (!form.linearEnabled) return;
-    setLinearConnectionsLoading(true);
-    api.listLinearOAuthConnections()
-      .then(({ connections }) => {
-        setLinearConnections(connections);
-        // Auto-select if only one connection and none selected yet
-        if (connections.length === 1 && !form.linearOAuthConnectionId) {
-          updateField("linearOAuthConnectionId", connections[0].id);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLinearConnectionsLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.linearEnabled]);
 
   function updateField<K extends keyof AgentFormData>(key: K, value: AgentFormData[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -613,18 +587,6 @@ export function AgentEditor({
                 Schedule
               </button>
 
-              {/* Linear Agent SDK toggle pill (only shown when OAuth is configured) */}
-              {linearOAuthConfigured && (
-                <button
-                  onClick={() => updateField("linearEnabled", !form.linearEnabled)}
-                  className={form.linearEnabled ? pillActive : pillDefault}
-                >
-                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
-                    <path d="M3 1a1 1 0 00-1 1v12a1 1 0 001 1h10a1 1 0 001-1V2a1 1 0 00-1-1H3zm1 2h8v2H4V3zm0 4h5v2H4V7zm0 4h8v2H4v-2z" />
-                  </svg>
-                  Linear Agent
-                </button>
-              )}
 
             </div>
 
@@ -638,58 +600,6 @@ export function AgentEditor({
                   <p className="text-[10px] text-cc-muted">
                     Base URL: <span className="font-mono-code">{webhookBaseUrl}</span>
                   </p>
-                )}
-              </div>
-            )}
-
-            {/* Linear OAuth connection picker */}
-            {form.linearEnabled && (
-              <div className="mt-3 space-y-2" data-testid="linear-connection-picker">
-                {linearConnectionsLoading ? (
-                  <p className="text-[10px] text-cc-muted">Loading connections...</p>
-                ) : linearConnections.length === 0 ? (
-                  <p className="text-[10px] text-cc-muted">
-                    No OAuth connections found.{" "}
-                    <a href="#/agents?setup=linear" className="text-cc-primary underline">
-                      Set up a Linear OAuth app
-                    </a>{" "}
-                    first.
-                  </p>
-                ) : (
-                  <>
-                    <label className="block text-[10px] text-cc-muted mb-1">OAuth Connection</label>
-                    <div className="space-y-1">
-                      {linearConnections.map((conn) => (
-                        <button
-                          key={conn.id}
-                          type="button"
-                          onClick={() => updateField("linearOAuthConnectionId", conn.id)}
-                          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-xs transition-colors cursor-pointer ${
-                            form.linearOAuthConnectionId === conn.id
-                              ? "border-cc-primary bg-cc-primary/10 text-cc-fg"
-                              : "border-cc-border bg-cc-input-bg text-cc-muted hover:text-cc-fg hover:border-cc-primary/50"
-                          }`}
-                        >
-                          <span className="font-medium">{conn.name}</span>
-                          <span
-                            className={`px-1.5 py-0.5 text-[10px] rounded-full ${
-                              conn.status === "connected"
-                                ? "bg-emerald-500/15 text-emerald-400"
-                                : "bg-cc-muted/15 text-cc-muted"
-                            }`}
-                          >
-                            {conn.status === "connected" ? "Connected" : "Not connected"}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-[10px] text-cc-muted">
-                      This agent will respond to @mentions in Linear.{" "}
-                      <a href="#/agents?setup=linear" className="text-cc-primary underline">
-                        Manage connections
-                      </a>
-                    </p>
-                  </>
                 )}
               </div>
             )}

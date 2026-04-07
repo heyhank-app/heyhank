@@ -299,7 +299,7 @@ describe("updateEnv", () => {
 // ===========================================================================
 describe("settings", () => {
   it("sends GET to /api/settings", async () => {
-    const settings = { anthropicApiKeyConfigured: true, anthropicModel: "claude-sonnet-4-6", linearApiKeyConfigured: false };
+    const settings = { anthropicApiKeyConfigured: true, anthropicModel: "claude-sonnet-4-6" };
     mockFetch.mockResolvedValueOnce(mockResponse(settings));
 
     const result = await api.getSettings();
@@ -310,75 +310,15 @@ describe("settings", () => {
   });
 
   it("sends PUT to /api/settings", async () => {
-    const settings = { anthropicApiKeyConfigured: true, anthropicModel: "claude-sonnet-4-6", linearApiKeyConfigured: true };
+    const settings = { anthropicApiKeyConfigured: true, anthropicModel: "claude-sonnet-4-6" };
     mockFetch.mockResolvedValueOnce(mockResponse(settings));
 
-    await api.updateSettings({ anthropicApiKey: "sk-ant-key", linearApiKey: "lin_api_123" });
+    await api.updateSettings({ anthropicApiKey: "sk-ant-key" });
 
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe("/api/settings");
     expect(opts.method).toBe("PUT");
-    expect(JSON.parse(opts.body)).toEqual({ anthropicApiKey: "sk-ant-key", linearApiKey: "lin_api_123" });
-  });
-
-  it("searches Linear issues with query + limit", async () => {
-    const data = { issues: [{ id: "1", identifier: "ENG-1", title: "Fix", description: "", url: "", branchName: "", priorityLabel: "", stateName: "", stateType: "", teamName: "", teamKey: "", teamId: "" }] };
-    mockFetch.mockResolvedValueOnce(mockResponse(data));
-
-    const result = await api.searchLinearIssues("auth bug", 5);
-    const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/issues?query=auth%20bug&limit=5");
-    expect(result).toEqual(data);
-  });
-
-  it("surfaces backend error message for Linear issue search", async () => {
-    mockFetch.mockResolvedValueOnce(mockResponse({ error: "Linear token invalid" }, 502));
-
-    await expect(api.searchLinearIssues("auth bug", 5)).rejects.toThrow("Linear token invalid");
-  });
-
-  it("gets Linear connection status", async () => {
-    const data = {
-      connected: true,
-      viewerName: "Ada",
-      viewerEmail: "ada@example.com",
-      teamName: "Engineering",
-      teamKey: "ENG",
-    };
-    mockFetch.mockResolvedValueOnce(mockResponse(data));
-
-    const result = await api.getLinearConnection();
-    const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/connection");
-    expect(result).toEqual(data);
-  });
-
-  it("transitions a Linear issue", async () => {
-    const data = { ok: true, skipped: false };
-    mockFetch.mockResolvedValueOnce(mockResponse(data));
-
-    const result = await api.transitionLinearIssue("issue-123");
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/issues/issue-123/transition");
-    expect(opts.method).toBe("POST");
-    expect(JSON.parse(opts.body)).toEqual({});
-    expect(result).toEqual(data);
-  });
-
-  it("surfaces backend error for Linear issue transition", async () => {
-    mockFetch.mockResolvedValueOnce(mockResponse({ error: "Linear transition failed" }, 502));
-
-    await expect(api.transitionLinearIssue("issue-123")).rejects.toThrow("Linear transition failed");
-  });
-
-  it("fetches Linear workflow states", async () => {
-    const data = { teams: [{ id: "t1", key: "ENG", name: "Engineering", states: [{ id: "s1", name: "In Progress", type: "started" }] }] };
-    mockFetch.mockResolvedValueOnce(mockResponse(data));
-
-    const result = await api.getLinearStates();
-    const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/states");
-    expect(result).toEqual(data);
+    expect(JSON.parse(opts.body)).toEqual({ anthropicApiKey: "sk-ant-key" });
   });
 
   it("verifyAnthropicKey sends POST to /api/settings/anthropic/verify", async () => {
@@ -864,155 +804,6 @@ describe("environment API", () => {
       name: "My Env",
       variables: { KEY: "val" },
     });
-  });
-});
-
-// ===========================================================================
-// Linear project API
-// ===========================================================================
-describe("Linear project API", () => {
-  it("listLinearProjects sends GET to /api/linear/projects", async () => {
-    const data = { projects: [{ id: "p1", name: "Q1 Roadmap", state: "started" }] };
-    mockFetch.mockResolvedValueOnce(mockResponse(data));
-
-    const result = await api.listLinearProjects();
-
-    const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/projects");
-    expect(result).toEqual(data);
-  });
-
-  it("getLinearProjectIssues sends GET with projectId and limit", async () => {
-    const data = { issues: [{ id: "i1", identifier: "ENG-1", title: "Task" }] };
-    mockFetch.mockResolvedValueOnce(mockResponse(data));
-
-    const result = await api.getLinearProjectIssues("proj-1", 10);
-
-    const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/project-issues?projectId=proj-1&limit=10");
-    expect(result).toEqual(data);
-  });
-
-  it("getLinearProjectIssues uses default limit of 15", async () => {
-    mockFetch.mockResolvedValueOnce(mockResponse({ issues: [] }));
-
-    await api.getLinearProjectIssues("proj-1");
-
-    const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/project-issues?projectId=proj-1&limit=15");
-  });
-
-  it("getLinearProjectMapping sends GET with repoRoot", async () => {
-    const data = { mapping: { repoRoot: "/repo", projectId: "p1", projectName: "Q1", createdAt: 1, updatedAt: 1 } };
-    mockFetch.mockResolvedValueOnce(mockResponse(data));
-
-    const result = await api.getLinearProjectMapping("/repo");
-
-    const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe(`/api/linear/project-mappings?repoRoot=${encodeURIComponent("/repo")}`);
-    expect(result).toEqual(data);
-  });
-
-  it("upsertLinearProjectMapping sends PUT to /api/linear/project-mappings", async () => {
-    const mapping = { repoRoot: "/repo", projectId: "p1", projectName: "Q1", createdAt: 1, updatedAt: 2 };
-    mockFetch.mockResolvedValueOnce(mockResponse({ mapping }));
-
-    const result = await api.upsertLinearProjectMapping({
-      repoRoot: "/repo",
-      projectId: "p1",
-      projectName: "Q1",
-    });
-
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/project-mappings");
-    expect(opts.method).toBe("PUT");
-    expect(JSON.parse(opts.body)).toEqual({ repoRoot: "/repo", projectId: "p1", projectName: "Q1" });
-    expect(result).toEqual({ mapping });
-  });
-
-  it("removeLinearProjectMapping sends DELETE with repoRoot body", async () => {
-    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
-
-    await api.removeLinearProjectMapping("/repo");
-
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/project-mappings");
-    expect(opts.method).toBe("DELETE");
-    expect(JSON.parse(opts.body)).toEqual({ repoRoot: "/repo" });
-  });
-});
-
-// ===========================================================================
-// Linear issue <-> session association
-// ===========================================================================
-describe("Linear issue-session linking", () => {
-  const mockIssue = {
-    id: "iss-1",
-    identifier: "ENG-1",
-    title: "Fix bug",
-    description: "",
-    url: "https://linear.app/ENG-1",
-    branchName: "fix-bug",
-    priorityLabel: "High",
-    stateName: "In Progress",
-    stateType: "started",
-    teamName: "Engineering",
-    teamKey: "ENG",
-    teamId: "t1",
-  };
-
-  it("linkLinearIssue sends PUT with issue body", async () => {
-    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
-
-    await api.linkLinearIssue("sess-1", mockIssue);
-
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/sessions/sess-1/linear-issue");
-    expect(opts.method).toBe("PUT");
-    expect(JSON.parse(opts.body)).toEqual(mockIssue);
-  });
-
-  it("unlinkLinearIssue sends DELETE", async () => {
-    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
-
-    await api.unlinkLinearIssue("sess-1");
-
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/sessions/sess-1/linear-issue");
-    expect(opts.method).toBe("DELETE");
-  });
-
-  it("getLinkedLinearIssue sends GET without refresh by default", async () => {
-    const data = { issue: mockIssue, comments: [], labels: [] };
-    mockFetch.mockResolvedValueOnce(mockResponse(data));
-
-    const result = await api.getLinkedLinearIssue("sess-1");
-
-    const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/sessions/sess-1/linear-issue");
-    expect(result).toEqual(data);
-  });
-
-  it("getLinkedLinearIssue sends GET with refresh=true", async () => {
-    mockFetch.mockResolvedValueOnce(mockResponse({ issue: null }));
-
-    await api.getLinkedLinearIssue("sess-1", true);
-
-    const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/sessions/sess-1/linear-issue?refresh=true");
-  });
-
-  it("addLinearComment sends POST with body text", async () => {
-    const comment = { id: "c1", body: "Hello", createdAt: "2026-01-01", userName: "Ada" };
-    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true, comment }));
-
-    const result = await api.addLinearComment("iss-1", "Hello");
-
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/issues/iss-1/comments");
-    expect(opts.method).toBe("POST");
-    expect(JSON.parse(opts.body)).toEqual({ body: "Hello" });
-    expect(result).toEqual({ ok: true, comment });
   });
 });
 
@@ -1921,125 +1712,6 @@ describe("browser preview API", () => {
     expect(opts.method).toBe("POST");
     expect(JSON.parse(opts.body)).toEqual({ url: "https://example.com" });
     expect(result).toEqual({ ok: true });
-  });
-});
-
-// ===========================================================================
-// Linear OAuth API (Agent Interaction SDK)
-// ===========================================================================
-describe("Linear OAuth API", () => {
-  it("getLinearOAuthStatus sends GET without params when no stagingId", async () => {
-    const data = { configured: true, hasClientId: true, hasClientSecret: true, hasWebhookSecret: true, hasAccessToken: true };
-    mockFetch.mockResolvedValueOnce(mockResponse(data));
-
-    const result = await api.getLinearOAuthStatus();
-
-    const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/oauth/status");
-    expect(result).toEqual(data);
-  });
-
-  it("getLinearOAuthStatus includes stagingId query param", async () => {
-    const data = { configured: false, hasClientId: true, hasClientSecret: true, hasWebhookSecret: false, hasAccessToken: false };
-    mockFetch.mockResolvedValueOnce(mockResponse(data));
-
-    const result = await api.getLinearOAuthStatus("staging-abc");
-
-    const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/oauth/status?stagingId=staging-abc");
-    expect(result).toEqual(data);
-  });
-
-  it("getLinearOAuthAuthorizeUrl sends GET without params", async () => {
-    const data = { url: "https://linear.app/oauth/authorize?client_id=xxx" };
-    mockFetch.mockResolvedValueOnce(mockResponse(data));
-
-    const result = await api.getLinearOAuthAuthorizeUrl();
-
-    const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/oauth/authorize-url");
-    expect(result).toEqual(data);
-  });
-
-  it("getLinearOAuthAuthorizeUrl includes returnTo and stagingId params", async () => {
-    const data = { url: "https://linear.app/oauth/authorize?client_id=xxx" };
-    mockFetch.mockResolvedValueOnce(mockResponse(data));
-
-    const result = await api.getLinearOAuthAuthorizeUrl("/#/settings", "staging-xyz");
-
-    const [url] = mockFetch.mock.calls[0];
-    expect(url).toContain("/api/linear/oauth/authorize-url?");
-    expect(url).toContain("returnTo=%2F%23%2Fsettings");
-    expect(url).toContain("stagingId=staging-xyz");
-    expect(result).toEqual(data);
-  });
-
-  it("disconnectLinearOAuth sends POST to /linear/oauth/disconnect", async () => {
-    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
-
-    const result = await api.disconnectLinearOAuth();
-
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/oauth/disconnect");
-    expect(opts.method).toBe("POST");
-    expect(result).toEqual({ ok: true });
-  });
-});
-
-// ===========================================================================
-// Linear OAuth staging slots API
-// ===========================================================================
-describe("Linear OAuth staging API", () => {
-  it("createLinearStaging sends POST with credentials", async () => {
-    const creds = { clientId: "cid", clientSecret: "csec", webhookSecret: "wsec" };
-    mockFetch.mockResolvedValueOnce(mockResponse({ stagingId: "slot-123" }));
-
-    const result = await api.createLinearStaging(creds);
-
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/oauth/staging");
-    expect(opts.method).toBe("POST");
-    expect(JSON.parse(opts.body)).toEqual(creds);
-    expect(result).toEqual({ stagingId: "slot-123" });
-  });
-
-  it("getLinearStagingStatus sends GET with encoded id", async () => {
-    const data = { exists: true, hasAccessToken: true, hasClientId: true, hasClientSecret: true };
-    mockFetch.mockResolvedValueOnce(mockResponse(data));
-
-    const result = await api.getLinearStagingStatus("slot-123");
-
-    const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/oauth/staging/slot-123/status");
-    expect(result).toEqual(data);
-  });
-
-  it("deleteLinearStaging sends DELETE with encoded id", async () => {
-    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
-
-    await api.deleteLinearStaging("slot-123");
-
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/oauth/staging/slot-123");
-    expect(opts.method).toBe("DELETE");
-  });
-});
-
-// ===========================================================================
-// createLinearIssue — covers previously untested one-liner
-// ===========================================================================
-describe("createLinearIssue", () => {
-  it("sends POST to /api/linear/issues", async () => {
-    const input = { title: "Bug report", teamId: "team-1" };
-    const responseData = { ok: true, issue: { id: "ISS-1", ...input } };
-    mockFetch.mockResolvedValueOnce(mockResponse(responseData));
-
-    const result = await api.createLinearIssue(input as Parameters<typeof api.createLinearIssue>[0]);
-
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("/api/linear/issues");
-    expect(opts.method).toBe("POST");
-    expect(result).toEqual(responseData);
   });
 });
 

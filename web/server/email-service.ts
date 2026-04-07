@@ -211,7 +211,7 @@ export async function readEmail(account: EmailAccount, uid: number, folder = "IN
   return withImap(account, async (client) => {
     const lock = await client.getMailboxLock(folder);
     try {
-      const msg = await client.fetchOne(uid, { envelope: true, flags: true, source: true });
+      const msg = await client.fetchOne(String(uid), { envelope: true, flags: true, source: true }, { uid: true });
       if (!msg) return null;
 
       // Parse the raw source to extract text body
@@ -231,7 +231,7 @@ export async function readEmail(account: EmailAccount, uid: number, folder = "IN
       }
 
       // Mark as seen
-      await client.messageFlagsAdd(uid, ["\\Seen"]);
+      await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
 
       return {
         uid: msg.uid,

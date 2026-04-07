@@ -4,11 +4,12 @@
 import { mkdirSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { HEYHANK_HOME } from "./paths.js";
+import { getSettings } from "./settings-manager.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const MEDIA_DIR = join(HEYHANK_HOME, "media");
-const API_KEY = () => process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "";
+const API_KEY = () => getSettings().geminiApiKey || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "";
 
 // Models that use the predict endpoint (Imagen)
 const PREDICT_MODELS = new Set([

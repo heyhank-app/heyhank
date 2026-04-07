@@ -43,7 +43,7 @@ function loadOrGenerateVapidKeys(): VapidKeys {
       const raw = readFileSync(VAPID_FILE, "utf-8");
       vapidKeys = JSON.parse(raw) as VapidKeys;
       webpush.setVapidDetails(
-        "mailto:maxx.stoeger@icloud.com",
+        "mailto:noreply@heyhank.dev",
         vapidKeys.publicKey,
         vapidKeys.privateKey,
       );
@@ -69,7 +69,7 @@ function loadOrGenerateVapidKeys(): VapidKeys {
   }
 
   webpush.setVapidDetails(
-    "mailto:maxx.stoeger@icloud.com",
+    "mailto:noreply@heyhank.dev",
     keys.publicKey,
     keys.privateKey,
   );

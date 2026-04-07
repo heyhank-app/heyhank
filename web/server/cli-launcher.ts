@@ -164,8 +164,10 @@ export interface LaunchOptions {
   resumeSessionAt?: string;
   /** Fork a new Claude session when resuming from prior context. */
   forkSession?: boolean;
-  /** Optional system prompt to inject into Codex sessions (e.g. Linear context). */
+  /** Optional system prompt to inject into Codex sessions. */
   systemPrompt?: string;
+  /** Claude Code --provider flag value (e.g. "openrouter", "mistral") */
+  provider?: string;
   /** Sandbox profile slug used for this session */
   sandboxSlug?: string;
 }
@@ -529,6 +531,9 @@ export class CliLauncher {
 
     if (options.model) {
       args.push("--model", options.model);
+    }
+    if (options.provider && options.provider !== "anthropic") {
+      args.push("--provider", options.provider);
     }
     if (effectivePermissionMode) {
       args.push("--permission-mode", effectivePermissionMode);

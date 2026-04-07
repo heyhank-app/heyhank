@@ -45,7 +45,6 @@ export const useStore = create<AppState>((...args) => ({
       recentlyRenamed: new Set(),
       mcpServers: new Map(),
       prStatus: new Map(),
-      linkedLinearIssues: new Map(),
       // Chat
       messages: new Map(),
       streaming: new Map(),

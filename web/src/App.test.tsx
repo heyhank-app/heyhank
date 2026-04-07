@@ -159,10 +159,6 @@ vi.mock("./components/IntegrationsPage.js", () => ({
   IntegrationsPage: () => <div data-testid="integrations-page">IntegrationsPage</div>,
 }));
 
-vi.mock("./components/LinearSettingsPage.js", () => ({
-  LinearSettingsPage: () => <div data-testid="linear-settings-page">LinearSettingsPage</div>,
-}));
-
 vi.mock("./components/PromptsPage.js", () => ({
   PromptsPage: () => <div data-testid="prompts-page">PromptsPage</div>,
 }));
@@ -367,14 +363,6 @@ describe("App", () => {
       render(<App />);
       await waitFor(() => {
         expect(screen.getByTestId("integrations-page")).toBeInTheDocument();
-      });
-    });
-
-    it("renders LinearSettingsPage for integration-linear route", async () => {
-      (parseHash as ReturnType<typeof vi.fn>).mockReturnValue({ page: "integration-linear" });
-      render(<App />);
-      await waitFor(() => {
-        expect(screen.getByTestId("linear-settings-page")).toBeInTheDocument();
       });
     });
 

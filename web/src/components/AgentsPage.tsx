@@ -2,25 +2,17 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { api, type AgentInfo, type AgentExport } from "../api.js";
 import { useStore } from "../store.js";
 import { PublicUrlBanner } from "./PublicUrlBanner.js";
-import { WizardStepIndicator } from "./wizard/WizardStepIndicator.js";
-import { WizardStepIntro } from "./wizard/WizardStepIntro.js";
-import { WizardStepSelectConnection } from "./wizard/WizardStepSelectConnection.js";
-import { WizardStepAgent } from "./wizard/WizardStepAgent.js";
-import { WizardStepDone } from "./wizard/WizardStepDone.js";
-import { LinearLogo } from "./LinearLogo.js";
 import type { Route } from "../utils/routing.js";
 import { AgentIcon } from "./AgentIcon.js";
 import { AgentCard, getWebhookUrl } from "./AgentCard.js";
 import { AgentEditor, type AgentFormData, EMPTY_FORM } from "./AgentEditor.js";
-import { LinearAgentEditor } from "./LinearAgentEditor.js";
 
 // ─── Filter types ────────────────────────────────────────────────────────────
 
-type AgentFilter = "all" | "linear" | "scheduled" | "webhook";
+type AgentFilter = "all" | "scheduled" | "webhook";
 
 const FILTER_LABELS: Record<AgentFilter, string> = {
   all: "All",
-  linear: "Linear",
   scheduled: "Scheduled",
   webhook: "Webhook",
 };
@@ -37,7 +29,7 @@ export function AgentsPage({ route }: Props) {
   const publicUrl = useStore((s) => s.publicUrl);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"list" | "edit" | "edit-linear" | "setup-linear">("list");
+  const [view, setView] = useState<"list" | "pick-template" | "edit">("list");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<AgentFormData>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -46,54 +38,13 @@ export function AgentsPage({ route }: Props) {
   const [runInput, setRunInput] = useState("");
   const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<AgentFilter>("all");
-  const [linearOAuthConfigured, setLinearOAuthConfigured] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // ── Linear wizard state ──
-  type WizardStep = 1 | 2 | 3 | 4;
-  const WIZARD_STEPS = [
-    { label: "Intro" },
-    { label: "Connection" },
-    { label: "Agent" },
-    { label: "Done" },
-  ];
-
-  const [wizardStep, setWizardStep] = useState<WizardStep>(1);
-  const [wizardAgentName, setWizardAgentName] = useState("");
-  const [wizardCreatedAgentId, setWizardCreatedAgentId] = useState<string | null>(null);
-  const [wizardEditingAgent, setWizardEditingAgent] = useState<AgentInfo | null>(null);
-  const [wizardSelectedConnectionId, setWizardSelectedConnectionId] = useState<string | null>(null);
-
-  // linearOAuthConfigured is derived from agents list in loadAgents below
-
-  // Check hash for wizard entry params
-  useEffect(() => {
-    const hash = window.location.hash;
-    if (hash.includes("setup=linear")) {
-      startLinearSetup();
-      history.replaceState(null, "", "#/agents");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Load agents
   const loadAgents = useCallback(async () => {
     try {
       const list = await api.listAgents();
       setAgents(list);
-      // Check if any OAuth connections exist (so the Linear trigger toggle is shown)
-      const hasLinearAgent = list.some(a => a.triggers?.linear?.enabled && a.triggers?.linear?.hasAccessToken);
-      if (hasLinearAgent) {
-        setLinearOAuthConfigured(true);
-      } else {
-        // Also check if standalone OAuth connections exist
-        try {
-          const { connections } = await api.listLinearOAuthConnections();
-          setLinearOAuthConfigured(connections.length > 0);
-        } catch {
-          setLinearOAuthConfigured(false);
-        }
-      }
     } catch {
       // ignore
     } finally {
@@ -120,6 +71,13 @@ export function AgentsPage({ route }: Props) {
   function startCreate() {
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setError("");
+    setView("pick-template");
+  }
+
+  function startCreateFromTemplate(template: AgentFormData) {
+    setEditingId(null);
+    setForm(template);
     setError("");
     setView("edit");
   }
@@ -150,16 +108,9 @@ export function AgentsPage({ route }: Props) {
       scheduleEnabled: agent.triggers?.schedule?.enabled ?? false,
       scheduleExpression: agent.triggers?.schedule?.expression || "0 8 * * *",
       scheduleRecurring: agent.triggers?.schedule?.recurring ?? true,
-      linearEnabled: agent.triggers?.linear?.enabled ?? false,
-      linearOAuthConnectionId: agent.triggers?.linear?.oauthConnectionId ?? "",
     });
     setError("");
-    // Route Linear agents to the dedicated editor
-    if (agent.triggers?.linear?.enabled) {
-      setView("edit-linear");
-    } else {
-      setView("edit");
-    }
+    setView("edit");
   }
 
   function cancelEdit() {
@@ -168,64 +119,6 @@ export function AgentsPage({ route }: Props) {
     setError("");
     window.location.hash = "#/agents";
   }
-
-  // ── Linear wizard helpers ──
-
-  function startLinearSetup() {
-    setView("setup-linear");
-    setWizardStep(1);
-  }
-
-  function cancelLinearSetup() {
-    setView("list");
-    setWizardStep(1);
-    setWizardAgentName("");
-    setWizardCreatedAgentId(null);
-    setWizardEditingAgent(null);
-    setWizardSelectedConnectionId(null);
-  }
-
-  const wizardCompletedSteps = new Set<number>();
-  if (wizardSelectedConnectionId) {
-    wizardCompletedSteps.add(1);
-    wizardCompletedSteps.add(2);
-  }
-  if (wizardCreatedAgentId) {
-    wizardCompletedSteps.add(3);
-  }
-
-  const handleWizardAgentCreated = useCallback((id: string, name: string) => {
-    setWizardCreatedAgentId(id);
-    setWizardAgentName(name);
-    setWizardStep(4);
-  }, []);
-
-  const handleWizardFinish = useCallback(() => {
-    setView("list");
-    setWizardStep(1);
-    setWizardAgentName("");
-    setWizardCreatedAgentId(null);
-    setWizardSelectedConnectionId(null);
-    loadAgents();
-  }, [loadAgents]);
-
-  // "Create Another" with the same OAuth app — reuse connection, skip to agent config
-  const handleWizardAddAnotherSameApp = useCallback(() => {
-    // Keep wizardSelectedConnectionId as-is
-    setWizardAgentName("");
-    setWizardEditingAgent(null);
-    setWizardCreatedAgentId(null);
-    setWizardStep(3);
-  }, []);
-
-  // "Create Another" with a different OAuth app — go back to connection selection
-  const handleWizardAddAnotherNewApp = useCallback(() => {
-    setWizardCreatedAgentId(null);
-    setWizardAgentName("");
-    setWizardEditingAgent(null);
-    setWizardSelectedConnectionId(null);
-    setWizardStep(2);
-  }, []);
 
   async function handleSave() {
     setSaving(true);
@@ -264,10 +157,6 @@ export function AgentsPage({ route }: Props) {
             expression: form.scheduleExpression,
             recurring: form.scheduleRecurring,
           },
-          linear: {
-            enabled: form.linearEnabled,
-            ...(form.linearOAuthConnectionId ? { oauthConnectionId: form.linearOAuthConnectionId } : {}),
-          },
         },
       };
 
@@ -289,12 +178,7 @@ export function AgentsPage({ route }: Props) {
   }
 
   async function handleDelete(id: string) {
-    const agent = agents.find(a => a.id === id);
-    const isLinear = agent?.triggers?.linear?.enabled;
-    const message = isLinear
-      ? "Delete this Linear agent? It will no longer respond to @mentions in Linear."
-      : "Delete this agent?";
-    if (!confirm(message)) return;
+    if (!confirm("Delete this agent?")) return;
     try {
       await api.deleteAgent(id);
       await loadAgents();
@@ -382,6 +266,16 @@ export function AgentsPage({ route }: Props) {
 
   // ── Render ──
 
+  if (view === "pick-template") {
+    return (
+      <AgentTemplatePicker
+        onSelect={startCreateFromTemplate}
+        onBlank={() => { setForm(EMPTY_FORM); setView("edit"); }}
+        onCancel={() => setView("list")}
+      />
+    );
+  }
+
   if (view === "edit") {
     return <AgentEditor
       form={form}
@@ -392,104 +286,19 @@ export function AgentsPage({ route }: Props) {
       saving={saving}
       onSave={handleSave}
       onCancel={cancelEdit}
-      linearOAuthConfigured={linearOAuthConfigured}
     />;
-  }
-
-  if (view === "edit-linear" && editingId) {
-    return <LinearAgentEditor
-      form={form}
-      setForm={setForm}
-      editingId={editingId}
-      error={error}
-      saving={saving}
-      onSave={handleSave}
-      onCancel={cancelEdit}
-      onOpenGenericEditor={() => setView("edit")}
-    />;
-  }
-
-  if (view === "setup-linear") {
-    return (
-      <main className="h-full overflow-y-auto bg-cc-bg">
-        <div className="max-w-3xl mx-auto px-4 sm:px-8 py-6 sm:py-10">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center gap-3">
-              <LinearLogo className="w-6 h-6 text-cc-fg" />
-              <h1 className="text-xl font-semibold text-cc-fg">Linear Agent Setup</h1>
-            </div>
-            <button
-              onClick={cancelLinearSetup}
-              className="px-3 py-2 rounded-lg text-sm text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-          </div>
-
-          {/* Step indicator */}
-          <WizardStepIndicator
-            steps={WIZARD_STEPS}
-            currentStep={wizardStep}
-            completedSteps={wizardCompletedSteps}
-          />
-
-          {/* Step content */}
-          <div className="bg-cc-card border border-cc-border rounded-xl p-5 sm:p-7">
-            {wizardStep === 1 && (
-              <WizardStepIntro onNext={() => setWizardStep(2)} />
-            )}
-            {wizardStep === 2 && (
-              <WizardStepSelectConnection
-                onNext={(connectionId) => {
-                  setWizardSelectedConnectionId(connectionId);
-                  setWizardStep(3);
-                }}
-                onBack={() => setWizardStep(1)}
-                selectedConnectionId={wizardSelectedConnectionId}
-              />
-            )}
-            {wizardStep === 3 && (
-              <WizardStepAgent
-                onNext={handleWizardAgentCreated}
-                onBack={() => setWizardStep(2)}
-                oauthConnectionId={wizardSelectedConnectionId}
-                existingAgent={wizardEditingAgent ? {
-                  id: wizardEditingAgent.id,
-                  name: wizardEditingAgent.name,
-                  prompt: wizardEditingAgent.prompt,
-                  backendType: wizardEditingAgent.backendType,
-                  model: wizardEditingAgent.model,
-                  cwd: wizardEditingAgent.cwd,
-                } : undefined}
-              />
-            )}
-            {wizardStep === 4 && (
-              <WizardStepDone
-                agentName={wizardAgentName}
-                onFinish={handleWizardFinish}
-                onAddAnotherSameApp={handleWizardAddAnotherSameApp}
-                onAddAnotherNewApp={handleWizardAddAnotherNewApp}
-              />
-            )}
-          </div>
-        </div>
-      </main>
-    );
   }
 
   // ── Filtering ──
 
   const filterCounts: Record<AgentFilter, number> = {
     all: agents.length,
-    linear: agents.filter(a => a.triggers?.linear?.enabled).length,
     scheduled: agents.filter(a => a.triggers?.schedule?.enabled).length,
     webhook: agents.filter(a => a.triggers?.webhook?.enabled).length,
   };
 
   const filteredAgents = agents.filter(agent => {
     switch (activeFilter) {
-      case "linear": return agent.triggers?.linear?.enabled === true;
       case "scheduled": return agent.triggers?.schedule?.enabled === true;
       case "webhook": return agent.triggers?.webhook?.enabled === true;
       default: return true;
@@ -539,7 +348,7 @@ export function AgentsPage({ route }: Props) {
         {/* Filter tabs */}
         {!loading && agents.length > 0 && (
           <div className="flex items-center gap-1 mb-4" data-testid="filter-tabs">
-            {(["all", "linear", "scheduled", "webhook"] as AgentFilter[]).map((f) => (
+            {(["all", "scheduled", "webhook"] as AgentFilter[]).map((f) => (
               <button
                 key={f}
                 onClick={() => setActiveFilter(f)}
@@ -568,30 +377,11 @@ export function AgentsPage({ route }: Props) {
           </div>
         ) : filteredAgents.length === 0 ? (
           <div className="text-center py-12">
-            {activeFilter === "linear" ? (
-              <>
-                <div className="mb-3 flex justify-center text-cc-muted">
-                  <LinearLogo className="w-6 h-6" />
-                </div>
-                <p className="text-sm text-cc-muted">No Linear agents</p>
-                <p className="text-xs text-cc-muted mt-1">Create a Linear agent to respond to @mentions in Linear issues.</p>
-                <button
-                  onClick={startLinearSetup}
-                  className="mt-3 px-3 py-1.5 text-xs rounded-lg bg-cc-primary text-white hover:bg-cc-primary-hover transition-colors cursor-pointer inline-flex items-center gap-1.5"
-                >
-                  <LinearLogo className="w-3 h-3" />
-                  Setup Linear Agent
-                </button>
-              </>
-            ) : (
-              <>
-                <p className="text-sm text-cc-muted">No {FILTER_LABELS[activeFilter].toLowerCase()} agents</p>
-                <p className="text-xs text-cc-muted mt-1">
-                  {activeFilter === "scheduled" && "Create an agent with a schedule trigger to see it here."}
-                  {activeFilter === "webhook" && "Create an agent with a webhook trigger to see it here."}
-                </p>
-              </>
-            )}
+            <p className="text-sm text-cc-muted">No {FILTER_LABELS[activeFilter].toLowerCase()} agents</p>
+            <p className="text-xs text-cc-muted mt-1">
+              {activeFilter === "scheduled" && "Create an agent with a schedule trigger to see it here."}
+              {activeFilter === "webhook" && "Create an agent with a webhook trigger to see it here."}
+            </p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -650,6 +440,156 @@ export function AgentsPage({ route }: Props) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Agent Templates ──────────────────────────────────────────────────────
+
+interface AgentTemplate {
+  name: string;
+  icon: string;
+  description: string;
+  color: string;
+  form: Partial<AgentFormData>;
+}
+
+const AGENT_TEMPLATES: AgentTemplate[] = [
+  {
+    name: "Coding Agent",
+    icon: "code",
+    description: "Develops features, fixes bugs, writes tests. Full file and terminal access.",
+    color: "text-blue-400",
+    form: {
+      name: "Coding Agent",
+      description: "Develops features, fixes bugs, writes tests",
+      icon: "code",
+      prompt: "You are a coding agent. Help the user with software development tasks: writing code, fixing bugs, refactoring, writing tests, and code reviews. Be thorough and follow best practices.",
+      permissionMode: "acceptEdits",
+    },
+  },
+  {
+    name: "Monitoring Agent",
+    icon: "activity",
+    description: "Checks server health: CPU, RAM, disk, Docker, PM2. Great for cron schedules.",
+    color: "text-green-400",
+    form: {
+      name: "Monitoring Agent",
+      description: "Checks server health and reports issues",
+      icon: "activity",
+      prompt: "You are a monitoring agent. Check server health: CPU usage, RAM, disk space, running processes (PM2, Docker), and network status. Report any issues found. Be concise and actionable.",
+      permissionMode: "plan",
+    },
+  },
+  {
+    name: "Content Agent",
+    icon: "pen-tool",
+    description: "Creates social media posts, generates images and videos via Gemini.",
+    color: "text-pink-400",
+    form: {
+      name: "Content Agent",
+      description: "Creates social media content, images, and videos",
+      icon: "pen-tool",
+      prompt: "You are a content creation agent. Help create social media posts, marketing copy, blog articles, and visual content. You can generate images with Imagen and videos with Veo. Be creative and on-brand.",
+    },
+  },
+  {
+    name: "Research Agent",
+    icon: "search",
+    description: "Researches topics, summarizes findings, gathers competitive intelligence.",
+    color: "text-purple-400",
+    form: {
+      name: "Research Agent",
+      description: "Researches topics and summarizes findings",
+      icon: "search",
+      prompt: "You are a research agent. Help the user research topics thoroughly: gather information, analyze data, compare options, and provide well-structured summaries with sources. Be objective and comprehensive.",
+    },
+  },
+  {
+    name: "DevOps Agent",
+    icon: "server",
+    description: "Manages deployments, CI/CD, Docker, Nginx, SSL certificates.",
+    color: "text-orange-400",
+    form: {
+      name: "DevOps Agent",
+      description: "Manages deployments, infrastructure, and CI/CD",
+      icon: "server",
+      prompt: "You are a DevOps agent. Help with server management, deployments, CI/CD pipelines, Docker, Nginx configuration, SSL certificates, and infrastructure automation. Prioritize security and reliability.",
+      permissionMode: "acceptEdits",
+    },
+  },
+  {
+    name: "Data Agent",
+    icon: "database",
+    description: "Analyzes data, writes SQL queries, creates reports and visualizations.",
+    color: "text-yellow-400",
+    form: {
+      name: "Data Agent",
+      description: "Analyzes data and creates reports",
+      icon: "database",
+      prompt: "You are a data analysis agent. Help with SQL queries, data analysis, creating reports, and data visualization. Be precise with numbers and provide clear insights.",
+    },
+  },
+];
+
+function AgentTemplatePicker({
+  onSelect,
+  onBlank,
+  onCancel,
+}: {
+  onSelect: (form: AgentFormData) => void;
+  onBlank: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="h-full overflow-auto">
+      <div className="mx-auto max-w-3xl px-6 py-8">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-lg font-bold text-cc-fg">New Agent</h1>
+            <p className="text-xs text-cc-muted mt-1">Start from a template or create from scratch.</p>
+          </div>
+          <button
+            onClick={onCancel}
+            className="px-3 py-1.5 text-xs rounded-lg border border-cc-border text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+
+        {/* Blank agent */}
+        <button
+          onClick={onBlank}
+          className="w-full mb-4 p-4 rounded-xl border-2 border-dashed border-cc-border hover:border-cc-primary/50 bg-cc-card hover:bg-cc-hover transition-colors text-left group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-cc-hover flex items-center justify-center text-cc-muted group-hover:text-cc-fg">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </div>
+            <div>
+              <div className="text-sm font-medium text-cc-fg">Blank Agent</div>
+              <div className="text-xs text-cc-muted">Start with an empty configuration</div>
+            </div>
+          </div>
+        </button>
+
+        {/* Templates grid */}
+        <h2 className="text-xs font-semibold text-cc-muted uppercase tracking-wider mb-3">Templates</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {AGENT_TEMPLATES.map((tpl) => (
+            <button
+              key={tpl.name}
+              onClick={() => onSelect({ ...EMPTY_FORM, ...tpl.form })}
+              className="p-4 rounded-xl border border-cc-border bg-cc-card hover:bg-cc-hover hover:border-cc-primary/30 transition-colors text-left"
+            >
+              <div className={`text-sm font-medium ${tpl.color}`}>{tpl.name}</div>
+              <div className="text-xs text-cc-muted mt-1 line-clamp-2">{tpl.description}</div>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

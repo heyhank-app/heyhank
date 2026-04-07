@@ -78,15 +78,6 @@ vi.mock("./image-pull-manager.js", () => ({
   },
 }));
 
-// Mock linear-connections
-vi.mock("./linear-connections.js", () => ({
-  getConnection: vi.fn(() => null),
-}));
-
-// Mock linear-prompt-builder
-vi.mock("./linear-prompt-builder.js", () => ({
-  buildLinearSystemPrompt: vi.fn(() => "linear prompt"),
-}));
 
 // Mock commands-discovery
 vi.mock("./commands-discovery.js", () => ({
@@ -113,8 +104,6 @@ import { containerManager } from "./container-manager.js";
 import { hasContainerClaudeAuth } from "./claude-container-auth.js";
 import { hasContainerCodexAuth } from "./codex-container-auth.js";
 import { imagePullManager } from "./image-pull-manager.js";
-import { getConnection } from "./linear-connections.js";
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -419,31 +408,6 @@ describe("executeSessionCreation", () => {
   it("works without progress callback (REST mode)", async () => {
     const result = await executeSessionCreation({ cwd: "/workspace" }, deps);
     expect(result.session.sessionId).toBe("sess-1");
-  });
-
-  // -- Linear connection injection --
-  it("injects LINEAR_API_KEY and system prompt when connection exists", async () => {
-    vi.mocked(getConnection).mockReturnValueOnce({
-      id: "conn-1",
-      name: "Test",
-      apiKey: "lin_api_test",
-    } as any);
-
-    await executeSessionCreation(
-      { cwd: "/workspace", linearConnectionId: "conn-1" },
-      deps,
-    );
-
-    expect(deps.launcher.launch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        env: expect.objectContaining({ LINEAR_API_KEY: "lin_api_test" }),
-      }),
-    );
-    // For claude backend, injectSystemPrompt should be called
-    expect(deps.wsBridge.injectSystemPrompt).toHaveBeenCalledWith(
-      "sess-1",
-      expect.any(String),
-    );
   });
 
   // -- Post-launch: container retracking --

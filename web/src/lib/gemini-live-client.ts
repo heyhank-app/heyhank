@@ -27,10 +27,17 @@ interface ActiveSession {
   cwd?: string;
 }
 
-function buildSystemPrompt(assistantName: string, agents: AgentInfo[], recentConversations?: ConversationContext[], activeSessions?: ActiveSession[]): string {
+export interface PhoneContact {
+  name: string;
+  phone: string;
+  notes?: string;
+}
+
+function buildSystemPrompt(assistantName: string, agents: AgentInfo[], recentConversations?: ConversationContext[], activeSessions?: ActiveSession[], userName?: string, contacts?: PhoneContact[]): string {
   const nameIntro = assistantName
     ? `You are "${assistantName}", a personal voice assistant on the HeyHank platform.`
     : `You are a personal voice assistant on the HeyHank platform.`;
+  const userIntro = userName ? `\nThe user's name is ${userName}. Address them by name when appropriate.` : "";
 
   const agentSection = agents.length > 0
     ? `\nAGENTS (configured on the platform):
@@ -44,7 +51,7 @@ When the user mentions an agent name (even approximately, e.g. "Max 2.0" for "Ag
 recognize it and start the appropriate session. Only ask if it is truly unclear.`
     : "";
 
-  return `${nameIntro}
+  return `${nameIntro}${userIntro}
 You speak English by default, unless the user speaks another language.
 Keep your answers short and natural — you are a voice assistant, not a text bot.
 
@@ -91,11 +98,17 @@ REMINDERS:
 EMAIL:
 - list_email_accounts: show configured email accounts
 - list_emails: list emails of an account (optional: unread only)
-- read_email: read an email (by UID)
+- read_email: read an email (by UID). ALWAYS read the body out loud. Summarize if long.
 - search_emails: search emails
-- send_email: send an email
-- reply_email: reply to an email
+- send_email: send a NEW email (needs: account, to, subject, body)
+- reply_email: reply to an email (needs: account, uid of original email, body text)
 - email_summary: unread emails across all accounts
+IMPORTANT email rules:
+- When reading emails, speak the content (from, subject, body) out loud.
+- When replying, confirm with the user what to say, then call reply_email with the uid of the original email.
+- When sending, ask for recipient, subject, and body if not provided.
+- Always confirm before actually sending: "Shall I send this?"
+- Use the first available email account if the user doesn't specify one.
 
 CALENDAR:
 - list_calendar_accounts: show configured calendar accounts
@@ -115,10 +128,55 @@ If the user assigns a complex task (create a website, write code, etc.), delegat
 
 TELEPHONY (phone calls):
 - make_call: Place a real phone call via SIP trunk. The AI on the other end conducts the conversation autonomously.
-  Example: "Call the restaurant and reserve a table" → make_call("+4312345678", "Reserve a table for 4 at 7pm Friday")
+  You can pass a contact NAME instead of a phone number — the system will resolve it automatically.
+  Example: "Call Mama" → make_call("Mama", "Say hi and ask how she's doing")
+  Example: "Call +4312345678" → make_call("+4312345678", "Reserve a table for 4 at 7pm Friday")
 - list_active_calls: Show current active phone calls
 - end_active_call: Hang up an active call
-After starting a call, inform the user about the status. The call runs autonomously — you don't need to monitor it.
+After starting a call, inform the user about the status. The call runs autonomously — you don't need to monitor it.${contacts && contacts.length > 0 ? `
+
+PHONE CONTACTS (you may call these by name):
+${contacts.map((c) => `- "${c.name}": ${c.phone}${c.notes ? ` (${c.notes})` : ""}`).join("\n")}` : ""}
+
+SOCIAL MEDIA:
+- prepare_social_post: Prepare a social media post as a DRAFT. The user can review and publish it from the Social Media page.
+- create_social_post: Create and IMMEDIATELY publish a post (use only when user explicitly says to post now)
+- list_social_posts: List recent social media posts (optional: filter by status)
+- get_social_analytics: Get analytics/metrics for a social media profile
+- reply_to_social_comment: Reply to a comment on a social media post
+
+IMAGE UPLOADS:
+When the user uploads an image, you will:
+1. SEE the image (it's sent to you visually)
+2. Receive a text message like "[Image uploaded and available at: /api/media/file/upload_xxx.jpg]"
+You can use this URL directly in prepare_social_post as mediaUrls or thumbnailUrl.
+
+IMPORTANT — ALWAYS ASK BEFORE CREATING A POST:
+When the user asks to create a social media post, ALWAYS ask:
+"Soll ich den Post selbst erstellen oder einen Agent beauftragen?
+Selbst: Ich erstelle den Draft sofort.
+Agent: Ein Agent kann zusätzlich Bilder generieren, recherchieren und den Text für jede Plattform optimieren."
+- If user says "selbst" / "du" / "mach du" → use prepare_social_post
+- If user says "agent" / "beauftrage" / "agent soll das machen" → use run_agent with the instructions below
+
+AFTER CREATING A DRAFT (prepare_social_post response received):
+Always tell the user the draft is ready and ask the complete workflow:
+1. Read back the post text briefly
+2. Ask: "Auf welchen Plattformen soll ich posten?" (if not already specified)
+3. Ask: "Wann soll der Post veröffentlicht werden? Sofort, oder soll ich einen Termin setzen?"
+4. If user gives a time → update the draft with scheduledAt
+5. If user says "poste jetzt" → publish the draft immediately using create_social_post
+6. If user wants to review first → tell them "Der Draft ist in der Social Media Seite unter Drafts, du kannst ihn dort bearbeiten und veröffentlichen."
+
+Agent task instructions (include these when delegating):
+- Generate images: POST /api/media/generate-image {prompt, model?, aspectRatio?} → {images: [{filename, path}]}
+  Models: imagen-4.0-fast-generate-001 (default), imagen-4.0-generate-001, imagen-4.0-ultra-generate-001
+- Generate videos: POST /api/media/generate-video {prompt, model?, aspectRatio?, durationSeconds?} → {operationName}
+  Model: veo-3.1-fast-generate-preview. Poll: GET /api/media/video-status/{operationName}
+- Files served at: /api/media/file/{filename}
+- Create draft: POST /api/socialmedia/posts {text, platforms, isDraft: true, createdBy: "agent", mediaUrls?, videoUrl?, thumbnailUrl?, title?, firstComment?}
+- Media URLs in draft: /api/media/file/{filename}
+- After agent creates draft, monitor it and inform the user, then ask about platforms and timing as described above.
 
 INTERNET SEARCH:
 You have access to Google Search (automatically integrated). When the user asks for current information
@@ -717,13 +775,13 @@ const TOOL_DECLARATIONS = [{
     // ─── Telephony Tools ──────────────────────────────────────────────
     {
       name: "make_call",
-      description: "Place a real phone call to a phone number. An AI assistant will conduct the conversation autonomously based on the given task. The call goes through a real SIP trunk to the actual phone network. Use when the user asks to 'call someone', 'phone', 'ring', or 'reserve by phone'.",
+      description: "Place a real phone call. An AI assistant will conduct the conversation autonomously based on the given task. You can pass either a phone number (E.164) or a contact name — the system resolves contact names to numbers automatically.",
       parameters: {
         type: "OBJECT",
         properties: {
           phone: {
             type: "STRING",
-            description: "Phone number in E.164 format (e.g. '+4366412345', '+49301234567'). Include country code.",
+            description: "Phone number in E.164 format (e.g. '+4366412345') OR a contact name (e.g. 'Mama', 'Restaurant Steirereck'). Contact names are resolved automatically.",
           },
           task: {
             type: "STRING",
@@ -759,6 +817,127 @@ const TOOL_DECLARATIONS = [{
         required: ["call_id"],
       },
     },
+    // ─── Social Media ──────────────────────────────────────────────
+    {
+      name: "prepare_social_post",
+      description: "Prepare a social media post as a draft for user review. The post will appear in the Social Media page where the user can edit, schedule, and publish it.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          text: {
+            type: "STRING",
+            description: "The post text/content.",
+          },
+          platforms: {
+            type: "ARRAY",
+            items: { type: "STRING" },
+            description: "Target platforms, e.g. [\"twitter\", \"linkedin\"].",
+          },
+          title: {
+            type: "STRING",
+            description: "Optional title/headline for the post.",
+          },
+          firstComment: {
+            type: "STRING",
+            description: "Optional text for the first comment (common on Instagram/LinkedIn).",
+          },
+          mediaUrls: {
+            type: "ARRAY",
+            items: { type: "STRING" },
+            description: "Optional image URLs to attach.",
+          },
+          videoUrl: {
+            type: "STRING",
+            description: "Optional video URL.",
+          },
+          thumbnailUrl: {
+            type: "STRING",
+            description: "Optional thumbnail/preview image URL.",
+          },
+          scheduledAt: {
+            type: "STRING",
+            description: "Optional ISO 8601 datetime to schedule the post.",
+          },
+        },
+        required: ["text", "platforms"],
+      },
+    },
+    {
+      name: "create_social_post",
+      description: "Create and publish a social media post on one or more platforms.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          text: {
+            type: "STRING",
+            description: "The post text/content.",
+          },
+          platforms: {
+            type: "ARRAY",
+            items: { type: "STRING" },
+            description: "Platforms to post to, e.g. [\"twitter\", \"linkedin\"].",
+          },
+          scheduledAt: {
+            type: "STRING",
+            description: "Optional ISO 8601 datetime to schedule the post for later.",
+          },
+        },
+        required: ["text", "platforms"],
+      },
+    },
+    {
+      name: "list_social_posts",
+      description: "List recent social media posts. Optionally filter by status.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          limit: {
+            type: "INTEGER",
+            description: "Max number of posts to return.",
+          },
+          status: {
+            type: "STRING",
+            description: "Filter by status: published, scheduled, failed.",
+          },
+        },
+      },
+    },
+    {
+      name: "get_social_analytics",
+      description: "Get analytics/metrics for a social media profile.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          profileId: {
+            type: "STRING",
+            description: "Profile/platform identifier.",
+          },
+        },
+        required: ["profileId"],
+      },
+    },
+    {
+      name: "reply_to_social_comment",
+      description: "Reply to a comment on a social media post.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          postId: {
+            type: "STRING",
+            description: "The post ID.",
+          },
+          commentId: {
+            type: "STRING",
+            description: "The comment ID to reply to (optional for new comment).",
+          },
+          text: {
+            type: "STRING",
+            description: "Reply text.",
+          },
+        },
+        required: ["postId", "text"],
+      },
+    },
   ],
 }];
 
@@ -791,7 +970,11 @@ export class GeminiLiveClient {
   }
 
   /** Connect to Gemini Live using an API key and optional voice */
-  connect(apiKey: string, voice: string = "Kore", config?: { assistantName?: string; agents?: AgentInfo[]; recentConversations?: ConversationContext[]; activeSessions?: ActiveSession[] }): void {
+  /** Previous conversation to resume (sent as context after setup) */
+  private resumeHistory: Array<{ role: string; text: string }> | null = null;
+
+  connect(apiKey: string, voice: string = "Kore", config?: { assistantName?: string; userName?: string; agents?: AgentInfo[]; recentConversations?: ConversationContext[]; activeSessions?: ActiveSession[]; contacts?: PhoneContact[]; resumeHistory?: Array<{ role: string; text: string }> }): void {
+    this.resumeHistory = config?.resumeHistory || null;
     const url = `${WS_BASE}?key=${apiKey}`;
     this.ws = new WebSocket(url);
 
@@ -800,6 +983,8 @@ export class GeminiLiveClient {
       config?.agents || [],
       config?.recentConversations,
       config?.activeSessions,
+      config?.userName,
+      config?.contacts,
     );
 
     this.ws.onopen = () => {
@@ -857,6 +1042,17 @@ export class GeminiLiveClient {
     // Setup complete
     if ("setupComplete" in msg) {
       this.setupDone = true;
+      // If resuming a conversation, send previous turns as context
+      if (this.resumeHistory && this.resumeHistory.length > 0 && this.ws) {
+        const turns = this.resumeHistory.map((m) => ({
+          role: m.role === "user" ? "user" : "model",
+          parts: [{ text: m.text }],
+        }));
+        this.ws.send(JSON.stringify({
+          clientContent: { turns, turnComplete: true },
+        }));
+        this.resumeHistory = null;
+      }
       this.handler({ type: "setupComplete" });
       return;
     }
@@ -960,6 +1156,18 @@ export class GeminiLiveClient {
           mimeType,
           data: base64Data,
         },
+      },
+    }));
+  }
+
+  /** Send a text message to Gemini (as user turn) */
+  sendText(text: string): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.setupDone) return;
+
+    this.ws.send(JSON.stringify({
+      clientContent: {
+        turns: [{ role: "user", parts: [{ text }] }],
+        turnComplete: true,
       },
     }));
   }

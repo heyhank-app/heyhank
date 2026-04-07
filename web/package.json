@@ -1,17 +1,24 @@
 {
   "name": "heyhank",
-  "version": "0.94.0",
+  "version": "0.1.0",
   "type": "module",
-  "description": "Web UI for launching and interacting with Claude Code agents",
+  "description": "Self-hosted web UI for running Claude Code and Codex agents",
   "license": "MIT",
-  "author": "The Vibe Company",
+  "author": "Markus Stoeger",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/heyhank-app/heyhank"
+  },
   "bin": {
     "heyhank": "./bin/cli.ts"
   },
   "files": [
     "bin/",
     "server/",
-    "dist/"
+    "dist/",
+    "!server/**/*.test.ts",
+    "!server/**/*.test.tsx",
+    "!server/**/*.spec.ts"
   ],
   "engines": {
     "bun": ">=1.0.0"

@@ -219,3 +219,54 @@ export function getDueReminders(): Reminder[] {
   const reminders = readJson<Reminder[]>("reminders.json", []);
   return reminders.filter((r) => !r.fired && r.triggerAt <= now);
 }
+
+// ─── Gemini Conversations ──────��─────────────────────────────────────────────
+
+export interface GeminiConversation {
+  id: string;
+  title: string;
+  messages: Array<{ role: "user" | "gemini" | "system"; text: string; ts: number }>;
+  createdAt: string;
+  duration?: number; // seconds
+}
+
+export function listGeminiConversations(): GeminiConversation[] {
+  return readJson<GeminiConversation[]>("gemini-conversations.json", [])
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export function saveGeminiConversation(
+  messages: Array<{ role: "user" | "gemini" | "system"; text: string; ts: number }>,
+  duration?: number,
+): GeminiConversation {
+  const convos = readJson<GeminiConversation[]>("gemini-conversations.json", []);
+  // Generate title from first user message
+  const firstUser = messages.find((m) => m.role === "user");
+  const title = firstUser ? firstUser.text.slice(0, 80) : "Gemini conversation";
+  const convo: GeminiConversation = {
+    id: genId(),
+    title,
+    messages: messages.filter((m) => m.role !== "system"),
+    createdAt: new Date().toISOString(),
+    duration,
+  };
+  convos.push(convo);
+  // Keep last 100 conversations
+  if (convos.length > 100) convos.splice(0, convos.length - 100);
+  writeJson("gemini-conversations.json", convos);
+  return convo;
+}
+
+export function getGeminiConversation(id: string): GeminiConversation | null {
+  const convos = readJson<GeminiConversation[]>("gemini-conversations.json", []);
+  return convos.find((c) => c.id === id) || null;
+}
+
+export function deleteGeminiConversation(id: string): boolean {
+  const convos = readJson<GeminiConversation[]>("gemini-conversations.json", []);
+  const idx = convos.findIndex((c) => c.id === id);
+  if (idx === -1) return false;
+  convos.splice(idx, 1);
+  writeJson("gemini-conversations.json", convos);
+  return true;
+}

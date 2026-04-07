@@ -227,14 +227,6 @@ export interface CreateSessionOpts {
   container?: ContainerCreateOpts;
   resumeSessionAt?: string;
   forkSession?: boolean;
-  linearConnectionId?: string;
-  linearIssue?: {
-    identifier: string;
-    title: string;
-    stateName: string;
-    teamName: string;
-    url: string;
-  };
 }
 
 export interface BackendInfo {
@@ -407,18 +399,12 @@ export interface AppSettings {
   openaiApiKeyConfigured: boolean;
   codexDeviceAuthConfigured: boolean;
   onboardingCompleted: boolean;
-  linearApiKeyConfigured: boolean;
-  linearConnectionCount: number;
-  linearAutoTransition: boolean;
-  linearAutoTransitionStateName: string;
-  linearArchiveTransition: boolean;
-  linearArchiveTransitionStateName: string;
-  linearOAuthConfigured: boolean;
-  linearOAuthCredentialsSaved: boolean;
   geminiApiKeyConfigured: boolean;
   geminiVoice: string;
   assistantName: string;
+  userName: string;
   editorTabEnabled: boolean;
+  internalAiProvider: string;
   aiValidationEnabled: boolean;
   aiValidationAutoApprove: boolean;
   aiValidationAutoDeny: boolean;
@@ -431,128 +417,9 @@ export interface AppSettings {
   codexCliAuth?: { installed: boolean; loggedIn: boolean; apiKeyConfigured: boolean; cliVersion: string | null };
 }
 
-export interface LinearOAuthConnectionSummary {
-  id: string;
-  name: string;
-  oauthClientId: string;
-  status: "connected" | "disconnected";
-  hasAccessToken: boolean;
-  hasClientSecret: boolean;
-  hasWebhookSecret: boolean;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface LinearConnectionSummary {
-  id: string;
-  name: string;
-  apiKeyLast4: string;
-  workspaceName: string;
-  workspaceId: string;
-  viewerName: string;
-  viewerEmail: string;
-  connected: boolean;
-  autoTransition: boolean;
-  autoTransitionStateId: string;
-  autoTransitionStateName: string;
-  archiveTransition: boolean;
-  archiveTransitionStateId: string;
-  archiveTransitionStateName: string;
-}
-
 export interface ArchiveInfo {
   hasLinkedIssue: boolean;
   issueNotDone: boolean;
-  issue?: {
-    id: string;
-    identifier: string;
-    stateName: string;
-    stateType: string;
-    teamId: string;
-  };
-  hasBacklogState?: boolean;
-  archiveTransitionConfigured?: boolean;
-  archiveTransitionStateName?: string;
-}
-
-export interface LinearWorkflowState {
-  id: string;
-  name: string;
-  type: string;
-}
-
-export interface LinearTeamStates {
-  id: string;
-  key: string;
-  name: string;
-  states: LinearWorkflowState[];
-}
-
-export interface LinearIssue {
-  id: string;
-  identifier: string;
-  title: string;
-  description: string;
-  url: string;
-  branchName: string;
-  priorityLabel: string;
-  stateName: string;
-  stateType: string;
-  teamName: string;
-  teamKey: string;
-  teamId: string;
-  assigneeName?: string;
-  updatedAt?: string;
-  connectionId?: string;
-}
-
-export interface LinearConnectionInfo {
-  connected: boolean;
-  viewerId: string;
-  viewerName: string;
-  viewerEmail: string;
-  teamName: string;
-  teamKey: string;
-}
-
-export interface LinearComment {
-  id: string;
-  body: string;
-  createdAt: string;
-  userName: string;
-  userAvatarUrl?: string | null;
-}
-
-export interface LinearIssueDetail {
-  issue: LinearIssue | null;
-  comments?: LinearComment[];
-  assignee?: { name: string; avatarUrl?: string | null } | null;
-  labels?: { id: string; name: string; color: string }[];
-}
-
-export interface LinearProject {
-  id: string;
-  name: string;
-  state: string;
-}
-
-export interface LinearProjectMapping {
-  repoRoot: string;
-  projectId: string;
-  projectName: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface CreateLinearIssueInput {
-  title: string;
-  description?: string;
-  teamId: string;
-  priority?: number;
-  projectId?: string;
-  assigneeId?: string;
-  stateId?: string;
-  connectionId?: string;
 }
 
 export interface GitHubPRInfo {
@@ -651,24 +518,6 @@ export interface AgentInfo {
       expression: string;
       recurring: boolean;
     };
-    /** Linear Agent Interaction SDK trigger (per-agent OAuth app) */
-    linear?: {
-      enabled: boolean;
-      /** Reference to a LinearOAuthConnection by ID (new model) */
-      oauthConnectionId?: string;
-      /** Resolved name of the referenced OAuth connection */
-      oauthConnectionName?: string;
-      /** Resolved status of the referenced OAuth connection */
-      oauthConnectionStatus?: string;
-      /** @deprecated OAuth app client ID (legacy inline model) */
-      oauthClientId?: string;
-      /** Whether the agent has an access token (OAuth connected) */
-      hasAccessToken?: boolean;
-      /** Whether the agent has a client secret configured */
-      hasClientSecret?: boolean;
-      /** Whether the agent has a webhook secret configured */
-      hasWebhookSecret?: boolean;
-    };
   };
   enabled: boolean;
   createdAt: number;
@@ -683,7 +532,7 @@ export interface AgentInfo {
 export interface AgentExecution {
   sessionId: string;
   agentId: string;
-  triggerType: "manual" | "webhook" | "schedule" | "linear";
+  triggerType: "manual" | "webhook" | "schedule";
   startedAt: number;
   completedAt?: number;
   success?: boolean;
@@ -970,6 +819,10 @@ export const api = {
     ),
 
   listSessions: () => get<SdkSessionInfo[]>("/sessions"),
+  searchSessions: (query: string) =>
+    get<{ results: Array<{ sessionId: string; sessionName: string; matches: Array<{ role: string; text: string; timestamp?: number }> }>; query: string }>(
+      `/sessions/search?q=${encodeURIComponent(query)}`,
+    ),
   discoverClaudeSessions: (limit = 200) =>
     get<{ sessions: ClaudeDiscoveredSession[] }>(
       `/claude/sessions/discover?limit=${encodeURIComponent(String(limit))}`,
@@ -991,7 +844,7 @@ export const api = {
   relaunchSession: (sessionId: string) =>
     post(`/sessions/${encodeURIComponent(sessionId)}/relaunch`),
 
-  archiveSession: (sessionId: string, opts?: { force?: boolean; linearTransition?: "none" | "backlog" | "configured" }) =>
+  archiveSession: (sessionId: string, opts?: { force?: boolean }) =>
     post(`/sessions/${encodeURIComponent(sessionId)}/archive`, opts),
 
   getArchiveInfo: (sessionId: string) =>
@@ -1061,20 +914,15 @@ export const api = {
     claudeCodeOAuthToken?: string;
     openaiApiKey?: string;
     onboardingCompleted?: boolean;
-    linearApiKey?: string;
-    linearAutoTransition?: boolean;
-    linearAutoTransitionStateId?: string;
-    linearAutoTransitionStateName?: string;
-    linearArchiveTransition?: boolean;
-    linearArchiveTransitionStateId?: string;
-    linearArchiveTransitionStateName?: string;
-    linearOAuthClientId?: string;
-    linearOAuthClientSecret?: string;
-    linearOAuthWebhookSecret?: string;
     geminiApiKey?: string;
     geminiVoice?: string;
     assistantName?: string;
+    userName?: string;
     editorTabEnabled?: boolean;
+    internalAiProvider?: string;
+    aiValidationEnabled?: boolean;
+    aiValidationAutoApprove?: boolean;
+    aiValidationAutoDeny?: boolean;
     publicUrl?: string;
     updateChannel?: "stable" | "prerelease";
     dockerAutoUpdate?: boolean;
@@ -1086,75 +934,6 @@ export const api = {
   getTailscaleStatus: () => get<TailscaleStatus>("/tailscale/status"),
   startTailscaleFunnel: () => post<TailscaleStatus>("/tailscale/funnel/start"),
   stopTailscaleFunnel: () => post<TailscaleStatus>("/tailscale/funnel/stop"),
-
-  // Linear connections CRUD
-  listLinearConnections: () =>
-    get<{ connections: LinearConnectionSummary[] }>("/linear/connections"),
-  createLinearConnection: (data: { name: string; apiKey: string }) =>
-    post<{ connection: LinearConnectionSummary; verified: boolean; error?: string }>(
-      "/linear/connections",
-      data,
-    ),
-  updateLinearConnection: (id: string, data: Record<string, unknown>) =>
-    put<{ connection: LinearConnectionSummary }>(`/linear/connections/${encodeURIComponent(id)}`, data),
-  deleteLinearConnection: (id: string) =>
-    del<{ ok: boolean }>(`/linear/connections/${encodeURIComponent(id)}`),
-  verifyLinearConnection: (id: string) =>
-    post<{ connection: LinearConnectionSummary; verified: boolean; error?: string }>(
-      `/linear/connections/${encodeURIComponent(id)}/verify`,
-      {},
-    ),
-
-  searchLinearIssues: (query: string, limit = 8, connectionId?: string) =>
-    get<{ issues: LinearIssue[] }>(
-      `/linear/issues?query=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(limit))}${connectionId ? `&connectionId=${encodeURIComponent(connectionId)}` : ""}`,
-    ),
-  getLinearConnection: (connectionId?: string) =>
-    get<LinearConnectionInfo>(`/linear/connection${connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : ""}`),
-  getLinearStates: (connectionId?: string) =>
-    get<{ teams: LinearTeamStates[] }>(`/linear/states${connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : ""}`),
-  transitionLinearIssue: (issueId: string, connectionId?: string) =>
-    post<{ ok: boolean; skipped: boolean }>(
-      `/linear/issues/${encodeURIComponent(issueId)}/transition${connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : ""}`,
-      {},
-    ),
-  listLinearProjects: (connectionId?: string) =>
-    get<{ projects: LinearProject[] }>(`/linear/projects${connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : ""}`),
-  getLinearProjectIssues: (projectId: string, limit = 15, connectionId?: string) =>
-    get<{ issues: LinearIssue[] }>(
-      `/linear/project-issues?projectId=${encodeURIComponent(projectId)}&limit=${encodeURIComponent(String(limit))}${connectionId ? `&connectionId=${encodeURIComponent(connectionId)}` : ""}`,
-    ),
-  getLinearProjectMapping: (repoRoot: string) =>
-    get<{ mapping: LinearProjectMapping | null }>(
-      `/linear/project-mappings?repoRoot=${encodeURIComponent(repoRoot)}`,
-    ),
-  upsertLinearProjectMapping: (data: {
-    repoRoot: string;
-    projectId: string;
-    projectName: string;
-  }) => put<{ mapping: LinearProjectMapping }>("/linear/project-mappings", data),
-  removeLinearProjectMapping: (repoRoot: string) =>
-    del<{ ok: boolean }>("/linear/project-mappings", { repoRoot }),
-
-  // Linear issue <-> session association
-  linkLinearIssue: (sessionId: string, issue: LinearIssue, connectionId?: string) =>
-    put<{ ok: boolean }>(`/sessions/${encodeURIComponent(sessionId)}/linear-issue`, {
-      ...issue,
-      ...(connectionId !== undefined ? { connectionId } : {}),
-    }),
-  unlinkLinearIssue: (sessionId: string) =>
-    del<{ ok: boolean }>(`/sessions/${encodeURIComponent(sessionId)}/linear-issue`),
-  getLinkedLinearIssue: (sessionId: string, refresh = false) =>
-    get<LinearIssueDetail>(
-      `/sessions/${encodeURIComponent(sessionId)}/linear-issue${refresh ? "?refresh=true" : ""}`,
-    ),
-  createLinearIssue: (input: CreateLinearIssueInput) =>
-    post<{ ok: boolean; issue: LinearIssue }>("/linear/issues", input),
-  addLinearComment: (issueId: string, body: string, connectionId?: string) =>
-    post<{ ok: boolean; comment: LinearComment }>(
-      `/linear/issues/${encodeURIComponent(issueId)}/comments`,
-      { body, connectionId },
-    ),
 
   // Git operations
   getRepoInfo: (path: string) =>
@@ -1360,45 +1139,6 @@ export const api = {
     return get<ExecutionListResult>(`/executions${qs ? `?${qs}` : ""}`);
   },
 
-  // Linear OAuth (Agent Interaction SDK)
-  getLinearOAuthStatus: (stagingId?: string) => {
-    const params = new URLSearchParams();
-    if (stagingId) params.set("stagingId", stagingId);
-    const qs = params.toString();
-    return get<{ configured: boolean; hasClientId: boolean; hasClientSecret: boolean; hasWebhookSecret: boolean; hasAccessToken: boolean }>(
-      `/linear/oauth/status${qs ? `?${qs}` : ""}`,
-    );
-  },
-  getLinearOAuthAuthorizeUrl: (returnTo?: string, stagingId?: string) => {
-    const params = new URLSearchParams();
-    if (returnTo) params.set("returnTo", returnTo);
-    if (stagingId) params.set("stagingId", stagingId);
-    const qs = params.toString();
-    return get<{ url: string }>(`/linear/oauth/authorize-url${qs ? `?${qs}` : ""}`);
-  },
-  disconnectLinearOAuth: () =>
-    post<{ ok: boolean }>("/linear/oauth/disconnect"),
-
-  // Linear OAuth staging slots (per-wizard credential storage)
-  createLinearStaging: (creds: { clientId: string; clientSecret: string; webhookSecret: string }) =>
-    post<{ stagingId: string }>("/linear/oauth/staging", creds),
-  getLinearStagingStatus: (id: string) =>
-    get<{ exists: boolean; hasAccessToken: boolean; hasClientId: boolean; hasClientSecret: boolean }>(`/linear/oauth/staging/${encodeURIComponent(id)}/status`),
-  deleteLinearStaging: (id: string) =>
-    del(`/linear/oauth/staging/${encodeURIComponent(id)}`),
-
-  // Linear OAuth connections (standalone OAuth app management)
-  listLinearOAuthConnections: () =>
-    get<{ connections: LinearOAuthConnectionSummary[] }>("/linear/oauth-connections"),
-  createLinearOAuthConnection: (data: { name: string; oauthClientId: string; oauthClientSecret: string; webhookSecret: string }) =>
-    post<{ connection: LinearOAuthConnectionSummary }>("/linear/oauth-connections", data),
-  updateLinearOAuthConnection: (id: string, data: Record<string, unknown>) =>
-    put<{ connection: LinearOAuthConnectionSummary }>(`/linear/oauth-connections/${encodeURIComponent(id)}`, data),
-  deleteLinearOAuthConnection: (id: string) =>
-    del<{ ok: boolean }>(`/linear/oauth-connections/${encodeURIComponent(id)}`),
-  getLinearOAuthConnectionAuthorizeUrl: (id: string, returnTo?: string) =>
-    get<{ url: string }>(`/linear/oauth-connections/${encodeURIComponent(id)}/authorize-url${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`),
-
   // Skills
   listSkills: () =>
     get<{ slug: string; name: string; description: string; path: string }[]>("/skills"),
@@ -1504,6 +1244,15 @@ export const api = {
     get<{ operationName: string; status: string; videoPath?: string }>(`/media/video-status/${operationName}`),
   listMedia: () =>
     get<{ files: Array<{ filename: string; path: string }> }>("/media"),
+  uploadMedia: async (base64: string, mimeType: string, filename?: string): Promise<{ ok: boolean; filename: string; url: string }> => {
+    const res = await fetch("/api/media/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify({ base64, mimeType, filename }),
+    });
+    if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+    return res.json();
+  },
 
   // ─── Federation ────────────────────────────────────────────────────
   getFederationIdentity: () =>
@@ -1540,4 +1289,147 @@ export const api = {
     put<{ success: boolean }>("/telephony/settings", settings),
   testFreeSwitchConnection: () =>
     post<{ connected: boolean; status?: string; error?: string }>("/telephony/test-connection"),
+  getContacts: () =>
+    get<{ contacts: Array<{ id: string; name: string; phone: string; notes?: string }> }>("/telephony/contacts"),
+  addContact: (contact: { name: string; phone: string; notes?: string }) =>
+    post<{ id: string; name: string; phone: string; notes?: string }>("/telephony/contacts", contact),
+  updateContact: (id: string, patch: { name?: string; phone?: string; notes?: string }) =>
+    put<{ id: string; name: string; phone: string; notes?: string }>(`/telephony/contacts/${encodeURIComponent(id)}`, patch),
+  deleteContact: (id: string) =>
+    del<{ success: boolean }>(`/telephony/contacts/${encodeURIComponent(id)}`),
+
+  // ─── Social Media ────────────────────────────────────────────────
+  getSocialSettings: () =>
+    get<{ backend: string | null; backends: Record<string, { url?: string; apiKey?: string }>; defaultPlatforms: string[] }>("/socialmedia/settings"),
+  updateSocialSettings: (settings: Record<string, unknown>) =>
+    put<{ ok: boolean }>("/socialmedia/settings", settings),
+  testSocialConnection: () =>
+    post<{ ok: boolean; error?: string }>("/socialmedia/test-connection"),
+  getSocialProfiles: () =>
+    get<{ profiles: Array<{ id: string; platform: string; name: string; picture?: string | null }> }>("/socialmedia/profiles"),
+  createSocialPost: (data: { text: string; platforms: string[]; scheduledAt?: string | null; mediaUrls?: string[]; title?: string; firstComment?: string; videoUrl?: string; thumbnailUrl?: string; isDraft?: boolean; createdBy?: string }) =>
+    post<any>("/socialmedia/posts", data),
+  listSocialPosts: (opts?: { status?: string; platform?: string; limit?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.status) params.set("status", opts.status);
+    if (opts?.platform) params.set("platform", opts.platform);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    return get<{ posts: Array<{ id: string; text: string; status: string; platforms: string[]; createdAt: string; scheduledAt?: string | null }> }>(`/socialmedia/posts?${params}`);
+  },
+  getSocialPost: (id: string) =>
+    get<{ id: string; text: string; status: string; platforms: string[]; createdAt: string; scheduledAt?: string | null }>(`/socialmedia/posts/${encodeURIComponent(id)}`),
+  updateSocialPost: (id: string, data: { text?: string; scheduledAt?: string | null; platforms?: string[] }) =>
+    patch<{ id: string; text: string; status: string }>(`/socialmedia/posts/${encodeURIComponent(id)}`, data),
+  publishSocialPost: (id: string) => post<any>(`/socialmedia/posts/${id}/publish`),
+  deleteSocialPost: (id: string) =>
+    del<{ ok: boolean }>(`/socialmedia/posts/${encodeURIComponent(id)}`),
+  getSocialPostAnalytics: (id: string) =>
+    get<{ impressions: number; likes: number; shares: number; comments: number }>(`/socialmedia/posts/${encodeURIComponent(id)}/analytics`),
+  getSocialPostComments: (id: string) =>
+    get<{ comments: Array<{ id: string; author: string; text: string; createdAt?: string; likes?: number }> }>(`/socialmedia/posts/${encodeURIComponent(id)}/comments`),
+  replySocialComment: (postId: string, commentId: string | null, text: string) =>
+    post<{ ok: boolean; error?: string }>(`/socialmedia/posts/${encodeURIComponent(postId)}/comments`, { commentId, text }),
+  getSocialCalendar: (month: string) =>
+    get<{ month: string; days: Record<string, Array<{ id: string; text: string; status: string; platforms: string[]; scheduledAt?: string | null }>> }>(`/socialmedia/calendar?month=${month}`),
+  getSocialAccountAnalytics: (profileId: string) =>
+    get<{ followers: number; following: number; posts: number }>(`/socialmedia/analytics/${encodeURIComponent(profileId)}`),
+
+  // ─── Assistant (Todos, Notes, Reminders) ─────────────────────────
+  listTodos: (filter?: { done?: boolean; priority?: string; category?: string }) => {
+    const params = new URLSearchParams();
+    if (filter?.done !== undefined) params.set("done", String(filter.done));
+    if (filter?.priority) params.set("priority", filter.priority);
+    if (filter?.category) params.set("category", filter.category);
+    return get<{ todos: Array<{ id: string; text: string; priority: string; done: boolean; createdAt: string; doneAt?: string; category?: string }> }>(`/assistant/todos?${params}`);
+  },
+  addTodo: (data: { text: string; priority?: string; category?: string }) =>
+    post<{ id: string; text: string; priority: string; done: boolean; createdAt: string; category?: string }>("/assistant/todos", data),
+  updateTodo: (id: string, data: { text?: string; priority?: string; category?: string; done?: boolean }) =>
+    patch<{ id: string; text: string; priority: string; done: boolean }>(`/assistant/todos/${encodeURIComponent(id)}`, data),
+  deleteTodo: (id: string) =>
+    del<{ ok: boolean }>(`/assistant/todos/${encodeURIComponent(id)}`),
+  listNotes: (search?: string) =>
+    get<{ notes: Array<{ id: string; title: string; content: string; tags: string[]; createdAt: string; updatedAt: string }> }>(`/assistant/notes${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+  addNote: (data: { title: string; content: string; tags?: string[] }) =>
+    post<{ id: string; title: string; content: string; tags: string[]; createdAt: string }>("/assistant/notes", data),
+  updateNote: (id: string, data: { title?: string; content?: string; tags?: string[] }) =>
+    patch<{ id: string; title: string; content: string; tags: string[] }>(`/assistant/notes/${encodeURIComponent(id)}`, data),
+  deleteNote: (id: string) =>
+    del<{ ok: boolean }>(`/assistant/notes/${encodeURIComponent(id)}`),
+  listReminders: (all?: boolean) =>
+    get<{ reminders: Array<{ id: string; text: string; triggerAt: string; fired: boolean; createdAt: string }> }>(`/assistant/reminders${all ? "?all=true" : ""}`),
+  addReminder: (data: { text: string; triggerAt: string }) =>
+    post<{ id: string; text: string; triggerAt: string; fired: boolean }>("/assistant/reminders", data),
+  deleteReminder: (id: string) =>
+    del<{ ok: boolean }>(`/assistant/reminders/${encodeURIComponent(id)}`),
+
+  // ─── Email ─────────────────────────────────────────────────────────
+  listEmailAccounts: () =>
+    get<{ accounts: Array<{ id: string; name: string; email: string; imap: { host: string; port: number; secure: boolean }; smtp: { host: string; port: number; secure: boolean } }> }>("/assistant/email/accounts"),
+  addEmailAccount: (data: { name: string; email: string; imap: { host: string; port: number; secure: boolean }; smtp: { host: string; port: number; secure: boolean }; auth: { user: string; pass: string } }) =>
+    post<{ id: string; name: string; email: string }>("/assistant/email/accounts", data),
+  deleteEmailAccount: (id: string) =>
+    del<{ ok: boolean }>(`/assistant/email/accounts/${encodeURIComponent(id)}`),
+  testEmailAccount: (id: string) =>
+    post<{ ok: boolean; error?: string }>(`/assistant/email/accounts/${encodeURIComponent(id)}/test`, {}),
+  getUnreadSummary: () =>
+    get<{ summary: Array<{ accountName: string; email: string; unread: number }> }>("/assistant/email/unread"),
+  listEmails: (accountId: string, options?: { limit?: number; unseen?: boolean; folder?: string }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.set("limit", String(options.limit));
+    if (options?.unseen) params.set("unseen", "true");
+    if (options?.folder) params.set("folder", options.folder);
+    return get<{ emails: Array<{ uid: number; subject: string; from: string; to: string; date: string; seen: boolean; accountId: string; accountName: string }> }>(`/assistant/email/${encodeURIComponent(accountId)}/messages?${params}`);
+  },
+  readEmail: (accountId: string, uid: number) =>
+    get<{ uid: number; subject: string; from: string; to: string; date: string; seen: boolean; textBody: string; accountId: string; accountName: string }>(`/assistant/email/${encodeURIComponent(accountId)}/messages/${uid}`),
+  searchEmails: (accountId: string, query: string, limit?: number) => {
+    const params = new URLSearchParams({ q: query });
+    if (limit) params.set("limit", String(limit));
+    return get<{ emails: Array<{ uid: number; subject: string; from: string; to: string; date: string; seen: boolean }> }>(`/assistant/email/${encodeURIComponent(accountId)}/search?${params}`);
+  },
+  sendEmailMessage: (accountId: string, data: { to: string; subject: string; body: string }) =>
+    post<{ messageId: string }>(`/assistant/email/${encodeURIComponent(accountId)}/send`, data),
+  replyToEmail: (accountId: string, data: { uid: number; body: string }) =>
+    post<{ messageId: string }>(`/assistant/email/${encodeURIComponent(accountId)}/reply`, data),
+
+  // Gemini conversations
+  listGeminiConversations: () =>
+    get<Array<{ id: string; title: string; messages: Array<{ role: string; text: string; ts: number }>; createdAt: string; duration?: number }>>("/gemini/conversations"),
+  getGeminiConversation: (id: string) =>
+    get<{ id: string; title: string; messages: Array<{ role: string; text: string; ts: number }>; createdAt: string; duration?: number }>(`/gemini/conversations/${encodeURIComponent(id)}`),
+  saveGeminiConversation: (messages: Array<{ role: string; text: string; ts: number }>, duration?: number) =>
+    post<{ id: string; title: string }>("/gemini/conversations", { messages, duration }),
+  deleteGeminiConversation: (id: string) =>
+    del<{ ok: boolean }>(`/gemini/conversations/${encodeURIComponent(id)}`),
+
+  // Export / Import
+  exportAll: () =>
+    get<{ version: number; exportedAt: string; agents: unknown[]; settings: unknown; notes: unknown[]; todos: unknown[]; reminders: unknown[]; geminiConversations: unknown[] }>("/export"),
+  importData: (data: { agents?: unknown[]; notes?: unknown[]; todos?: unknown[] }) =>
+    post<{ imported: Record<string, number> }>("/import", data),
+
+  // Providers
+  getProviders: () =>
+    get<Array<{
+      id: string; name: string; description: string; category: string;
+      cliProviderFlag: string; defaultModel?: string; docsUrl?: string;
+      envFields: Array<{ key: string; label: string; required: boolean; secret: boolean; placeholder?: string }>;
+      configured: boolean; enabled: boolean;
+      envConfigured: Record<string, boolean>;
+      customModel?: string;
+    }>>("/providers"),
+  getProvider: (id: string) =>
+    get<{
+      id: string; name: string; description: string; category: string;
+      envFields: Array<{ key: string; label: string; required: boolean; secret: boolean; placeholder?: string }>;
+      configured: boolean; enabled: boolean;
+      envConfigured: Record<string, boolean>;
+      envValues: Record<string, string>;
+      customModel?: string;
+    }>(`/providers/${encodeURIComponent(id)}`),
+  updateProvider: (id: string, data: { enabled?: boolean; envValues?: Record<string, string>; customModel?: string }) =>
+    put<{ configured: boolean; enabled: boolean }>(`/providers/${encodeURIComponent(id)}`, data),
+  deleteProvider: (id: string) =>
+    del<{ ok: boolean }>(`/providers/${encodeURIComponent(id)}`),
 };

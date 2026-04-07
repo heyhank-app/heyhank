@@ -4,7 +4,7 @@
 import type { Hono } from "hono";
 import { callManager } from "../telephony/call-manager.js";
 import * as store from "../telephony/telephony-store.js";
-import type { CallConfig, SipTrunkConfig } from "../telephony/call-types.js";
+import type { CallConfig, SipTrunkConfig, TelephonyContact } from "../telephony/call-types.js";
 import { randomUUID } from "node:crypto";
 
 export function registerTelephonyRoutes(api: Hono): void {
@@ -163,6 +163,67 @@ export function registerTelephonyRoutes(api: Hono): void {
       settings.defaultTrunkId = settings.trunks[0]?.id || null;
     }
     store.saveSettings(settings);
+    return c.json({ success: true });
+  });
+
+  // ─── Contacts ──────────────────────────────────────────────────────
+
+  /** List all contacts */
+  api.get("/telephony/contacts", (c) => {
+    return c.json({ contacts: store.getContacts() });
+  });
+
+  /** Add a contact */
+  api.post("/telephony/contacts", async (c) => {
+    try {
+      const body = await c.req.json() as Omit<TelephonyContact, "id">;
+      if (!body.name?.trim() || !body.phone?.trim()) {
+        return c.json({ error: "name and phone are required" }, 400);
+      }
+      let phone = body.phone.replace(/\s/g, "");
+      if (!phone.startsWith("+")) {
+        if (phone.startsWith("0")) phone = "+43" + phone.slice(1);
+        else phone = "+" + phone;
+      }
+      const contact: TelephonyContact = {
+        id: randomUUID(),
+        name: body.name.trim(),
+        phone,
+        notes: body.notes?.trim() || undefined,
+      };
+      store.addContact(contact);
+      return c.json(contact);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Failed to add contact" }, 500);
+    }
+  });
+
+  /** Update a contact */
+  api.put("/telephony/contacts/:id", async (c) => {
+    try {
+      const id = c.req.param("id");
+      const body = await c.req.json() as Partial<Omit<TelephonyContact, "id">>;
+      if (body.phone) {
+        let phone = body.phone.replace(/\s/g, "");
+        if (!phone.startsWith("+")) {
+          if (phone.startsWith("0")) phone = "+43" + phone.slice(1);
+          else phone = "+" + phone;
+        }
+        body.phone = phone;
+      }
+      const updated = store.updateContact(id, body);
+      if (!updated) return c.json({ error: "Contact not found" }, 404);
+      return c.json(updated);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Failed to update contact" }, 500);
+    }
+  });
+
+  /** Delete a contact */
+  api.delete("/telephony/contacts/:id", (c) => {
+    const id = c.req.param("id");
+    const deleted = store.deleteContact(id);
+    if (!deleted) return c.json({ error: "Contact not found" }, 404);
     return c.json({ success: true });
   });
 
