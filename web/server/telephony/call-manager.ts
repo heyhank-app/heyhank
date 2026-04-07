@@ -391,7 +391,8 @@ export class CallManager {
     console.log(`[telephony] ESL originate: ${cmd}`);
 
     try {
-      const result = await eslCommand(cmd, settings.freeswitch);
+      // Use bgapi (background=true) — originate blocks until call is answered/rejected
+      const result = await eslCommand(cmd, settings.freeswitch, 10000, true);
       console.log(`[telephony] ESL originate result: ${result.trim()}`);
       if (result.includes("-ERR")) {
         throw new Error(`FreeSWITCH error: ${result.trim()}`);

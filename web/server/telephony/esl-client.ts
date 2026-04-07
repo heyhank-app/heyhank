@@ -11,11 +11,13 @@ import type { FreeSwitchConfig } from "./call-types.js";
 /**
  * Send a single FreeSWITCH API command via ESL TCP and return the response.
  * Opens a connection, authenticates, sends the command, then closes.
+ * Use background=true for long-running commands like originate (uses bgapi).
  */
 export async function eslCommand(
   command: string,
   config: FreeSwitchConfig,
   timeoutMs = 5000,
+  background = false,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     let buffer = "";
@@ -23,10 +25,26 @@ export async function eslCommand(
     let commandSent = false;
     let responseBody = "";
     let expectedContentLength = 0;
+    let resolved = false;
+
+    const done = (result: string) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(result);
+    };
+
+    const fail = (err: Error) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      socket.destroy();
+      reject(err);
+    };
 
     const timer = setTimeout(() => {
-      socket.destroy();
-      reject(new Error(`ESL timeout after ${timeoutMs}ms`));
+      fail(new Error(`ESL timeout after ${timeoutMs}ms`));
     }, timeoutMs);
 
     const socket: Socket = connect(config.eslPort, config.eslHost, () => {
@@ -48,37 +66,43 @@ export async function eslCommand(
 
         if (!authenticated) {
           if (headers["Content-Type"] === "auth/request") {
-            // Send auth
             socket.write(`auth ${config.eslPassword}\n\n`);
           } else if (headers["Reply-Text"]?.startsWith("+OK")) {
             authenticated = true;
-            // Send the API command
-            socket.write(`api ${command}\n\n`);
+            // Use bgapi for background commands (non-blocking), api for regular
+            const prefix = background ? "bgapi" : "api";
+            socket.write(`${prefix} ${command}\n\n`);
             commandSent = true;
           } else if (headers["Reply-Text"]?.startsWith("-ERR")) {
-            clearTimeout(timer);
-            socket.destroy();
-            reject(new Error(`ESL auth failed: ${headers["Reply-Text"]}`));
+            fail(new Error(`ESL auth failed: ${headers["Reply-Text"]}`));
             return;
           }
         } else if (commandSent) {
-          // Reading command response
+          // bgapi returns Reply-Text with Job-UUID immediately
+          if (background && headers["Reply-Text"]) {
+            const reply = headers["Reply-Text"];
+            if (reply.startsWith("+OK")) {
+              // Extract Job-UUID: "+OK Job-UUID: xxxx"
+              const jobId = reply.replace("+OK Job-UUID: ", "").trim();
+              done(jobId || "+OK");
+              return;
+            } else if (reply.startsWith("-ERR")) {
+              fail(new Error(`FreeSWITCH error: ${reply}`));
+              return;
+            }
+          }
+
+          // Regular api response
           if (headers["Content-Type"] === "api/response") {
             expectedContentLength = parseInt(headers["Content-Length"] || "0", 10);
             if (expectedContentLength > 0) {
-              // Body follows — it might already be in buffer
               if (buffer.length >= expectedContentLength) {
-                responseBody = buffer.slice(0, expectedContentLength);
-                clearTimeout(timer);
-                socket.destroy();
-                resolve(responseBody);
+                done(buffer.slice(0, expectedContentLength));
                 return;
               }
               // Wait for more data
             } else {
-              clearTimeout(timer);
-              socket.destroy();
-              resolve("");
+              done("");
               return;
             }
           }
@@ -87,24 +111,18 @@ export async function eslCommand(
 
       // If we're waiting for body content after headers
       if (expectedContentLength > 0 && buffer.length >= expectedContentLength) {
-        responseBody = buffer.slice(0, expectedContentLength);
-        clearTimeout(timer);
-        socket.destroy();
-        resolve(responseBody);
+        done(buffer.slice(0, expectedContentLength));
       }
     });
 
     socket.on("error", (err) => {
-      clearTimeout(timer);
-      reject(new Error(`ESL connection error: ${err.message}`));
+      fail(new Error(`ESL connection error: ${err.message}`));
     });
 
     socket.on("close", () => {
-      clearTimeout(timer);
-      if (!commandSent) {
-        reject(new Error("ESL connection closed before command sent"));
+      if (!resolved && !commandSent) {
+        fail(new Error("ESL connection closed before command sent"));
       }
-      // If we already resolved/rejected, this is a no-op
     });
   });
 }

@@ -28,7 +28,8 @@ function generateGatewayXml(trunk: SipTrunkConfig): string {
   const useTls = defaults?.tls || trunk.server?.startsWith("sips.");
 
   // Sanitize the gateway name for FreeSWITCH (alphanumeric + underscore + hyphen)
-  const gatewayName = trunk.name.replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase();
+  // Prefix with "heyhank_" to match what call-manager.ts expects
+  const gatewayName = `heyhank_${trunk.name.replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase()}`;
 
   const tlsParams = useTls ? `
     <param name="register-transport" value="tls"/>
@@ -139,10 +140,16 @@ export async function syncAndReload(): Promise<{
 
 /**
  * Check if a specific gateway is registered with FreeSWITCH.
+ * Accepts either a trunk ID (UUID) or a gateway name.
  */
 export async function checkGatewayStatus(
-  gatewayName: string,
+  trunkIdOrName: string,
 ): Promise<{ registered: boolean; status: string }> {
   const settings = getSettings();
-  return eslGatewayStatus(gatewayName, settings.freeswitch);
+  // Resolve trunk ID to gateway name
+  const trunk = settings.trunks.find((t) => t.id === trunkIdOrName);
+  const gwName = trunk
+    ? `heyhank_${trunk.name.replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase()}`
+    : trunkIdOrName;
+  return eslGatewayStatus(gwName, settings.freeswitch);
 }
