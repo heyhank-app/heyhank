@@ -47,7 +47,12 @@ export interface TelephonyTranscriptSocketData {
   callId: string;
 }
 
-export type SocketData = CLISocketData | BrowserSocketData | TerminalSocketData | NoVncSocketData | NodeSocketData | TelephonyAudioSocketData | TelephonyTranscriptSocketData;
+export interface TelephonyListenSocketData {
+  kind: "telephony-listen";
+  callId: string;
+}
+
+export type SocketData = CLISocketData | BrowserSocketData | TerminalSocketData | NoVncSocketData | NodeSocketData | TelephonyAudioSocketData | TelephonyTranscriptSocketData | TelephonyListenSocketData;
 
 /** Tracks a pending control_request sent to CLI that expects a control_response. */
 export interface PendingControlRequest {

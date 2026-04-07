@@ -5,6 +5,8 @@ import type { Hono } from "hono";
 import { callManager } from "../telephony/call-manager.js";
 import * as store from "../telephony/telephony-store.js";
 import type { CallConfig, SipTrunkConfig, TelephonyContact } from "../telephony/call-types.js";
+import { eslCommand, eslStatus } from "../telephony/esl-client.js";
+import { syncAndReload, checkGatewayStatus } from "../telephony/freeswitch-sync.js";
 import { randomUUID } from "node:crypto";
 
 export function registerTelephonyRoutes(api: Hono): void {
@@ -148,6 +150,9 @@ export function registerTelephonyRoutes(api: Hono): void {
       if (!settings.defaultTrunkId) settings.defaultTrunkId = trunk.id;
       store.saveSettings(settings);
 
+      // Auto-sync gateway to FreeSWITCH
+      syncAndReload().catch((err) => console.error("[telephony] Auto-sync failed:", err));
+
       return c.json(trunk);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Failed to add trunk" }, 500);
@@ -163,6 +168,10 @@ export function registerTelephonyRoutes(api: Hono): void {
       settings.defaultTrunkId = settings.trunks[0]?.id || null;
     }
     store.saveSettings(settings);
+
+    // Auto-sync after trunk removal
+    syncAndReload().catch((err) => console.error("[telephony] Auto-sync failed:", err));
+
     return c.json({ success: true });
   });
 
@@ -227,33 +236,39 @@ export function registerTelephonyRoutes(api: Hono): void {
     return c.json({ success: true });
   });
 
-  /** Test FreeSWITCH ESL connection */
+  /** Test FreeSWITCH ESL connection (TCP) */
   api.post("/telephony/test-connection", async (c) => {
     const settings = store.getSettings();
-    const { eslHost, eslPort, eslPassword } = settings.freeswitch;
 
     try {
-      const eslUrl = `http://${eslHost}:${eslPort}/api`;
-      const res = await fetch(eslUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/plain",
-          "Authorization": `Basic ${btoa(`freeswitch:${eslPassword}`)}`,
-        },
-        body: "status",
-        signal: AbortSignal.timeout(5000),
-      });
-
-      if (res.ok) {
-        const text = await res.text();
-        return c.json({ connected: true, status: text.trim().slice(0, 200) });
-      }
-      return c.json({ connected: false, error: `HTTP ${res.status}` });
+      const result = await eslStatus(settings.freeswitch);
+      return c.json({ connected: result.connected, status: result.status });
     } catch (err) {
       return c.json({
         connected: false,
         error: err instanceof Error ? err.message : "Connection failed",
       });
+    }
+  });
+
+  /** Sync gateway configs to FreeSWITCH and reload */
+  api.post("/telephony/sync", async (c) => {
+    try {
+      await syncAndReload();
+      return c.json({ success: true, message: "Gateway configs synced and reloaded." });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Sync failed" }, 500);
+    }
+  });
+
+  /** Check gateway registration status */
+  api.get("/telephony/trunks/:id/status", async (c) => {
+    const id = c.req.param("id");
+    try {
+      const status = await checkGatewayStatus(id);
+      return c.json(status);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Status check failed" }, 500);
     }
   });
 }

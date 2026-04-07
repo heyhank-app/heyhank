@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   freeswitch:
-    image: signalwire/freeswitch:latest
+    image: safarov/freeswitch:latest
     container_name: heyhank-freeswitch
     restart: unless-stopped
     network_mode: host  # SIP needs many ports (5060, RTP range)
@@ -14,5 +12,6 @@ services:
       - ./entrypoint.sh:/docker-entrypoint-custom.sh:ro
     environment:
       - FREESWITCH_DOMAIN=${FREESWITCH_DOMAIN:-127.0.0.1}
+      - HEYHANK_ESL_PASSWORD=${HEYHANK_ESL_PASSWORD:-heyhank_esl_secret}
     # Override entrypoint to inject our gateway configs
-    entrypoint: ["/bin/bash", "/docker-entrypoint-custom.sh"]
+    entrypoint: ["/bin/sh", "/docker-entrypoint-custom.sh"]

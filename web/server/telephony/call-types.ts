@@ -25,6 +25,7 @@ export interface CallConfig {
   trunkId?: string; // Which SIP trunk to use
   callerId?: string; // Override caller ID
   maxDurationSeconds?: number; // Auto-hangup after N seconds (safety)
+  listen?: boolean; // Stream live audio to browser (listen mode)
 }
 
 export type CallStatus =
@@ -58,6 +59,7 @@ export interface CallState {
   connectedAt: number | null;
   endedAt: number | null;
   error: string | null;
+  listenMode: boolean;
 }
 
 /** Message from FreeSWITCH audio fork WebSocket (PCM audio chunks) */
@@ -98,7 +100,7 @@ export const DEFAULT_TELEPHONY_SETTINGS: TelephonySettings = {
   freeswitch: {
     eslHost: "localhost",
     eslPort: 8021,
-    eslPassword: "ClueCon",
+    eslPassword: "heyhank_esl_secret",
   },
   trunks: [],
   contacts: [],

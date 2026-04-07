@@ -127,10 +127,13 @@ If they want to create an event ("schedule a...", "meeting on..."), use create_e
 If the user assigns a complex task (create a website, write code, etc.), delegate to the appropriate agent.
 
 TELEPHONY (phone calls):
-- make_call: Place a real phone call via SIP trunk. The AI on the other end conducts the conversation autonomously.
-  You can pass a contact NAME instead of a phone number — the system will resolve it automatically.
+- make_call: Place a real phone call via SIP trunk. The AI conducts the conversation autonomously.
+  IMPORTANT: You can ONLY call saved contacts by name. You cannot call arbitrary phone numbers.
   Example: "Call Mama" → make_call("Mama", "Say hi and ask how she's doing")
-  Example: "Call +4312345678" → make_call("+4312345678", "Reserve a table for 4 at 7pm Friday")
+  Example: "Call Restaurant Steirereck" → make_call("Restaurant Steirereck", "Reserve a table for 4 at 7pm Friday")
+  If the user provides a phone number that's not a saved contact, ask them to save it first in Settings → Telephony → Contacts.
+  You can optionally pass listen=true to let the user hear the call live through their speakers.
+  Example: "Call Mama and let me listen" → make_call("Mama", "...", listen=true)
 - list_active_calls: Show current active phone calls
 - end_active_call: Hang up an active call
 After starting a call, inform the user about the status. The call runs autonomously — you don't need to monitor it.${contacts && contacts.length > 0 ? `
@@ -775,13 +778,13 @@ const TOOL_DECLARATIONS = [{
     // ─── Telephony Tools ──────────────────────────────────────────────
     {
       name: "make_call",
-      description: "Place a real phone call. An AI assistant will conduct the conversation autonomously based on the given task. You can pass either a phone number (E.164) or a contact name — the system resolves contact names to numbers automatically.",
+      description: "Place a real phone call to a SAVED CONTACT. An AI assistant will conduct the conversation autonomously. You MUST use a contact name — arbitrary phone numbers are NOT allowed for safety.",
       parameters: {
         type: "OBJECT",
         properties: {
           phone: {
             type: "STRING",
-            description: "Phone number in E.164 format (e.g. '+4366412345') OR a contact name (e.g. 'Mama', 'Restaurant Steirereck'). Contact names are resolved automatically.",
+            description: "Contact name (e.g. 'Mama', 'Restaurant Steirereck'). Must be a saved contact in Settings → Telephony → Contacts.",
           },
           task: {
             type: "STRING",
@@ -790,6 +793,10 @@ const TOOL_DECLARATIONS = [{
           voice: {
             type: "STRING",
             description: "Voice for the call AI. Default: same as current voice.",
+          },
+          listen: {
+            type: "BOOLEAN",
+            description: "If true, stream live call audio to the user's browser so they can listen in real-time.",
           },
         },
         required: ["phone", "task"],

@@ -27,3 +27,4 @@ push-keys.json
 recordings/
 heyhank-*.tgz
 ecosystem.config.cjs
+freeswitch/conf/sip_profiles/external/heyhank_*.xml

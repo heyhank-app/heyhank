@@ -1097,32 +1097,30 @@ export function registerPlatformRoutes(api: Hono): void {
 
         // ─── Telephony ──────────────────────────────────────────────────
         case "make_call": {
-          let phone = (args?.phone as string) || "";
+          const contactNameOrPhone = (args?.phone as string) || "";
           const task = (args?.task as string) || "";
-          if (!phone || !task) {
-            return c.json({ result: { error: "phone and task are required" } });
+          const listen = args?.listen === true;
+          if (!contactNameOrPhone || !task) {
+            return c.json({ result: { error: "phone (contact name) and task are required" } });
           }
           try {
-            // Resolve contact name to phone number if input doesn't look like a number
-            const stripped = phone.replace(/[\s\-().]/g, "");
-            if (!stripped.startsWith("+") && !/^\d{4,}$/.test(stripped)) {
-              const { resolveContactByName } = await import("../telephony/telephony-store.js");
-              const contact = resolveContactByName(phone);
-              if (contact) {
-                phone = contact.phone;
-              } else {
-                return c.json({ result: { error: `Contact "${phone}" not found. Use a phone number in E.164 format or add the contact in Settings > Telephony.` } });
-              }
+            // Contacts-only: resolve by name. Raw phone numbers are not allowed.
+            const { resolveContactByName } = await import("../telephony/telephony-store.js");
+            const contact = resolveContactByName(contactNameOrPhone);
+            if (!contact) {
+              return c.json({ result: { error: `Contact "${contactNameOrPhone}" not found. For safety, only saved contacts can be called. Add the contact in Settings → Telephony → Contacts first.` } });
             }
             const { callManager } = await import("../telephony/call-manager.js");
-            const call = await callManager.startCall({ phone, prompt: task, voice: args?.voice as string });
+            const call = await callManager.startCall({ phone: contact.phone, prompt: task, voice: args?.voice as string, listen });
             return c.json({
               result: {
                 success: true,
                 callId: call.id,
+                contactName: contact.name,
                 phone: call.phone,
                 status: call.status,
-                message: `Call to ${call.phone} initiated. Status: ${call.status}. Call ID: ${call.id}`,
+                listenMode: call.listenMode,
+                message: `Call to ${contact.name} (${call.phone}) initiated. Status: ${call.status}. Call ID: ${call.id}${listen ? " — Listen mode active." : ""}`,
               },
             });
           } catch (err) {

@@ -8,7 +8,7 @@ import type { CallState, TranscriptEntry } from "./call-types.js";
 
 // Gemini Live WebSocket endpoint
 const GEMINI_WS_BASE = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
-const GEMINI_MODEL = "models/gemini-2.0-flash-live-001";
+const GEMINI_MODEL = "models/gemini-2.0-flash-live";
 
 export interface AudioBridgeConfig {
   geminiApiKey: string;

@@ -7,6 +7,7 @@ import type { CallConfig, CallState, CallEvent, TranscriptEntry } from "./call-t
 import { AudioBridge, downsampleTo8k, base64ToBuffer } from "./audio-bridge.js";
 import { getSettings, saveCall } from "./telephony-store.js";
 import { getSettings as getMainSettings } from "../settings-manager.js";
+import { eslCommand } from "./esl-client.js";
 import { randomUUID } from "node:crypto";
 
 // Gemini tool declarations for telephony calls (subset — focused on conversation)
@@ -48,6 +49,8 @@ export class CallManager {
     bridge: AudioBridge;
     fsSockets: Set<ServerWebSocket<unknown>>; // FreeSWITCH audio fork WebSockets
     transcriptSockets: Set<ServerWebSocket<unknown>>; // Browser WebSockets for live transcript
+    listenSockets: Set<ServerWebSocket<unknown>>; // Browser WebSockets for live audio listen
+    listenMode: boolean;
     maxDurationTimer?: ReturnType<typeof setTimeout>;
   }>();
 
@@ -110,6 +113,7 @@ export class CallManager {
       connectedAt: null,
       endedAt: null,
       error: null,
+      listenMode: config.listen ?? false,
     };
 
     // Create audio bridge to Gemini
@@ -135,7 +139,7 @@ export class CallManager {
       },
     });
 
-    // When Gemini produces response audio, send it to FreeSWITCH
+    // When Gemini produces response audio, send it to FreeSWITCH + listen sockets
     bridge.onGeminiAudio = (base64Pcm: string) => {
       const pcm = base64ToBuffer(base64Pcm);
       // Gemini outputs 24kHz PCM, FreeSWITCH expects 8kHz
@@ -147,6 +151,13 @@ export class CallManager {
             ws.send(downsampled);
           } catch { /* socket closed */ }
         }
+        // Stream AI audio to listen sockets (browser)
+        if (call.listenMode) {
+          const msg = JSON.stringify({ type: "audio", speaker: "ai", data: base64Pcm });
+          for (const ws of call.listenSockets) {
+            try { ws.send(msg); } catch { /* ignore */ }
+          }
+        }
       }
     };
 
@@ -155,6 +166,8 @@ export class CallManager {
       bridge,
       fsSockets: new Set(),
       transcriptSockets: new Set(),
+      listenSockets: new Set(),
+      listenMode: config.listen ?? false,
     });
 
     // Connect to Gemini first
@@ -238,6 +251,18 @@ export class CallManager {
     const call = this.activeCalls.get(callId);
     if (!call) return;
     call.bridge.sendCallerAudio(data);
+    // Stream callee audio to listen sockets (browser)
+    if (call.listenMode && call.listenSockets.size > 0) {
+      let binary = "";
+      for (let i = 0; i < data.byteLength; i++) {
+        binary += String.fromCharCode(data[i]);
+      }
+      const base64 = btoa(binary);
+      const msg = JSON.stringify({ type: "audio", speaker: "callee", data: base64 });
+      for (const ws of call.listenSockets) {
+        try { ws.send(msg); } catch { /* ignore */ }
+      }
+    }
   }
 
   /** Register a FreeSWITCH audio WebSocket for a call */
@@ -268,6 +293,22 @@ export class CallManager {
   removeTranscriptSocket(callId: string, ws: ServerWebSocket<unknown>): void {
     const call = this.activeCalls.get(callId);
     if (call) call.transcriptSockets.delete(ws);
+  }
+
+  /** Register a browser WebSocket for live audio listen */
+  addListenSocket(callId: string, ws: ServerWebSocket<unknown>): void {
+    const call = this.activeCalls.get(callId);
+    if (call) call.listenSockets.add(ws);
+  }
+
+  removeListenSocket(callId: string, ws: ServerWebSocket<unknown>): void {
+    const call = this.activeCalls.get(callId);
+    if (call) call.listenSockets.delete(ws);
+  }
+
+  /** Check if call has listen mode */
+  isListenMode(callId: string): boolean {
+    return this.activeCalls.get(callId)?.listenMode ?? false;
   }
 
   private broadcastTranscript(callId: string, entry: TranscriptEntry): void {
@@ -325,13 +366,9 @@ export class CallManager {
     return results;
   }
 
-  // ─── FreeSWITCH ESL Commands ────���──────────────────────────────────────────
+  // ─── FreeSWITCH ESL Commands (TCP) ──────────────────────────────────────────
 
-  /**
-   * Originate a call via FreeSWITCH ESL.
-   * Uses HTTP API (mod_xml_rpc or mod_httapi) for simplicity —
-   * no need for a persistent ESL TCP connection.
-   */
+  /** Originate a call via FreeSWITCH ESL TCP. */
   private async eslOriginate(
     callId: string,
     phone: string,
@@ -339,10 +376,10 @@ export class CallManager {
     callerId: string,
   ): Promise<void> {
     const settings = getSettings();
-    const { eslHost, eslPort, eslPassword } = settings.freeswitch;
 
-    // FreeSWITCH ESL over HTTP (mod_xml_rpc)
-    // Format: api originate {vars}sofia/gateway/trunk/number &park()
+    // Sanitize gateway name to match what freeswitch-sync generates
+    const gwName = `heyhank_${trunk.name.replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase()}`;
+
     const vars = [
       `origination_caller_id_number=${callerId}`,
       `origination_caller_id_name=HeyHank`,
@@ -350,30 +387,12 @@ export class CallManager {
       `ignore_early_media=true`,
     ].join(",");
 
-    const cmd = `originate {${vars}}sofia/gateway/${trunk.name}/${phone} &park()`;
-
+    const cmd = `originate {${vars}}sofia/gateway/${gwName}/${phone} &park()`;
     console.log(`[telephony] ESL originate: ${cmd}`);
 
-    // Try ESL HTTP API first (port 8080 default for mod_xml_rpc)
     try {
-      const eslUrl = `http://${eslHost}:${eslPort}/api`;
-      const res = await fetch(eslUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/plain",
-          "Authorization": `Basic ${btoa(`freeswitch:${eslPassword}`)}`,
-        },
-        body: cmd,
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`ESL error: ${res.status} ${text}`);
-      }
-
-      const result = await res.text();
+      const result = await eslCommand(cmd, settings.freeswitch);
       console.log(`[telephony] ESL originate result: ${result.trim()}`);
-
       if (result.includes("-ERR")) {
         throw new Error(`FreeSWITCH error: ${result.trim()}`);
       }
@@ -385,18 +404,8 @@ export class CallManager {
 
   private async eslHangup(callId: string): Promise<void> {
     const settings = getSettings();
-    const { eslHost, eslPort, eslPassword } = settings.freeswitch;
-
     try {
-      const eslUrl = `http://${eslHost}:${eslPort}/api`;
-      await fetch(eslUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/plain",
-          "Authorization": `Basic ${btoa(`freeswitch:${eslPassword}`)}`,
-        },
-        body: `uuid_kill ${callId}`,
-      });
+      await eslCommand(`uuid_kill ${callId}`, settings.freeswitch);
     } catch {
       // Might already be disconnected
     }

@@ -300,6 +300,16 @@ const server = Bun.serve<SocketData>({
       return new Response("WebSocket upgrade failed", { status: 400 });
     }
 
+    // ── Telephony Listen WebSocket — browser live audio listen ───────
+    const telListenMatch = url.pathname.match(/^\/ws\/telephony\/listen\/([a-f0-9-]+)$/);
+    if (telListenMatch) {
+      const upgraded = server.upgrade(req, {
+        data: { kind: "telephony-listen" as const, callId: telListenMatch[1] },
+      });
+      if (upgraded) return undefined;
+      return new Response("WebSocket upgrade failed", { status: 400 });
+    }
+
     // ── Federation WebSocket — peer node connections ─────────────────
     if (url.pathname === "/ws/node") {
       // Auth is handled inside the federation protocol (first frame)
@@ -333,6 +343,8 @@ const server = Bun.serve<SocketData>({
         callManager.addFreeSwitchSocket(data.callId, ws);
       } else if (data.kind === "telephony-transcript") {
         callManager.addTranscriptSocket(data.callId, ws);
+      } else if (data.kind === "telephony-listen") {
+        callManager.addListenSocket(data.callId, ws);
       }
     },
     message(ws: ServerWebSocket<SocketData>, msg: string | Buffer) {
@@ -374,6 +386,8 @@ const server = Bun.serve<SocketData>({
         callManager.removeFreeSwitchSocket(data.callId, ws);
       } else if (data.kind === "telephony-transcript") {
         callManager.removeTranscriptSocket(data.callId, ws);
+      } else if (data.kind === "telephony-listen") {
+        callManager.removeListenSocket(data.callId, ws);
       }
     },
   },

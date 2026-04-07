@@ -1,11 +1,22 @@
-#!/bin/bash
-# Custom entrypoint for HeyHank FreeSWITCH
+#!/bin/sh
+# Custom entrypoint for HeyHank FreeSWITCH (Alpine — no bash!)
 # Copies custom gateway configs into the right places, then starts FreeSWITCH.
 
 set -e
 
 CUSTOM_DIR="/etc/freeswitch/custom"
 FS_CONF="/etc/freeswitch"
+
+# ── Initialize vanilla config if missing (safarov image) ──
+if [ ! -f "$FS_CONF/freeswitch.xml" ]; then
+  echo "[HeyHank] First boot — initializing FreeSWITCH config..."
+  if [ -d /usr/share/freeswitch/conf/vanilla ]; then
+    cp -a /usr/share/freeswitch/conf/vanilla/* "$FS_CONF/"
+  fi
+fi
+
+# Ensure external SIP profile directory exists
+mkdir -p "$FS_CONF/sip_profiles/external"
 
 # Copy custom SIP gateway configs if they exist
 if [ -d "$CUSTOM_DIR/sip_profiles/external" ]; then
@@ -17,25 +28,26 @@ if [ -d "$CUSTOM_DIR/dialplan/default" ]; then
   cp -v "$CUSTOM_DIR/dialplan/default/"*.xml "$FS_CONF/dialplan/default/" 2>/dev/null || true
 fi
 
-# Enable mod_audio_fork if available (for streaming audio to HeyHank)
-# Note: mod_audio_fork may need to be compiled separately for some images
-if [ -f "$FS_CONF/autoload_configs/modules.conf.xml" ]; then
-  # Ensure ESL module is loaded (for HTTP API control)
-  grep -q "mod_xml_rpc" "$FS_CONF/autoload_configs/modules.conf.xml" || \
-    sed -i 's|</modules>|  <load module="mod_xml_rpc"/>\n</modules>|' "$FS_CONF/autoload_configs/modules.conf.xml"
-fi
-
-# Configure mod_xml_rpc for HTTP API access (ESL over HTTP)
-cat > "$FS_CONF/autoload_configs/xml_rpc.conf.xml" << 'XMLRPC'
-<configuration name="xml_rpc.conf" description="XML RPC">
+# ── Configure ESL (mod_event_socket) ──
+ESL_PW="${HEYHANK_ESL_PASSWORD:-heyhank_esl_secret}"
+cat > "$FS_CONF/autoload_configs/event_socket.conf.xml" << EOF
+<configuration name="event_socket.conf" description="Socket Client">
   <settings>
-    <param name="http-port" value="8021"/>
-    <param name="auth-realm" value="freeswitch"/>
-    <param name="auth-user" value="freeswitch"/>
-    <param name="auth-pass" value="heyhank_esl_secret"/>
+    <param name="nat-map" value="false"/>
+    <param name="listen-ip" value="127.0.0.1"/>
+    <param name="listen-port" value="8021"/>
+    <param name="password" value="$ESL_PW"/>
   </settings>
 </configuration>
-XMLRPC
+EOF
+
+# ── Enable SIP TLS for external profile ──
+if [ -f "$FS_CONF/sip_profiles/external.xml" ]; then
+  # Set external_ssl_enable=true if not already set
+  if grep -q 'external_ssl_enable' "$FS_CONF/sip_profiles/external.xml"; then
+    sed -i 's/external_ssl_enable=false/external_ssl_enable=true/' "$FS_CONF/sip_profiles/external.xml"
+  fi
+fi
 
 echo "[HeyHank] FreeSWITCH config ready, starting..."
 
