@@ -9,8 +9,7 @@ module.exports = {
         NODE_ENV: "production",
         PORT: "3100",
         HOST: "127.0.0.1",
-        GEMINI_API_KEY: "REDACTED",
-        GOOGLE_API_KEY: "REDACTED",
+        // API keys are stored in ~/.heyhank/settings.json — NEVER in this file
       },
       max_memory_restart: "1G",
       restart_delay: 3000,

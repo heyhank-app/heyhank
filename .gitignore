@@ -26,3 +26,4 @@ settings.json
 push-keys.json
 recordings/
 heyhank-*.tgz
+ecosystem.config.cjs
