@@ -383,6 +383,8 @@ export class CallManager {
     const vars = [
       `origination_caller_id_number=${callerId}`,
       `origination_caller_id_name=HeyHank`,
+      `effective_caller_id_number=${callerId}`,
+      `effective_caller_id_name=HeyHank`,
       `origination_uuid=${callId}`,
       `ignore_early_media=true`,
     ].join(",");
@@ -391,8 +393,8 @@ export class CallManager {
     console.log(`[telephony] ESL originate: ${cmd}`);
 
     try {
-      // Use bgapi (background=true) — originate blocks until call is answered/rejected
-      const result = await eslCommand(cmd, settings.freeswitch, 10000, true);
+      // Use api with 60s timeout — originate blocks until answered/rejected/timeout
+      const result = await eslCommand(cmd, settings.freeswitch, 60000);
       console.log(`[telephony] ESL originate result: ${result.trim()}`);
       if (result.includes("-ERR")) {
         throw new Error(`FreeSWITCH error: ${result.trim()}`);
