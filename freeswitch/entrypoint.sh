@@ -49,6 +49,27 @@ if [ -f "$FS_CONF/sip_profiles/external.xml" ]; then
   fi
 fi
 
+# ── CRITICAL: Remove video codecs from SIP INVITE ──
+# peoplefone/carriers reject calls with video codecs (H264, VP8) in SDP.
+# Override global codec prefs to audio-only.
+if [ -f "$FS_CONF/vars.xml" ]; then
+  echo "[HeyHank] Removing video codecs from global codec prefs..."
+  sed -i 's/global_codec_prefs=OPUS,G722,PCMU,PCMA,H264,VP8/global_codec_prefs=PCMU,PCMA,G722/' "$FS_CONF/vars.xml"
+  sed -i 's/outbound_codec_prefs=OPUS,G722,PCMU,PCMA,H264,VP8/outbound_codec_prefs=PCMU,PCMA,G722/' "$FS_CONF/vars.xml"
+fi
+
+# Also force audio-only codec prefs directly in external SIP profile
+if [ -f "$FS_CONF/sip_profiles/external.xml" ]; then
+  sed -i 's|<param name="inbound-codec-prefs" value="$${global_codec_prefs}"/>|<param name="inbound-codec-prefs" value="PCMU,PCMA,G722"/>|' "$FS_CONF/sip_profiles/external.xml"
+  sed -i 's|<param name="outbound-codec-prefs" value="$${outbound_codec_prefs}"/>|<param name="outbound-codec-prefs" value="PCMU,PCMA,G722"/>|' "$FS_CONF/sip_profiles/external.xml"
+fi
+
+# ── Copy custom dialplan for incoming calls (public context) ──
+mkdir -p "$FS_CONF/dialplan/public"
+if [ -d "$CUSTOM_DIR/dialplan/public" ]; then
+  cp -v "$CUSTOM_DIR/dialplan/public/"*.xml "$FS_CONF/dialplan/public/" 2>/dev/null || true
+fi
+
 echo "[HeyHank] FreeSWITCH config ready, starting..."
 
 # Start FreeSWITCH in foreground

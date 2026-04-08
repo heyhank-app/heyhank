@@ -389,7 +389,9 @@ export class CallManager {
       `ignore_early_media=true`,
     ].join(",");
 
-    const cmd = `originate {${vars}}sofia/gateway/${gwName}/${phone} &park()`;
+    // playback silence_stream keeps the media path active for mod_audio_fork.
+    // -1 = infinite duration. 1400 = comfort noise level.
+    const cmd = `originate {${vars}}sofia/gateway/${gwName}/${phone} &playback(silence_stream://-1;1400)`;
     console.log(`[telephony] ESL originate: ${cmd}`);
 
     try {
@@ -399,9 +401,35 @@ export class CallManager {
       if (result.includes("-ERR")) {
         throw new Error(`FreeSWITCH error: ${result.trim()}`);
       }
+
+      // Call connected — start audio fork to stream audio via WebSocket
+      await this.startAudioFork(callId, settings.freeswitch);
     } catch (err) {
       console.error(`[telephony] ESL originate failed:`, err);
       throw err;
+    }
+  }
+
+  /** Start mod_audio_fork to stream call audio to our WebSocket endpoint */
+  private async startAudioFork(
+    callId: string,
+    fsConfig: { eslHost: string; eslPort: number; eslPassword: string },
+  ): Promise<void> {
+    const port = process.env.PORT || 3100;
+    const wsUrl = `ws://127.0.0.1:${port}/ws/telephony/audio/${callId}`;
+    // Bidirectional mode: callee audio → WebSocket → Gemini, Gemini audio → WebSocket → callee
+    const forkCmd = `uuid_audio_fork ${callId} start ${wsUrl} mono 8000 heyhank {} true true 8000`;
+    console.log(`[telephony] Starting audio fork: ${forkCmd}`);
+
+    try {
+      const result = await eslCommand(forkCmd, fsConfig, 10000);
+      console.log(`[telephony] Audio fork result: ${result.trim()}`);
+      if (result.includes("-ERR")) {
+        console.error(`[telephony] Audio fork failed: ${result.trim()}`);
+      }
+    } catch (err) {
+      console.error(`[telephony] Audio fork error:`, err);
+      // Don't throw — call is still connected, just no audio bridge
     }
   }
 

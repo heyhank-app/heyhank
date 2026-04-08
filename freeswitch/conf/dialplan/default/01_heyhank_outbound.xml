@@ -7,7 +7,7 @@
       <action application="set" data="effective_caller_id_name=HeyHank"/>
       <action application="set" data="hangup_after_bridge=true"/>
       <action application="set" data="ignore_early_media=true"/>
-      <action application="bridge" data="sofia/gateway/peoplefone/$1"/>
+      <action application="bridge" data="sofia/gateway/heyhank_peoplefone/$1"/>
     </condition>
 
     <!-- German numbers (+49...) -->
@@ -15,7 +15,7 @@
       <action application="set" data="effective_caller_id_name=HeyHank"/>
       <action application="set" data="hangup_after_bridge=true"/>
       <action application="set" data="ignore_early_media=true"/>
-      <action application="bridge" data="sofia/gateway/peoplefone/$1"/>
+      <action application="bridge" data="sofia/gateway/heyhank_peoplefone/$1"/>
     </condition>
 
     <!-- International fallback (+...) -->
@@ -23,7 +23,7 @@
       <action application="set" data="effective_caller_id_name=HeyHank"/>
       <action application="set" data="hangup_after_bridge=true"/>
       <action application="set" data="ignore_early_media=true"/>
-      <action application="bridge" data="sofia/gateway/peoplefone/$1"/>
+      <action application="bridge" data="sofia/gateway/heyhank_peoplefone/$1"/>
     </condition>
   </extension>
 </include>

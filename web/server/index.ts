@@ -361,8 +361,8 @@ const server = Bun.serve<SocketData>({
         const handler = (ws as unknown as Record<string, unknown>).__federationOnMessage as ((data: string | Buffer) => void) | undefined;
         handler?.(typeof msg === "string" ? msg : msg.toString());
       } else if (data.kind === "telephony-audio") {
-        // Binary audio from FreeSWITCH mod_audio_fork
-        if (msg instanceof Buffer || msg instanceof Uint8Array) {
+        // mod_audio_fork: text frames = metadata, binary frames = PCM audio
+        if (typeof msg !== "string") {
           callManager.handleFreeSwitchAudio(data.callId, msg as Buffer);
         }
       }
