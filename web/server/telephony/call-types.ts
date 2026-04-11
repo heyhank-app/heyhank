@@ -81,6 +81,49 @@ export interface TelephonyContact {
   name: string; // Display name (e.g. "Mama", "Restaurant Steirereck")
   phone: string; // E.164 format (e.g. "+4366412345")
   notes?: string; // Optional context (e.g. "Mon-Sat 10-18 Uhr")
+  language?: string; // Call language (e.g. "de", "en") — default: "en"
+  script?: string; // Simple call script (markdown prompt)
+  callFlow?: CallFlow; // Enterprise: state machine call flow
+}
+
+// ─── Call Flow (State Machine) ────────────────────────────────────────────────
+
+/** A node in the call flow graph */
+export interface CallFlowNode {
+  id: string;
+  type: "start" | "say" | "ask" | "condition" | "action" | "end";
+  label: string; // Short label for UI display
+  prompt?: string; // What the AI should say/do at this node
+  /** For "ask" nodes: what to listen for */
+  expectedResponses?: string[];
+  /** For "condition" nodes: variable to evaluate */
+  conditionVariable?: string;
+  /** For "action" nodes: tool to call (e.g. "save_note", "end_call") */
+  actionTool?: string;
+  actionArgs?: Record<string, unknown>;
+  /** Position in visual editor (pixels) */
+  position?: { x: number; y: number };
+}
+
+/** An edge connecting two nodes in the call flow */
+export interface CallFlowEdge {
+  id: string;
+  from: string; // source node ID
+  to: string; // target node ID
+  label?: string; // condition label (e.g. "yes", "no", "timeout", "default")
+  condition?: string; // optional match condition (regex or keyword)
+}
+
+/** A complete call flow definition (state machine) */
+export interface CallFlow {
+  id: string;
+  name: string;
+  description?: string;
+  nodes: CallFlowNode[];
+  edges: CallFlowEdge[];
+  variables?: Record<string, string>; // template variables (e.g. {{companyName}})
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 /** Telephony settings stored in ~/.heyhank/telephony.json */
@@ -93,6 +136,10 @@ export interface TelephonySettings {
   defaultVoice: string;
   maxCallDurationSeconds: number;
   geminiApiKey?: string; // Override; falls back to main Gemini key
+  geminiBackend?: "aistudio" | "vertexai"; // Default: aistudio
+  gcpProjectId?: string; // Required for Vertex AI
+  gcpLocation?: string; // e.g. "europe-west4" (default for Vertex AI)
+  gcpServiceAccountKey?: string; // Path to service account JSON key file
 }
 
 export const DEFAULT_TELEPHONY_SETTINGS: TelephonySettings = {

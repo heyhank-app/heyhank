@@ -13,7 +13,7 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 function handle401(status: number): void {
-  if (status === 401 && typeof window !== "undefined") {
+  if ((status === 401 || status === 403) && typeof window !== "undefined") {
     localStorage.removeItem(AUTH_STORAGE_KEY);
     // Dynamic import to avoid circular dependency
     import("./store.js").then(({ useStore }) => {
@@ -221,7 +221,7 @@ export interface CreateSessionOpts {
   branch?: string;
   createBranch?: boolean;
   useWorktree?: boolean;
-  backend?: "claude" | "codex";
+  backend?: string;
   sandboxEnabled?: boolean;
   sandboxSlug?: string;
   container?: ContainerCreateOpts;
@@ -1290,11 +1290,11 @@ export const api = {
   testFreeSwitchConnection: () =>
     post<{ connected: boolean; status?: string; error?: string }>("/telephony/test-connection"),
   getContacts: () =>
-    get<{ contacts: Array<{ id: string; name: string; phone: string; notes?: string }> }>("/telephony/contacts"),
-  addContact: (contact: { name: string; phone: string; notes?: string }) =>
-    post<{ id: string; name: string; phone: string; notes?: string }>("/telephony/contacts", contact),
-  updateContact: (id: string, patch: { name?: string; phone?: string; notes?: string }) =>
-    put<{ id: string; name: string; phone: string; notes?: string }>(`/telephony/contacts/${encodeURIComponent(id)}`, patch),
+    get<{ contacts: Array<{ id: string; name: string; phone: string; notes?: string; script?: string; callFlow?: any }> }>("/telephony/contacts"),
+  addContact: (contact: { name: string; phone: string; notes?: string; script?: string; callFlow?: any }) =>
+    post<{ id: string; name: string; phone: string; notes?: string; script?: string; callFlow?: any }>("/telephony/contacts", contact),
+  updateContact: (id: string, patch: Record<string, unknown>) =>
+    put<{ id: string; name: string; phone: string; notes?: string; script?: string; callFlow?: any }>(`/telephony/contacts/${encodeURIComponent(id)}`, patch),
   deleteContact: (id: string) =>
     del<{ success: boolean }>(`/telephony/contacts/${encodeURIComponent(id)}`),
 

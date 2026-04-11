@@ -12,12 +12,66 @@ interface CallInfo {
   transcript?: Array<{ speaker: string; text: string; ts: number }>;
 }
 
+interface CallFlowNode {
+  id: string;
+  type: "start" | "say" | "ask" | "condition" | "action" | "end";
+  label: string;
+  prompt?: string;
+  expectedResponses?: string[];
+  conditionVariable?: string;
+  actionTool?: string;
+  actionArgs?: Record<string, unknown>;
+  position?: { x: number; y: number };
+}
+
+interface CallFlowEdge {
+  id: string;
+  from: string;
+  to: string;
+  label?: string;
+  condition?: string;
+}
+
+interface CallFlow {
+  id: string;
+  name: string;
+  description?: string;
+  nodes: CallFlowNode[];
+  edges: CallFlowEdge[];
+  variables?: Record<string, string>;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 interface Contact {
   id: string;
   name: string;
   phone: string;
   notes?: string;
+  language?: string;
+  script?: string;
+  callFlow?: CallFlow;
 }
+
+const LANGUAGE_OPTIONS = [
+  { code: "en", label: "English", flag: "🇬🇧" },
+  { code: "de", label: "Deutsch", flag: "🇩🇪" },
+  { code: "fr", label: "Français", flag: "🇫🇷" },
+  { code: "it", label: "Italiano", flag: "🇮🇹" },
+  { code: "es", label: "Español", flag: "🇪🇸" },
+  { code: "pt", label: "Português", flag: "🇵🇹" },
+  { code: "nl", label: "Nederlands", flag: "🇳🇱" },
+  { code: "pl", label: "Polski", flag: "🇵🇱" },
+  { code: "cs", label: "Čeština", flag: "🇨🇿" },
+  { code: "hu", label: "Magyar", flag: "🇭🇺" },
+  { code: "ro", label: "Română", flag: "🇷🇴" },
+  { code: "tr", label: "Türkçe", flag: "🇹🇷" },
+  { code: "ru", label: "Русский", flag: "🇷🇺" },
+  { code: "ja", label: "日本語", flag: "🇯🇵" },
+  { code: "zh", label: "中文", flag: "🇨🇳" },
+  { code: "ko", label: "한국어", flag: "🇰🇷" },
+  { code: "ar", label: "العربية", flag: "🇸🇦" },
+];
 
 export function TelephonyPage({ embedded }: { embedded?: boolean }) {
   const [phone, setPhone] = useState("");
@@ -31,8 +85,14 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
     trunks: Array<{ id: string; name: string; provider: string; username?: string; password?: string; server?: string; callerId: string; enabled: boolean }>;
     defaultVoice: string;
     maxCallDurationSeconds?: number;
+    geminiBackend?: "aistudio" | "vertexai";
+    gcpProjectId?: string;
+    gcpLocation?: string;
+    gcpServiceAccountKey?: string;
   } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
   const [testResult, setTestResult] = useState<{ connected: boolean; status?: string; error?: string } | null>(null);
   const [showAddTrunk, setShowAddTrunk] = useState(false);
   const [newTrunk, setNewTrunk] = useState({ name: "peoplefone", provider: "peoplefone", username: "", password: "", server: "sip.peoplefone.at", callerId: "", enabled: true });
@@ -44,9 +104,14 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
   const wsRef = useRef<WebSocket | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [showAddContact, setShowAddContact] = useState(false);
-  const [newContact, setNewContact] = useState({ name: "", phone: "", notes: "" });
+  const [newContact, setNewContact] = useState({ name: "", phone: "", notes: "", language: "en" });
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
-  const [editContactData, setEditContactData] = useState({ name: "", phone: "", notes: "" });
+  const [editContactData, setEditContactData] = useState({ name: "", phone: "", notes: "", language: "en" });
+  const [scriptContactId, setScriptContactId] = useState<string | null>(null);
+  const [scriptMode, setScriptMode] = useState<"simple" | "flow">("simple");
+  const [scriptText, setScriptText] = useState("");
+  const [callFlow, setCallFlow] = useState<CallFlow | null>(null);
+  const [savingScript, setSavingScript] = useState(false);
 
   // Load active calls and history
   useEffect(() => {
@@ -136,7 +201,7 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
     try {
       const c = await api.addContact(newContact);
       setContacts((prev) => [...prev, c]);
-      setNewContact({ name: "", phone: "", notes: "" });
+      setNewContact({ name: "", phone: "", notes: "", language: "en" });
       setShowAddContact(false);
     } catch { /* silent */ }
   }
@@ -157,12 +222,142 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
     } catch { /* silent */ }
   }
 
+  function openScriptEditor(contact: Contact) {
+    setScriptContactId(contact.id);
+    if (contact.callFlow && contact.callFlow.nodes.length > 0) {
+      setScriptMode("flow");
+      setCallFlow(contact.callFlow);
+      setScriptText(contact.script || "");
+    } else {
+      setScriptMode("simple");
+      setScriptText(contact.script || "");
+      setCallFlow(contact.callFlow || null);
+    }
+  }
+
+  async function saveScript() {
+    if (!scriptContactId) return;
+    setSavingScript(true);
+    try {
+      const patch: Record<string, unknown> = {};
+      if (scriptMode === "simple") {
+        patch.script = scriptText.trim() || undefined;
+        // Keep callFlow if it exists (user might switch modes)
+        if (callFlow) patch.callFlow = callFlow;
+      } else {
+        patch.callFlow = callFlow;
+        patch.script = scriptText.trim() || undefined;
+      }
+      const updated = await api.updateContact(scriptContactId, patch);
+      setContacts(prev => prev.map(c => c.id === scriptContactId ? { ...c, ...updated } : c));
+    } catch { /* silent */ }
+    setSavingScript(false);
+    setScriptContactId(null);
+  }
+
+  function addFlowNode(type: CallFlowNode["type"]) {
+    if (!callFlow) return;
+    const id = `node_${Date.now()}`;
+    const nodeCount = callFlow.nodes.length;
+    const newNode: CallFlowNode = {
+      id,
+      type,
+      label: type === "start" ? "Start" : type === "end" ? "End" : `${type.charAt(0).toUpperCase() + type.slice(1)} ${nodeCount}`,
+      prompt: "",
+      position: { x: 100, y: 80 + nodeCount * 100 },
+    };
+    setCallFlow({ ...callFlow, nodes: [...callFlow.nodes, newNode] });
+  }
+
+  function updateFlowNode(nodeId: string, patch: Partial<CallFlowNode>) {
+    if (!callFlow) return;
+    setCallFlow({
+      ...callFlow,
+      nodes: callFlow.nodes.map(n => n.id === nodeId ? { ...n, ...patch } : n),
+    });
+  }
+
+  function deleteFlowNode(nodeId: string) {
+    if (!callFlow) return;
+    setCallFlow({
+      ...callFlow,
+      nodes: callFlow.nodes.filter(n => n.id !== nodeId),
+      edges: callFlow.edges.filter(e => e.from !== nodeId && e.to !== nodeId),
+    });
+  }
+
+  function addFlowEdge(from: string, to: string, label?: string) {
+    if (!callFlow) return;
+    const id = `edge_${Date.now()}`;
+    setCallFlow({
+      ...callFlow,
+      edges: [...callFlow.edges, { id, from, to, label: label || "" }],
+    });
+  }
+
+  function deleteFlowEdge(edgeId: string) {
+    if (!callFlow) return;
+    setCallFlow({
+      ...callFlow,
+      edges: callFlow.edges.filter(e => e.id !== edgeId),
+    });
+  }
+
+  function initializeCallFlow() {
+    const contact = contacts.find(c => c.id === scriptContactId);
+    setCallFlow({
+      id: `flow_${Date.now()}`,
+      name: contact?.name ? `${contact.name} Script` : "Call Script",
+      nodes: [
+        { id: "start_1", type: "start", label: "Start", position: { x: 100, y: 50 } },
+        { id: "say_1", type: "say", label: "Greeting", prompt: "Greet the person naturally", position: { x: 100, y: 150 } },
+        { id: "ask_1", type: "ask", label: "Main Question", prompt: "", expectedResponses: ["yes", "no"], position: { x: 100, y: 250 } },
+        { id: "end_1", type: "end", label: "Goodbye", prompt: "Thank them and say goodbye", position: { x: 100, y: 350 } },
+      ],
+      edges: [
+        { id: "e1", from: "start_1", to: "say_1", label: "begin" },
+        { id: "e2", from: "say_1", to: "ask_1", label: "then" },
+        { id: "e3", from: "ask_1", to: "end_1", label: "default" },
+      ],
+    });
+  }
+
   async function saveTelSettings(updates: Record<string, unknown>) {
     setSaving(true);
     try {
       await api.updateTelephonySettings(updates);
       const fresh = await api.getTelephonySettings();
       setTelSettings(fresh as typeof telSettings);
+    } catch { /* silent */ }
+    setSaving(false);
+  }
+
+  /** Update local settings state and mark as dirty (unsaved) */
+  function editTelSettings(updates: Partial<NonNullable<typeof telSettings>>) {
+    setTelSettings((prev) => prev ? { ...prev, ...updates } : prev);
+    setSettingsDirty(true);
+    setSettingsSaved(false);
+  }
+
+  /** Save all current settings at once */
+  async function saveAllSettings() {
+    if (!telSettings) return;
+    setSaving(true);
+    try {
+      await api.updateTelephonySettings({
+        freeswitch: telSettings.freeswitch,
+        defaultVoice: telSettings.defaultVoice,
+        maxCallDurationSeconds: telSettings.maxCallDurationSeconds,
+        geminiBackend: telSettings.geminiBackend,
+        gcpProjectId: telSettings.gcpProjectId,
+        gcpLocation: telSettings.gcpLocation,
+        gcpServiceAccountKey: telSettings.gcpServiceAccountKey,
+      });
+      const fresh = await api.getTelephonySettings();
+      setTelSettings(fresh as typeof telSettings);
+      setSettingsDirty(false);
+      setSettingsSaved(true);
+      setTimeout(() => setSettingsSaved(false), 3000);
     } catch { /* silent */ }
     setSaving(false);
   }
@@ -203,7 +398,7 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
     } else {
       // Load full call details for history
       api.getCall(call.id).then((full) => {
-        setSelectedCall(full);
+        setSelectedCall({ ...call, ...full });
         setLiveTranscript(full.transcript || []);
       }).catch(() => {});
     }
@@ -293,10 +488,19 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                     placeholder="+43..." className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
                 </div>
               </div>
-              <div>
-                <label className="text-[11px] text-cc-muted">Notes (optional)</label>
-                <input type="text" value={newContact.notes} onChange={(e) => setNewContact({ ...newContact, notes: e.target.value })}
-                  placeholder="e.g. Mo-Sa 10-18 Uhr" className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <div>
+                  <label className="text-[11px] text-cc-muted">Notes (optional)</label>
+                  <input type="text" value={newContact.notes} onChange={(e) => setNewContact({ ...newContact, notes: e.target.value })}
+                    placeholder="e.g. Mo-Sa 10-18 Uhr" className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
+                </div>
+                <div>
+                  <label className="text-[11px] text-cc-muted">Language</label>
+                  <select value={newContact.language} onChange={(e) => setNewContact({ ...newContact, language: e.target.value })}
+                    className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg w-28">
+                    {LANGUAGE_OPTIONS.map(l => <option key={l.code} value={l.code}>{l.flag} {l.label}</option>)}
+                  </select>
+                </div>
               </div>
               <button
                 onClick={addContact}
@@ -322,8 +526,14 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                         <input type="tel" value={editContactData.phone} onChange={(e) => setEditContactData({ ...editContactData, phone: e.target.value })}
                           className="px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
                       </div>
-                      <input type="text" value={editContactData.notes} onChange={(e) => setEditContactData({ ...editContactData, notes: e.target.value })}
-                        placeholder="Notes" className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
+                      <div className="grid grid-cols-[1fr_auto] gap-2">
+                        <input type="text" value={editContactData.notes} onChange={(e) => setEditContactData({ ...editContactData, notes: e.target.value })}
+                          placeholder="Notes" className="px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
+                        <select value={editContactData.language} onChange={(e) => setEditContactData({ ...editContactData, language: e.target.value })}
+                          className="px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg w-28">
+                          {LANGUAGE_OPTIONS.map(l => <option key={l.code} value={l.code}>{l.flag} {l.label}</option>)}
+                        </select>
+                      </div>
                       <div className="flex gap-2">
                         <button onClick={saveContactEdit} className="px-2 py-1 text-[11px] rounded bg-green-600 text-white hover:bg-green-500 cursor-pointer">Save</button>
                         <button onClick={() => setEditingContactId(null)} className="px-2 py-1 text-[11px] rounded bg-cc-hover text-cc-muted hover:text-cc-fg cursor-pointer">Cancel</button>
@@ -332,16 +542,34 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                   ) : (
                     <div className="flex items-center justify-between">
                       <button
-                        onClick={() => { setPhone(c.phone); }}
+                        onClick={() => {
+                          setPhone(c.phone);
+                          // Auto-populate prompt from script if available and prompt is empty
+                          if (!prompt.trim() && c.script) {
+                            setPrompt(c.script);
+                          }
+                        }}
                         className="min-w-0 flex-1 text-left cursor-pointer hover:opacity-80"
                         title="Click to use this number"
                       >
                         <p className="text-xs font-medium text-cc-fg">{c.name}</p>
-                        <p className="text-[11px] text-cc-muted">{c.phone}{c.notes ? ` — ${c.notes}` : ""}</p>
+                        <p className="text-[11px] text-cc-muted">
+                          {c.phone}
+                          {c.language && <span className="ml-1"> {LANGUAGE_OPTIONS.find(l => l.code === c.language)?.flag || ""}</span>}
+                          {c.notes ? ` — ${c.notes}` : ""}
+                          {(c.script || c.callFlow) && <span className="ml-1.5 text-green-500 text-[9px]">(script)</span>}
+                        </p>
                       </button>
                       <div className="flex items-center gap-2 ml-2 shrink-0">
                         <button
-                          onClick={() => { setEditingContactId(c.id); setEditContactData({ name: c.name, phone: c.phone, notes: c.notes || "" }); }}
+                          onClick={() => openScriptEditor(c)}
+                          className={`text-[11px] transition-colors cursor-pointer ${c.script || c.callFlow ? "text-green-500 hover:text-green-400" : "text-cc-muted hover:text-cc-fg"}`}
+                          title={c.script || c.callFlow ? "Edit call script" : "Add call script"}
+                        >
+                          {c.script || c.callFlow ? "Script" : "+ Script"}
+                        </button>
+                        <button
+                          onClick={() => { setEditingContactId(c.id); setEditContactData({ name: c.name, phone: c.phone, notes: c.notes || "", language: c.language || "en" }); }}
                           className="text-[11px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
                         >
                           Edit
@@ -360,6 +588,327 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
             </div>
           )}
         </div>
+
+        {/* Script Editor Modal */}
+        {scriptContactId && (
+          <div className="bg-cc-card border border-cc-border rounded-xl p-4 mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">
+                  Call Script — {contacts.find(c => c.id === scriptContactId)?.name}
+                </h2>
+                <p className="text-[10px] text-cc-muted mt-0.5">
+                  Define what Gemini should say and how to handle responses during the call.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Mode toggle */}
+                <div className="flex bg-cc-bg rounded-lg border border-cc-border overflow-hidden">
+                  <button
+                    onClick={() => setScriptMode("simple")}
+                    className={`px-2.5 py-1 text-[11px] transition-colors cursor-pointer ${scriptMode === "simple" ? "bg-cc-primary text-white" : "text-cc-muted hover:text-cc-fg"}`}
+                  >
+                    Simple
+                  </button>
+                  <button
+                    onClick={() => setScriptMode("flow")}
+                    className={`px-2.5 py-1 text-[11px] transition-colors cursor-pointer ${scriptMode === "flow" ? "bg-cc-primary text-white" : "text-cc-muted hover:text-cc-fg"}`}
+                  >
+                    Flow Builder
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {scriptMode === "simple" ? (
+              /* Simple Script: Markdown textarea */
+              <div className="space-y-2">
+                <textarea
+                  value={scriptText}
+                  onChange={e => setScriptText(e.target.value)}
+                  placeholder={`Example script:\n\n1. Greet and introduce yourself\n2. Ask if they have a table for 4 on Friday at 7pm\n3. If yes: confirm and ask for name\n4. If no: ask about Saturday\n5. Thank them and say goodbye\n\nIMPORTANT: Always be polite and speak German.`}
+                  rows={10}
+                  className="w-full px-3 py-2 text-xs bg-cc-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted/60 focus:outline-none focus:border-cc-primary font-mono resize-y"
+                />
+                <p className="text-[10px] text-cc-muted">
+                  Write a simple call script in plain text or markdown. Gemini will follow this as a guide during the call.
+                </p>
+              </div>
+            ) : (
+              /* Call Flow Builder */
+              <div className="space-y-3">
+                {!callFlow || callFlow.nodes.length === 0 ? (
+                  <div className="text-center py-8 space-y-3">
+                    <p className="text-xs text-cc-muted">No call flow defined yet.</p>
+                    <button
+                      onClick={initializeCallFlow}
+                      className="px-3 py-1.5 text-xs rounded bg-cc-primary text-white hover:bg-cc-primary/90 transition-colors cursor-pointer"
+                    >
+                      Create Template Flow
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Flow metadata */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-cc-muted">Flow Name</label>
+                        <input
+                          type="text" value={callFlow.name}
+                          onChange={e => setCallFlow({ ...callFlow, name: e.target.value })}
+                          className="w-full px-2 py-1.5 text-xs bg-cc-bg border border-cc-border rounded text-cc-fg"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-cc-muted">Description</label>
+                        <input
+                          type="text" value={callFlow.description || ""}
+                          onChange={e => setCallFlow({ ...callFlow, description: e.target.value })}
+                          placeholder="e.g. Restaurant reservation flow"
+                          className="w-full px-2 py-1.5 text-xs bg-cc-bg border border-cc-border rounded text-cc-fg"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Nodes */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-[11px] font-medium text-cc-muted uppercase tracking-wider">Nodes</h3>
+                        <div className="flex gap-1">
+                          {(["say", "ask", "condition", "action", "end"] as const).map(type => (
+                            <button
+                              key={type}
+                              onClick={() => addFlowNode(type)}
+                              className="px-1.5 py-0.5 text-[10px] rounded bg-cc-hover text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                              title={`Add ${type} node`}
+                            >
+                              + {type}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {callFlow.nodes.map((node, idx) => (
+                        <div key={node.id} className="bg-cc-bg rounded-lg px-3 py-2 border border-cc-border space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                                node.type === "start" ? "bg-green-500/20 text-green-400" :
+                                node.type === "end" ? "bg-red-500/20 text-red-400" :
+                                node.type === "say" ? "bg-blue-500/20 text-blue-400" :
+                                node.type === "ask" ? "bg-yellow-500/20 text-yellow-400" :
+                                node.type === "condition" ? "bg-purple-500/20 text-purple-400" :
+                                "bg-orange-500/20 text-orange-400"
+                              }`}>{node.type}</span>
+                              <input
+                                type="text" value={node.label}
+                                onChange={e => updateFlowNode(node.id, { label: e.target.value })}
+                                className="px-1.5 py-0.5 text-xs bg-transparent border-b border-cc-border/50 text-cc-fg focus:outline-none focus:border-cc-primary w-40"
+                              />
+                            </div>
+                            {node.type !== "start" && (
+                              <button
+                                onClick={() => deleteFlowNode(node.id)}
+                                className="text-[10px] text-red-400 hover:text-red-300 cursor-pointer"
+                              >
+                                remove
+                              </button>
+                            )}
+                          </div>
+
+                          {(node.type === "say" || node.type === "ask" || node.type === "end") && (
+                            <textarea
+                              value={node.prompt || ""}
+                              onChange={e => updateFlowNode(node.id, { prompt: e.target.value })}
+                              placeholder={node.type === "say" ? "What should the AI say?" : node.type === "ask" ? "What question to ask?" : "Goodbye message"}
+                              rows={2}
+                              className="w-full px-2 py-1 text-[11px] bg-cc-hover border border-cc-border rounded text-cc-fg placeholder:text-cc-muted/60 focus:outline-none focus:border-cc-primary resize-none"
+                            />
+                          )}
+
+                          {node.type === "ask" && (
+                            <div>
+                              <label className="text-[10px] text-cc-muted">Expected responses (comma-separated)</label>
+                              <input
+                                type="text"
+                                value={(node.expectedResponses || []).join(", ")}
+                                onChange={e => updateFlowNode(node.id, { expectedResponses: e.target.value.split(",").map(s => s.trim()).filter(Boolean) })}
+                                placeholder="yes, no, maybe"
+                                className="w-full px-2 py-1 text-[11px] bg-cc-hover border border-cc-border rounded text-cc-fg"
+                              />
+                            </div>
+                          )}
+
+                          {node.type === "condition" && (
+                            <div>
+                              <label className="text-[10px] text-cc-muted">Condition / Variable</label>
+                              <input
+                                type="text"
+                                value={node.conditionVariable || ""}
+                                onChange={e => updateFlowNode(node.id, { conditionVariable: e.target.value })}
+                                placeholder="e.g. callee said yes"
+                                className="w-full px-2 py-1 text-[11px] bg-cc-hover border border-cc-border rounded text-cc-fg"
+                              />
+                            </div>
+                          )}
+
+                          {node.type === "action" && (
+                            <div>
+                              <label className="text-[10px] text-cc-muted">Tool to call</label>
+                              <input
+                                type="text"
+                                value={node.actionTool || ""}
+                                onChange={e => updateFlowNode(node.id, { actionTool: e.target.value })}
+                                placeholder="e.g. save_note, end_call"
+                                className="w-full px-2 py-1 text-[11px] bg-cc-hover border border-cc-border rounded text-cc-fg"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Edges */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-[11px] font-medium text-cc-muted uppercase tracking-wider">Connections</h3>
+                      </div>
+
+                      {callFlow.edges.map(edge => {
+                        const fromNode = callFlow.nodes.find(n => n.id === edge.from);
+                        const toNode = callFlow.nodes.find(n => n.id === edge.to);
+                        return (
+                          <div key={edge.id} className="flex items-center gap-2 text-[11px]">
+                            <span className="text-cc-fg">{fromNode?.label || edge.from}</span>
+                            <span className="text-cc-muted">→</span>
+                            <input
+                              type="text" value={edge.label || ""}
+                              onChange={e => {
+                                setCallFlow({
+                                  ...callFlow,
+                                  edges: callFlow.edges.map(ed => ed.id === edge.id ? { ...ed, label: e.target.value } : ed),
+                                });
+                              }}
+                              placeholder="condition"
+                              className="w-20 px-1.5 py-0.5 text-[10px] bg-cc-hover border border-cc-border rounded text-cc-fg text-center"
+                            />
+                            <span className="text-cc-muted">→</span>
+                            <select
+                              value={edge.to}
+                              onChange={e => {
+                                setCallFlow({
+                                  ...callFlow,
+                                  edges: callFlow.edges.map(ed => ed.id === edge.id ? { ...ed, to: e.target.value } : ed),
+                                });
+                              }}
+                              className="px-1.5 py-0.5 text-[11px] bg-cc-hover border border-cc-border rounded text-cc-fg"
+                            >
+                              {callFlow.nodes.map(n => (
+                                <option key={n.id} value={n.id}>{n.label}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => deleteFlowEdge(edge.id)}
+                              className="text-[10px] text-red-400 hover:text-red-300 cursor-pointer"
+                            >
+                              x
+                            </button>
+                          </div>
+                        );
+                      })}
+
+                      {/* Add edge */}
+                      {callFlow.nodes.length >= 2 && (
+                        <div className="flex items-center gap-2">
+                          <select id="edge-from" className="px-1.5 py-0.5 text-[11px] bg-cc-hover border border-cc-border rounded text-cc-fg">
+                            {callFlow.nodes.map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
+                          </select>
+                          <span className="text-[11px] text-cc-muted">→</span>
+                          <select id="edge-to" className="px-1.5 py-0.5 text-[11px] bg-cc-hover border border-cc-border rounded text-cc-fg">
+                            {callFlow.nodes.map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
+                          </select>
+                          <button
+                            onClick={() => {
+                              const from = (document.getElementById("edge-from") as HTMLSelectElement)?.value;
+                              const to = (document.getElementById("edge-to") as HTMLSelectElement)?.value;
+                              if (from && to && from !== to) addFlowEdge(from, to);
+                            }}
+                            className="px-1.5 py-0.5 text-[10px] rounded bg-cc-hover text-cc-muted hover:text-cc-fg cursor-pointer"
+                          >
+                            + Connect
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Template Variables */}
+                    <details className="group">
+                      <summary className="text-[11px] text-cc-muted cursor-pointer hover:text-cc-fg">
+                        Template Variables ({Object.keys(callFlow.variables || {}).length})
+                      </summary>
+                      <div className="mt-2 space-y-1">
+                        {Object.entries(callFlow.variables || {}).map(([key, value]) => (
+                          <div key={key} className="flex items-center gap-2">
+                            <span className="text-[11px] text-cc-muted font-mono">{`{{${key}}}`}</span>
+                            <input
+                              type="text" value={value}
+                              onChange={e => setCallFlow({ ...callFlow, variables: { ...callFlow.variables, [key]: e.target.value } })}
+                              className="flex-1 px-2 py-0.5 text-[11px] bg-cc-hover border border-cc-border rounded text-cc-fg"
+                            />
+                            <button
+                              onClick={() => {
+                                const vars = { ...callFlow.variables };
+                                delete vars[key];
+                                setCallFlow({ ...callFlow, variables: vars });
+                              }}
+                              className="text-[10px] text-red-400 cursor-pointer"
+                            >x</button>
+                          </div>
+                        ))}
+                        <button
+                          onClick={() => {
+                            const key = window.prompt("Variable name:");
+                            if (key) setCallFlow({ ...callFlow, variables: { ...callFlow.variables, [key]: "" } });
+                          }}
+                          className="text-[10px] text-cc-primary hover:text-cc-primary/80 cursor-pointer"
+                        >
+                          + Add Variable
+                        </button>
+                      </div>
+                    </details>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex items-center justify-between mt-4 pt-3 border-t border-cc-border">
+              <button
+                onClick={() => setScriptContactId(null)}
+                className="px-3 py-1.5 text-xs rounded bg-cc-hover text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <div className="flex items-center gap-2">
+                {(scriptText || (callFlow && callFlow.nodes.length > 0)) && (
+                  <button
+                    onClick={() => { setScriptText(""); setCallFlow(null); }}
+                    className="px-3 py-1.5 text-xs rounded text-red-400 hover:text-red-300 transition-colors cursor-pointer"
+                  >
+                    Clear Script
+                  </button>
+                )}
+                <button
+                  onClick={saveScript}
+                  disabled={savingScript}
+                  className="px-4 py-1.5 text-xs rounded bg-green-600 text-white hover:bg-green-500 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {savingScript ? "Saving..." : "Save Script"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Active Calls */}
         {activeCalls.length > 0 && (
@@ -480,24 +1029,20 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                       <div>
                         <label className="text-[11px] text-cc-muted">Host</label>
                         <input type="text" value={telSettings.freeswitch.eslHost}
-                          onChange={(e) => setTelSettings({ ...telSettings, freeswitch: { ...telSettings.freeswitch, eslHost: e.target.value } })}
-                          onBlur={() => saveTelSettings({ freeswitch: telSettings.freeswitch })}
+                          onChange={(e) => editTelSettings({ freeswitch: { ...telSettings.freeswitch, eslHost: e.target.value } })}
                           className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
                       </div>
                       <div>
                         <label className="text-[11px] text-cc-muted">Port</label>
                         <input type="number" value={telSettings.freeswitch.eslPort}
-                          onChange={(e) => setTelSettings({ ...telSettings, freeswitch: { ...telSettings.freeswitch, eslPort: parseInt(e.target.value) || 8021 } })}
-                          onBlur={() => saveTelSettings({ freeswitch: telSettings.freeswitch })}
+                          onChange={(e) => editTelSettings({ freeswitch: { ...telSettings.freeswitch, eslPort: parseInt(e.target.value) || 8021 } })}
                           className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
                       </div>
                     </div>
                     <div>
                       <label className="text-[11px] text-cc-muted">ESL Password</label>
                       <input type="password" value={telSettings.freeswitch.eslPassword || ""}
-                        onChange={(e) => setTelSettings({ ...telSettings, freeswitch: { ...telSettings.freeswitch, eslPassword: e.target.value } })}
-                        onBlur={() => saveTelSettings({ freeswitch: telSettings.freeswitch })}
-                        placeholder="heyhank_esl_secret"
+                        onChange={(e) => editTelSettings({ freeswitch: { ...telSettings.freeswitch, eslPassword: e.target.value } })}
                         className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
                     </div>
                     <div className="flex items-center gap-2">
@@ -590,29 +1135,174 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                     )}
                   </div>
 
-                  {/* Voice & Limits */}
+                  {/* Defaults */}
                   <div className="bg-cc-bg rounded-lg p-3 space-y-2 border border-cc-border">
                     <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Defaults</h3>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[11px] text-cc-muted">Default Voice</label>
-                        <select value={telSettings.defaultVoice || "Kore"} onChange={(e) => saveTelSettings({ defaultVoice: e.target.value })}
-                          className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg">
-                          <option value="Kore">Kore (male)</option>
-                          <option value="Puck">Puck (male)</option>
-                          <option value="Charon">Charon (male)</option>
-                          <option value="Aoede">Aoede (female)</option>
-                          <option value="Fenrir">Fenrir (male)</option>
-                          <option value="Leda">Leda (female)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[11px] text-cc-muted">Max Call Duration (sec)</label>
-                        <input type="number" value={telSettings.maxCallDurationSeconds || 600}
-                          onChange={(e) => saveTelSettings({ maxCallDurationSeconds: parseInt(e.target.value) || 600 })}
-                          className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
-                      </div>
+                    <div>
+                      <label className="text-[11px] text-cc-muted">Max Call Duration (seconds)</label>
+                      <input type="number" value={telSettings.maxCallDurationSeconds || 600}
+                        onChange={(e) => editTelSettings({ maxCallDurationSeconds: parseInt(e.target.value) || 600 })}
+                        className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
+                      <p className="text-[10px] text-cc-muted mt-0.5">Safety limit — calls are automatically ended after this duration</p>
                     </div>
+                  </div>
+
+                  {/* Gemini Live Backend */}
+                  <div className="bg-cc-bg rounded-lg p-3 space-y-3 border border-cc-border">
+                    <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Gemini Live Backend</h3>
+                    <div>
+                      <label className="text-[11px] text-cc-muted">Backend</label>
+                      <select
+                        value={telSettings.geminiBackend || "aistudio"}
+                        onChange={(e) => editTelSettings({ geminiBackend: e.target.value as "aistudio" | "vertexai" })}
+                        className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg"
+                      >
+                        <option value="aistudio">Google AI Studio (default — US routing)</option>
+                        <option value="vertexai">Vertex AI (EU routing — lower latency)</option>
+                      </select>
+                      <p className="text-[10px] text-cc-muted mt-0.5">
+                        {telSettings.geminiBackend === "vertexai"
+                          ? "Model: gemini-live-2.5-flash-native-audio (Chirp3-HD voices, 30 voices, 24 languages)"
+                          : "Model: gemini-3.1-flash-live-preview"}
+                      </p>
+                    </div>
+
+                    {/* Voice — changes based on backend */}
+                    <div>
+                      <label className="text-[11px] text-cc-muted">Default Voice</label>
+                      <select value={telSettings.defaultVoice || "Puck"} onChange={(e) => editTelSettings({ defaultVoice: e.target.value })}
+                        className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg">
+                        {telSettings.geminiBackend === "vertexai" ? (
+                          <>
+                            <optgroup label="Male">
+                              <option value="Puck">Puck</option>
+                              <option value="Charon">Charon</option>
+                              <option value="Fenrir">Fenrir</option>
+                              <option value="Orus">Orus</option>
+                              <option value="Achird">Achird</option>
+                              <option value="Algenib">Algenib</option>
+                              <option value="Algieba">Algieba</option>
+                              <option value="Alnilam">Alnilam</option>
+                              <option value="Enceladus">Enceladus</option>
+                              <option value="Iapetus">Iapetus</option>
+                              <option value="Rasalgethi">Rasalgethi</option>
+                              <option value="Sadachbia">Sadachbia</option>
+                              <option value="Sadaltager">Sadaltager</option>
+                              <option value="Schedar">Schedar</option>
+                              <option value="Umbriel">Umbriel</option>
+                              <option value="Zubenelgenubi">Zubenelgenubi</option>
+                            </optgroup>
+                            <optgroup label="Female">
+                              <option value="Kore">Kore</option>
+                              <option value="Aoede">Aoede</option>
+                              <option value="Leda">Leda</option>
+                              <option value="Zephyr">Zephyr</option>
+                              <option value="Achernar">Achernar</option>
+                              <option value="Autonoe">Autonoe</option>
+                              <option value="Callirrhoe">Callirrhoe</option>
+                              <option value="Despina">Despina</option>
+                              <option value="Erinome">Erinome</option>
+                              <option value="Gacrux">Gacrux</option>
+                              <option value="Laomedeia">Laomedeia</option>
+                              <option value="Pulcherrima">Pulcherrima</option>
+                              <option value="Sulafat">Sulafat</option>
+                              <option value="Vindemiatrix">Vindemiatrix</option>
+                            </optgroup>
+                          </>
+                        ) : (
+                          <>
+                            <optgroup label="Male">
+                              <option value="Kore">Kore</option>
+                              <option value="Puck">Puck</option>
+                              <option value="Charon">Charon</option>
+                              <option value="Fenrir">Fenrir</option>
+                            </optgroup>
+                            <optgroup label="Female">
+                              <option value="Aoede">Aoede</option>
+                              <option value="Leda">Leda</option>
+                            </optgroup>
+                          </>
+                        )}
+                      </select>
+                      <p className="text-[10px] text-cc-muted mt-0.5">
+                        {telSettings.geminiBackend === "vertexai"
+                          ? "Chirp3-HD voices — note: Kore is female on Vertex AI (unlike AI Studio)"
+                          : "Standard Gemini Live voices"}
+                      </p>
+                    </div>
+
+                    {telSettings.geminiBackend === "vertexai" && (
+                      <div className="space-y-3 mt-1 pl-2 border-l-2 border-cc-primary/30">
+                        <div className="text-[10px] text-cc-muted space-y-1">
+                          <p>
+                            Vertex AI routes Gemini Live audio through a Google Cloud region you control (e.g. Netherlands) instead of the default US routing. This can significantly reduce latency for European callers.
+                          </p>
+                          <p>
+                            <strong>Setup required:</strong> Create a GCP project, enable the <em>Vertex AI API</em>, set up billing, and create a service account with the <em>Vertex AI Administrator</em> role. Download the service account key as JSON and place it on this server.
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[11px] text-cc-muted">GCP Project ID</label>
+                            <input
+                              type="text"
+                              value={telSettings.gcpProjectId || ""}
+                              onChange={(e) => editTelSettings({ gcpProjectId: e.target.value })}
+                              placeholder="my-project-id"
+                              className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg"
+                            />
+                            <p className="text-[10px] text-cc-muted mt-0.5">Find this in the GCP Console dashboard</p>
+                          </div>
+                          <div>
+                            <label className="text-[11px] text-cc-muted">Region</label>
+                            <select
+                              value={telSettings.gcpLocation || "europe-west4"}
+                              onChange={(e) => editTelSettings({ gcpLocation: e.target.value })}
+                              className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg"
+                            >
+                              <option value="europe-west4">europe-west4 (Netherlands)</option>
+                              <option value="europe-west3">europe-west3 (Frankfurt)</option>
+                              <option value="europe-west1">europe-west1 (Belgium)</option>
+                              <option value="us-central1">us-central1 (Iowa)</option>
+                            </select>
+                            <p className="text-[10px] text-cc-muted mt-0.5">Choose the region closest to your server</p>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[11px] text-cc-muted">Service Account Key</label>
+                          <input
+                            type="text"
+                            value={telSettings.gcpServiceAccountKey || ""}
+                            onChange={(e) => editTelSettings({ gcpServiceAccountKey: e.target.value })}
+                            placeholder="/path/to/service-account-key.json"
+                            className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg font-mono"
+                          />
+                          <p className="text-[10px] text-cc-muted mt-0.5">Absolute path to the JSON key file on this server. Create one in GCP Console → IAM → Service Accounts → Keys.</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Save Button */}
+                  <div className="flex items-center gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={saveAllSettings}
+                      disabled={saving || !settingsDirty}
+                      className={`px-4 py-2 text-xs font-medium rounded-lg transition-all cursor-pointer ${
+                        settingsDirty
+                          ? "bg-cc-primary text-white hover:opacity-90 shadow-sm"
+                          : "bg-cc-hover text-cc-muted"
+                      } disabled:opacity-50 disabled:cursor-default`}
+                    >
+                      {saving ? "Saving..." : "Save Settings"}
+                    </button>
+                    {settingsSaved && (
+                      <span className="text-xs text-green-500 animate-fade-in">Settings saved</span>
+                    )}
+                    {settingsDirty && !saving && (
+                      <span className="text-[11px] text-amber-400">Unsaved changes</span>
+                    )}
                   </div>
                 </>
               )}
