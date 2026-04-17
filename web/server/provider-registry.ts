@@ -107,6 +107,18 @@ const PROVIDER_REGISTRY: ProviderDefinition[] = [
     ],
   },
   {
+    id: "groq",
+    name: "Groq",
+    description: "Ultra-low-latency inference (Llama, Mixtral, Whisper). Ideal for real-time voice.",
+    cliProviderFlag: "groq",
+    category: "cloud",
+    defaultModel: "llama-3.3-70b-versatile",
+    docsUrl: "https://console.groq.com/docs",
+    envFields: [
+      { key: "GROQ_API_KEY", label: "API Key", required: true, secret: true, placeholder: "gsk_..." },
+    ],
+  },
+  {
     id: "together",
     name: "Together AI",
     description: "Open-source models hosted by Together",

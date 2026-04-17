@@ -144,6 +144,15 @@ export function regenerateToken(): string {
   return token;
 }
 
+/**
+ * Check whether a token file already exists on disk (i.e. not a fresh first-run).
+ * Used to decide whether to print the token to console on startup.
+ */
+export function isTokenPersisted(): boolean {
+  if (process.env.HEYHANK_AUTH_TOKEN || process.env.COMPANION_AUTH_TOKEN) return true;
+  return existsSync(AUTH_FILE);
+}
+
 /** Reset cached state — for testing only */
 export function _resetForTest(): void {
   cachedToken = null;

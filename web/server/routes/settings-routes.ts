@@ -87,6 +87,10 @@ export function registerSettingsRoutes(api: Hono): void {
       publicUrl: settings.publicUrl,
       updateChannel: settings.updateChannel,
       dockerAutoUpdate: settings.dockerAutoUpdate,
+      hankChatProvider: settings.hankChatProvider,
+      hankChatModel: settings.hankChatModel,
+      obsidianVaultPath: settings.obsidianVaultPath,
+      openrouterApiKeyConfigured: !!process.env.OPENROUTER_API_KEY?.trim(),
     });
   });
 
@@ -140,6 +144,9 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.dockerAutoUpdate !== undefined && typeof body.dockerAutoUpdate !== "boolean") {
       return c.json({ error: "dockerAutoUpdate must be a boolean" }, 400);
     }
+    if (body.obsidianVaultPath !== undefined && typeof body.obsidianVaultPath !== "string") {
+      return c.json({ error: "obsidianVaultPath must be a string" }, 400);
+    }
     const hasAnyField = body.anthropicApiKey !== undefined || body.anthropicModel !== undefined
       || body.claudeCodeOAuthToken !== undefined || body.openaiApiKey !== undefined
       || body.onboardingCompleted !== undefined
@@ -150,7 +157,10 @@ export function registerSettingsRoutes(api: Hono): void {
       || body.aiValidationAutoDeny !== undefined
       || body.publicUrl !== undefined
       || body.updateChannel !== undefined
-      || body.dockerAutoUpdate !== undefined;
+      || body.dockerAutoUpdate !== undefined
+      || body.hankChatProvider !== undefined
+      || body.hankChatModel !== undefined
+      || body.obsidianVaultPath !== undefined;
     if (!hasAnyField) {
       return c.json({ error: "At least one settings field is required" }, 400);
     }
@@ -224,7 +234,23 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.dockerAutoUpdate === "boolean"
           ? body.dockerAutoUpdate
           : undefined,
+      hankChatProvider:
+        typeof body.hankChatProvider === "string"
+          ? body.hankChatProvider.trim()
+          : undefined,
+      hankChatModel:
+        typeof body.hankChatModel === "string"
+          ? body.hankChatModel.trim()
+          : undefined,
+      obsidianVaultPath:
+        typeof body.obsidianVaultPath === "string"
+          ? body.obsidianVaultPath.trim()
+          : undefined,
     });
+
+    if (body.obsidianVaultPath !== undefined) {
+      import("../memory-service.js").then(m => m.restartVaultSync()).catch(() => {});
+    }
 
     const claudeAuthAfter = detectClaudeAuthStatus();
     const codexAuthAfter = detectCodexAuthStatus();
@@ -249,6 +275,10 @@ export function registerSettingsRoutes(api: Hono): void {
       publicUrl: settings.publicUrl,
       updateChannel: settings.updateChannel,
       dockerAutoUpdate: settings.dockerAutoUpdate,
+      hankChatProvider: settings.hankChatProvider,
+      hankChatModel: settings.hankChatModel,
+      obsidianVaultPath: settings.obsidianVaultPath,
+      openrouterApiKeyConfigured: !!process.env.OPENROUTER_API_KEY?.trim(),
     });
   });
 

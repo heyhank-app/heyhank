@@ -64,6 +64,12 @@ async function callOllama(
   config: LLMProviderConfig,
 ): Promise<LLMResponse> {
   const baseUrl = config.baseUrl || "http://localhost:11434";
+
+  // Warn about insecure remote Ollama URLs
+  if (baseUrl.startsWith("http://") && !baseUrl.includes("localhost") && !baseUrl.includes("127.0.0.1") && !baseUrl.includes(".ts.net")) {
+    console.warn(`[llm-providers] WARNING: Ollama URL "${baseUrl}" uses HTTP over a potentially public network. Consider using Tailscale (.ts.net) for secure remote access.`);
+  }
+
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -112,6 +118,12 @@ export async function* streamOllama(
   config: LLMProviderConfig,
 ): AsyncGenerator<LLMStreamChunk> {
   const baseUrl = config.baseUrl || "http://localhost:11434";
+
+  // Warn about insecure remote Ollama URLs
+  if (baseUrl.startsWith("http://") && !baseUrl.includes("localhost") && !baseUrl.includes("127.0.0.1") && !baseUrl.includes(".ts.net")) {
+    console.warn(`[llm-providers] WARNING: Ollama URL "${baseUrl}" uses HTTP over a potentially public network. Consider using Tailscale (.ts.net) for secure remote access.`);
+  }
+
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -430,6 +430,8 @@ export interface SessionState {
   nodeId?: string;
   /** Federation: remote node display name */
   nodeName?: string;
+  /** Raw message history kept for search (populated by ws-bridge) */
+  messageHistory?: Array<Record<string, unknown>>;
 }
 
 // ─── MCP Types ───────────────────────────────────────────────────────────────

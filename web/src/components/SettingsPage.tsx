@@ -17,9 +17,9 @@ const CATEGORIES = [
   { id: "notifications", label: "Notifications" },
   { id: "providers", label: "Providers" },
   { id: "gemini", label: "Gemini" },
+  { id: "hank-chat", label: "Hank Chat" },
   { id: "email", label: "Email" },
   { id: "calendar", label: "Calendar" },
-  { id: "ai-features", label: "HeyHank AI" },
   { id: "updates", label: "Updates" },
   { id: "appearance", label: "Appearance" },
   { id: "environments", label: "Environments" },
@@ -87,11 +87,64 @@ function PushNotificationToggle() {
   );
 }
 
+/** Collapsible section for Settings — shows title + optional status when collapsed */
+function SettingsSection({ id, title, status, defaultOpen = false, forceOpen, sectionRef, children }: {
+  id: string;
+  title: string;
+  status?: string;
+  defaultOpen?: boolean;
+  forceOpen?: boolean;
+  sectionRef?: (el: HTMLElement | null) => void;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(() => {
+    const stored = localStorage.getItem(`settings-section-${id}`);
+    if (stored !== null) return stored === "true";
+    return defaultOpen;
+  });
+
+  // Allow parent to force-open via prop
+  useEffect(() => {
+    if (forceOpen) {
+      setOpen(true);
+      localStorage.setItem(`settings-section-${id}`, "true");
+    }
+  }, [forceOpen, id]);
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    localStorage.setItem(`settings-section-${id}`, String(next));
+  };
+
+  return (
+    <section id={id} ref={sectionRef}>
+      <button
+        type="button"
+        onClick={toggle}
+        className="w-full flex items-center gap-2 group cursor-pointer mb-2 py-1 -mx-1 px-1 rounded-lg hover:bg-cc-hover/50 transition-colors"
+        aria-expanded={open}
+      >
+        <svg viewBox="0 0 16 16" fill="currentColor" className={`w-3 h-3 text-cc-muted transition-transform duration-150 ${open ? "rotate-90" : ""}`}>
+          <path d="M6 4l4 4-4 4" />
+        </svg>
+        <h2 className="text-sm font-semibold text-cc-fg">{title}</h2>
+        {!open && status && (
+          <span className="text-[11px] text-cc-muted ml-auto">{status}</span>
+        )}
+      </button>
+      {open && <div className="space-y-3 ml-0.5">{children}</div>}
+    </section>
+  );
+}
+
 export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [anthropicApiKey, setAnthropicApiKey] = useState("");
   const [anthropicModel, setAnthropicModel] = useState("claude-sonnet-4-6");
   const [editorTabEnabled, setEditorTabEnabled] = useState(false);
   const [configured, setConfigured] = useState(false);
+  const [anthropicApiKeyOnly, setAnthropicApiKeyOnly] = useState(false);
+  const [openrouterApiKeyConfigured, setOpenrouterApiKeyConfigured] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -115,11 +168,14 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [updatingApp, setUpdatingApp] = useState(false);
   const [updateStatus, setUpdateStatus] = useState("");
   const [updateError, setUpdateError] = useState("");
+  const [hankChatProvider, setHankChatProvider] = useState("gemini-live");
+  const [hankChatModel, setHankChatModel] = useState("");
   const [aiValidationEnabled, setAiValidationEnabled] = useState(false);
   const [aiValidationAutoApprove, setAiValidationAutoApprove] = useState(true);
   const [aiValidationAutoDeny, setAiValidationAutoDeny] = useState(false);
   const [publicUrl, setPublicUrl] = useState("");
   const [activeSection, setActiveSection] = useState<CategoryId>("general");
+  const [forceOpenId, setForceOpenId] = useState<CategoryId | null>(null);
   const [apiKeyFocused, setApiKeyFocused] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{ valid: boolean; error?: string } | null>(null);
@@ -134,8 +190,8 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [providerError, setProviderError] = useState("");
   const [claudeTokenFocused, setClaudeTokenFocused] = useState(false);
   const [openaiKeyFocused, setOpenaiKeyFocused] = useState(false);
-  const [claudeCliAuth, setClaudeCliAuth] = useState<{ authenticated: boolean; method: string; oauthTokenConfigured: boolean; cliVersion: string | null } | null>(null);
-  const [codexCliAuth, setCodexCliAuth] = useState<{ authenticated: boolean; method: string; apiKeyConfigured: boolean; cliVersion: string | null } | null>(null);
+  const [claudeCliAuth, setClaudeCliAuth] = useState<{ installed: boolean; loggedIn: boolean; authenticated?: boolean; method?: string; oauthTokenConfigured: boolean; cliVersion: string | null } | null>(null);
+  const [codexCliAuth, setCodexCliAuth] = useState<{ installed: boolean; loggedIn: boolean; authenticated?: boolean; method?: string; apiKeyConfigured: boolean; cliVersion: string | null } | null>(null);
 
   // Gemini state
   const [geminiApiKey, setGeminiApiKey] = useState("");
@@ -179,7 +235,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   interface CalendarAccountUI {
     id: string;
     name: string;
-    provider: "google" | "icloud" | "caldav";
+    provider: "google" | "icloud" | "caldav" | "outlook";
     serverUrl: string;
     auth: { user: string; pass: string };
     defaultCalendarId?: string;
@@ -191,7 +247,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [editingCal, setEditingCal] = useState<CalendarAccountUI | null>(null);
   const [showCalForm, setShowCalForm] = useState(false);
   const [calForm, setCalForm] = useState({
-    name: "", provider: "google" as "google" | "icloud" | "caldav",
+    name: "", provider: "google" as "google" | "icloud" | "caldav" | "outlook",
     serverUrl: "", authUser: "", authPass: "",
   });
   const [calTesting, setCalTesting] = useState<string | null>(null);
@@ -246,10 +302,16 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
 
   const scrollToSection = useCallback((id: CategoryId) => {
     setActiveSection(id);
-    const el = sectionRefs.current[id];
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+    // Force-open the target section, then reset after a tick so re-clicks work
+    setForceOpenId(id);
+    setTimeout(() => setForceOpenId(null), 100);
+    // Wait a frame for the section to expand before scrolling
+    requestAnimationFrame(() => {
+      const el = sectionRefs.current[id];
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -257,6 +319,8 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
       .getSettings()
       .then((s) => {
         setConfigured(s.anthropicApiKeyConfigured);
+        setAnthropicApiKeyOnly(s.anthropicApiKeyConfigured);
+        if (typeof s.openrouterApiKeyConfigured === "boolean") setOpenrouterApiKeyConfigured(s.openrouterApiKeyConfigured);
         // Also check if any additional provider is enabled (for AI Features status)
         api.getProviders().then((providers) => {
           if (providers.some((p) => p.configured && p.enabled)) setConfigured(true);
@@ -275,6 +339,8 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
         if (typeof s.aiValidationEnabled === "boolean") setAiValidationEnabled(s.aiValidationEnabled);
         if (typeof s.aiValidationAutoApprove === "boolean") setAiValidationAutoApprove(s.aiValidationAutoApprove);
         if (typeof s.aiValidationAutoDeny === "boolean") setAiValidationAutoDeny(s.aiValidationAutoDeny);
+        if (typeof s.hankChatProvider === "string") setHankChatProvider(s.hankChatProvider);
+        if (typeof s.hankChatModel === "string") setHankChatModel(s.hankChatModel);
         if (s.updateChannel === "stable" || s.updateChannel === "prerelease") setUpdateChannel(s.updateChannel);
         if (typeof s.dockerAutoUpdate === "boolean") setDockerAutoUpdate(s.dockerAutoUpdate);
         if (typeof s.publicUrl === "string") {
@@ -408,14 +474,15 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
       outlook: { serverUrl: "https://outlook.office365.com/caldav/" },
       caldav: { serverUrl: "" },
     };
-    setCalForm((f) => ({ ...f, provider: provider === "outlook" ? "caldav" : provider, serverUrl: presets[provider]?.serverUrl || "" }));
+    setCalForm((f) => ({ ...f, provider, serverUrl: presets[provider]?.serverUrl || "" }));
   }
 
   async function saveCalendarAccount() {
     setCalError("");
+    const apiProvider = calForm.provider === "outlook" ? "caldav" as const : calForm.provider;
     const payload = {
       name: calForm.name.trim(),
-      provider: calForm.provider,
+      provider: apiProvider,
       serverUrl: calForm.serverUrl.trim(),
       auth: { user: calForm.authUser.trim(), pass: calForm.authPass },
     };
@@ -423,7 +490,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
       setCalError("Name, user and password are required.");
       return;
     }
-    if (payload.provider === "caldav" && !payload.serverUrl) {
+    if ((calForm.provider === "caldav" || calForm.provider === "outlook") && !payload.serverUrl) {
       setCalError("Server URL is required for custom CalDAV.");
       return;
     }
@@ -496,6 +563,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
 
       const res = await api.updateSettings(payload);
       setConfigured(res.anthropicApiKeyConfigured);
+      setAnthropicApiKeyOnly(res.anthropicApiKeyConfigured);
       setEditorTabEnabled(res.editorTabEnabled);
       setStoreEditorTabEnabled(res.editorTabEnabled);
       setAnthropicApiKey("");
@@ -624,7 +692,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
       <div className="flex-1 min-h-0 flex max-w-5xl w-full mx-auto">
         {/* Desktop sidebar nav */}
         <nav
-          className="hidden sm:flex flex-col gap-0.5 w-44 shrink-0 pt-2 pr-6 pl-8 sticky top-0 self-start"
+          className="hidden sm:flex flex-col gap-0.5 w-44 shrink-0 pt-2 pr-6 pl-8 sticky top-0 self-start max-h-[calc(100vh-3rem)] overflow-y-auto"
           aria-label="Settings categories"
         >
           {CATEGORIES.map((cat) => (
@@ -647,9 +715,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
         <div ref={contentRef} className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-8 sm:pl-0 pb-safe">
           <div className="space-y-10 py-4 sm:py-2">
             {/* General */}
-            <section id="general" ref={setSectionRef("general")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">General</h2>
-              <div className="space-y-3">
+            <SettingsSection id="general" title="General" defaultOpen forceOpen={forceOpenId === "general"} sectionRef={setSectionRef("general")}>
                 <button
                   type="button"
                   onClick={toggleDarkMode}
@@ -684,13 +750,10 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                 <p className="text-xs text-cc-muted px-1">
                   Last commit shows only uncommitted changes. Default branch shows all changes since diverging from main.
                 </p>
-              </div>
-            </section>
+            </SettingsSection>
 
             {/* Connectivity */}
-            <section id="connectivity" ref={setSectionRef("connectivity")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Connectivity</h2>
-              <div className="space-y-4">
+            <SettingsSection id="connectivity" title="Connectivity" status={publicUrl || "Not configured"} forceOpen={forceOpenId === "connectivity"} sectionRef={setSectionRef("connectivity")}>
                 <p className="text-xs text-cc-muted">
                   HeyHank needs an externally-reachable HTTPS URL for mobile access (PWA), webhooks (GitHub), and OAuth callbacks.
                 </p>
@@ -761,13 +824,10 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     <li>Federation — connect multiple HeyHank instances</li>
                   </ul>
                 </div>
-              </div>
-            </section>
+            </SettingsSection>
 
             {/* Authentication */}
-            <section id="authentication" ref={setSectionRef("authentication")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Authentication</h2>
-              <div className="space-y-4">
+            <SettingsSection id="authentication" title="Authentication" status={authToken ? "Token set" : "No token"} forceOpen={forceOpenId === "authentication"} sectionRef={setSectionRef("authentication")}>
                 <p className="text-xs text-cc-muted">
                   Use the auth token or QR code to connect additional devices (e.g. mobile over Tailscale).
                 </p>
@@ -909,13 +969,10 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     Creates a new token. All other signed-in devices will need to re-authenticate.
                   </p>
                 </div>
-              </div>
-            </section>
+            </SettingsSection>
 
             {/* Notifications */}
-            <section id="notifications" ref={setSectionRef("notifications")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Notifications</h2>
-              <div className="space-y-3">
+            <SettingsSection id="notifications" title="Notifications" status={notificationSound ? "Sound on" : "Sound off"} forceOpen={forceOpenId === "notifications"} sectionRef={setSectionRef("notifications")}>
                 <button
                   type="button"
                   onClick={toggleNotificationSound}
@@ -945,13 +1002,10 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   </button>
                 )}
                 <PushNotificationToggle />
-              </div>
-            </section>
+            </SettingsSection>
 
             {/* Providers */}
-            <section id="providers" ref={setSectionRef("providers")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Providers</h2>
-              <div className="space-y-6">
+            <SettingsSection id="providers" title="Providers" defaultOpen forceOpen={forceOpenId === "providers"} status={configured ? "Configured" : "Not configured"} sectionRef={setSectionRef("providers")}>
                 <p className="text-xs text-cc-muted">
                   Connect AI backends to power your agent sessions. Configure CLI backends (Claude Code, Codex) and additional model providers for Claude Code's <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">--provider</code> flag.
                 </p>
@@ -965,7 +1019,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                         <p className="text-xs text-cc-muted mt-0.5">{claudeCliAuth.cliVersion}</p>
                       )}
                     </div>
-                    {claudeCliAuth?.authenticated || claudeCodeTokenConfigured ? (
+                    {(claudeCliAuth?.authenticated ?? claudeCliAuth?.loggedIn) || claudeCodeTokenConfigured ? (
                       <span className="px-2 py-0.5 text-xs rounded-full bg-cc-success/15 text-cc-success border border-cc-success/20">
                         Authenticated
                       </span>
@@ -975,7 +1029,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                       </span>
                     )}
                   </div>
-                  {claudeCliAuth?.authenticated && (
+                  {(claudeCliAuth?.authenticated ?? claudeCliAuth?.loggedIn) && (
                     <div className="px-3 py-2 rounded-lg bg-cc-success/5 border border-cc-success/10 text-xs text-cc-muted">
                       {claudeCliAuth.method === "cli_login" && <>Authenticated via <strong className="text-cc-fg">CLI login</strong>. Sessions authenticate automatically.</>}
                       {claudeCliAuth.method === "env_api_key" && <>Authenticated via <strong className="text-cc-fg">ANTHROPIC_API_KEY</strong> env var.</>}
@@ -983,14 +1037,14 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                       {claudeCliAuth.method === "env_auth_token" && <>Authenticated via <strong className="text-cc-fg">ANTHROPIC_AUTH_TOKEN</strong> env var.</>}
                     </div>
                   )}
-                  {!claudeCliAuth?.authenticated && !claudeCodeTokenConfigured && (
+                  {!(claudeCliAuth?.authenticated ?? claudeCliAuth?.loggedIn) && !claudeCodeTokenConfigured && (
                     <div className="px-3 py-2.5 rounded-lg bg-cc-primary/5 border border-cc-primary/15 text-xs text-cc-muted space-y-1.5">
                       <p><strong>CLI Login:</strong> Run <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">claude login</code> on the server.</p>
                       <p><strong>OAuth Token:</strong> Paste a token from <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">claude setup-token</code> below.</p>
                     </div>
                   )}
                   <div className="space-y-1.5">
-                    <label className="block text-xs text-cc-muted" htmlFor="claude-code-token">OAuth Token {claudeCliAuth?.authenticated ? "(optional)" : ""}</label>
+                    <label className="block text-xs text-cc-muted" htmlFor="claude-code-token">OAuth Token {(claudeCliAuth?.authenticated ?? claudeCliAuth?.loggedIn) ? "(optional)" : ""}</label>
                     <input id="claude-code-token" type="password"
                       value={claudeCodeTokenConfigured && !claudeTokenFocused && !claudeCodeToken ? "••••••••••••••••" : claudeCodeToken}
                       onChange={(e) => setClaudeCodeToken(e.target.value)}
@@ -1007,26 +1061,26 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                       <h3 className="text-sm font-medium text-cc-fg">OpenAI Codex</h3>
                       {codexCliAuth?.cliVersion && <p className="text-xs text-cc-muted mt-0.5">{codexCliAuth.cliVersion}</p>}
                     </div>
-                    {codexCliAuth?.authenticated || openaiApiKeyConfigured ? (
+                    {(codexCliAuth?.authenticated ?? codexCliAuth?.loggedIn) || openaiApiKeyConfigured ? (
                       <span className="px-2 py-0.5 text-xs rounded-full bg-cc-success/15 text-cc-success border border-cc-success/20">Authenticated</span>
                     ) : (
                       <span className="px-2 py-0.5 text-xs rounded-full bg-cc-error/15 text-cc-error border border-cc-error/20">Not configured</span>
                     )}
                   </div>
-                  {codexCliAuth?.authenticated && (
+                  {(codexCliAuth?.authenticated ?? codexCliAuth?.loggedIn) && (
                     <div className="px-3 py-2 rounded-lg bg-cc-success/5 border border-cc-success/10 text-xs text-cc-muted">
                       {codexCliAuth.method === "cli_login" && <>Authenticated via <strong className="text-cc-fg">device login</strong>.</>}
                       {codexCliAuth.method === "env_api_key" && <>Authenticated via <strong className="text-cc-fg">OPENAI_API_KEY</strong> env var.</>}
                     </div>
                   )}
-                  {!codexCliAuth?.authenticated && !openaiApiKeyConfigured && (
+                  {!(codexCliAuth?.authenticated ?? codexCliAuth?.loggedIn) && !openaiApiKeyConfigured && (
                     <div className="px-3 py-2.5 rounded-lg bg-cc-primary/5 border border-cc-primary/15 text-xs text-cc-muted space-y-1.5">
                       <p><strong>Device Login:</strong> Run <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">codex --login</code> on the server.</p>
                       <p><strong>API Key:</strong> Enter your key below from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-cc-primary hover:underline">platform.openai.com</a>.</p>
                     </div>
                   )}
                   <div className="space-y-1.5">
-                    <label className="block text-xs text-cc-muted" htmlFor="openai-api-key">API Key {codexCliAuth?.authenticated ? "(optional)" : ""}</label>
+                    <label className="block text-xs text-cc-muted" htmlFor="openai-api-key">API Key {(codexCliAuth?.authenticated ?? codexCliAuth?.loggedIn) ? "(optional)" : ""}</label>
                     <input id="openai-api-key" type="password"
                       value={openaiApiKeyConfigured && !openaiKeyFocused && !openaiApiKey ? "••••••••••••••••" : openaiApiKey}
                       onChange={(e) => setOpenaiApiKey(e.target.value)}
@@ -1084,13 +1138,10 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     <ProviderGrid />
                   </div>
                 </details>
-              </div>
-            </section>
+            </SettingsSection>
 
             {/* Gemini */}
-            <section id="gemini" ref={setSectionRef("gemini")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Gemini</h2>
-              <div className="space-y-6">
+            <SettingsSection id="gemini" title="Gemini" status={geminiApiKeyConfigured ? "Key set" : "Not configured"} forceOpen={forceOpenId === "gemini"} sectionRef={setSectionRef("gemini")}>
                 <p className="text-xs text-cc-muted">
                   Configure Gemini Live for voice chat. Get an API key from{" "}
                   <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-cc-primary hover:underline">
@@ -1223,13 +1274,10 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                 >
                   {geminiSaving ? "Saving..." : "Save Gemini Settings"}
                 </button>
-              </div>
-            </section>
+            </SettingsSection>
 
             {/* Email Accounts */}
-            <section id="email" ref={setSectionRef("email")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Email Accounts</h2>
-              <div className="space-y-4">
+            <SettingsSection id="email" title="Email Accounts" status={`${emailAccounts.length} account${emailAccounts.length !== 1 ? "s" : ""}`} forceOpen={forceOpenId === "email"} sectionRef={setSectionRef("email")}>
                 <p className="text-xs text-cc-muted">
                   Configure IMAP/SMTP email accounts for the voice assistant. Gemini can read, search, and send emails on your behalf.
                 </p>
@@ -1477,12 +1525,10 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   </div>
                 )}
 
-              </div>
-            </section>
+            </SettingsSection>
 
             {/* Calendar */}
-            <section id="calendar" ref={setSectionRef("calendar")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Calendar Accounts</h2>
+            <SettingsSection id="calendar" title="Calendar Accounts" status={`${calAccounts.length} account${calAccounts.length !== 1 ? "s" : ""}`} forceOpen={forceOpenId === "calendar"} sectionRef={setSectionRef("calendar")}>
               <p className="text-xs text-cc-muted mb-4">
                 Connect CalDAV calendars (Google Calendar, iCloud, Outlook, Nextcloud, etc.) so your assistant can manage events.
               </p>
@@ -1656,15 +1702,94 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   </div>
                 </div>
               )}
-            </section>
+            </SettingsSection>
 
-            {/* AI Features */}
-            <section id="ai-features" ref={setSectionRef("ai-features")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">HeyHank AI Features</h2>
-              <div className="space-y-4">
+            {/* Hank Chat — merged with AI Features */}
+            <SettingsSection id="hank-chat" title="Hank Chat" forceOpen={forceOpenId === "hank-chat"} status={hankChatProvider !== "gemini-live" ? ({ claude: "Claude", openai: "OpenAI", ollama: "Ollama", openrouter: "OpenRouter", "gemini-text": "Gemini Text" } as Record<string, string>)[hankChatProvider] || hankChatProvider : "Gemini Live"} sectionRef={setSectionRef("hank-chat")}>
                 <p className="text-xs text-cc-muted leading-relaxed">
-                  These features use any enabled provider configured under Providers → Additional Providers above.
+                  Configure the default provider and model for the Hank Chat overlay.
                 </p>
+
+                {/* Default Provider */}
+                <div>
+                  <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-1.5">Default Provider</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(() => {
+                      // HankChat text providers need a direct API key in settings
+                      // (CLI login / OAuth don't work for HankChat's server-side LLM calls).
+                      const providers = [
+                        { id: "gemini-live", label: "Gemini Live", desc: "Voice + Text", hasKey: geminiApiKeyConfigured, keySection: "gemini", keyLabel: "Gemini API Key" },
+                        { id: "claude", label: "Claude", desc: "Text", hasKey: anthropicApiKeyOnly, keySection: "claude-code", keyLabel: "Anthropic API Key" },
+                        { id: "openai", label: "OpenAI", desc: "Text", hasKey: openaiApiKeyConfigured, keySection: "codex", keyLabel: "OpenAI API Key" },
+                        { id: "ollama", label: "Ollama", desc: "Local", hasKey: true, keySection: "", keyLabel: "" },
+                        { id: "openrouter", label: "OpenRouter", desc: "Text", hasKey: openrouterApiKeyConfigured, keySection: "", keyLabel: "OPENROUTER_API_KEY env var" },
+                        { id: "gemini-text", label: "Gemini", desc: "Text", hasKey: geminiApiKeyConfigured, keySection: "gemini", keyLabel: "Gemini API Key" },
+                      ];
+                      return providers.map((p) => {
+                        const disabled = !p.hasKey;
+                        return (
+                          <button key={p.id} onClick={async () => {
+                            if (disabled) return;
+                            setHankChatProvider(p.id);
+                            try { await api.updateSettings({ hankChatProvider: p.id }); window.dispatchEvent(new Event("heyhank-settings-changed")); } catch { setHankChatProvider(hankChatProvider); }
+                          }}
+                          disabled={disabled}
+                          className={`p-2.5 rounded-lg border text-left transition-all ${
+                            disabled
+                              ? "border-cc-border bg-cc-card opacity-50 cursor-not-allowed"
+                              : hankChatProvider === p.id ? "border-cc-accent bg-cc-accent/10" : "border-cc-border bg-cc-card hover:border-cc-accent/30"
+                          }`}>
+                            <div className={`text-xs font-medium ${disabled ? "text-cc-muted" : "text-cc-fg"}`}>{p.label}</div>
+                            {disabled
+                              ? <div className="text-[9px] text-red-400 mt-0.5">API Key missing — set in <a href={`#settings/${p.keySection}`} className="underline hover:text-red-300" onClick={e => { e.stopPropagation(); document.getElementById(p.keySection)?.scrollIntoView({ behavior: "smooth" }); }}>{p.keyLabel}</a></div>
+                              : <div className="text-[9px] text-cc-muted mt-0.5">{p.desc}</div>
+                            }
+                          </button>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+
+                {/* Model Override */}
+                <div>
+                  <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-1.5">Model Override</label>
+                  <p className="text-[9px] text-cc-muted mb-1.5">Leave empty for provider default.</p>
+                  <input
+                    type="text"
+                    value={hankChatModel}
+                    onChange={(e) => setHankChatModel(e.target.value)}
+                    onBlur={async () => { try { await api.updateSettings({ hankChatModel }); } catch {} }}
+                    placeholder={hankChatProvider === "claude" ? "claude-sonnet-4-20250514" : hankChatProvider === "ollama" ? "llama3.2" : hankChatProvider === "gemini-text" ? "gemini-2.5-flash" : "default"}
+                    className="w-full bg-cc-bg border border-cc-border rounded-md p-2 text-xs text-cc-fg focus:outline-none focus:border-cc-accent/50"
+                  />
+                </div>
+
+                {/* Connection Test */}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const res = await fetch("/api/hank/chat/config", { headers: { Authorization: `Bearer ${localStorage.getItem("heyhank_auth_token") || ""}` } });
+                      if (res.ok) {
+                        alert("Connection OK — provider config loaded successfully.");
+                      } else {
+                        alert("Connection failed: " + res.status);
+                      }
+                    } catch (err) {
+                      alert("Connection failed: " + (err instanceof Error ? err.message : "Unknown error"));
+                    }
+                  }}
+                  className="px-4 py-2 text-xs font-medium rounded-md text-cc-muted hover:text-cc-fg border border-cc-border hover:border-cc-accent/30 transition-colors"
+                >
+                  Test Connection
+                </button>
+
+                {/* Divider */}
+                <div className="border-t border-cc-border my-2" />
+
+                {/* AI Features (merged from HeyHank AI) */}
+                <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-1.5">AI Features</label>
 
                 {/* Auto-Renaming info */}
                 <div className="px-3 py-2.5 rounded-lg bg-cc-hover/50 border border-cc-border">
@@ -1722,13 +1847,10 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     </>
                   )}
                 </div>
-              </div>
-            </section>
+            </SettingsSection>
 
             {/* Updates */}
-            <section id="updates" ref={setSectionRef("updates")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Updates</h2>
-              <div className="space-y-3">
+            <SettingsSection id="updates" title="Updates" status={updateInfo ? `v${updateInfo.currentVersion}` : ""} forceOpen={forceOpenId === "updates"} sectionRef={setSectionRef("updates")}>
                 {updateInfo ? (
                   <p className="text-xs text-cc-muted">
                     Current version: v{updateInfo.currentVersion}
@@ -1881,13 +2003,10 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     </p>
                   )}
                 </div>
-              </div>
-            </section>
+            </SettingsSection>
 
             {/* Appearance */}
-            <section id="appearance" ref={setSectionRef("appearance")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Appearance</h2>
-              <div className="space-y-4">
+            <SettingsSection id="appearance" title="Appearance" status={darkMode ? "Dark" : "Light"} forceOpen={forceOpenId === "appearance"} sectionRef={setSectionRef("appearance")}>
                 {/* Theme toggle */}
                 <div>
                   <label className="text-xs text-cc-fg font-medium block mb-2">Theme</label>
@@ -1939,12 +2058,13 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                 <div>
                   <label className="text-xs text-cc-fg font-medium block mb-2">Font Size</label>
                   <div className="flex items-center gap-3">
+                    <span className="text-[10px] text-cc-muted shrink-0">Small</span>
                     <input
                       id="font-size-slider"
                       type="range"
                       min="12"
-                      max="20"
-                      step="1"
+                      max="18"
+                      step="2"
                       value={parseInt(localStorage.getItem("cc-font-size") || "14", 10)}
                       onChange={(e) => {
                         const size = e.target.value;
@@ -1953,29 +2073,37 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                       }}
                       className="flex-1 accent-cc-primary cursor-pointer"
                     />
-                    <span className="text-xs text-cc-muted tabular-nums w-8 text-right">
-                      {localStorage.getItem("cc-font-size") || "14"}px
-                    </span>
+                    <span className="text-[10px] text-cc-muted shrink-0">Large</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      localStorage.removeItem("cc-font-size");
-                      document.documentElement.style.fontSize = "";
-                      window.dispatchEvent(new Event("storage"));
-                    }}
-                    className="text-xs text-cc-muted hover:text-cc-fg transition-colors cursor-pointer mt-1"
-                  >
-                    Reset to default
-                  </button>
+                  <div className="flex justify-between px-0.5 mt-1">
+                    {[
+                      { val: "12", label: "Small" },
+                      { val: "14", label: "Medium" },
+                      { val: "16", label: "Large" },
+                      { val: "18", label: "XL" },
+                    ].map((stop) => (
+                      <button
+                        key={stop.val}
+                        type="button"
+                        onClick={() => {
+                          localStorage.setItem("cc-font-size", stop.val);
+                          document.documentElement.style.fontSize = `${stop.val}px`;
+                        }}
+                        className={`text-[10px] transition-colors cursor-pointer ${
+                          (localStorage.getItem("cc-font-size") || "14") === stop.val
+                            ? "text-cc-primary font-medium"
+                            : "text-cc-muted hover:text-cc-fg"
+                        }`}
+                      >
+                        {stop.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </section>
+            </SettingsSection>
 
             {/* Environments */}
-            <section id="environments" ref={setSectionRef("environments")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Environments</h2>
-              <div className="space-y-3">
+            <SettingsSection id="environments" title="Environments" forceOpen={forceOpenId === "environments"} sectionRef={setSectionRef("environments")}>
                 <p className="text-xs text-cc-muted">
                   Manage reusable environment profiles used when creating sessions.
                 </p>
@@ -1988,26 +2116,20 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                 >
                   Open Environments Page
                 </button>
-              </div>
-            </section>
+            </SettingsSection>
 
             {/* Federation */}
-            <section id="federation" ref={setSectionRef("federation")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Federation</h2>
-              <div className="space-y-3">
+            <SettingsSection id="federation" title="Federation" forceOpen={forceOpenId === "federation"} sectionRef={setSectionRef("federation")}>
                 <p className="text-xs text-cc-muted">
                   Connect multiple HeyHank instances into a peer-to-peer mesh.
                 </p>
                 <FederationSettings />
-              </div>
-            </section>
+            </SettingsSection>
 
-
-            {/* ─── Backup ─────────────────────────────────────────────── */}
-            <section id="backup" ref={setSectionRef("backup")}>
-              <h2 className="text-sm font-semibold text-cc-fg mb-4">Export &amp; Backup</h2>
+            {/* Backup */}
+            <SettingsSection id="backup" title="Export &amp; Backup" forceOpen={forceOpenId === "backup"} sectionRef={setSectionRef("backup")}>
               <BackupSection />
-            </section>
+            </SettingsSection>
           </div>
         </div>
       </div>

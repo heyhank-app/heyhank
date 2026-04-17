@@ -1,10 +1,11 @@
 /**
  * Provider config storage — persists user's provider credentials to ~/.heyhank/providers.json
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { getProviderById } from "./provider-registry.js";
+import { atomicWriteFileSync } from "./fs-utils.js";
 
 export interface ProviderConfig {
   providerId: string;
@@ -35,7 +36,9 @@ function readAll(): ProviderConfig[] {
 
 function writeAll(configs: ProviderConfig[]): void {
   ensureDir();
-  writeFileSync(PROVIDERS_FILE, JSON.stringify(configs, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(PROVIDERS_FILE, JSON.stringify(configs, null, 2));
+  // chmod separately — atomic rename preserves temp file's mode (0o644 by default)
+  try { chmodSync(PROVIDERS_FILE, 0o600); } catch { /* best-effort */ }
 }
 
 export function listProviderConfigs(): ProviderConfig[] {

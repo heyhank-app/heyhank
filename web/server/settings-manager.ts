@@ -3,6 +3,7 @@ import {
   readFileSync,
   writeFileSync,
   existsSync,
+  renameSync,
 } from "node:fs";
 import { join, dirname } from "node:path";
 import { HEYHANK_HOME } from "./paths.js";
@@ -28,6 +29,16 @@ export interface HeyHankSettings {
   assistantName: string;
   /** User's display name so the assistant knows who it's talking to */
   userName: string;
+  /** Selected chat provider for Hank-UI (default: "gemini-live") */
+  hankChatProvider: string;
+  /** Selected model for Hank-UI text chat */
+  hankChatModel: string;
+  /** @deprecated No longer used — memory is fully local */
+  mem0ApiKey: string;
+  /** @deprecated No longer used — memory is fully local */
+  mem0UserId: string;
+  /** Auto-detect and save memories from conversations */
+  memoryAutoDetect: boolean;
   editorTabEnabled: boolean;
   /** Provider ID for internal AI features (auto-renaming, AI validation). Empty = auto-detect. */
   internalAiProvider: string;
@@ -37,6 +48,8 @@ export interface HeyHankSettings {
   publicUrl: string;
   updateChannel: UpdateChannel;
   dockerAutoUpdate: boolean;
+  /** Path to Obsidian vault folder for memory sync (empty = disabled) */
+  obsidianVaultPath: string;
   updatedAt: number;
 }
 
@@ -54,6 +67,11 @@ let settings: HeyHankSettings = {
   geminiVoice: "Kore",
   assistantName: "",
   userName: "",
+  hankChatProvider: "gemini-live",
+  hankChatModel: "",
+  mem0ApiKey: "",
+  mem0UserId: "",
+  memoryAutoDetect: true,
   editorTabEnabled: false,
   internalAiProvider: "",
   aiValidationEnabled: false,
@@ -62,6 +80,7 @@ let settings: HeyHankSettings = {
   publicUrl: "",
   updateChannel: "stable",
   dockerAutoUpdate: false,
+  obsidianVaultPath: "",
   updatedAt: 0,
 };
 
@@ -79,6 +98,11 @@ function normalize(raw: Partial<HeyHankSettings> | null | undefined): HeyHankSet
     geminiVoice: typeof raw?.geminiVoice === "string" && raw.geminiVoice.trim() ? raw.geminiVoice : "Kore",
     assistantName: typeof raw?.assistantName === "string" ? raw.assistantName.trim() : "",
     userName: typeof raw?.userName === "string" ? raw.userName.trim() : "",
+    hankChatProvider: typeof raw?.hankChatProvider === "string" ? raw.hankChatProvider.trim() || "gemini-live" : "gemini-live",
+    hankChatModel: typeof raw?.hankChatModel === "string" ? raw.hankChatModel.trim() : "",
+    mem0ApiKey: typeof raw?.mem0ApiKey === "string" ? raw.mem0ApiKey : "",
+    mem0UserId: typeof raw?.mem0UserId === "string" ? raw.mem0UserId.trim() : "",
+    memoryAutoDetect: typeof raw?.memoryAutoDetect === "boolean" ? raw.memoryAutoDetect : true,
     editorTabEnabled: typeof raw?.editorTabEnabled === "boolean" ? raw.editorTabEnabled : false,
     internalAiProvider: typeof raw?.internalAiProvider === "string" ? raw.internalAiProvider.trim() : "",
     aiValidationEnabled: typeof raw?.aiValidationEnabled === "boolean" ? raw.aiValidationEnabled : false,
@@ -87,6 +111,7 @@ function normalize(raw: Partial<HeyHankSettings> | null | undefined): HeyHankSet
     publicUrl: typeof raw?.publicUrl === "string" ? raw.publicUrl.trim().replace(/\/+$/, "") : "",
     updateChannel: raw?.updateChannel === "prerelease" ? "prerelease" : "stable",
     dockerAutoUpdate: typeof raw?.dockerAutoUpdate === "boolean" ? raw.dockerAutoUpdate : false,
+    obsidianVaultPath: typeof raw?.obsidianVaultPath === "string" ? raw.obsidianVaultPath.trim() : "",
     updatedAt: typeof raw?.updatedAt === "number" ? raw.updatedAt : 0,
   };
 }
@@ -106,7 +131,9 @@ function ensureLoaded(): void {
 
 function persist(): void {
   mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, JSON.stringify(settings, null, 2), { encoding: "utf-8", mode: 0o600 });
+  const tmpFile = filePath + ".tmp";
+  writeFileSync(tmpFile, JSON.stringify(settings, null, 2), { encoding: "utf-8", mode: 0o600 });
+  renameSync(tmpFile, filePath);
 }
 
 export function getSettings(): HeyHankSettings {
@@ -115,7 +142,7 @@ export function getSettings(): HeyHankSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<HeyHankSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "geminiApiKey" | "geminiVoice" | "assistantName" | "userName" | "editorTabEnabled" | "internalAiProvider" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate">>,
+  patch: Partial<Pick<HeyHankSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "geminiApiKey" | "geminiVoice" | "assistantName" | "userName" | "hankChatProvider" | "hankChatModel" | "mem0ApiKey" | "mem0UserId" | "memoryAutoDetect" | "editorTabEnabled" | "internalAiProvider" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "obsidianVaultPath">>,
 ): HeyHankSettings {
   ensureLoaded();
   settings = normalize({
@@ -128,6 +155,11 @@ export function updateSettings(
     geminiVoice: patch.geminiVoice ?? settings.geminiVoice,
     assistantName: patch.assistantName ?? settings.assistantName,
     userName: patch.userName ?? settings.userName,
+    hankChatProvider: patch.hankChatProvider ?? settings.hankChatProvider,
+    hankChatModel: patch.hankChatModel ?? settings.hankChatModel,
+    mem0ApiKey: patch.mem0ApiKey ?? settings.mem0ApiKey,
+    mem0UserId: patch.mem0UserId ?? settings.mem0UserId,
+    memoryAutoDetect: patch.memoryAutoDetect ?? settings.memoryAutoDetect,
     editorTabEnabled: patch.editorTabEnabled ?? settings.editorTabEnabled,
     internalAiProvider: patch.internalAiProvider ?? settings.internalAiProvider,
     aiValidationEnabled: patch.aiValidationEnabled ?? settings.aiValidationEnabled,
@@ -136,6 +168,7 @@ export function updateSettings(
     publicUrl: patch.publicUrl ?? settings.publicUrl,
     updateChannel: patch.updateChannel ?? settings.updateChannel,
     dockerAutoUpdate: patch.dockerAutoUpdate ?? settings.dockerAutoUpdate,
+    obsidianVaultPath: patch.obsidianVaultPath ?? settings.obsidianVaultPath,
     updatedAt: Date.now(),
   });
   persist();

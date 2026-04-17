@@ -10,6 +10,7 @@ import {
   pullOllamaModel,
 } from "../llm-providers.js";
 import type { LLMProviderConfig, LLMMessage } from "../llm-providers.js";
+import { isAllowedBaseUrl } from "../url-validator.js";
 
 export function registerLLMRoutes(api: Hono): void {
   /** Call an LLM provider (non-streaming) */
@@ -21,6 +22,10 @@ export function registerLLMRoutes(api: Hono): void {
         { error: "messages, provider, and model are required" },
         400,
       );
+    }
+
+    if (body.baseUrl && !isAllowedBaseUrl(body.baseUrl)) {
+      return c.json({ error: "baseUrl points to a disallowed internal address" }, 400);
     }
 
     const config: LLMProviderConfig = {
@@ -55,6 +60,13 @@ export function registerLLMRoutes(api: Hono): void {
       if (!body.messages || !body.model) {
         await stream.writeSSE({
           data: JSON.stringify({ error: "messages and model required" }),
+        });
+        return;
+      }
+
+      if (body.baseUrl && !isAllowedBaseUrl(body.baseUrl as string)) {
+        await stream.writeSSE({
+          data: JSON.stringify({ error: "baseUrl points to a disallowed internal address" }),
         });
         return;
       }
