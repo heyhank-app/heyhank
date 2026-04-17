@@ -28,3 +28,6 @@ recordings/
 heyhank-*.tgz
 ecosystem.config.cjs
 freeswitch/conf/sip_profiles/external/heyhank_*.xml
+gcp-service-account.json
+*-service-account.json
+web/test-results/
