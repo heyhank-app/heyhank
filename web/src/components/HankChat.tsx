@@ -74,6 +74,21 @@ function friendlyToolName(name: string): string {
   return TOOL_LABELS[name] || name.replace(/_/g, " ");
 }
 
+// Map Gemini / agent tool names to a TalkingHead gesture so the avatar
+// visibly reacts while an action is being performed. Keep the mapping
+// conservative — unknown tools fall back to a generic "handup".
+// Supported gestures (TalkingHead 1.7): handup, index, ok, thumbup,
+// thumbdown, side, shrug, namaste.
+function gestureForTool(name: string): string {
+  if (!name) return "handup";
+  if (/search|find|list|get|query|fetch|read|load/i.test(name)) return "index";
+  if (/create|add|save|write|publish|prepare|make|send|post|update/i.test(name)) return "thumbup";
+  if (/delete|remove|cancel|end/i.test(name)) return "thumbdown";
+  if (/call|dial|ring/i.test(name)) return "ok";
+  if (/agent|run|execute/i.test(name)) return "namaste";
+  return "handup";
+}
+
 interface TranscriptEntry {
   role: "user" | "assistant" | "system" | "session_event";
   text: string;
@@ -361,6 +376,8 @@ export function HankChat() {
       case "turnComplete":
         flushGeminiBuffer();
         avatarRef.current?.notifyEnd();
+        // Gentle positive mood after a successful turn.
+        avatarRef.current?.setMood("happy");
         setState("listening");
         break;
       case "interrupted":
@@ -371,6 +388,8 @@ export function HankChat() {
         break;
       case "error":
         setError(event.error);
+        avatarRef.current?.setMood("sad");
+        avatarRef.current?.playGesture("shrug", 2);
         setState("idle");
         break;
       case "closed":
@@ -398,6 +417,10 @@ export function HankChat() {
         const friendlyNames = calls.map(c => friendlyToolName(c.name)).join(", ");
         setLastAction(friendlyNames);
         addTranscript("system", friendlyNames);
+        // Play a gesture for the first tool call so the avatar reacts.
+        if (calls.length > 0) {
+          avatarRef.current?.playGesture(gestureForTool(calls[0].name), 2);
+        }
         Promise.all(
           calls.map(async call => {
             const result = await executeToolCall(call);
@@ -494,6 +517,7 @@ export function HankChat() {
             case "tool_call":
               setLastAction(friendlyToolName(event.name || ""));
               addTranscript("system", friendlyToolName(event.name || ""));
+              avatarRef.current?.playGesture(gestureForTool(event.name || ""), 2);
               setState("toolCall");
               break;
             case "tool_result": {
@@ -550,10 +574,13 @@ export function HankChat() {
                 conversationRef.current.push({ role: "assistant", content: assistantText.trim() });
               }
               assistantText = "";
+              avatarRef.current?.setMood("happy");
               setState(isGeminiLive ? "listening" : "idle");
               break;
             case "error":
               setError(event.error || "Unknown error");
+              avatarRef.current?.setMood("sad");
+              avatarRef.current?.playGesture("shrug", 2);
               setState("idle");
               break;
           }
