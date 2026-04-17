@@ -33,6 +33,10 @@ export interface HeyHankSettings {
   hankChatProvider: string;
   /** Selected model for Hank-UI text chat */
   hankChatModel: string;
+  /** Whether to show a 3D TalkingHead avatar during Gemini Live sessions */
+  hankChatAvatarEnabled: boolean;
+  /** URL to a Ready Player Me (or compatible) GLB avatar with ARKit + Oculus visemes */
+  hankChatAvatarUrl: string;
   /** @deprecated No longer used — memory is fully local */
   mem0ApiKey: string;
   /** @deprecated No longer used — memory is fully local */
@@ -69,6 +73,8 @@ let settings: HeyHankSettings = {
   userName: "",
   hankChatProvider: "gemini-live",
   hankChatModel: "",
+  hankChatAvatarEnabled: true,
+  hankChatAvatarUrl: "https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb",
   mem0ApiKey: "",
   mem0UserId: "",
   memoryAutoDetect: true,
@@ -100,6 +106,11 @@ function normalize(raw: Partial<HeyHankSettings> | null | undefined): HeyHankSet
     userName: typeof raw?.userName === "string" ? raw.userName.trim() : "",
     hankChatProvider: typeof raw?.hankChatProvider === "string" ? raw.hankChatProvider.trim() || "gemini-live" : "gemini-live",
     hankChatModel: typeof raw?.hankChatModel === "string" ? raw.hankChatModel.trim() : "",
+    hankChatAvatarEnabled: typeof raw?.hankChatAvatarEnabled === "boolean" ? raw.hankChatAvatarEnabled : true,
+    hankChatAvatarUrl:
+      typeof raw?.hankChatAvatarUrl === "string" && raw.hankChatAvatarUrl.trim()
+        ? raw.hankChatAvatarUrl.trim()
+        : "https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb",
     mem0ApiKey: typeof raw?.mem0ApiKey === "string" ? raw.mem0ApiKey : "",
     mem0UserId: typeof raw?.mem0UserId === "string" ? raw.mem0UserId.trim() : "",
     memoryAutoDetect: typeof raw?.memoryAutoDetect === "boolean" ? raw.memoryAutoDetect : true,

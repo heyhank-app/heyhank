@@ -3,8 +3,15 @@
 // Supports: Gemini Live (voice+text), Ollama, Claude, OpenAI, OpenRouter (text SSE).
 // Gemini Live uses the existing client-side WebSocket; all others use POST /api/hank/chat SSE.
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, lazy, Suspense } from "react";
 import { api } from "../api.js";
+import type { TalkingHeadAvatarHandle } from "./TalkingHeadAvatar";
+
+// Lazy-load the 3D avatar so three.js (~600kB) only ships when a user opens
+// the chat overlay. Also lets devices without WebGL fail gracefully.
+const TalkingHeadAvatar = lazy(() =>
+  import("./TalkingHeadAvatar").then(m => ({ default: m.TalkingHeadAvatar })),
+);
 
 type ChatProvider = "gemini-live" | "ollama" | "claude" | "openai" | "openrouter" | "gemini-text";
 type ChatState = "idle" | "connecting" | "listening" | "speaking" | "toolCall" | "streaming";
@@ -205,6 +212,11 @@ export function HankChat() {
   const [providerDropdownOpen, setProviderDropdownOpen] = useState(false);
   const [providerKeyStatus, setProviderKeyStatus] = useState<Record<string, boolean>>({});
   const [modelOverride, setModelOverride] = useState("");
+  // 3D TalkingHead avatar (opt-in via settings; only used with gemini-live).
+  const [avatarEnabled, setAvatarEnabled] = useState(true);
+  const [avatarUrl, setAvatarUrl] = useState("https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb");
+  const [avatarReady, setAvatarReady] = useState(false);
+  const avatarRef = useRef<TalkingHeadAvatarHandle | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const textInputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -249,6 +261,8 @@ export function HankChat() {
         });
         if (s.assistantName) setDisplayName(s.assistantName || "Hank");
         if (s.hankChatModel) setModelOverride(s.hankChatModel);
+        if (typeof s.hankChatAvatarEnabled === "boolean") setAvatarEnabled(s.hankChatAvatarEnabled);
+        if (typeof s.hankChatAvatarUrl === "string" && s.hankChatAvatarUrl) setAvatarUrl(s.hankChatAvatarUrl);
         const keyMap: Record<string, boolean> = {
           "gemini-live": !!s.geminiApiKeyConfigured || !!s.geminiApiKey,
           "claude": !!s.anthropicApiKeyConfigured || !!s.anthropicApiKey,
@@ -330,7 +344,13 @@ export function HankChat() {
         break;
       case "audio":
         setState("speaking");
-        streamerRef.current?.addPcm16Chunk(event.data);
+        // Route audio either to the 3D avatar (TalkingHead owns playback +
+        // lipsync in one pipeline) or to the plain AudioStreamer fallback.
+        if (avatarEnabled && avatarReady && avatarRef.current) {
+          avatarRef.current.feedPcm(event.data);
+        } else {
+          streamerRef.current?.addPcm16Chunk(event.data);
+        }
         break;
       case "text":
         setGeminiTextBuffer(prev => prev + event.text);
@@ -340,11 +360,13 @@ export function HankChat() {
         break;
       case "turnComplete":
         flushGeminiBuffer();
+        avatarRef.current?.notifyEnd();
         setState("listening");
         break;
       case "interrupted":
         flushGeminiBuffer();
         streamerRef.current?.stop();
+        avatarRef.current?.interrupt();
         setState("listening");
         break;
       case "error":
@@ -392,7 +414,7 @@ export function HankChat() {
         break;
       }
     }
-  }, [addTranscript, flushGeminiBuffer, stopCamera]);
+  }, [addTranscript, flushGeminiBuffer, stopCamera, avatarEnabled, avatarReady]);
 
   // ─── Start Gemini Live Session ──────────────────────────────────────────
   const startGeminiLive = useCallback(async (resumeHistory?: Array<{ role: string; text: string }>) => {
@@ -607,6 +629,7 @@ export function HankChat() {
     setMuted(false);
     setLastAction(null);
     setGeminiTextBuffer("");
+    setAvatarReady(false);
     stopCamera();
   }, [isGeminiLive, stopCamera]);
 
@@ -797,12 +820,17 @@ export function HankChat() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, [expanded]);
 
-  // Overlay dimensions — responsive: cap at 360px but shrink on narrow viewports
+  // Overlay dimensions — responsive: cap at 360px but shrink on narrow viewports.
+  // The 3D avatar adds ~260px when visible, so grow the max height accordingly.
+  const avatarVisible = isGeminiLive && avatarEnabled && state !== "idle";
   const overlayWidth = typeof window !== "undefined"
     ? Math.min(360, window.innerWidth - 16)
     : 360;
   const overlayMaxHeight = typeof window !== "undefined"
-    ? Math.min(cameraActive ? 620 : 520, window.innerHeight - 40)
+    ? Math.min(
+        (cameraActive ? 620 : 520) + (avatarVisible ? 260 : 0),
+        window.innerHeight - 40,
+      )
     : 520;
 
   useEffect(() => {
@@ -951,6 +979,25 @@ export function HankChat() {
             </button>
           </div>
         </div>
+
+        {/* 3D TalkingHead avatar (Gemini Live + enabled in settings) */}
+        {isGeminiLive && avatarEnabled && state !== "idle" && (
+          <div className="relative border-b border-cc-border bg-gradient-to-b from-cc-card to-cc-bg h-[260px]">
+            <Suspense fallback={
+              <div className="absolute inset-0 flex items-center justify-center text-xs text-cc-muted">
+                Loading avatar...
+              </div>
+            }>
+              <TalkingHeadAvatar
+                ref={avatarRef}
+                avatarUrl={avatarUrl}
+                cameraView="upper"
+                onReady={() => setAvatarReady(true)}
+                onError={() => setAvatarReady(false)}
+              />
+            </Suspense>
+          </div>
+        )}
 
         {/* Camera preview (Gemini Live only) */}
         {cameraActive && (

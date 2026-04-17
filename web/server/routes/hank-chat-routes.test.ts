@@ -7,6 +7,8 @@ vi.mock("../settings-manager.js", () => ({
   getSettings: vi.fn(() => ({
     hankChatProvider: "claude",
     hankChatModel: "",
+    hankChatAvatarEnabled: true,
+    hankChatAvatarUrl: "https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb",
     assistantName: "Hank",
     userName: "TestUser",
     anthropicApiKey: "sk-test-key",
