@@ -1558,7 +1558,7 @@ function HashtagPoolsSection({ showMessage }: { showMessage: (text: string, isEr
       if (isNew) {
         await api.createHashtagPool(editingPool);
       } else {
-        await api.updateHashtagPool(editingPool.id, editingPool);
+        await api.updateHashtagPool(editingPool.id, editingPool as unknown as Record<string, unknown>);
       }
       showMessage("Hashtag pool saved.");
       setEditingPool(null);

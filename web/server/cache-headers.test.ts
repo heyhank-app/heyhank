@@ -53,12 +53,12 @@ describe("cacheControlMiddleware", () => {
 
   it("sets no-cache for / (index.html root)", async () => {
     const res = await app.request("/");
-    expect(res.headers.get("Cache-Control")).toBe("no-cache");
+    expect(res.headers.get("Cache-Control")).toBe("no-store, no-cache, must-revalidate, max-age=0");
   });
 
   it("sets no-cache for /index.html", async () => {
     const res = await app.request("/index.html");
-    expect(res.headers.get("Cache-Control")).toBe("no-cache");
+    expect(res.headers.get("Cache-Control")).toBe("no-store, no-cache, must-revalidate, max-age=0");
   });
 
   it("sets no-cache for /manifest.json", async () => {

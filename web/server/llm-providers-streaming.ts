@@ -13,6 +13,8 @@ export interface ChatMessage {
   content: string | ContentPart[];
   tool_call_id?: string;
   tool_calls?: ToolCall[];
+  /** OpenAI-compatible tool name for role: "tool" messages */
+  name?: string;
 }
 
 export interface ToolCall {

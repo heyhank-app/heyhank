@@ -47,6 +47,7 @@ describe("settings-manager", () => {
       mem0ApiKey: "",
       mem0UserId: "",
       memoryAutoDetect: true,
+      obsidianVaultPath: "",
       internalAiProvider: "",
       updatedAt: 0,
     });
@@ -99,6 +100,7 @@ describe("settings-manager", () => {
       mem0ApiKey: "",
       mem0UserId: "",
       memoryAutoDetect: true,
+      obsidianVaultPath: "",
       internalAiProvider: "",
       updatedAt: 123,
     });
@@ -176,6 +178,7 @@ describe("settings-manager", () => {
       mem0ApiKey: "",
       mem0UserId: "",
       memoryAutoDetect: true,
+      obsidianVaultPath: "",
       internalAiProvider: "",
       updatedAt: 0,
     });

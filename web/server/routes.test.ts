@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 // Mock auth-manager so all test requests pass the auth middleware
 vi.mock("./auth-manager.js", () => ({
@@ -2107,6 +2107,18 @@ describe("GET /api/fs/home", () => {
 });
 
 describe("GET /api/fs/diff", () => {
+  // guardPath() allows paths under homedir()/process.cwd(). These tests use
+  // synthetic paths like /repo/file.ts that don't exist on disk, so spy on
+  // process.cwd to include "/" — execSync is mocked, so the real FS isn't touched.
+  let origCwd: typeof process.cwd;
+  beforeEach(() => {
+    origCwd = process.cwd;
+    process.cwd = () => "/repo";
+  });
+  afterEach(() => {
+    process.cwd = origCwd;
+  });
+
   it("returns 400 when path is missing", async () => {
     const res = await app.request("/api/fs/diff", { method: "GET" });
 
@@ -2165,7 +2177,7 @@ describe("GET /api/fs/diff", () => {
     expect(json.diff).toBe(diffOutput);
     expect(json.path).toContain("file.ts");
     expect(vi.mocked(execSync)).toHaveBeenCalledWith(
-      expect.stringContaining("git diff origin/main"),
+      expect.stringContaining("git diff 'origin/main'"),
       expect.objectContaining({ encoding: "utf-8", timeout: 5000 }),
     );
   });
@@ -2228,7 +2240,7 @@ index 0000000..e69de29
     const json = await res.json();
     expect(json.diff).toBe(diffOutput);
     expect(vi.mocked(execSync)).toHaveBeenCalledWith(
-      expect.stringContaining("git diff main"),
+      expect.stringContaining("git diff 'main'"),
       expect.objectContaining({ encoding: "utf-8", timeout: 5000 }),
     );
   });
@@ -2238,7 +2250,8 @@ index 0000000..e69de29
       throw new Error("not a git repository");
     });
 
-    const res = await app.request("/api/fs/diff?path=/not-a-repo/file.ts", { method: "GET" });
+    // Use path under /repo (stubbed cwd) so guardPath allows it; execSync throws to simulate "not a repo".
+    const res = await app.request("/api/fs/diff?path=/repo/not-a-repo/file.ts", { method: "GET" });
 
     expect(res.status).toBe(200);
     const json = await res.json();

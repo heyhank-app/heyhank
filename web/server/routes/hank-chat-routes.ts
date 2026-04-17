@@ -313,7 +313,7 @@ export function registerHankChatRoutes(api: Hono): void {
                 const fallbackKeepAlive = setInterval(async () => {
                   try { await stream.writeSSE({ data: JSON.stringify({ type: "keep_alive" }) }); } catch {}
                 }, 15_000);
-                let result: Record<string, unknown>;
+                let result: unknown;
                 try {
                   result = await executeHankTool("run_agent", { agent: "Content Agent", task: taskDescription }, authHeader);
                 } finally {
@@ -413,7 +413,7 @@ export function registerHankChatRoutes(api: Hono): void {
             }, 15_000); // every 15s
           }
 
-          let result: Record<string, unknown>;
+          let result: unknown;
           try {
             result = await executeHankTool(toolName, toolArgs, authHeader);
           } finally {

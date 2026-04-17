@@ -43,12 +43,12 @@ describe("sw-register", () => {
     expect(typeof config.onOfflineReady).toBe("function");
   });
 
-  it("sets up periodic update check every 5 minutes", async () => {
+  it("sets up periodic update check every 60 seconds", async () => {
     await import("./sw-register.js");
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const config = mockRegisterSW.mock.calls[0]![0] as any;
-    const mockRegistration = { update: vi.fn() };
+    const mockRegistration = { update: vi.fn(), addEventListener: vi.fn(), waiting: null, installing: null };
 
     // Simulate the SW being registered
     config.onRegisteredSW("/sw.js", mockRegistration);
@@ -56,12 +56,12 @@ describe("sw-register", () => {
     // No update calls yet
     expect(mockRegistration.update).not.toHaveBeenCalled();
 
-    // Advance 5 minutes
-    vi.advanceTimersByTime(5 * 60 * 1000);
+    // Advance 60 seconds
+    vi.advanceTimersByTime(60 * 1000);
     expect(mockRegistration.update).toHaveBeenCalledOnce();
 
-    // Advance another 5 minutes
-    vi.advanceTimersByTime(5 * 60 * 1000);
+    // Advance another 60 seconds
+    vi.advanceTimersByTime(60 * 1000);
     expect(mockRegistration.update).toHaveBeenCalledTimes(2);
   });
 

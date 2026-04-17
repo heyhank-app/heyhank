@@ -4,7 +4,7 @@
  *
  * The SettingsPage is organized into collapsible sections:
  * General, Connectivity, Authentication, Notifications, Providers,
- * Gemini, Hank Chat, Email, Calendar, HeyHank AI, Updates, Appearance,
+ * Gemini, Hank Chat, Email, Calendar, Updates, Appearance,
  * Environments, Federation, Backup.
  *
  * Tests validate:
@@ -305,7 +305,7 @@ describe("SettingsPage", () => {
     const expectedLabels = [
       "General", "Connectivity", "Authentication", "Notifications",
       "Providers", "Gemini", "Hank Chat", "Email", "Calendar",
-      "HeyHank AI", "Updates", "Appearance", "Environments",
+      "Updates", "Appearance", "Environments",
       "Federation", "Backup",
     ];
     for (const label of expectedLabels) {
@@ -323,7 +323,7 @@ describe("SettingsPage", () => {
     const expectedIds = [
       "general", "connectivity", "authentication", "notifications",
       "providers", "gemini", "hank-chat", "email", "calendar",
-      "ai-features", "updates", "appearance", "environments",
+      "updates", "appearance", "environments",
       "federation", "backup",
     ];
     for (const id of expectedIds) {
@@ -585,8 +585,8 @@ describe("SettingsPage", () => {
 
   // ─── AI Validation section ────────────────────────────────────────────────
 
-  it("renders HeyHank AI section with toggle", async () => {
-    // The AI features section should have a validation toggle.
+  it("renders AI Validation toggle in the Hank Chat section", async () => {
+    // AI Validation was merged into the Hank Chat section ("AI Features" subgroup).
     mockApi.getSettings.mockResolvedValueOnce({
       ...DEFAULT_SETTINGS,
       anthropicApiKeyConfigured: true,
@@ -594,8 +594,8 @@ describe("SettingsPage", () => {
     render(<SettingsPage />);
     await waitForLoad();
 
-    // Open the HeyHank AI section
-    await openSection("ai-features");
+    // Open the Hank Chat section where AI Validation now lives
+    await openSection("hank-chat");
 
     await waitFor(() => {
       // The <h3> "AI Validation" and a button with text "AI Validation" should be present

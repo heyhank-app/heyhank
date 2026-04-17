@@ -66,6 +66,8 @@ async function renderAndWaitForSettings() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockSettingsResponse();
+  // HankChat early-returns null unless authenticated — seed a token so the UI actually renders.
+  localStorage.setItem("heyhank_auth_token", "test-token");
 });
 
 // ─── Basic rendering ────────────────────────────────────────────────────────
