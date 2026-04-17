@@ -121,6 +121,14 @@ const NAV_ITEMS: NavItem[] = [
     iconPath: "M2 3.5A1.5 1.5 0 013.5 2h9A1.5 1.5 0 0114 3.5v1a.5.5 0 01-1 0v-1a.5.5 0 00-.5-.5h-9a.5.5 0 00-.5.5v9a.5.5 0 00.5.5h9a.5.5 0 00.5-.5v-1a.5.5 0 011 0v1a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 12.5v-9zM5 6.5a.5.5 0 01.5-.5h5a.5.5 0 010 1h-5a.5.5 0 01-.5-.5zM5.5 8a.5.5 0 000 1h3a.5.5 0 000-1h-3zm0 2a.5.5 0 000 1h4a.5.5 0 000-1h-4z",
   },
   {
+    id: "memory",
+    label: "Memory",
+    hash: "#/memory",
+    activePages: ["memory"],
+    viewBox: "0 0 24 24",
+    iconPath: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z",
+  },
+  {
     id: "platform",
     label: "Platform",
     hash: "#/platform",
@@ -138,6 +146,16 @@ const NAV_ITEMS: NavItem[] = [
     clipRule: "evenodd",
   },
   {
+    id: "business",
+    label: "Business",
+    hash: "#/business",
+    activePages: ["business"],
+    viewBox: "0 0 16 16",
+    iconPath: "M1.5 1.5A.5.5 0 012 1h12a.5.5 0 01.5.5v2a.5.5 0 01-.128.334L10 8.692V13.5a.5.5 0 01-.342.474l-3 1A.5.5 0 016 14.5V8.692L1.628 3.834A.5.5 0 011.5 3.5v-2zm1 .5v1.308l4.372 4.858A.5.5 0 017 8.5v5.306l2-.666V8.5a.5.5 0 01.128-.334L13.5 3.308V2h-11z",
+    fillRule: "evenodd",
+    clipRule: "evenodd",
+  },
+  {
     id: "help",
     label: "Help",
     hash: "#/help",
@@ -148,23 +166,109 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const NAV_SECTIONS = [
-  { id: "workbench", label: "Workbench", itemIds: ["prompts", "integrations", "terminal"] },
-  { id: "workspace", label: "Workspace", itemIds: ["environments", "sandboxes", "agents", "media", "telephony", "socialmedia", "assistant", "platform", "settings", "help"] },
+  { id: "workbench", label: "Workbench", itemIds: ["prompts", "integrations", "terminal", "environments", "sandboxes"] },
+  { id: "agents", label: "Agents", itemIds: ["agents", "runs", "platform"] },
+  { id: "hank", label: "Hank AI", itemIds: ["assistant", "memory", "media", "business"] },
+  { id: "connect", label: "Integrations", itemIds: ["telephony", "socialmedia"] },
 ] as const;
 
+/** Items rendered separately in the sidebar footer (not in collapsible groups) */
+const NAV_FOOTER_ITEMS = ["settings", "help"] as const;
+
 const NAV_ITEMS_BY_ID = new Map(NAV_ITEMS.map((item) => [item.id, item]));
+
+/** Collapsible nav section for the desktop sidebar */
+function NavSection({ section, hasActiveItem, route, draftCount }: {
+  section: (typeof NAV_SECTIONS)[number];
+  hasActiveItem: boolean;
+  route: { page: string };
+  draftCount: number;
+}) {
+  const storageKey = `sidebar-nav-${section.id}`;
+  const [expanded, setExpanded] = useState(() => {
+    const stored = localStorage.getItem(storageKey);
+    if (stored !== null) return stored === "true";
+    return false; // default collapsed — keeps session list visible
+  });
+
+  const toggle = () => {
+    const next = !expanded;
+    setExpanded(next);
+    localStorage.setItem(storageKey, String(next));
+  };
+
+  return (
+    <div className="rounded-lg border border-cc-border/30 bg-cc-card/20 p-0.5">
+      <button
+        onClick={toggle}
+        className="w-full flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-cc-muted/75 hover:text-cc-muted transition-colors cursor-pointer"
+        aria-expanded={expanded}
+      >
+        <svg viewBox="0 0 16 16" fill="currentColor" className={`w-2 h-2 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}>
+          <path d="M6 4l4 4-4 4" />
+        </svg>
+        {section.label}
+        {!expanded && hasActiveItem && (
+          <span className="w-1.5 h-1.5 rounded-full bg-cc-primary ml-auto" />
+        )}
+      </button>
+      {expanded && (
+        <div className="flex flex-col">
+          {section.itemIds.map((itemId) => {
+            const item = NAV_ITEMS_BY_ID.get(itemId);
+            if (!item) return null;
+            const isActive = item.activePages
+              ? item.activePages.some((p) => route.page === p)
+              : route.page === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  if (item.id !== "terminal") {
+                    useStore.getState().closeTerminal();
+                  }
+                  window.location.hash = item.hash;
+                }}
+                title={item.label}
+                aria-current={isActive ? "page" : undefined}
+                className={`group flex min-h-[30px] w-full items-center gap-2 rounded-md px-2 py-0.5 text-left transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cc-primary/60 ${
+                  isActive
+                    ? "bg-cc-active text-cc-fg"
+                    : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+                }`}
+              >
+                <span
+                  aria-hidden
+                  className={`h-4 w-0.5 shrink-0 rounded-full transition-colors ${
+                    isActive ? "bg-cc-primary" : "bg-transparent group-hover:bg-cc-border"
+                  }`}
+                />
+                <svg viewBox={item.viewBox} fill="currentColor" className="w-3.5 h-3.5 shrink-0">
+                  <path d={item.iconPath} fillRule={item.fillRule} clipRule={item.clipRule} />
+                </svg>
+                <span className="min-w-0 flex-1 text-[12px] font-medium leading-tight">{item.label}</span>
+                {item.id === "socialmedia" && draftCount > 0 && (
+                  <span className="ml-auto flex h-4 min-w-[16px] items-center justify-center rounded-full bg-yellow-500/20 px-1 text-[9px] font-semibold text-yellow-400">
+                    {draftCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Sidebar() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<Array<{ sessionId: string; sessionName: string; matches: Array<{ role: string; text: string }> }> | null>(null);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [draftCount, setDraftCount] = useState(0);
   const [hash, setHash] = useState(() => (typeof window !== "undefined" ? window.location.hash : ""));
   const editInputRef = useRef<HTMLInputElement>(null);
   const deleteModalRef = useRef<HTMLDivElement>(null);
@@ -193,12 +297,6 @@ export function Sidebar() {
           const store = useStore.getState();
           store.setSdkSessions(list);
           // Remove client-side sessions the server no longer knows about.
-          // Re-read state AFTER setSdkSessions so we get the freshest snapshot —
-          // a session_init WebSocket message may have arrived while listSessions()
-          // was in-flight and added a new session to the store. Guard removal with
-          // a connectionStatus check: a "connected" session arrived legitimately
-          // via session_init and must not be evicted just because it was absent
-          // from the (now-stale) server snapshot.
           const freshStore = useStore.getState();
           const serverIds = new Set(list.map((s) => s.sessionId));
           for (const id of freshStore.sessions.keys()) {
@@ -239,29 +337,21 @@ export function Sidebar() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  // Debounced session search
+  // Poll social media draft count
   useEffect(() => {
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    const q = searchQuery.trim();
-    if (!q) {
-      setSearchResults(null);
-      setSearchLoading(false);
-      return;
-    }
-    if (q.length < 2) return;
-    setSearchLoading(true);
-    searchTimerRef.current = setTimeout(async () => {
+    let active = true;
+    async function fetchDraftCount() {
       try {
-        const res = await api.searchSessions(q);
-        setSearchResults(res.results);
-      } catch {
-        setSearchResults([]);
-      }
-      setSearchLoading(false);
-    }, 300);
-    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
-  }, [searchQuery]);
+        const data = await api.listSocialPosts({ status: "draft", limit: 100 });
+        if (active) setDraftCount((data.posts || []).length);
+      } catch { /* silent */ }
+    }
+    fetchDraftCount();
+    const interval = setInterval(fetchDraftCount, 30_000);
+    return () => { active = false; clearInterval(interval); };
+  }, []);
 
+  // Debounced session search
   function handleSelectSession(sessionId: string) {
     useStore.getState().closeTerminal();
     // Navigate to session hash — App.tsx hash effect handles setCurrentSession + connectSession
@@ -493,6 +583,8 @@ export function Sidebar() {
   const agentSessions = allSessionList.filter((s) => !s.archived && !!s.agentId && !s.nodeId);
   const remoteSessions = allSessionList.filter((s) => !s.archived && !!s.nodeId);
   const archivedSessions = allSessionList.filter((s) => s.archived);
+
+
   const currentSession = currentSessionId ? allSessionList.find((s) => s.id === currentSessionId) : null;
   const logoSrc = currentSession?.backendType === "codex" ? "/logo-codex.svg" : "/logo.png";
   const [showSessions, setShowSessions] = useState(true);
@@ -541,16 +633,6 @@ export function Sidebar() {
               <path d="M8 3v10M3 8h10" />
             </svg>
           </button>
-          <button
-            onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
-            className="hidden md:flex items-center gap-1 px-2 py-1 rounded-md text-[10px] text-cc-muted bg-cc-hover hover:bg-cc-active transition-colors cursor-pointer"
-            title="Search (⌘K)"
-          >
-            <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
-              <path d="M11.742 10.344a6.5 6.5 0 10-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 001.415-1.414l-3.85-3.85a1.007 1.007 0 00-.115-.1zM12 6.5a5.5 5.5 0 11-11 0 5.5 5.5 0 0111 0z" />
-            </svg>
-            ⌘K
-          </button>
           {/* Close button — mobile only (sidebar is full-width on mobile, so no backdrop to tap) */}
           <button
             onClick={() => useStore.getState().setSidebarOpen(false)}
@@ -564,31 +646,6 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Search */}
-      <div className="px-2.5 pb-1">
-        <div className="relative shadow-sm rounded-lg">
-          <svg viewBox="0 0 16 16" fill="currentColor" className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-cc-muted">
-            <path d="M11.742 10.344a6.5 6.5 0 10-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 001.415-1.414l-3.85-3.85a1.007 1.007 0 00-.115-.1zM12 6.5a5.5 5.5 0 11-11 0 5.5 5.5 0 0111 0z" />
-          </svg>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search sessions..."
-            className="w-full pl-7 pr-7 py-1.5 text-xs bg-cc-hover rounded-lg border border-transparent focus:border-cc-primary/30 focus:outline-none text-cc-fg placeholder:text-cc-muted/60"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => { setSearchQuery(""); setSearchResults(null); }}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center rounded text-cc-muted hover:text-cc-fg cursor-pointer"
-            >
-              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
-                <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-              </svg>
-            </button>
-          )}
-        </div>
-      </div>
 
       {/* Container archive confirmation */}
       {confirmArchiveId && (
@@ -622,36 +679,7 @@ export function Sidebar() {
 
       {/* Session list */}
       <div className="flex-1 overflow-y-auto px-2.5 pb-2" data-sidebar-sessions>
-        {/* Search results overlay */}
-        {searchQuery.trim().length >= 2 ? (
-          <div className="space-y-1">
-            {searchLoading ? (
-              <p className="px-3 py-4 text-xs text-cc-muted text-center">Searching...</p>
-            ) : searchResults && searchResults.length > 0 ? (
-              <>
-                <p className="px-2 py-1 text-[10px] text-cc-muted">{searchResults.length} session{searchResults.length !== 1 ? "s" : ""} found</p>
-                {searchResults.map((r) => (
-                  <button
-                    key={r.sessionId}
-                    onClick={() => { handleSelectSession(r.sessionId); setSearchQuery(""); setSearchResults(null); }}
-                    className={`w-full text-left px-2.5 py-2 rounded-lg text-xs transition-colors hover:bg-cc-hover cursor-pointer ${
-                      currentSessionId === r.sessionId ? "bg-cc-hover" : ""
-                    }`}
-                  >
-                    <div className="font-medium text-cc-fg truncate">{r.sessionName || r.sessionId.slice(0, 8)}</div>
-                    {r.matches.slice(0, 2).map((m, i) => (
-                      <p key={i} className="text-[10px] text-cc-muted mt-0.5 truncate">
-                        <span className="text-cc-fg/50">{m.role}:</span> {m.text.slice(0, 120)}
-                      </p>
-                    ))}
-                  </button>
-                ))}
-              </>
-            ) : searchResults ? (
-              <p className="px-3 py-4 text-xs text-cc-muted text-center">No matches found</p>
-            ) : null}
-          </div>
-        ) : activeSessions.length === 0 && cronSessions.length === 0 && archivedSessions.length === 0 ? (
+        {activeSessions.length === 0 && cronSessions.length === 0 && agentSessions.length === 0 && archivedSessions.length === 0 ? (
           <p className="px-3 py-8 text-xs text-cc-muted text-center leading-relaxed">
             No sessions yet.
           </p>
@@ -816,6 +844,7 @@ export function Sidebar() {
             )}
           </>
         )}
+
       </div>
 
       {/* Mobile bottom navigation */}
@@ -860,11 +889,11 @@ export function Sidebar() {
         </nav>
       </div>
 
-      {/* Footer — compact icon bar on mobile, full list on desktop */}
-      <div className="px-2 py-1.5 pb-safe bg-cc-sidebar-footer border-t border-cc-border/30">
+      {/* Footer — nav for both mobile and desktop */}
+      <div className="shrink-0 px-2 py-1.5 pb-safe bg-cc-sidebar-footer border-t border-cc-border/30">
         {/* Mobile: compact icon grid */}
-        <nav className="md:hidden flex flex-wrap gap-1 justify-center" aria-label="Navigation">
-          {NAV_SECTIONS.flatMap((section) => section.itemIds).map((itemId) => {
+        <nav className="md:hidden flex flex-wrap gap-1 justify-center" aria-label="Mobile tools navigation">
+          {[...NAV_SECTIONS.flatMap((section) => section.itemIds), ...NAV_FOOTER_ITEMS].map((itemId) => {
             const item = NAV_ITEMS_BY_ID.get(itemId);
             if (!item) return null;
             const isActive = item.activePages
@@ -916,59 +945,55 @@ export function Sidebar() {
           ))}
         </nav>
 
-        {/* Desktop: full list with sections */}
-        <nav className="hidden md:flex flex-col gap-1.5" aria-label="Navigation">
-          {NAV_SECTIONS.map((section) => (
-            <section key={section.id} className="rounded-lg border border-cc-border/30 bg-cc-card/20 p-0.5">
-              <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-cc-muted/75 block">
-                {section.label}
-              </span>
-              <div className="flex flex-col">
-                {section.itemIds.map((itemId) => {
-                  const item = NAV_ITEMS_BY_ID.get(itemId);
-                  if (!item) return null;
-                  const isActive = item.activePages
-                    ? item.activePages.some((p) => route.page === p)
-                    : route.page === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        if (item.id !== "terminal") {
-                          useStore.getState().closeTerminal();
-                        }
-                        window.location.hash = item.hash;
-                      }}
-                      title={item.label}
-                      aria-current={isActive ? "page" : undefined}
-                      className={`group flex min-h-[34px] w-full items-center gap-2 rounded-md px-2 py-0.5 text-left transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cc-primary/60 ${
-                        isActive
-                          ? "bg-cc-active text-cc-fg"
-                          : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
-                      }`}
-                    >
-                      <span
-                        aria-hidden
-                        className={`h-4 w-0.5 shrink-0 rounded-full transition-colors ${
-                          isActive ? "bg-cc-primary" : "bg-transparent group-hover:bg-cc-border"
-                        }`}
-                      />
-                      <svg viewBox={item.viewBox} fill="currentColor" className="w-3.5 h-3.5 shrink-0">
-                        <path d={item.iconPath} fillRule={item.fillRule} clipRule={item.clipRule} />
-                      </svg>
-                      <span className="min-w-0 flex-1 text-[12px] font-medium leading-tight">{item.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
+        {/* Desktop: grouped nav with collapsible sections */}
+        <nav className="hidden md:flex flex-col gap-1" aria-label="Navigation">
+          {NAV_SECTIONS.map((section) => {
+            const hasActiveItem = section.itemIds.some((itemId) => {
+              const item = NAV_ITEMS_BY_ID.get(itemId);
+              return item?.activePages
+                ? item.activePages.some((p) => route.page === p)
+                : route.page === itemId;
+            });
+            return (
+              <NavSection
+                key={section.id}
+                section={section}
+                hasActiveItem={hasActiveItem}
+                route={route}
+                draftCount={draftCount}
+              />
+            );
+          })}
         </nav>
-        <div className="hidden md:block mt-1.5 rounded-lg border border-cc-border/30 bg-cc-card/20 px-1.5 py-0.5">
-          <div className="flex items-center justify-between">
-            <span className="px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cc-muted/75">
-              Resources
-            </span>
+
+        {/* Desktop footer: Settings, Help, Resources */}
+        <div className="hidden md:flex flex-col gap-0.5 mt-1.5 pt-1.5 border-t border-cc-border/30">
+          {NAV_FOOTER_ITEMS.map((itemId) => {
+            const item = NAV_ITEMS_BY_ID.get(itemId);
+            if (!item) return null;
+            const isActive = item.activePages
+              ? item.activePages.some((p) => route.page === p)
+              : route.page === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => { window.location.hash = item.hash; }}
+                title={item.label}
+                aria-current={isActive ? "page" : undefined}
+                className={`group flex min-h-[30px] w-full items-center gap-2 rounded-md px-2 py-0.5 text-left transition-colors duration-150 cursor-pointer ${
+                  isActive
+                    ? "bg-cc-active text-cc-fg"
+                    : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+                }`}
+              >
+                <svg viewBox={item.viewBox} fill="currentColor" className="w-3.5 h-3.5 shrink-0">
+                  <path d={item.iconPath} fillRule={item.fillRule} clipRule={item.clipRule} />
+                </svg>
+                <span className="min-w-0 flex-1 text-[12px] font-medium leading-tight">{item.label}</span>
+              </button>
+            );
+          })}
+          <div className="flex items-center justify-between px-1 mt-0.5">
             <div className="flex items-center gap-0.5">
               {EXTERNAL_LINKS.map((link) => (
                 <a

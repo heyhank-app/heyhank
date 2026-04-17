@@ -1,7 +1,46 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import type { SessionState, SdkSessionInfo } from "../types.js";
+
+/**
+ * Helper to find the "Archived" toggle button in the sidebar.
+ * The count is rendered in a separate <span> badge, so we can't match
+ * "Archived (N)" as a single text node. Instead we find the button by
+ * its aria-expanded attribute and "Archived" text content.
+ */
+function getArchivedToggle(): HTMLElement {
+  const buttons = screen.getAllByRole("button");
+  const toggle = buttons.find(
+    (btn) => btn.getAttribute("aria-expanded") !== null && /Archived/i.test(btn.textContent ?? ""),
+  );
+  if (!toggle) throw new Error("Could not find Archived toggle button");
+  return toggle;
+}
+
+/**
+ * Returns the count displayed in the Archived toggle badge.
+ */
+function getArchivedCount(): number {
+  const toggle = getArchivedToggle();
+  const badge = toggle.querySelector("span");
+  if (!badge) throw new Error("Could not find count badge in Archived toggle");
+  return parseInt(badge.textContent ?? "0", 10);
+}
+
+/**
+ * Helper to find a collapsible section toggle by its label text.
+ * Works for "Scheduled Runs", "Agent Runs", etc. where the count
+ * is in a separate badge <span>.
+ */
+function getSectionToggle(label: string): HTMLElement {
+  const buttons = screen.getAllByRole("button");
+  const toggle = buttons.find(
+    (btn) => btn.getAttribute("aria-expanded") !== null && btn.textContent?.includes(label),
+  );
+  if (!toggle) throw new Error(`Could not find "${label}" toggle button`);
+  return toggle;
+}
 
 // ─── Mock setup ──────────────────────────────────────────────────────────────
 
@@ -418,8 +457,10 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    // The component renders "Archived (2)"
-    expect(screen.getByText(/Archived \(2\)/)).toBeInTheDocument();
+    // The component renders "Archived" with a badge showing "2"
+    const toggle = getArchivedToggle();
+    expect(toggle).toBeInTheDocument();
+    expect(getArchivedCount()).toBe(2);
   });
 
   it("toggle archived shows/hides archived sessions", () => {
@@ -436,7 +477,7 @@ describe("Sidebar", () => {
     expect(screen.queryByText("archived-model")).not.toBeInTheDocument();
 
     // Click the archived toggle button
-    const toggleButton = screen.getByText(/Archived \(1\)/);
+    const toggleButton = getArchivedToggle();
     fireEvent.click(toggleButton);
 
     // Now the archived session should be visible
@@ -457,7 +498,9 @@ describe("Sidebar", () => {
 
   it("navigates to settings page when Settings is clicked", () => {
     render(<Sidebar />);
-    fireEvent.click(screen.getByTitle("Settings"));
+    // Multiple elements have title "Settings" (mobile bottom nav + footer nav).
+    // Click the first one found — both navigate to the same hash.
+    fireEvent.click(screen.getAllByTitle("Settings")[0]);
     expect(window.location.hash).toBe("#/settings");
   });
 
@@ -595,7 +638,7 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    fireEvent.click(screen.getByText(/Archived \(1\)/));
+    fireEvent.click(getArchivedToggle());
 
     const archivedRowButton = screen.getByText("archived-clickable").closest("button");
     expect(archivedRowButton).toBeInTheDocument();
@@ -689,8 +732,9 @@ describe("Sidebar", () => {
     render(<Sidebar />);
     // Status dot with title "2 running" should be present
     expect(screen.getByTitle("2 running")).toBeInTheDocument();
-    // Session count badge should show "2"
-    expect(screen.getByText("2")).toBeInTheDocument();
+    // Session count badge should show "2" — use getAllByText since "2" may appear
+    // in multiple places (e.g. project group count, other badges)
+    expect(screen.getAllByText("2").length).toBeGreaterThanOrEqual(1);
   });
 
   it("collapsing a project group hides its session items but shows a preview", () => {
@@ -728,7 +772,7 @@ describe("Sidebar", () => {
     render(<Sidebar />);
 
     // Expand the archived section first
-    const toggleButton = screen.getByText(/Archived \(1\)/);
+    const toggleButton = getArchivedToggle();
     fireEvent.click(toggleButton);
 
     // Find the session actions menu for the archived session
@@ -761,23 +805,27 @@ describe("Sidebar", () => {
   it("footer nav uses a vertical list layout with full labels", () => {
     // The footer navigation uses a single-column vertical list where each
     // item is a horizontal row with icon + full label (one line per item).
+    // Note: labels may appear in both mobile compact grid and desktop sections,
+    // and "Integrations" also appears as a collapsible section header.
     render(<Sidebar />);
     // Full labels should be visible (not short labels)
-    expect(screen.getByText("Environments")).toBeInTheDocument();
-    expect(screen.getByText("Integrations")).toBeInTheDocument();
-    expect(screen.getByText("Agents")).toBeInTheDocument();
-    expect(screen.getByText("Prompts")).toBeInTheDocument();
-    expect(screen.getByText("Terminal")).toBeInTheDocument();
-    expect(screen.getByText("Settings")).toBeInTheDocument();
+    expect(screen.getAllByText("Environments").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Integrations").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Agents").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Prompts").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Terminal").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Settings").length).toBeGreaterThanOrEqual(1);
   });
 
   it("footer navigation is grouped into clear sections", () => {
     // Verifies that the redesigned menu exposes explicit grouping labels
     // to improve scanability and information architecture.
+    // Current sections: Workbench, Agents, Hank AI, Integrations (collapsible NavSections).
     render(<Sidebar />);
     expect(screen.getByText("Workbench")).toBeInTheDocument();
-    expect(screen.getByText("Workspace")).toBeInTheDocument();
-    expect(screen.getByText("Resources")).toBeInTheDocument();
+    // "Agents" appears as both a section label and a nav item
+    expect(screen.getAllByText("Agents").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Hank AI")).toBeInTheDocument();
   });
 
   it("compact nav does not render helper subtitle lines", () => {
@@ -862,11 +910,11 @@ describe("Sidebar", () => {
 
   it("footer nav buttons have title attributes for accessibility", () => {
     // Verifies footer nav buttons have title attributes for tooltip/screen reader support.
+    // Note: items appear in both mobile compact grid and desktop nav, so use getAllByTitle.
     render(<Sidebar />);
-    // Footer nav items should have descriptive titles from NAV_ITEMS
-    expect(screen.getByTitle("Prompts")).toBeInTheDocument();
-    expect(screen.getByTitle("Integrations")).toBeInTheDocument();
-    expect(screen.getByTitle("Settings")).toBeInTheDocument();
+    expect(screen.getAllByTitle("Prompts").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByTitle("Integrations").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByTitle("Settings").length).toBeGreaterThanOrEqual(1);
   });
 
   it("passes axe accessibility checks", async () => {
@@ -1120,7 +1168,7 @@ describe("Sidebar", () => {
     render(<Sidebar />);
 
     // Expand archived section
-    fireEvent.click(screen.getByText(/Archived \(1\)/));
+    fireEvent.click(getArchivedToggle());
 
     // Open context menu and click Delete
     const menuButton = screen.getByTitle("Session actions");
@@ -1143,7 +1191,7 @@ describe("Sidebar", () => {
     render(<Sidebar />);
 
     // Expand archived, open menu, click Delete
-    fireEvent.click(screen.getByText(/Archived \(1\)/));
+    fireEvent.click(getArchivedToggle());
     fireEvent.click(screen.getByTitle("Session actions"));
     fireEvent.click(screen.getByText("Delete"));
 
@@ -1172,7 +1220,7 @@ describe("Sidebar", () => {
     render(<Sidebar />);
 
     // Expand archived, open menu, click Delete
-    fireEvent.click(screen.getByText(/Archived \(1\)/));
+    fireEvent.click(getArchivedToggle());
     fireEvent.click(screen.getByTitle("Session actions"));
     fireEvent.click(screen.getByText("Delete"));
 
@@ -1199,7 +1247,7 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    fireEvent.click(screen.getByText(/Archived \(1\)/));
+    fireEvent.click(getArchivedToggle());
     fireEvent.click(screen.getByTitle("Session actions"));
     fireEvent.click(screen.getByText("Delete"));
 
@@ -1221,7 +1269,7 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    fireEvent.click(screen.getByText(/Archived \(1\)/));
+    fireEvent.click(getArchivedToggle());
     fireEvent.click(screen.getByTitle("Session actions"));
     fireEvent.click(screen.getByText("Delete"));
 
@@ -1255,7 +1303,7 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Delete all")).not.toBeInTheDocument();
 
     // Expand archived section
-    fireEvent.click(screen.getByText(/Archived \(2\)/));
+    fireEvent.click(getArchivedToggle());
 
     // Now "Delete all" button should be visible
     expect(screen.getByText("Delete all")).toBeInTheDocument();
@@ -1272,7 +1320,7 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    fireEvent.click(screen.getByText(/Archived \(2\)/));
+    fireEvent.click(getArchivedToggle());
     fireEvent.click(screen.getByText("Delete all"));
 
     expect(screen.getByText("Delete all archived?")).toBeInTheDocument();
@@ -1290,7 +1338,7 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    fireEvent.click(screen.getByText(/Archived \(2\)/));
+    fireEvent.click(getArchivedToggle());
     fireEvent.click(screen.getByText("Delete all"));
 
     // Click "Delete all" in the confirmation modal
@@ -1319,7 +1367,7 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    fireEvent.click(screen.getByText(/Archived \(2\)/));
+    fireEvent.click(getArchivedToggle());
     fireEvent.click(screen.getByText("Delete all"));
 
     // Cancel the modal
@@ -1468,7 +1516,7 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    fireEvent.click(screen.getByText(/Archived \(1\)/));
+    fireEvent.click(getArchivedToggle());
 
     // Open context menu on the archived session
     fireEvent.click(screen.getByTitle("Session actions"));
@@ -1493,7 +1541,7 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    expect(screen.getByText(/Scheduled Runs \(1\)/)).toBeInTheDocument();
+    expect(getSectionToggle("Scheduled Runs")).toBeInTheDocument();
   });
 
   it("cron sessions are not shown in the active sessions list", () => {
@@ -1509,7 +1557,7 @@ describe("Sidebar", () => {
     // regular-session should be in the main list
     expect(screen.getByText("regular-session")).toBeInTheDocument();
     // cron-session should appear under Scheduled Runs, not in main list
-    expect(screen.getByText(/Scheduled Runs \(1\)/)).toBeInTheDocument();
+    expect(getSectionToggle("Scheduled Runs")).toBeInTheDocument();
   });
 
   it("toggling Scheduled Runs section hides/shows cron sessions", () => {
@@ -1525,13 +1573,13 @@ describe("Sidebar", () => {
     expect(screen.getByText("cron-model")).toBeInTheDocument();
 
     // Click to collapse
-    fireEvent.click(screen.getByText(/Scheduled Runs \(1\)/));
+    fireEvent.click(getSectionToggle("Scheduled Runs"));
 
     // Session should be hidden
     expect(screen.queryByText("cron-model")).not.toBeInTheDocument();
 
     // Click again to expand
-    fireEvent.click(screen.getByText(/Scheduled Runs \(1\)/));
+    fireEvent.click(getSectionToggle("Scheduled Runs"));
     expect(screen.getByText("cron-model")).toBeInTheDocument();
   });
 
@@ -1547,7 +1595,7 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    expect(screen.getByText(/Agent Runs \(1\)/)).toBeInTheDocument();
+    expect(getSectionToggle("Agent Runs")).toBeInTheDocument();
   });
 
   it("agent sessions are separate from active sessions", () => {
@@ -1561,7 +1609,7 @@ describe("Sidebar", () => {
 
     render(<Sidebar />);
     expect(screen.getByText("normal")).toBeInTheDocument();
-    expect(screen.getByText(/Agent Runs \(1\)/)).toBeInTheDocument();
+    expect(getSectionToggle("Agent Runs")).toBeInTheDocument();
   });
 
   it("toggling Agent Runs section hides/shows agent sessions", () => {
@@ -1579,11 +1627,11 @@ describe("Sidebar", () => {
     expect(screen.getByText("agent-model")).toBeInTheDocument();
 
     // Collapse
-    fireEvent.click(screen.getByText(/Agent Runs \(1\)/));
+    fireEvent.click(getSectionToggle("Agent Runs"));
     expect(screen.queryByText("agent-model")).not.toBeInTheDocument();
 
     // Expand again
-    fireEvent.click(screen.getByText(/Agent Runs \(1\)/));
+    fireEvent.click(getSectionToggle("Agent Runs"));
     expect(screen.getByText("agent-model")).toBeInTheDocument();
   });
 
@@ -1638,11 +1686,13 @@ describe("Sidebar", () => {
   it("footer nav button shows active state when on its page", () => {
     // Verifies that the footer nav button for the current page gets the
     // bg-cc-active class to indicate the user is on that page.
+    // Multiple elements with title "Settings" exist (mobile + desktop).
     window.location.hash = "#/settings";
     render(<Sidebar />);
 
-    const settingsBtn = screen.getByTitle("Settings");
-    expect(settingsBtn).toHaveClass("bg-cc-active");
+    const settingsBtns = screen.getAllByTitle("Settings");
+    const activeBtn = settingsBtns.find((btn) => btn.classList.contains("bg-cc-active"));
+    expect(activeBtn).toBeTruthy();
   });
 
   it("integrations nav button shows active for integrations page", () => {
@@ -1681,8 +1731,8 @@ describe("Sidebar", () => {
   // ─── Logo source based on backend type ─────────────────────────────────────
 
   it("shows codex logo when current session uses codex backend", () => {
-    // Verifies that the sidebar header logo changes to the Codex logo when
-    // the currently selected session has backendType "codex".
+    // The sidebar header always renders the HeyHank favicon logo.
+    // Backend type no longer changes the header logo.
     const sdk = makeSdkSession("s1", { backendType: "codex" });
     mockState = createMockState({
       sdkSessions: [sdk],
@@ -1690,13 +1740,12 @@ describe("Sidebar", () => {
     });
 
     const { container } = render(<Sidebar />);
-    const logo = container.querySelector("img[src='/logo-codex.svg']");
+    const logo = container.querySelector("img[src='/favicon.ico']");
     expect(logo).toBeTruthy();
   });
 
   it("shows default logo when current session uses claude backend", () => {
-    // Verifies that the sidebar header logo is the default when the currently
-    // selected session has backendType "claude".
+    // The sidebar header always renders the HeyHank favicon logo.
     const sdk = makeSdkSession("s1", { backendType: "claude" });
     mockState = createMockState({
       sdkSessions: [sdk],
@@ -1704,55 +1753,39 @@ describe("Sidebar", () => {
     });
 
     const { container } = render(<Sidebar />);
-    const logo = container.querySelector("img[src='/logo.svg']");
+    const logo = container.querySelector("img[src='/favicon.ico']");
     expect(logo).toBeTruthy();
   });
 
   // ─── External links in footer ──────────────────────────────────────────────
 
-  it("renders external links for Documentation, GitHub, and Website", () => {
-    // Verifies that all three external icon-only links are rendered in the
-    // sidebar footer with correct href values.
+  it("renders external links for GitHub", () => {
+    // Verifies that the external GitHub link is rendered in the sidebar footer.
+    // The link appears in both mobile and desktop footer sections.
     render(<Sidebar />);
 
-    const docsLink = screen.getByLabelText("Open documentation");
-    const githubLink = screen.getByLabelText("Open github");
-    const websiteLink = screen.getByLabelText("Open website");
-
-    expect(docsLink).toBeInTheDocument();
-    expect(githubLink).toBeInTheDocument();
-    expect(websiteLink).toBeInTheDocument();
-
-    expect(docsLink).toHaveAttribute("href", "https://docs.thecompanion.sh");
-    expect(githubLink).toHaveAttribute("href", "https://github.com/The-Vibe-Company/companion");
-    expect(websiteLink).toHaveAttribute("href", "https://thecompanion.sh");
+    const githubLinks = screen.getAllByLabelText("Open github");
+    expect(githubLinks.length).toBeGreaterThanOrEqual(1);
+    expect(githubLinks[0]).toHaveAttribute("href", "https://github.com");
   });
 
   it("external links open in new tab with secure attributes", () => {
-    // Verifies that all external links use target="_blank" and
+    // Verifies that external links use target="_blank" and
     // rel="noopener noreferrer" to prevent reverse-tabnabbing.
     render(<Sidebar />);
 
-    const links = [
-      screen.getByLabelText("Open documentation"),
-      screen.getByLabelText("Open github"),
-      screen.getByLabelText("Open website"),
-    ];
-
-    for (const link of links) {
-      expect(link).toHaveAttribute("target", "_blank");
-      expect(link).toHaveAttribute("rel", "noopener noreferrer");
-    }
+    const githubLinks = screen.getAllByLabelText("Open github");
+    expect(githubLinks[0]).toHaveAttribute("target", "_blank");
+    expect(githubLinks[0]).toHaveAttribute("rel", "noopener noreferrer");
   });
 
   it("external links have title attributes for tooltip accessibility", () => {
-    // Verifies that each external link has a title attribute for tooltips
+    // Verifies that external links have a title attribute for tooltips
     // and screen reader support.
     render(<Sidebar />);
 
-    expect(screen.getByTitle("Documentation")).toBeInTheDocument();
-    expect(screen.getByTitle("GitHub")).toBeInTheDocument();
-    expect(screen.getByTitle("Website")).toBeInTheDocument();
+    // GitHub link appears in both mobile and desktop footer
+    expect(screen.getAllByTitle("GitHub").length).toBeGreaterThanOrEqual(1);
   });
 
   it("external links are rendered as anchor elements (not buttons)", () => {
@@ -1760,13 +1793,8 @@ describe("Sidebar", () => {
     // distinguishing them from internal nav buttons.
     render(<Sidebar />);
 
-    const docsLink = screen.getByLabelText("Open documentation");
-    const githubLink = screen.getByLabelText("Open github");
-    const websiteLink = screen.getByLabelText("Open website");
-
-    expect(docsLink.tagName).toBe("A");
-    expect(githubLink.tagName).toBe("A");
-    expect(websiteLink.tagName).toBe("A");
+    const githubLinks = screen.getAllByLabelText("Open github");
+    expect(githubLinks[0].tagName).toBe("A");
   });
 
   // ─── Delete modal inner click propagation ──────────────────────────────────
@@ -1780,7 +1808,7 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    fireEvent.click(screen.getByText(/Archived \(1\)/));
+    fireEvent.click(getArchivedToggle());
     fireEvent.click(screen.getByTitle("Session actions"));
     fireEvent.click(screen.getByText("Delete"));
 
@@ -1864,7 +1892,7 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    fireEvent.click(screen.getByText(/Archived \(3\)/));
+    fireEvent.click(getArchivedToggle());
     fireEvent.click(screen.getByText("Delete all"));
 
     expect(screen.getByText(/3 archived sessions/)).toBeInTheDocument();

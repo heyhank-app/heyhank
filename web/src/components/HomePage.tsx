@@ -108,7 +108,7 @@ function ConnectedServices() {
         });
       }),
       api.getSocialSettings().then((s: any) => {
-        const backendLabel: Record<string, string> = { postiz: "Postiz", buffer: "Buffer", ayrshare: "Ayrshare" };
+        const backendLabel: Record<string, string> = { postiz: "Postiz", buffer: "Buffer" };
         items.push({
           name: "Social Media",
           status: s.backend ? "connected" : "not_configured",

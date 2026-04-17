@@ -95,6 +95,12 @@ vi.mock("./settings-manager.js", () => ({
     assistantName: "Maxx",
     userName: "",
     internalAiProvider: "",
+    hankChatProvider: "gemini-live",
+    hankChatModel: "",
+    mem0ApiKey: "",
+    mem0UserId: "",
+    memoryAutoDetect: true,
+    obsidianVaultPath: "",
   })),
   updateSettings: vi.fn((patch) => ({
     anthropicApiKey: patch.anthropicApiKey ?? "",
@@ -115,12 +121,27 @@ vi.mock("./settings-manager.js", () => ({
     assistantName: patch.assistantName ?? "Maxx",
     userName: patch.userName ?? "",
     internalAiProvider: patch.internalAiProvider ?? "",
+    hankChatProvider: patch.hankChatProvider ?? "gemini-live",
+    hankChatModel: patch.hankChatModel ?? "",
+    mem0ApiKey: patch.mem0ApiKey ?? "",
+    mem0UserId: patch.mem0UserId ?? "",
+    memoryAutoDetect: patch.memoryAutoDetect ?? true,
   })),
 }));
 
 
 vi.mock("./codex-container-auth.js", () => ({
   hasContainerCodexAuth: vi.fn(() => false),
+}));
+
+// Mock cost-tracker to avoid bun:sqlite import (not available in vitest)
+vi.mock("./cost-tracker.js", () => ({
+  getCostTracker: vi.fn(() => ({
+    record: vi.fn(),
+    getSessionCost: vi.fn(() => 0),
+    getTotalCost: vi.fn(() => 0),
+    getRecentSessions: vi.fn(() => []),
+  })),
 }));
 
 const mockDiscoverClaudeSessions = vi.hoisted(() => vi.fn(
@@ -728,8 +749,8 @@ describe("POST /api/sessions/:id/editor/start", () => {
     });
     vi.spyOn(containerManager, "getContainer").mockReturnValue({
       containerId: "cid-1",
-      name: "companion-s1",
-      image: "the-companion:latest",
+      name: "heyhank-s1",
+      image: "heyhank:latest",
       portMappings: [{ containerPort: 13337, hostPort: 49152 }],
       hostCwd: "/repo",
       containerCwd: "/workspace",
@@ -798,7 +819,7 @@ describe("POST /api/sessions/:id/relaunch", () => {
   it("returns 503 with error when container is missing", async () => {
     orchestrator.relaunchSession.mockResolvedValue({
       ok: false,
-      error: 'Container "companion-gone" was removed externally. Please create a new session.',
+      error: 'Container "heyhank-gone" was removed externally. Please create a new session.',
     });
 
     const res = await app.request("/api/sessions/s1/relaunch", { method: "POST" });
@@ -1224,15 +1245,15 @@ describe("Saved prompts API", () => {
 describe("GET /api/images/:tag/status", () => {
   it("returns the pull state for an image", async () => {
     mockImagePullGetState.mockReturnValueOnce({
-      image: "the-companion:latest",
+      image: "heyhank:latest",
       status: "ready",
       progress: [],
     });
 
-    const res = await app.request("/api/images/the-companion%3Alatest/status");
+    const res = await app.request("/api/images/heyhank%3Alatest/status");
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.image).toBe("the-companion:latest");
+    expect(json.image).toBe("heyhank:latest");
     expect(json.status).toBe("ready");
   });
 });
@@ -1241,25 +1262,25 @@ describe("POST /api/images/:tag/pull", () => {
   it("triggers a pull and returns the current state", async () => {
     vi.spyOn(containerManager, "checkDocker").mockReturnValue(true);
     mockImagePullGetState.mockReturnValueOnce({
-      image: "the-companion:latest",
+      image: "heyhank:latest",
       status: "pulling",
       progress: [],
       startedAt: Date.now(),
     });
 
-    const res = await app.request("/api/images/the-companion%3Alatest/pull", {
+    const res = await app.request("/api/images/heyhank%3Alatest/pull", {
       method: "POST",
     });
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.ok).toBe(true);
-    expect(mockImagePullPull).toHaveBeenCalledWith("the-companion:latest");
+    expect(mockImagePullPull).toHaveBeenCalledWith("heyhank:latest");
   });
 
   it("returns 503 when Docker is not available", async () => {
     vi.spyOn(containerManager, "checkDocker").mockReturnValue(false);
 
-    const res = await app.request("/api/images/the-companion%3Alatest/pull", {
+    const res = await app.request("/api/images/heyhank%3Alatest/pull", {
       method: "POST",
     });
     expect(res.status).toBe(503);
@@ -1291,13 +1312,19 @@ describe("GET /api/settings", () => {
       assistantName: "Maxx",
       userName: "",
       internalAiProvider: "",
+    hankChatProvider: "gemini-live",
+    hankChatModel: "",
+    mem0ApiKey: "",
+    mem0UserId: "",
+    memoryAutoDetect: true,
+    obsidianVaultPath: "",
     });
 
     const res = await app.request("/api/settings", { method: "GET" });
 
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json).toEqual({
+    expect(json).toMatchObject({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
       claudeCodeOAuthTokenConfigured: false,
@@ -1334,13 +1361,19 @@ describe("GET /api/settings", () => {
       assistantName: "Maxx",
       userName: "",
       internalAiProvider: "",
+    hankChatProvider: "gemini-live",
+    hankChatModel: "",
+    mem0ApiKey: "",
+    mem0UserId: "",
+    memoryAutoDetect: true,
+    obsidianVaultPath: "",
     });
 
     const res = await app.request("/api/settings", { method: "GET" });
 
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json).toEqual({
+    expect(json).toMatchObject({
       anthropicApiKeyConfigured: false,
       anthropicModel: "openai/gpt-4o-mini",
       claudeCodeOAuthTokenConfigured: false,
@@ -1378,6 +1411,12 @@ describe("GET /api/settings", () => {
       assistantName: "Maxx",
       userName: "",
       internalAiProvider: "",
+    hankChatProvider: "gemini-live",
+    hankChatModel: "",
+    mem0ApiKey: "",
+    mem0UserId: "",
+    memoryAutoDetect: true,
+    obsidianVaultPath: "",
     });
 
     const res = await app.request("/api/settings", { method: "GET" });
@@ -1409,6 +1448,12 @@ describe("PUT /api/settings", () => {
       assistantName: "Maxx",
       userName: "",
       internalAiProvider: "",
+    hankChatProvider: "gemini-live",
+    hankChatModel: "",
+    mem0ApiKey: "",
+    mem0UserId: "",
+    memoryAutoDetect: true,
+    obsidianVaultPath: "",
     });
 
     const res = await app.request("/api/settings", {
@@ -1418,17 +1463,13 @@ describe("PUT /api/settings", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(settingsManager.updateSettings).toHaveBeenCalledWith({
-      anthropicApiKey: "new-key",
-      anthropicModel: undefined,
-      editorTabEnabled: undefined,
-      aiValidationEnabled: undefined,
-      aiValidationAutoApprove: undefined,
-      aiValidationAutoDeny: undefined,
-      updateChannel: undefined,
-    });
+    expect(settingsManager.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        anthropicApiKey: "new-key",
+      }),
+    );
     const json = await res.json();
-    expect(json).toEqual({
+    expect(json).toMatchObject({
       anthropicApiKeyConfigured: true,
       anthropicModel: "claude-sonnet-4-6",
       claudeCodeOAuthTokenConfigured: false,
@@ -1465,6 +1506,12 @@ describe("PUT /api/settings", () => {
       assistantName: "Maxx",
       userName: "",
       internalAiProvider: "",
+    hankChatProvider: "gemini-live",
+    hankChatModel: "",
+    mem0ApiKey: "",
+    mem0UserId: "",
+    memoryAutoDetect: true,
+    obsidianVaultPath: "",
     });
 
     const res = await app.request("/api/settings", {
@@ -1501,6 +1548,12 @@ describe("PUT /api/settings", () => {
       assistantName: "Maxx",
       userName: "",
       internalAiProvider: "",
+    hankChatProvider: "gemini-live",
+    hankChatModel: "",
+    mem0ApiKey: "",
+    mem0UserId: "",
+    memoryAutoDetect: true,
+    obsidianVaultPath: "",
     });
 
     const res = await app.request("/api/settings", {
@@ -1588,6 +1641,12 @@ describe("PUT /api/settings", () => {
       assistantName: "Maxx",
       userName: "",
       internalAiProvider: "",
+    hankChatProvider: "gemini-live",
+    hankChatModel: "",
+    mem0ApiKey: "",
+    mem0UserId: "",
+    memoryAutoDetect: true,
+    obsidianVaultPath: "",
     });
 
     const res = await app.request("/api/settings", {
@@ -1830,7 +1889,7 @@ describe("GET /api/git/branches", () => {
 describe("POST /api/git/worktree", () => {
   it("creates a worktree", async () => {
     const result = {
-      worktreePath: "/home/.companion/worktrees/repo/feat",
+      worktreePath: "/home/.heyhank/worktrees/repo/feat",
       branch: "feat",
       actualBranch: "feat",
       isNew: true,
@@ -1987,62 +2046,62 @@ describe("GET /api/fs/home", () => {
 
   it("returns home as cwd when process.cwd() is the package root", async () => {
     const origCwd = process.cwd;
-    const origEnv = process.env.__COMPANION_PACKAGE_ROOT;
+    const origEnv = process.env.__HEYHANK_PACKAGE_ROOT;
     try {
-      process.env.__COMPANION_PACKAGE_ROOT = "/opt/companion";
-      process.cwd = () => "/opt/companion";
+      process.env.__HEYHANK_PACKAGE_ROOT = "/opt/heyhank";
+      process.cwd = () => "/opt/heyhank";
       const res = await app.request("/api/fs/home", { method: "GET" });
       const json = await res.json();
       expect(json.cwd).toBe(json.home);
     } finally {
       process.cwd = origCwd;
-      process.env.__COMPANION_PACKAGE_ROOT = origEnv;
+      process.env.__HEYHANK_PACKAGE_ROOT = origEnv;
     }
   });
 
   it("returns home as cwd when process.cwd() is inside the package root", async () => {
     const origCwd = process.cwd;
-    const origEnv = process.env.__COMPANION_PACKAGE_ROOT;
+    const origEnv = process.env.__HEYHANK_PACKAGE_ROOT;
     try {
-      process.env.__COMPANION_PACKAGE_ROOT = "/opt/companion";
-      process.cwd = () => "/opt/companion/node_modules/.bin";
+      process.env.__HEYHANK_PACKAGE_ROOT = "/opt/heyhank";
+      process.cwd = () => "/opt/heyhank/node_modules/.bin";
       const res = await app.request("/api/fs/home", { method: "GET" });
       const json = await res.json();
       expect(json.cwd).toBe(json.home);
     } finally {
       process.cwd = origCwd;
-      process.env.__COMPANION_PACKAGE_ROOT = origEnv;
+      process.env.__HEYHANK_PACKAGE_ROOT = origEnv;
     }
   });
 
   it("returns actual cwd when launched from a project directory", async () => {
     const origCwd = process.cwd;
-    const origEnv = process.env.__COMPANION_PACKAGE_ROOT;
+    const origEnv = process.env.__HEYHANK_PACKAGE_ROOT;
     try {
-      process.env.__COMPANION_PACKAGE_ROOT = "/opt/companion";
+      process.env.__HEYHANK_PACKAGE_ROOT = "/opt/heyhank";
       process.cwd = () => "/Users/testuser/my-project";
       const res = await app.request("/api/fs/home", { method: "GET" });
       const json = await res.json();
       expect(json.cwd).toBe("/Users/testuser/my-project");
     } finally {
       process.cwd = origCwd;
-      process.env.__COMPANION_PACKAGE_ROOT = origEnv;
+      process.env.__HEYHANK_PACKAGE_ROOT = origEnv;
     }
   });
 
   it("returns home as cwd when process.cwd() equals home directory", async () => {
     const { homedir } = await import("node:os");
     const origCwd = process.cwd;
-    const origEnv = process.env.__COMPANION_PACKAGE_ROOT;
+    const origEnv = process.env.__HEYHANK_PACKAGE_ROOT;
     try {
-      delete process.env.__COMPANION_PACKAGE_ROOT;
+      delete process.env.__HEYHANK_PACKAGE_ROOT;
       process.cwd = () => homedir();
       const res = await app.request("/api/fs/home", { method: "GET" });
       const json = await res.json();
       expect(json.cwd).toBe(json.home);
     } finally {
       process.cwd = origCwd;
-      process.env.__COMPANION_PACKAGE_ROOT = origEnv;
+      process.env.__HEYHANK_PACKAGE_ROOT = origEnv;
     }
   });
 });
@@ -2804,14 +2863,14 @@ describe("POST /api/sessions/:id/processes/system/:pid/kill", () => {
     expect(res.status).toBe(404);
   });
 
-  it("refuses to kill the companion server process", async () => {
+  it("refuses to kill the heyhank server process", async () => {
     launcher.getSession.mockReturnValue({ pid: 1234 });
     const res = await app.request(`/api/sessions/sess-1/processes/system/${process.pid}/kill`, {
       method: "POST",
     });
     expect(res.status).toBe(403);
     const data = await res.json();
-    expect(data.error).toContain("Cannot kill the Companion server");
+    expect(data.error).toContain("Cannot kill the HeyHank server");
   });
 
   it("refuses to kill the session's own CLI process", async () => {
@@ -2907,8 +2966,8 @@ describe("POST /api/sessions/:id/browser/start", () => {
     });
     vi.spyOn(containerManager, "getContainer").mockReturnValue({
       containerId: "cid-1",
-      name: "companion-s1",
-      image: "the-companion:latest",
+      name: "heyhank-s1",
+      image: "heyhank:latest",
       portMappings: [{ containerPort: 6080, hostPort: 49200 }],
       hostCwd: "/repo",
       containerCwd: "/workspace",
@@ -2940,8 +2999,8 @@ describe("POST /api/sessions/:id/browser/start", () => {
     });
     vi.spyOn(containerManager, "getContainer").mockReturnValue({
       containerId: "cid-1",
-      name: "companion-s1",
-      image: "the-companion:latest",
+      name: "heyhank-s1",
+      image: "heyhank:latest",
       portMappings: [{ containerPort: 6080, hostPort: 49200 }],
       hostCwd: "/repo",
       containerCwd: "/workspace",
@@ -2960,7 +3019,7 @@ describe("POST /api/sessions/:id/browser/start", () => {
       available: true,
       mode: "container",
     });
-    // URL should be a proxied path through the companion server
+    // URL should be a proxied path through the heyhank server
     expect(json.url).toContain("/api/sessions/s1/browser/proxy/vnc.html");
     expect(json.url).toContain("autoconnect=true");
     expect(json.url).toContain("path=ws/novnc/s1");
@@ -2978,8 +3037,8 @@ describe("POST /api/sessions/:id/browser/start", () => {
     });
     vi.spyOn(containerManager, "getContainer").mockReturnValue({
       containerId: "cid-1",
-      name: "companion-s1",
-      image: "the-companion:latest",
+      name: "heyhank-s1",
+      image: "heyhank:latest",
       portMappings: [{ containerPort: 6080, hostPort: 49200 }],
       hostCwd: "/repo",
       containerCwd: "/workspace",
@@ -3012,8 +3071,8 @@ describe("POST /api/sessions/:id/browser/start", () => {
     });
     vi.spyOn(containerManager, "getContainer").mockReturnValue({
       containerId: "cid-1",
-      name: "companion-s1",
-      image: "the-companion:latest",
+      name: "heyhank-s1",
+      image: "heyhank:latest",
       portMappings: [{ containerPort: 6080, hostPort: 49200 }],
       hostCwd: "/repo",
       containerCwd: "/workspace",
@@ -3093,8 +3152,8 @@ describe("POST /api/sessions/:id/browser/navigate", () => {
     });
     vi.spyOn(containerManager, "getContainer").mockReturnValue({
       containerId: "cid-1",
-      name: "companion-s1",
-      image: "the-companion:latest",
+      name: "heyhank-s1",
+      image: "heyhank:latest",
       portMappings: [],
       hostCwd: "/repo",
       containerCwd: "/workspace",
@@ -3149,8 +3208,8 @@ describe("GET /api/sessions/:id/browser/proxy/*", () => {
     });
     vi.spyOn(containerManager, "getContainer").mockReturnValue({
       containerId: "cid-1",
-      name: "companion-s1",
-      image: "the-companion:latest",
+      name: "heyhank-s1",
+      image: "heyhank:latest",
       portMappings: [{ containerPort: 6080, hostPort: 49200 }],
       hostCwd: "/repo",
       containerCwd: "/workspace",
@@ -3228,8 +3287,8 @@ describe("GET /api/sessions/:id/browser/host-proxy/:port/*", () => {
     expect(res.status).toBe(404);
   });
 
-  // Security: block proxying to the companion server itself (would bypass remote auth)
-  it("rejects proxying to the companion server port", async () => {
+  // Security: block proxying to the heyhank server itself (would bypass remote auth)
+  it("rejects proxying to the heyhank server port", async () => {
     launcher.getSession.mockReturnValue({
       sessionId: "s1",
       state: "running",

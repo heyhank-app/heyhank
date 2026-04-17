@@ -183,6 +183,10 @@ vi.mock("./components/ProcessPanel.js", () => ({
   ProcessPanel: () => <div data-testid="process-panel">ProcessPanel</div>,
 }));
 
+vi.mock("./components/SessionsDashboard.js", () => ({
+  SessionsDashboard: () => <div data-testid="sessions-dashboard">SessionsDashboard</div>,
+}));
+
 // ─── Import SUT after mocks ─────────────────────────────────────
 import App from "./App.js";
 import { parseHash } from "./utils/routing.js";
@@ -227,7 +231,7 @@ beforeEach(() => {
   mockGetState.mockReturnValue(mockStoreState);
   (parseHash as ReturnType<typeof vi.fn>).mockReturnValue({ page: "home" });
   window.location.hash = "";
-  localStorage.removeItem("companion_docker_prompt_pending");
+  localStorage.removeItem("heyhank_docker_prompt_pending");
 });
 
 // ─── Tests ───────────────────────────────────────────────────────
@@ -251,16 +255,16 @@ describe("App", () => {
       setStoreValues({ isAuthenticated: true });
     });
 
-    it("renders Sidebar, TopBar, UpdateBanner, and HomePage when on home route with no session", () => {
+    it("renders Sidebar, TopBar, UpdateBanner, and SessionsDashboard when on home route with no session", () => {
       // Authenticated user on the home route (no active session) should see the
-      // full chrome: sidebar, topbar, update banner, and the home page content.
+      // full chrome: sidebar, topbar, update banner, and the sessions dashboard.
       render(<App />);
 
       expect(screen.queryByTestId("login-page")).not.toBeInTheDocument();
       expect(screen.getByTestId("sidebar")).toBeInTheDocument();
       expect(screen.getByTestId("topbar")).toBeInTheDocument();
       expect(screen.getByTestId("update-banner")).toBeInTheDocument();
-      expect(screen.getByTestId("home-page")).toBeInTheDocument();
+      expect(screen.getByTestId("sessions-dashboard")).toBeInTheDocument();
       expect(screen.getByTestId("update-overlay")).toBeInTheDocument();
     });
 
@@ -325,7 +329,9 @@ describe("App", () => {
     });
 
     it("renders SessionLaunchOverlay during session creation", () => {
-      // While a session is being created, the overlay should appear over the home page.
+      // While a session is being created, the overlay should appear.
+      // SessionLaunchOverlay is inside the isSessionView block, so route must be "session" or "new-session".
+      (parseHash as ReturnType<typeof vi.fn>).mockReturnValue({ page: "new-session" });
       setStoreValues({
         sessionCreating: true,
         creationProgress: [{ label: "Starting...", status: "done" }],
@@ -405,15 +411,15 @@ describe("App", () => {
   });
 
   describe("docker update dialog activation", () => {
-    it("opens DockerUpdateDialog and clears localStorage when companion_docker_prompt_pending is set", () => {
+    it("opens DockerUpdateDialog and clears localStorage when heyhank_docker_prompt_pending is set", () => {
       // After an app update, the localStorage flag triggers the Docker update dialog.
       // This useEffect reads the flag, removes it, and opens the dialog via the store.
-      localStorage.setItem("companion_docker_prompt_pending", "1");
+      localStorage.setItem("heyhank_docker_prompt_pending", "1");
       setStoreValues({ isAuthenticated: true });
       render(<App />);
 
       expect(mockStoreState.setDockerUpdateDialogOpen).toHaveBeenCalledWith(true);
-      expect(localStorage.getItem("companion_docker_prompt_pending")).toBeNull();
+      expect(localStorage.getItem("heyhank_docker_prompt_pending")).toBeNull();
     });
 
     it("does not open DockerUpdateDialog on normal page load", () => {

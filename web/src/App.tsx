@@ -42,6 +42,8 @@ const TelephonyPage = lazy(() => import("./components/TelephonyPage.js").then((m
 const SocialMediaPage = lazy(() => import("./components/SocialMediaPage.js").then((m) => ({ default: m.SocialMediaPage })));
 const HelpPage = lazy(() => import("./components/HelpPage.js").then((m) => ({ default: m.HelpPage })));
 const AssistantPage = lazy(() => import("./components/AssistantPage.js").then((m) => ({ default: m.AssistantPage })));
+const MemoryPage = lazy(() => import("./components/MemoryPage.js").then((m) => ({ default: m.MemoryPage })));
+const BusinessPage = lazy(() => import("./components/BusinessPage.js").then((m) => ({ default: m.BusinessPage })));
 
 
 function LazyFallback() {
@@ -90,7 +92,9 @@ export default function App() {
   const isTelephonyPage = route.page === "telephony";
   const isSocialMediaPage = route.page === "socialmedia";
   const isHelpPage = route.page === "help";
+  const isMemoryPage = route.page === "memory";
   const isAssistantPage = route.page === "assistant";
+  const isBusinessPage = route.page === "business";
   const isNewSessionPage = route.page === "new-session";
   const isSessionView = route.page === "session" || route.page === "new-session";
 
@@ -316,9 +320,21 @@ export default function App() {
             </div>
           )}
 
+          {isMemoryPage && (
+            <div className="absolute inset-0">
+              <Suspense fallback={<LazyFallback />}><MemoryPage embedded /></Suspense>
+            </div>
+          )}
+
           {isAssistantPage && (
             <div className="absolute inset-0">
               <Suspense fallback={<LazyFallback />}><AssistantPage /></Suspense>
+            </div>
+          )}
+
+          {isBusinessPage && (
+            <div className="absolute inset-0">
+              <Suspense fallback={<LazyFallback />}><BusinessPage embedded /></Suspense>
             </div>
           )}
 

@@ -60,7 +60,7 @@ function StatusDot({ status }: { status: DerivedStatus }) {
   }
 }
 
-function BackendBadge({ type }: { type: "claude" | "codex" }) {
+function BackendBadge({ type }: { type: string }) {
   if (type === "codex") {
     return (
       <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-500 leading-none">
@@ -68,9 +68,10 @@ function BackendBadge({ type }: { type: "claude" | "codex" }) {
       </span>
     );
   }
+  const label = type === "claude" ? "CC" : type.slice(0, 2).toUpperCase();
   return (
     <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-cc-success/15 text-cc-success leading-none">
-      CC
+      {label}
     </span>
   );
 }

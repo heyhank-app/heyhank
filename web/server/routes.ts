@@ -34,9 +34,17 @@ import { registerHubRoutes } from "./recording-hub/hub-routes.js";
 import { registerFederationRoutes } from "./routes/federation-routes.js";
 import { registerTelephonyRoutes } from "./routes/telephony-routes.js";
 import { registerSocialMediaRoutes } from "./routes/socialmedia-routes.js";
+import { registerSocialViewRoutes } from "./socialview/routes.js";
 import { registerAssistantRoutes } from "./routes/assistant-routes.js";
 import { registerEmailRoutes } from "./routes/email-routes.js";
 import { registerProviderRoutes } from "./routes/provider-routes.js";
+import { registerHankChatRoutes } from "./routes/hank-chat-routes.js";
+import { registerMemoryRoutes } from "./routes/memory-routes.js";
+import { registerTeamRoutes } from "./routes/team-routes.js";
+import { registerContentRoutes } from "./routes/content-routes.js";
+import { registerCeoDocumentRoutes } from "./routes/ceo-routes.js";
+import { registerCeoNewsTimeRoutes } from "./routes/ceo-news-time-routes.js";
+import { registerCeoFinanceKpiRoutes } from "./routes/ceo-finance-kpi-routes.js";
 import { nodeManager } from "./federation/node-manager.js";
 import { discoverClaudeSessions } from "./claude-session-discovery.js";
 import { getClaudeSessionHistoryPage } from "./claude-session-history.js";
@@ -136,17 +144,22 @@ export function createRoutes(
   // When behind a reverse proxy (Nginx), check X-Real-IP / X-Forwarded-For
   // headers first, since the TCP source will always be 127.0.0.1 from the proxy.
   function isLocalhostRequest(c: { env: unknown; req: { raw: Request; header: (name: string) => string | undefined } }): boolean {
-    // If a reverse proxy set X-Real-IP, use that (this is the real client IP)
+    // First determine the TCP peer address
+    const bunServer = c.env as { requestIP?: (req: Request) => { address: string } | null };
+    const ip = bunServer?.requestIP?.(c.req.raw);
+    const tcpAddr = ip?.address ?? "";
+    const tcpIsLocal = tcpAddr === "127.0.0.1" || tcpAddr === "::1" || tcpAddr === "::ffff:127.0.0.1";
+
+    // Only trust X-Real-IP when the TCP connection comes from localhost (i.e. a local reverse proxy)
     const realIp = c.req.header("x-real-ip");
-    if (realIp) {
+    if (realIp && tcpIsLocal) {
       const trimmed = realIp.trim();
       return trimmed === "127.0.0.1" || trimmed === "::1" || trimmed === "::ffff:127.0.0.1";
     }
-    // Fallback to TCP socket address (direct connections without proxy)
-    const bunServer = c.env as { requestIP?: (req: Request) => { address: string } | null };
-    const ip = bunServer?.requestIP?.(c.req.raw);
-    const addr = ip?.address ?? "";
-    return addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1";
+
+    // If X-Real-IP is present but TCP is NOT localhost, ignore the header (spoofed)
+    // Fall back to TCP peer address
+    return tcpIsLocal;
   }
 
   api.get("/auth/auto", (c) => {
@@ -182,7 +195,9 @@ export function createRoutes(
     // send Authorization headers, but browsers do forward cookies automatically.
     const cookieToken = getCookie(c, "heyhank_auth") ?? null;
     if (!verifyToken(token) && !verifyToken(cookieToken)) {
-      return c.json({ error: "unauthorized" }, 401);
+      // Use 403 instead of 401 to prevent browsers from re-showing
+      // the Basic Auth dialog when Nginx basic auth is in front
+      return c.json({ error: "unauthorized" }, 403);
     }
     return next();
   });
@@ -602,7 +617,7 @@ export function createRoutes(
       return c.json({
         available: false,
         mode: "container" as const,
-        message: "Browser preview requires Xvfb and noVNC in the container image. Rebuild with the latest the-companion image.",
+        message: "Browser preview requires Xvfb and noVNC in the container image. Rebuild with the latest heyhank image.",
       });
     }
 
@@ -1332,9 +1347,17 @@ export function createRoutes(
   registerFederationRoutes(api);
   registerTelephonyRoutes(api);
   registerSocialMediaRoutes(api);
+  registerSocialViewRoutes(api);
   registerAssistantRoutes(api);
   registerEmailRoutes(api);
   registerProviderRoutes(api);
+  registerHankChatRoutes(api);
+  registerMemoryRoutes(api);
+  registerTeamRoutes(api);
+  registerContentRoutes(api);
+  registerCeoDocumentRoutes(api);
+  registerCeoNewsTimeRoutes(api);
+  registerCeoFinanceKpiRoutes(api);
 
   // ─── Gemini → Session bridge ───────────────────────────────────────
   // Allows Gemini voice chat tool calls to send messages to active sessions

@@ -162,6 +162,16 @@ export function SessionsDashboard() {
   const [geminiReady, setGeminiReady] = useState<boolean | null>(null);
   const [geminiConversations, setGeminiConversations] = useState<GeminiConversationSummary[]>([]);
   const [expandedConvo, setExpandedConvo] = useState<string | null>(null);
+  const [callHistory, setCallHistory] = useState<Array<{ id: string; phone: string; status: string; prompt: string; summary: string | null; durationSeconds: number; startedAt: number }>>([]);
+  const [hankHistoryTab, setHankHistoryTab] = useState<"chat" | "calls">("chat");
+  const [briefing, setBriefing] = useState<{
+    date: string;
+    email: { totalUnread: number };
+    calendar: { count: number };
+    todos: { open: number; overdue: number; dueToday: number };
+    delegations: { count: number };
+    projects: Array<{ name: string; total: number; done: number; open: number }>;
+  } | null>(null);
 
   // Poll sessions
   useEffect(() => {
@@ -175,6 +185,7 @@ export function SessionsDashboard() {
 
   // Fetch dashboard extras once
   useEffect(() => {
+    api.getDailyBriefing().then(setBriefing).catch(() => {});
     api.listAgents().then(setDashboardAgents).catch(() => {});
     api.getFederationNodes().then((res) => {
       const connected = res.nodes.filter((n: { connected: boolean }) => n.connected).length;
@@ -184,6 +195,7 @@ export function SessionsDashboard() {
       setGeminiReady(s.geminiApiKeyConfigured);
     }).catch(() => {});
     api.listGeminiConversations().then(setGeminiConversations).catch(() => {});
+    api.getCallHistory(10).then((res) => setCallHistory(res.calls || [])).catch(() => {});
   }, []);
 
   const allSessions = useMemo(() => {
@@ -247,8 +259,8 @@ export function SessionsDashboard() {
   const enabledAgents = dashboardAgents.filter((a) => a.enabled !== false);
 
   return (
-    <div className="h-full overflow-auto">
-      <div className="max-w-4xl mx-auto px-4 py-8 sm:px-6">
+    <div className="h-full overflow-y-auto bg-cc-bg">
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10 pb-safe">
         {/* ── Dashboard Header ── */}
         <div className="flex items-center justify-between mb-8">
           <div>
@@ -266,6 +278,53 @@ export function SessionsDashboard() {
             New Session
           </button>
         </div>
+
+        {/* ── Daily Briefing Card ── */}
+        {briefing && (
+          <div className="bg-cc-card border border-cc-border rounded-xl p-4 mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-cc-primary opacity-70">
+                <path d="M4.5 1.5c-1.036 0-1.875.84-1.875 1.875v9.25c0 1.035.84 1.875 1.875 1.875h7c1.035 0 1.875-.84 1.875-1.875v-9.25c0-1.036-.84-1.875-1.875-1.875h-7ZM5.25 5a.75.75 0 0 0 0 1.5h5.5a.75.75 0 0 0 0-1.5h-5.5Zm0 3a.75.75 0 0 0 0 1.5h5.5a.75.75 0 0 0 0-1.5h-5.5Zm0 3a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5h-3.5Z" />
+              </svg>
+              <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Daily Briefing</h3>
+              <span className="text-[10px] text-cc-muted ml-auto">{briefing.date}</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="flex flex-col">
+                <span className="text-[10px] text-cc-muted uppercase tracking-wider mb-0.5">Unread Emails</span>
+                <span className="text-lg font-bold text-cc-fg">{briefing.email.totalUnread}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] text-cc-muted uppercase tracking-wider mb-0.5">Events Today</span>
+                <span className="text-lg font-bold text-cc-fg">{briefing.calendar.count}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] text-cc-muted uppercase tracking-wider mb-0.5">Open Todos</span>
+                <span className="text-lg font-bold text-cc-fg">
+                  {briefing.todos.open}
+                  {briefing.todos.overdue > 0 && (
+                    <span className="text-xs font-medium text-red-400 ml-1">({briefing.todos.overdue} overdue)</span>
+                  )}
+                </span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] text-cc-muted uppercase tracking-wider mb-0.5">Delegations</span>
+                <span className="text-lg font-bold text-cc-fg">{briefing.delegations.count}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] text-cc-muted uppercase tracking-wider mb-0.5">Projects</span>
+                <span className="text-lg font-bold text-cc-fg">
+                  {briefing.projects.length}
+                  {briefing.projects.length > 0 && (
+                    <span className="text-xs font-normal text-cc-muted ml-1">
+                      ({briefing.projects.reduce((s, p) => s + p.done, 0)}/{briefing.projects.reduce((s, p) => s + p.total, 0)} done)
+                    </span>
+                  )}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── KPI Status Cards ── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
@@ -352,55 +411,127 @@ export function SessionsDashboard() {
           </button>
         </div>
 
-        {/* ── Gemini Conversations ── */}
-        {geminiConversations.length > 0 && (
+        {/* ── Hank History (Chat + Calls) ── */}
+        {(geminiConversations.length > 0 || callHistory.length > 0) && (
           <div className="bg-cc-card border border-cc-border rounded-xl p-4 mb-6">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Gemini History</h3>
-              <span className="text-[10px] text-cc-muted px-2 py-0.5 rounded-full bg-cc-hover">{geminiConversations.length}</span>
+              <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Hank History</h3>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setHankHistoryTab("chat")}
+                  className={`px-2.5 py-1 text-[10px] font-medium rounded-md transition-colors cursor-pointer ${
+                    hankHistoryTab === "chat" ? "bg-cc-accent/15 text-cc-accent" : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+                  }`}
+                >
+                  Chat{geminiConversations.length > 0 ? ` (${geminiConversations.length})` : ""}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHankHistoryTab("calls")}
+                  className={`px-2.5 py-1 text-[10px] font-medium rounded-md transition-colors cursor-pointer ${
+                    hankHistoryTab === "calls" ? "bg-cc-accent/15 text-cc-accent" : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+                  }`}
+                >
+                  Calls{callHistory.length > 0 ? ` (${callHistory.length})` : ""}
+                </button>
+              </div>
             </div>
-            <div className="space-y-1">
-              {geminiConversations.slice(0, 8).map((convo) => (
-                <div key={convo.id}>
-                  <button
-                    type="button"
-                    onClick={() => setExpandedConvo(expandedConvo === convo.id ? null : convo.id)}
-                    className="card-hover w-full text-left flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-cc-hover/50 transition-colors cursor-pointer"
-                  >
-                    <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-primary/50 shrink-0">
-                      <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8z" />
-                      <path d="M8 4a.75.75 0 01.75.75v2.5h2.5a.75.75 0 010 1.5h-2.5v2.5a.75.75 0 01-1.5 0v-2.5h-2.5a.75.75 0 010-1.5h2.5v-2.5A.75.75 0 018 4z" />
-                    </svg>
-                    <span className="text-xs text-cc-fg truncate flex-1">{convo.title}</span>
-                    <span className="text-[10px] text-cc-muted shrink-0">{timeAgo(new Date(convo.createdAt).getTime())}</span>
-                    {convo.duration && <span className="text-[10px] text-cc-muted shrink-0">{Math.round(convo.duration / 60)}m</span>}
-                  </button>
-                  {expandedConvo === convo.id && (
-                    <div className="ml-8 mr-2 mb-2 mt-1 space-y-1">
-                      <div className="max-h-48 overflow-y-auto rounded-lg bg-cc-bg/50 p-2 space-y-1">
-                        {convo.messages.map((msg, i) => (
-                          <div key={i} className={`text-[11px] ${msg.role === "user" ? "text-cc-fg" : "text-cc-muted"}`}>
-                            <span className="font-medium">{msg.role === "user" ? "You" : "Gemini"}:</span>{" "}
-                            <span>{msg.text.slice(0, 200)}{msg.text.length > 200 ? "..." : ""}</span>
-                          </div>
-                        ))}
+
+            {/* Chat Tab */}
+            {hankHistoryTab === "chat" && (
+              <div className="space-y-1">
+                {geminiConversations.length === 0 ? (
+                  <p className="text-[11px] text-cc-muted py-3 text-center">No chat conversations yet.</p>
+                ) : geminiConversations.slice(0, 8).map((convo) => (
+                  <div key={convo.id}>
+                    <button
+                      type="button"
+                      onClick={() => setExpandedConvo(expandedConvo === convo.id ? null : convo.id)}
+                      className="card-hover w-full text-left flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-cc-hover/50 transition-colors cursor-pointer"
+                    >
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3 text-cc-primary/50 shrink-0">
+                        <path d="M1.5 2.75c0-.69.56-1.25 1.25-1.25h10.5c.69 0 1.25.56 1.25 1.25v7.5c0 .69-.56 1.25-1.25 1.25h-3.19l-3.4 2.55a.5.5 0 01-.81-.39V11.5H2.75c-.69 0-1.25-.56-1.25-1.25v-7.5z" />
+                      </svg>
+                      <span className="text-xs text-cc-fg truncate flex-1">{convo.title}</span>
+                      <span className="text-[10px] text-cc-muted shrink-0">{timeAgo(new Date(convo.createdAt).getTime())}</span>
+                      {convo.duration && <span className="text-[10px] text-cc-muted shrink-0">{Math.round(convo.duration / 60)}m</span>}
+                    </button>
+                    {expandedConvo === convo.id && (
+                      <div className="ml-8 mr-2 mb-2 mt-1 space-y-1">
+                        <div className="max-h-48 overflow-y-auto rounded-lg bg-cc-bg/50 p-2 space-y-1">
+                          {convo.messages.map((msg, i) => (
+                            <div key={i} className={`text-[11px] ${msg.role === "user" ? "text-cc-fg" : "text-cc-muted"}`}>
+                              <span className="font-medium">{msg.role === "user" ? "You" : "Hank"}:</span>{" "}
+                              <span>{msg.text.slice(0, 200)}{msg.text.length > 200 ? "..." : ""}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const msgs = convo.messages.map((m) => ({ role: m.role, text: m.text }));
+                            window.dispatchEvent(new CustomEvent("gemini-resume", { detail: { messages: msgs } }));
+                            setExpandedConvo(null);
+                          }}
+                          className="mt-1 px-2.5 py-1 text-[10px] font-medium rounded-md bg-cc-primary text-white hover:bg-cc-primary-hover transition-colors cursor-pointer"
+                        >
+                          Continue conversation
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const msgs = convo.messages.map((m) => ({ role: m.role, text: m.text }));
-                          window.dispatchEvent(new CustomEvent("gemini-resume", { detail: { messages: msgs } }));
-                          setExpandedConvo(null);
-                        }}
-                        className="mt-1 px-2.5 py-1 text-[10px] font-medium rounded-md bg-cc-primary text-white hover:bg-cc-primary-hover transition-colors cursor-pointer"
-                      >
-                        Continue conversation
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Calls Tab */}
+            {hankHistoryTab === "calls" && (
+              <div className="space-y-1">
+                {callHistory.length === 0 ? (
+                  <p className="text-[11px] text-cc-muted py-3 text-center">No call history yet.</p>
+                ) : callHistory.slice(0, 8).map((call) => (
+                  <div key={call.id}>
+                    <button
+                      type="button"
+                      onClick={() => setExpandedConvo(expandedConvo === call.id ? null : call.id)}
+                      className="card-hover w-full text-left flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-cc-hover/50 transition-colors cursor-pointer"
+                    >
+                      <svg viewBox="0 0 16 16" fill="currentColor" className={`w-3 h-3 shrink-0 ${call.status === "error" ? "text-red-400" : "text-cc-success/60"}`}>
+                        <path d="M1.885.511a1.745 1.745 0 0 1 2.61.163L6.29 2.98c.329.423.445.974.315 1.494l-.547 2.19a.678.678 0 0 0 .178.643l2.457 2.457a.678.678 0 0 0 .644.178l2.189-.547a1.745 1.745 0 0 1 1.494.315l2.306 1.794c.829.645.905 1.87.163 2.611l-1.034 1.034c-.74.74-1.846 1.065-2.877.702a18.634 18.634 0 0 1-7.01-4.42 18.634 18.634 0 0 1-4.42-7.009c-.362-1.03-.037-2.137.703-2.877L1.885.511Z" />
+                      </svg>
+                      <span className="text-xs text-cc-fg truncate flex-1">{call.phone}</span>
+                      <span className={`text-[10px] shrink-0 px-1.5 py-0.5 rounded ${
+                        call.status === "completed" ? "text-cc-success bg-cc-success/10" :
+                        call.status === "error" ? "text-red-400 bg-red-400/10" :
+                        "text-cc-muted bg-cc-hover"
+                      }`}>
+                        {call.status}
+                      </span>
+                      <span className="text-[10px] text-cc-muted shrink-0">{timeAgo(call.startedAt)}</span>
+                      {call.durationSeconds > 0 && <span className="text-[10px] text-cc-muted shrink-0">{Math.round(call.durationSeconds / 60)}m</span>}
+                    </button>
+                    {expandedConvo === call.id && (
+                      <div className="ml-8 mr-2 mb-2 mt-1">
+                        {call.summary && (
+                          <p className="text-[11px] text-cc-fg mb-1.5">{call.summary}</p>
+                        )}
+                        {call.prompt && (
+                          <p className="text-[11px] text-cc-muted"><span className="font-medium">Prompt:</span> {call.prompt.slice(0, 200)}{call.prompt.length > 200 ? "..." : ""}</p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => { window.location.hash = "/telephony"; }}
+                          className="mt-1.5 px-2.5 py-1 text-[10px] font-medium rounded-md bg-cc-hover border border-cc-border/50 text-cc-fg hover:bg-cc-hover/80 transition-colors cursor-pointer"
+                        >
+                          View in Telephony
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -486,8 +617,11 @@ export function SessionsDashboard() {
 
         {/* ── Empty state ── */}
         {activeSessions.length === 0 && agentSessions.length === 0 && cronSessions.length === 0 && (
-          <div className="text-center py-16">
-            <p className="text-sm text-cc-muted mb-4">No sessions yet</p>
+          <div className="text-center py-16 space-y-3">
+            <svg className="w-10 h-10 mx-auto text-cc-muted/40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
+            </svg>
+            <p className="text-sm text-cc-muted">No sessions yet</p>
             <button
               type="button"
               onClick={handleNewSession}

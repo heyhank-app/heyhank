@@ -23,6 +23,8 @@ const { mockApi, createSessionStreamMock, mockStoreState, mockStoreGetState } = 
     gitPull: vi.fn(),
     listPrompts: vi.fn(),
     listSandboxes: vi.fn(),
+    getSocialSettings: vi.fn(),
+    getTelephonySettings: vi.fn(),
   },
   createSessionStreamMock: vi.fn(),
   mockStoreState: {
@@ -120,6 +122,8 @@ describe("HomePage", () => {
     mockApi.listSandboxes.mockResolvedValue([]);
     mockApi.getImageStatus.mockResolvedValue({ status: "idle" });
     mockApi.pullImage.mockResolvedValue({ ok: true });
+    mockApi.getSocialSettings.mockResolvedValue({});
+    mockApi.getTelephonySettings.mockResolvedValue({});
   });
 
   it("passes axe accessibility checks", async () => {
@@ -295,12 +299,12 @@ describe("HomePage", () => {
     render(<HomePage />);
 
     // Title
-    expect(screen.getByText("The Companion")).toBeInTheDocument();
+    expect(screen.getByText("HeyHank")).toBeInTheDocument();
 
     // Logo image (the claude logo is the default)
-    const logo = screen.getByAltText("The Companion");
+    const logo = screen.getByAltText("HeyHank");
     expect(logo).toBeInTheDocument();
-    expect(logo).toHaveAttribute("src", "/logo.svg");
+    expect(logo).toHaveAttribute("src", "/logo.png");
 
     // Textarea
     const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
@@ -339,23 +343,23 @@ describe("HomePage", () => {
     render(<HomePage />);
     await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
 
-    // The default model label for claude backend is "Opus 4.6"
-    const modelButton = screen.getByText("Opus 4.6");
+    // The default model label for claude backend is "Sonnet 4.6"
+    const modelButton = screen.getByText("Sonnet 4.6");
     expect(modelButton).toBeInTheDocument();
 
     // Open model dropdown
     fireEvent.click(modelButton);
 
     // Should see model options
-    const sonnetOption = screen.getByText("Sonnet 4.6");
-    expect(sonnetOption).toBeInTheDocument();
+    const opusOption = screen.getByText("Opus 4.6");
+    expect(opusOption).toBeInTheDocument();
 
-    // Select Sonnet
-    fireEvent.click(sonnetOption);
+    // Select Opus
+    fireEvent.click(opusOption);
 
-    // Verify dropdown closed and Sonnet is now shown
+    // Verify dropdown closed and Opus is now shown
     expect(screen.queryByText("Haiku 4.5")).not.toBeInTheDocument(); // dropdown closed
-    expect(screen.getByText("Sonnet 4.6")).toBeInTheDocument(); // now selected
+    expect(screen.getByText("Opus 4.6")).toBeInTheDocument(); // now selected
   });
 
   // ─── Mode dropdown interaction ──────────────────────────────────────────────
@@ -476,10 +480,10 @@ describe("HomePage", () => {
     // Switch to Codex
     fireEvent.click(codexButton);
 
-    // Logo should change to codex
+    // Logo stays as HeyHank logo (no longer changes per backend)
     await waitFor(() => {
-      const logo = screen.getByAltText("The Companion");
-      expect(logo).toHaveAttribute("src", "/logo-codex.svg");
+      const logo = screen.getByAltText("HeyHank");
+      expect(logo).toHaveAttribute("src", "/logo.png");
     });
 
     // The "Branch from session" button should disappear (only for claude)
@@ -616,7 +620,7 @@ describe("HomePage", () => {
     await waitFor(() => {
       expect(createSessionStreamMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: "claude-opus-4-6",
+          model: "claude-sonnet-4-6",
           permissionMode: "bypassPermissions",
           cwd: "/repo",
           backend: "claude",
@@ -846,9 +850,9 @@ describe("HomePage", () => {
     await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
 
     // Open model dropdown
-    const modelButton = screen.getByText("Opus 4.6");
+    const modelButton = screen.getByText("Sonnet 4.6");
     fireEvent.click(modelButton);
-    expect(screen.getByText("Sonnet 4.6")).toBeInTheDocument();
+    expect(screen.getByText("Opus 4.6")).toBeInTheDocument();
 
     // Click outside (on the document body)
     fireEvent.pointerDown(document.body);
@@ -888,9 +892,9 @@ describe("HomePage", () => {
     render(<HomePage />);
     await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
 
-    // Logo should be the codex logo since backend was restored from localStorage
-    const logo = screen.getByAltText("The Companion");
-    expect(logo).toHaveAttribute("src", "/logo-codex.svg");
+    // Logo stays as HeyHank logo (no longer changes per backend)
+    const logo = screen.getByAltText("HeyHank");
+    expect(logo).toHaveAttribute("src", "/logo.png");
   });
 
   // ─── Dynamic model fetching for codex ───────────────────────────────────────
@@ -1106,7 +1110,7 @@ describe("HomePage", () => {
     await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
 
     // Component should still render without errors
-    expect(screen.getByText("The Companion")).toBeInTheDocument();
+    expect(screen.getByText("HeyHank")).toBeInTheDocument();
   });
 
   // ─── getHome fallback ──────────────────────────────────────────────────────
@@ -1292,7 +1296,7 @@ describe("HomePage", () => {
       await act(async () => { fireEvent.click(sandboxBtn); });
 
       // Dropdown opens — select Default to enable sandbox
-      const defaultOption = await screen.findByText("Default (the-companion:latest)");
+      const defaultOption = await screen.findByText("Default (heyhank:latest)");
       await act(async () => { fireEvent.click(defaultOption.closest("button")!); });
 
       expect(localStorage.getItem("cc-sandbox-enabled")).toBe("true");
@@ -1315,7 +1319,7 @@ describe("HomePage", () => {
 
       // The dropdown should show Off, Default, and our sandbox
       await screen.findByText("Off");
-      await screen.findByText("Default (the-companion:latest)");
+      await screen.findByText("Default (heyhank:latest)");
       await screen.findByText("My Sandbox");
     });
 

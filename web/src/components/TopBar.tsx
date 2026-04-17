@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useStore } from "../store.js";
 import { parseHash } from "../utils/routing.js";
 import { AiValidationToggle } from "./AiValidationToggle.js";
+import { AuthStatusBadge } from "./AuthStatusBadge.js";
 
 type WorkspaceTab = "chat" | "diff" | "terminal" | "processes" | "editor" | "browser";
 
@@ -80,6 +81,26 @@ export function TopBar() {
   const showContextToggle = route.page === "session" && !!currentSessionId;
   const workspaceTabs: WorkspaceTab[] = ["chat", "diff", "terminal", "processes", "editor", "browser"];
 
+  const PAGE_TITLES: Record<string, string> = {
+    settings: "Settings",
+    prompts: "Prompts",
+    integrations: "Integrations",
+    terminal: "Terminal",
+    environments: "Environments",
+    sandboxes: "Sandboxes",
+    agents: "Agents",
+    "agent-detail": "Agent",
+    runs: "Runs",
+    media: "Media",
+    telephony: "Telephony",
+    socialmedia: "Social Media",
+    assistant: "Assistant",
+    memory: "Memory",
+    platform: "Platform",
+    help: "Help",
+  };
+  const pageTitle = !showWorkspaceControls ? PAGE_TITLES[route.page] : null;
+
   const activateWorkspaceTab = (tab: WorkspaceTab) => {
     if (tab === "terminal") {
       if (!cwd) return;
@@ -148,6 +169,12 @@ export function TopBar() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 3v18" />
           </svg>
         </button>
+
+        {pageTitle && !showWorkspaceControls && (
+          <div className="flex-1 flex items-center min-w-0">
+            <span className="text-[13px] font-medium text-cc-fg truncate">{pageTitle}</span>
+          </div>
+        )}
 
         {showWorkspaceControls && (
           <div className="flex-1 flex items-center justify-start md:justify-center gap-0.5 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -253,6 +280,7 @@ export function TopBar() {
           {showWorkspaceControls && currentSessionId && (
             <AiValidationToggle sessionId={currentSessionId} />
           )}
+          <AuthStatusBadge />
           <ThemeToggle />
           {showContextToggle && (
             <button

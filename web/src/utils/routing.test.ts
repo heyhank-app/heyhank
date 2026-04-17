@@ -28,8 +28,8 @@ describe("parseHash", () => {
     expect(parseHash("#/integrations")).toEqual({ page: "integrations" });
   });
 
-  it("parses linear integration route", () => {
-    expect(parseHash("#/integrations/linear")).toEqual({ page: "integration-linear" });
+  it("parses tailscale integration route", () => {
+    expect(parseHash("#/integrations/tailscale")).toEqual({ page: "integration-tailscale" });
   });
 
   it("parses terminal route", () => {
