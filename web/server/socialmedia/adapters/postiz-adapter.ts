@@ -4,8 +4,40 @@
 // Auth: raw API key in Authorization header (no Bearer prefix).
 // API key found at: Settings → Developers → Public API
 
+import { readFileSync, existsSync } from "node:fs";
+import { basename, join } from "node:path";
 import type { SocialMediaAdapter } from "../adapter.js";
 import type { SocialProfile, CreatePostInput, PostAnalytics, AccountAnalytics, SocialComment, SocialPlatform } from "../types.js";
+import { getSettings as getAppSettings } from "../../settings-manager.js";
+import { HEYHANK_HOME } from "../../paths.js";
+
+const MIME_BY_EXT: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+};
+
+/**
+ * Detect URLs that point to HeyHank's own media route. Works for both
+ * absolute URLs (any host, e.g. the publicUrl) and relative paths.
+ * Returns the bare filename if matched, else null.
+ */
+function extractLocalMediaFilename(url: string): string | null {
+  try {
+    // Normalize: strip protocol+host if present
+    const withoutHost = url.replace(/^https?:\/\/[^/]+/i, "");
+    const match = withoutHost.match(/^\/api\/media\/file\/([^/?#]+)/);
+    if (!match) return null;
+    return basename(decodeURIComponent(match[1]));
+  } catch {
+    return null;
+  }
+}
 
 const HOSTED_API = "https://api.postiz.com";
 
@@ -125,27 +157,110 @@ export class PostizAdapter implements SocialMediaAdapter {
         return { id: null, status: "failed", backendData: { error: "No connected integrations match the selected platforms" } };
       }
 
-      // Upload media from URLs if present
+      // Upload media. Two paths:
+      //  1. Local HeyHank media (/api/media/file/<filename>): read from disk
+      //     and upload as multipart — avoids Postiz hitting our Basic-Auth
+      //     protected HTTP endpoint (which returns 500 / auth challenge).
+      //  2. Other URLs: use Postiz /upload-from-url so Postiz fetches directly.
+      const publicUrl = getAppSettings().publicUrl?.replace(/\/+$/, "") ?? "";
       const mediaItems: Array<{ id: string; path: string }> = [];
-      if (input.mediaUrls?.length) {
-        for (const mediaUrl of input.mediaUrls) {
+      const mediaUploadErrors: string[] = [];
+
+      for (const mediaUrl of input.mediaUrls ?? []) {
+        if (!mediaUrl) continue;
+
+        // ── Path 1: local media file ──────────────────────────────────────
+        const localFilename = extractLocalMediaFilename(mediaUrl);
+        if (localFilename) {
+          const localPath = join(HEYHANK_HOME, "media", localFilename);
+          if (!existsSync(localPath)) {
+            mediaUploadErrors.push(`Local media file not found: ${localFilename}`);
+            continue;
+          }
           try {
-            const uploadRes = await fetch(this.url("/upload-from-url"), {
+            const fileBuf = readFileSync(localPath);
+            const ext = localFilename.split(".").pop()?.toLowerCase() ?? "";
+            const mime = MIME_BY_EXT[ext] ?? "application/octet-stream";
+            const form = new FormData();
+            form.append("file", new Blob([fileBuf], { type: mime }), localFilename);
+
+            // Do NOT set Content-Type — fetch/Blob sets the multipart boundary.
+            const uploadRes = await fetch(this.url("/upload"), {
               method: "POST",
-              headers: this.headers(),
-              body: JSON.stringify({ url: mediaUrl }),
+              headers: { Authorization: this.apiKey },
+              body: form,
             });
             if (uploadRes.ok) {
               const uploadData = await uploadRes.json();
               if (uploadData.id && uploadData.path) {
                 mediaItems.push({ id: uploadData.id, path: uploadData.path });
+              } else {
+                mediaUploadErrors.push(`Upload of "${localFilename}" returned unexpected payload`);
               }
+            } else {
+              const errText = await uploadRes.text().catch(() => "");
+              mediaUploadErrors.push(`Upload of "${localFilename}" failed: ${uploadRes.status} ${errText || uploadRes.statusText}`);
             }
-          } catch {
-            // Skip failed uploads
+          } catch (err: any) {
+            mediaUploadErrors.push(`Upload of "${localFilename}" threw: ${err?.message ?? "unknown"}`);
           }
+          continue;
+        }
+
+        // ── Path 2: external URL via upload-from-url ──────────────────────
+        let absoluteUrl: string | null = null;
+        if (/^https?:\/\//i.test(mediaUrl)) {
+          absoluteUrl = mediaUrl;
+        } else if (mediaUrl.startsWith("/")) {
+          absoluteUrl = publicUrl ? `${publicUrl}${mediaUrl}` : null;
+        } else {
+          absoluteUrl = mediaUrl;
+        }
+        if (!absoluteUrl) {
+          mediaUploadErrors.push(`Cannot resolve media URL "${mediaUrl}" — publicUrl not configured`);
+          continue;
+        }
+        try {
+          const uploadRes = await fetch(this.url("/upload-from-url"), {
+            method: "POST",
+            headers: this.headers(),
+            body: JSON.stringify({ url: absoluteUrl }),
+          });
+          if (uploadRes.ok) {
+            const uploadData = await uploadRes.json();
+            if (uploadData.id && uploadData.path) {
+              mediaItems.push({ id: uploadData.id, path: uploadData.path });
+            } else {
+              mediaUploadErrors.push(`Upload of "${absoluteUrl}" returned unexpected payload`);
+            }
+          } else {
+            const errText = await uploadRes.text().catch(() => "");
+            mediaUploadErrors.push(`Upload of "${absoluteUrl}" failed: ${uploadRes.status} ${errText || uploadRes.statusText}`);
+          }
+        } catch (err: any) {
+          mediaUploadErrors.push(`Upload of "${absoluteUrl}" threw: ${err?.message ?? "unknown"}`);
         }
       }
+
+      // If any media was requested but NONE uploaded successfully, fail the post
+      // rather than silently publishing text-only — user expected the image.
+      if (input.mediaUrls?.length && mediaItems.length === 0) {
+        return {
+          id: null,
+          status: "failed",
+          backendData: { error: "Media upload failed", details: mediaUploadErrors },
+        };
+      }
+
+      // Platform-specific default settings required by Postiz.
+      // These mirror the validation rules Postiz applies per integration:
+      //  - Instagram/Facebook: post_type ("post" | "story")
+      //  - X (Twitter): who_can_reply_post ("everyone" | "following" | "mentionedUsers" | "subscribers" | "verified")
+      const SETTINGS_DEFAULTS: Record<string, Record<string, unknown>> = {
+        instagram: { post_type: "post" },
+        facebook: { post_type: "post" },
+        x: { who_can_reply_post: "everyone" },
+      };
 
       // Build post payload per Postiz API
       const postEntries = matchedIntegrations.map((ig) => ({
@@ -154,13 +269,17 @@ export class PostizAdapter implements SocialMediaAdapter {
           content: input.text,
           image: mediaItems,
         }],
-        settings: { __type: ig.identifier },
+        settings: {
+          __type: ig.identifier,
+          ...(SETTINGS_DEFAULTS[ig.identifier] ?? {}),
+        },
       }));
 
       const body: Record<string, unknown> = {
         type: input.scheduledAt ? "schedule" : "now",
         date: input.scheduledAt || new Date().toISOString(),
         shortLink: false,
+        tags: [],
         posts: postEntries,
       };
 

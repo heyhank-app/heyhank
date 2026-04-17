@@ -5,16 +5,18 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlink
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { SocialMediaSettings, SocialPost, ListPostsOpts } from "./types.js";
+import type { SocialMediaSettings, SocialPost, ListPostsOpts, HashtagPool } from "./types.js";
 import { DEFAULT_SOCIAL_SETTINGS } from "./types.js";
 
 const BASE_DIR = join(homedir(), ".heyhank", "socialmedia");
 const SETTINGS_FILE = join(BASE_DIR, "settings.json");
 const POSTS_DIR = join(BASE_DIR, "posts");
+const HASHTAG_POOLS_DIR = join(BASE_DIR, "hashtag-pools");
 
 function ensureDirs(): void {
   if (!existsSync(BASE_DIR)) mkdirSync(BASE_DIR, { recursive: true });
   if (!existsSync(POSTS_DIR)) mkdirSync(POSTS_DIR, { recursive: true });
+  if (!existsSync(HASHTAG_POOLS_DIR)) mkdirSync(HASHTAG_POOLS_DIR, { recursive: true });
 }
 
 // ─── Settings ────────────────────────────────────────────────────────────────
@@ -88,6 +90,54 @@ export function listLocalPosts(opts?: ListPostsOpts): SocialPost[] {
 
 export function deleteLocalPost(postId: string): boolean {
   const file = join(POSTS_DIR, `${postId}.json`);
+  if (!existsSync(file)) return false;
+  try {
+    unlinkSync(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ─── Hashtag Pools ──────────────────────────────────────────────────────────
+
+export function saveHashtagPool(pool: HashtagPool): void {
+  ensureDirs();
+  if (!pool.id) pool.id = randomUUID();
+  const file = join(HASHTAG_POOLS_DIR, `${pool.id}.json`);
+  writeFileSync(file, JSON.stringify(pool, null, 2), "utf-8");
+}
+
+export function getHashtagPool(poolId: string): HashtagPool | null {
+  const file = join(HASHTAG_POOLS_DIR, `${poolId}.json`);
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+export function listHashtagPools(): HashtagPool[] {
+  ensureDirs();
+  try {
+    return readdirSync(HASHTAG_POOLS_DIR)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => {
+        try {
+          return JSON.parse(readFileSync(join(HASHTAG_POOLS_DIR, f), "utf-8")) as HashtagPool;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean) as HashtagPool[];
+  } catch {
+    return [];
+  }
+}
+
+export function deleteHashtagPool(poolId: string): boolean {
+  const file = join(HASHTAG_POOLS_DIR, `${poolId}.json`);
   if (!existsSync(file)) return false;
   try {
     unlinkSync(file);

@@ -43,11 +43,6 @@ export async function getAdapter(settings?: SocialMediaSettings): Promise<Social
       adapter = new PostizAdapter({ url: config.url ?? "", apiKey: config.apiKey });
       break;
     }
-    case "ayrshare": {
-      const { AyrshareAdapter } = await import("./adapters/ayrshare-adapter.js");
-      adapter = new AyrshareAdapter({ apiKey: config.apiKey });
-      break;
-    }
     case "buffer": {
       const { BufferAdapter } = await import("./adapters/buffer-adapter.js");
       adapter = new BufferAdapter({ apiKey: config.apiKey });
@@ -196,6 +191,26 @@ export async function createDraft(input: CreatePostInput & { createdBy?: "user" 
   };
   store.savePost(post);
   return post;
+}
+
+export async function updateDraft(id: string, updates: { text?: string; platforms?: string[]; scheduledAt?: string }): Promise<SocialPost> {
+  const post = store.getPost(id);
+  if (!post) throw new Error("Post not found");
+  if (post.status !== "draft") throw new Error("Post is not a draft");
+
+  if (updates.text !== undefined) post.text = updates.text;
+  if (updates.platforms !== undefined) post.platforms = updates.platforms as SocialPost["platforms"];
+  if (updates.scheduledAt !== undefined) post.scheduledAt = updates.scheduledAt || null;
+  post.updatedAt = new Date().toISOString();
+  store.savePost(post);
+  return post;
+}
+
+export async function deleteDraft(id: string): Promise<boolean> {
+  const post = store.getPost(id);
+  if (!post) return false;
+  if (post.status !== "draft") throw new Error("Post is not a draft");
+  return store.deleteLocalPost(id);
 }
 
 export async function publishDraft(id: string): Promise<SocialPost> {

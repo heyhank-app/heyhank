@@ -74,12 +74,23 @@ export function registerSocialMediaRoutes(api: Hono): void {
       const body = await c.req.json();
       const text = (body.text || "").trim();
       if (!text) return c.json({ error: "text required" }, 400);
+      // Accept both mediaUrls (array) and imageUrl (string) for compatibility
+      let mediaUrls: string[] = body.mediaUrls || [];
+      if (mediaUrls.length === 0 && body.imageUrl) {
+        mediaUrls = [body.imageUrl];
+      }
       const result = await manager.createPost({
         text,
         platforms: body.platforms || [],
         scheduledAt: body.scheduledAt || null,
-        mediaUrls: body.mediaUrls || [],
+        mediaUrls,
+        isDraft: body.isDraft ?? false,
+        title: body.title,
+        firstComment: body.firstComment,
+        videoUrl: body.videoUrl,
+        thumbnailUrl: body.thumbnailUrl,
       });
+      if (body.createdBy && result) (result as any).createdBy = body.createdBy;
       return c.json(result, 201);
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : "failed" }, 500);
@@ -192,6 +203,78 @@ export function registerSocialMediaRoutes(api: Hono): void {
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : "failed" }, 500);
     }
+  });
+
+  // ─── Hashtag Pools ─────────────────────────────────────────────────
+
+  /** List all hashtag pools */
+  api.get("/socialmedia/hashtag-pools", (c) => {
+    try {
+      const pools = store.listHashtagPools();
+      return c.json({ pools });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "failed" }, 500);
+    }
+  });
+
+  /** Get single hashtag pool */
+  api.get("/socialmedia/hashtag-pools/:id", (c) => {
+    const pool = store.getHashtagPool(c.req.param("id"));
+    if (!pool) return c.json({ error: "pool not found" }, 404);
+    return c.json(pool);
+  });
+
+  /** Create or update hashtag pool */
+  api.post("/socialmedia/hashtag-pools", async (c) => {
+    try {
+      const body = await c.req.json();
+      if (!body.name) return c.json({ error: "name required" }, 400);
+      const { randomUUID } = await import("node:crypto");
+      const now = new Date().toISOString();
+      const pool = {
+        id: body.id || randomUUID(),
+        name: body.name,
+        industry: body.industry || "",
+        language: body.language || "de",
+        popular: body.popular || [],
+        medium: body.medium || [],
+        niche: body.niche || [],
+        branded: body.branded || [],
+        blocked: body.blocked || [],
+        createdAt: body.createdAt || now,
+        updatedAt: now,
+      };
+      store.saveHashtagPool(pool);
+      return c.json(pool, 201);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "bad request" }, 400);
+    }
+  });
+
+  /** Update hashtag pool */
+  api.put("/socialmedia/hashtag-pools/:id", async (c) => {
+    try {
+      const id = c.req.param("id");
+      const existing = store.getHashtagPool(id);
+      if (!existing) return c.json({ error: "pool not found" }, 404);
+      const body = await c.req.json();
+      const pool = {
+        ...existing,
+        ...body,
+        id, // don't allow id change
+        updatedAt: new Date().toISOString(),
+      };
+      store.saveHashtagPool(pool);
+      return c.json(pool);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "bad request" }, 400);
+    }
+  });
+
+  /** Delete hashtag pool */
+  api.delete("/socialmedia/hashtag-pools/:id", (c) => {
+    const ok = store.deleteHashtagPool(c.req.param("id"));
+    return c.json({ ok }, ok ? 200 : 404);
   });
 
   // ─── Account Analytics ──────────────────────────────────────────────

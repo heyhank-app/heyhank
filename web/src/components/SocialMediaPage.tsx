@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "../api.js";
+import { SocialViewTab } from "./SocialViewTab.js";
+import { SocialLibraryTab } from "./SocialLibraryTab.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -48,7 +50,7 @@ const PLATFORM_ICONS: Record<string, string> = {
   threads: "@",
 };
 
-type TabId = "posts" | "drafts" | "calendar" | "analytics" | "settings";
+type TabId = "posts" | "drafts" | "calendar" | "view" | "library" | "analytics" | "settings";
 type PostFilter = "all" | "published" | "scheduled" | "failed";
 
 function formatMetric(n: number): string {
@@ -72,7 +74,16 @@ function relativeTime(dateStr: string): string {
 // ─── Main Page ──────────────────────────────────────────────────────────────
 
 export function SocialMediaPage({ embedded }: { embedded?: boolean }) {
-  const [activeTab, setActiveTab] = useState<TabId>("posts");
+  // Read initial tab from URL hash (e.g. #/socialmedia/drafts)
+  const initialTab = (() => {
+    const hash = window.location.hash;
+    const match = hash.match(/#\/socialmedia\/(\w+)/);
+    if (match && ["posts", "drafts", "calendar", "analytics", "settings"].includes(match[1])) {
+      return match[1] as TabId;
+    }
+    return "posts";
+  })();
+  const [activeTab, setActiveTab] = useState<TabId>(initialTab);
   const [message, setMessage] = useState("");
   const [messageError, setMessageError] = useState(false);
   const [showComposer, setShowComposer] = useState(false);
@@ -101,13 +112,15 @@ export function SocialMediaPage({ embedded }: { embedded?: boolean }) {
     { id: "posts", label: "Queue" },
     { id: "drafts", label: "Drafts" },
     { id: "calendar", label: "Calendar" },
+    { id: "view", label: "View" },
+    { id: "library", label: "Library" },
     { id: "analytics", label: "Analytics" },
     { id: "settings", label: "Settings" },
   ];
 
   return (
-    <div className={`h-full overflow-auto ${embedded ? "" : "p-4"}`}>
-      <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-4">
+    <div className="h-full overflow-y-auto bg-cc-bg">
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10 pb-safe space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-semibold text-cc-fg">Social Media</h1>
@@ -157,6 +170,8 @@ export function SocialMediaPage({ embedded }: { embedded?: boolean }) {
         {activeTab === "posts" && <QueueTab refreshKey={refreshKey} showMessage={showMessage} onEdit={openComposer} onRefresh={refresh} />}
         {activeTab === "drafts" && <DraftsTab refreshKey={refreshKey} showMessage={showMessage} onEdit={openComposer} onRefresh={refresh} />}
         {activeTab === "calendar" && <CalendarTab refreshKey={refreshKey} showMessage={showMessage} onEdit={openComposer} onRefresh={refresh} />}
+        {activeTab === "view" && <SocialViewTab showMessage={showMessage} />}
+        {activeTab === "library" && <SocialLibraryTab showMessage={showMessage} />}
         {activeTab === "analytics" && <AnalyticsTab showMessage={showMessage} />}
         {activeTab === "settings" && <SettingsTab showMessage={showMessage} />}
       </div>
@@ -189,10 +204,33 @@ function PostComposer({ post, onClose, onSuccess, showMessage }: {
   const [showAdvanced, setShowAdvanced] = useState(!!(post?.firstComment || post?.videoUrl || post?.thumbnailUrl));
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [showMediaPicker, setShowMediaPicker] = useState(false);
 
   const isEditing = !!post;
   const charCount = text.length;
-  const twitterLimit = 280;
+
+  // Platform character limits
+  const PLATFORM_LIMITS: Record<string, number> = {
+    twitter: 280,
+    instagram: 2200,
+    facebook: 63206,
+    linkedin: 3000,
+    tiktok: 2200,
+    threads: 500,
+  };
+
+  // Check which selected platforms exceed the limit
+  const overLimitPlatforms = platforms.filter(
+    (p) => PLATFORM_LIMITS[p] && charCount > PLATFORM_LIMITS[p],
+  );
+  const hasOverLimit = overLimitPlatforms.length > 0;
+
+  // Find the tightest limit among selected platforms (for the main counter)
+  const tightestLimit = platforms.reduce<number | null>((min, p) => {
+    const limit = PLATFORM_LIMITS[p];
+    if (!limit) return min;
+    return min === null ? limit : Math.min(min, limit);
+  }, null);
 
   function togglePlatform(p: string) {
     setPlatforms((prev) => prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]);
@@ -227,6 +265,14 @@ function PostComposer({ post, onClose, onSuccess, showMessage }: {
     if (!text.trim()) { showMessage("Post text is required.", true); return; }
     if (!platforms.length) { showMessage("Select at least one platform.", true); return; }
     if (scheduleMode === "schedule" && !scheduleDate) { showMessage("Select a date and time.", true); return; }
+    // Block publish if text exceeds any selected platform's character limit (drafts are OK)
+    if (scheduleMode !== "draft" && hasOverLimit) {
+      const details = overLimitPlatforms
+        .map((p) => `${p.charAt(0).toUpperCase() + p.slice(1)}: ${charCount}/${PLATFORM_LIMITS[p]}`)
+        .join(", ");
+      showMessage(`Text too long for: ${details}`, true);
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -307,9 +353,18 @@ function PostComposer({ post, onClose, onSuccess, showMessage }: {
             placeholder="What would you like to share?"
             className="w-full bg-cc-bg border border-cc-border rounded-lg p-3 text-sm text-cc-fg resize-y focus:outline-none focus:border-cc-accent/50 min-h-[100px]"
           />
-          {platforms.includes("twitter") && (
-            <div className={`absolute bottom-2 right-2 text-[10px] ${charCount > twitterLimit ? "text-red-400" : "text-cc-muted"}`}>
-              {charCount}/{twitterLimit}
+          {tightestLimit !== null && (
+            <div className="absolute bottom-2 right-2 flex gap-2">
+              {platforms.map((p) => {
+                const limit = PLATFORM_LIMITS[p];
+                if (!limit) return null;
+                const over = charCount > limit;
+                return (
+                  <span key={p} className={`text-[10px] ${over ? "text-red-400 font-medium" : "text-cc-muted"}`}>
+                    {p === "twitter" ? "X" : p.charAt(0).toUpperCase() + p.slice(1)} {charCount}/{limit}
+                  </span>
+                );
+              })}
             </div>
           )}
         </div>
@@ -324,6 +379,20 @@ function PostComposer({ post, onClose, onSuccess, showMessage }: {
             >
               {uploadingMedia ? "Uploading..." : "📎 Add Media"}
             </button>
+            <button
+              onClick={() => setShowMediaPicker(true)}
+              className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-cc-muted hover:text-cc-fg border border-cc-border rounded-md hover:border-cc-accent/30 transition-colors"
+            >
+              🖼️ Media Library
+            </button>
+            <MediaPickerModal
+              open={showMediaPicker}
+              onClose={() => setShowMediaPicker(false)}
+              onSelect={(urls) => {
+                const existing = mediaUrls.split(",").map((u) => u.trim()).filter(Boolean);
+                setMediaUrls([...existing, ...urls].join(", "));
+              }}
+            />
             <input ref={fileInputRef} type="file" accept="image/*,video/*" multiple onChange={handleMediaUpload} className="hidden" />
             {mediaList.length > 0 && (
               <span className="text-[10px] text-cc-muted">{mediaList.length} file(s)</span>
@@ -552,11 +621,43 @@ function DraftsTab({ refreshKey, showMessage, onEdit, onRefresh }: {
 
   useEffect(() => { loadDrafts(); }, [loadDrafts, refreshKey]);
 
+  // Platform character limits (same as in PostComposer)
+  const PLATFORM_LIMITS: Record<string, number> = {
+    twitter: 280, instagram: 2200, facebook: 63206,
+    linkedin: 3000, tiktok: 2200, threads: 500,
+  };
+
   async function handlePublish(id: string) {
+    // Pre-flight: check character limits before sending to backend
+    const draft = drafts.find((d) => d.id === id);
+    if (draft) {
+      const textLen = draft.text.length;
+      const over = draft.platforms.filter((p) => PLATFORM_LIMITS[p] && textLen > PLATFORM_LIMITS[p]);
+      if (over.length > 0) {
+        const details = over
+          .map((p) => `${p.charAt(0).toUpperCase() + p.slice(1)}: ${textLen}/${PLATFORM_LIMITS[p]}`)
+          .join(", ");
+        showMessage(`Text too long for: ${details}. Edit the draft first.`, true);
+        return;
+      }
+    }
+
     setPublishing(id);
     try {
-      await api.publishSocialPost(id);
-      showMessage("Post published!");
+      // publishDraft returns the updated post — status may be "failed" even on
+      // a 200 response because the adapter swallows backend errors into the post.
+      const result = await api.publishSocialPost(id);
+      if (result?.status === "failed") {
+        const backendErr = (result as { backendData?: { error?: unknown; message?: unknown; details?: unknown } }).backendData;
+        const errMsg =
+          (Array.isArray(backendErr?.message) ? backendErr.message.join(" • ") : backendErr?.message) ||
+          (Array.isArray(backendErr?.details) ? backendErr.details.join(" • ") : backendErr?.details) ||
+          backendErr?.error ||
+          "Publish failed";
+        showMessage(String(errMsg), true);
+      } else {
+        showMessage("Post published!");
+      }
       loadDrafts();
       onRefresh();
     } catch (err) {
@@ -688,7 +789,7 @@ function PostCard({ post, onEdit, onDelete, showMessage, onRefresh, onPublish, i
         {/* Badges */}
         <div className="flex flex-wrap items-center gap-1.5">
           <StatusBadge status={post.status} />
-          {post.createdBy && post.createdBy !== "user" && <CreatedByBadge by={post.createdBy} />}
+          {post.createdBy && <CreatedByBadge by={post.createdBy} />}
           {post.platforms.map((p) => (
             <PlatformBadge key={p} platform={p} />
           ))}
@@ -806,7 +907,7 @@ function CalendarTab({ refreshKey, showMessage, onEdit, onRefresh }: {
   const loadCalendar = useCallback(async () => {
     try {
       const data = await api.getSocialCalendar(monthStr);
-      setCalData(data.days || {});
+      setCalData((data.days || {}) as Record<string, SocialPost[]>);
     } catch { /* silent */ }
   }, [monthStr]);
 
@@ -840,101 +941,185 @@ function CalendarTab({ refreshKey, showMessage, onEdit, onRefresh }: {
     }
   }
 
+  async function handleDeletePost(postId: string) {
+    try {
+      await api.deleteSocialPost(postId);
+      showMessage("Post deleted.");
+      loadCalendar();
+      onRefresh();
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : "Failed", true);
+    }
+  }
+
   const dayPosts = selectedDay ? (calData[selectedDay] || []) : [];
+
+  // Status color helpers
+  const statusBorder: Record<string, string> = {
+    published: "border-l-green-400",
+    scheduled: "border-l-blue-400",
+    draft: "border-l-yellow-400",
+    failed: "border-l-red-400",
+  };
 
   return (
     <div className="space-y-3">
       {/* Month Navigation */}
       <div className="flex items-center justify-between">
-        <button onClick={prevMonth} className="px-2 py-1 text-cc-muted hover:text-cc-fg transition-colors rounded-md hover:bg-cc-hover">&larr;</button>
-        <span className="text-sm font-medium text-cc-fg">{MONTH_NAMES[month]} {year}</span>
-        <button onClick={nextMonth} className="px-2 py-1 text-cc-muted hover:text-cc-fg transition-colors rounded-md hover:bg-cc-hover">&rarr;</button>
+        <button onClick={prevMonth} className="px-2.5 py-1 text-cc-muted hover:text-cc-fg transition-colors rounded-md hover:bg-cc-hover text-sm">&larr;</button>
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold text-cc-fg">{MONTH_NAMES[month]} {year}</span>
+          <button
+            onClick={() => { setYear(now.getFullYear()); setMonth(now.getMonth()); setSelectedDay(null); }}
+            className="text-[10px] px-2 py-0.5 rounded-md text-cc-muted hover:text-cc-fg border border-cc-border hover:border-cc-accent/30 transition-colors"
+          >
+            Today
+          </button>
+        </div>
+        <button onClick={nextMonth} className="px-2.5 py-1 text-cc-muted hover:text-cc-fg transition-colors rounded-md hover:bg-cc-hover text-sm">&rarr;</button>
       </div>
 
-      {/* Calendar Grid */}
-      <div className="grid grid-cols-7 gap-0.5">
+      {/* Legend */}
+      <div className="flex gap-3 justify-center text-[9px] text-cc-muted">
+        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" /> Published</span>
+        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block" /> Scheduled</span>
+        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-yellow-400 inline-block" /> Draft</span>
+      </div>
+
+      {/* Calendar Grid — Buffer/Postiz style with post previews in cells */}
+      <div className="grid grid-cols-7 gap-px bg-cc-border/30 rounded-xl overflow-hidden border border-cc-border/30">
+        {/* Day headers */}
         {DAY_HEADERS.map((d) => (
-          <div key={d} className="text-center text-[9px] font-medium text-cc-muted py-1.5 uppercase tracking-wider">{d}</div>
+          <div key={d} className="text-center text-[9px] font-semibold text-cc-muted py-2 bg-cc-bg uppercase tracking-wider">{d}</div>
         ))}
+        {/* Empty leading cells */}
         {Array.from({ length: startDow }).map((_, i) => (
-          <div key={`e-${i}`} className="aspect-square" />
+          <div key={`e-${i}`} className="min-h-[90px] bg-cc-bg/50" />
         ))}
+        {/* Day cells */}
         {Array.from({ length: daysInMonth }).map((_, i) => {
           const day = i + 1;
           const dateStr = `${monthStr}-${String(day).padStart(2, "0")}`;
           const posts = calData[dateStr] || [];
           const isToday = dateStr === todayStr;
           const isSelected = dateStr === selectedDay;
-          const hasDrafts = posts.some((p) => p.status === "draft");
-          const hasScheduled = posts.some((p) => p.status === "scheduled");
-          const hasPublished = posts.some((p) => p.status === "published");
 
           return (
             <button
               key={day}
               onClick={() => setSelectedDay(isSelected ? null : dateStr)}
-              className={`aspect-square flex flex-col items-center justify-center rounded-lg text-xs transition-all border relative ${
+              className={`min-h-[90px] flex flex-col p-1 text-left transition-all relative ${
                 isSelected
-                  ? "border-cc-accent bg-cc-accent/15 text-cc-accent font-semibold"
-                  : posts.length > 0
-                    ? "border-cc-border/30 bg-cc-card text-cc-fg hover:border-cc-accent/30"
-                    : "border-transparent text-cc-fg hover:bg-cc-hover"
-              } ${isToday ? "ring-1 ring-cc-accent/30" : ""}`}
+                  ? "bg-cc-accent/10 ring-1 ring-inset ring-cc-accent/40"
+                  : "bg-cc-card hover:bg-cc-hover/50"
+              }`}
             >
-              <span className={isToday ? "font-bold" : ""}>{day}</span>
-              {posts.length > 0 && (
-                <div className="flex items-center gap-0.5 mt-0.5">
-                  {hasPublished && <div className="w-1 h-1 rounded-full bg-green-400" />}
-                  {hasScheduled && <div className="w-1 h-1 rounded-full bg-cc-accent" />}
-                  {hasDrafts && <div className="w-1 h-1 rounded-full bg-yellow-400" />}
-                  <span className="text-[8px] text-cc-muted font-medium ml-0.5">{posts.length}</span>
-                </div>
-              )}
+              {/* Day number */}
+              <span className={`text-[10px] leading-none mb-1 self-end px-1 py-0.5 rounded ${
+                isToday
+                  ? "bg-cc-accent text-white font-bold"
+                  : "text-cc-muted"
+              }`}>
+                {day}
+              </span>
+
+              {/* Post previews (max 3 visible, then "+N more") */}
+              <div className="flex flex-col gap-0.5 flex-1 w-full overflow-hidden">
+                {posts.slice(0, 3).map((p) => (
+                  <div
+                    key={p.id}
+                    className={`rounded px-1 py-0.5 text-[8px] leading-tight truncate border-l-2 ${
+                      statusBorder[p.status] || "border-l-cc-muted"
+                    } bg-cc-bg/80`}
+                    title={p.text}
+                  >
+                    <span className="text-cc-muted mr-0.5">
+                      {p.platforms.map((pl) => PLATFORM_ICONS[pl] || pl.charAt(0)).join("")}
+                    </span>
+                    <span className="text-cc-fg">{p.text.slice(0, 30)}{p.text.length > 30 ? "..." : ""}</span>
+                  </div>
+                ))}
+                {posts.length > 3 && (
+                  <span className="text-[8px] text-cc-muted text-center">+{posts.length - 3} more</span>
+                )}
+              </div>
             </button>
           );
         })}
+        {/* Trailing empty cells to fill last row */}
+        {(() => {
+          const totalCells = startDow + daysInMonth;
+          const remainder = totalCells % 7;
+          if (remainder === 0) return null;
+          return Array.from({ length: 7 - remainder }).map((_, i) => (
+            <div key={`t-${i}`} className="min-h-[90px] bg-cc-bg/50" />
+          ));
+        })()}
       </div>
 
-      {/* Legend */}
-      <div className="flex gap-3 justify-center text-[9px] text-cc-muted">
-        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" /> Published</span>
-        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-cc-accent inline-block" /> Scheduled</span>
-        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-yellow-400 inline-block" /> Draft</span>
-      </div>
-
-      {/* Day Detail */}
+      {/* Day Detail Panel — opens below when a day is selected */}
       {selectedDay && (
-        <div className="border border-cc-border rounded-xl p-3.5 bg-cc-card space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-medium text-cc-fg">
+        <div className="border border-cc-border rounded-xl overflow-hidden bg-cc-card">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-cc-border/50 bg-cc-bg/50">
+            <h3 className="text-xs font-semibold text-cc-fg">
               {new Date(selectedDay + "T00:00:00").toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
             </h3>
-            <button
-              onClick={() => onEdit({ id: "", text: "", status: "draft", platforms: [], createdAt: "", scheduledAt: selectedDay + "T12:00:00" } as SocialPost)}
-              className="text-[10px] px-2 py-1 rounded-md bg-cc-accent/10 text-cc-accent border border-cc-accent/30 hover:bg-cc-accent/20 transition-colors cursor-pointer"
-            >
-              + New Post
-            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-cc-muted">{dayPosts.length} post(s)</span>
+              <button
+                onClick={() => onEdit({ id: "", text: "", status: "draft", platforms: [], createdAt: "", scheduledAt: selectedDay + "T12:00:00" } as SocialPost)}
+                className="text-[10px] px-2 py-1 rounded-md bg-cc-accent/10 text-cc-accent border border-cc-accent/30 hover:bg-cc-accent/20 transition-colors cursor-pointer"
+              >
+                + New Post
+              </button>
+              <button onClick={() => setSelectedDay(null)} className="text-cc-muted hover:text-cc-fg text-sm leading-none">&times;</button>
+            </div>
           </div>
-          {dayPosts.length === 0 ? (
-            <p className="text-[10px] text-cc-muted">No posts on this day.</p>
-          ) : (
-            dayPosts.map((p) => (
-              <div key={p.id} className="border border-cc-border/30 rounded-lg p-2.5 space-y-1.5 bg-cc-bg/50">
-                {p.title && <div className="text-[11px] font-semibold text-cc-fg">{p.title}</div>}
-                <p className="text-[11px] text-cc-fg break-words leading-relaxed">{p.text}</p>
-                <div className="flex flex-wrap gap-1 items-center">
-                  <StatusBadge status={p.status} />
-                  {p.platforms.map((pl) => <PlatformBadge key={pl} platform={pl} />)}
-                  {p.scheduledAt && <span className="text-[9px] text-cc-muted">{new Date(p.scheduledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
+
+          {/* Posts list */}
+          <div className="p-3 space-y-2">
+            {dayPosts.length === 0 ? (
+              <p className="text-[11px] text-cc-muted py-4 text-center">No posts on this day. Click "+ New Post" to create one.</p>
+            ) : (
+              dayPosts.map((p) => (
+                <div key={p.id} className={`border rounded-lg overflow-hidden bg-cc-bg/50 border-cc-border/30`}>
+                  <div className="flex gap-3 p-3">
+                    {/* Thumbnail */}
+                    {(p.mediaUrls?.length ?? 0) > 0 && (
+                      <img
+                        src={p.mediaUrls![0]}
+                        alt=""
+                        className="w-16 h-16 rounded-lg object-cover border border-cc-border/30 flex-shrink-0"
+                      />
+                    )}
+                    {/* Content */}
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      {p.title && <div className="text-[11px] font-semibold text-cc-fg">{p.title}</div>}
+                      <p className="text-[11px] text-cc-fg break-words leading-relaxed line-clamp-3">{p.text}</p>
+                      {/* Badges row */}
+                      <div className="flex flex-wrap gap-1 items-center">
+                        <StatusBadge status={p.status} />
+                        {p.createdBy && <CreatedByBadge by={p.createdBy} />}
+                        {p.platforms.map((pl) => <PlatformBadge key={pl} platform={pl} />)}
+                        {(p.scheduledAt || p.createdAt) && (
+                          <span className="text-[9px] text-cc-muted ml-auto">
+                            {new Date(p.scheduledAt || p.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 px-3 py-1.5 border-t border-cc-border/20 bg-cc-bg/30">
+                    <button onClick={() => onEdit(p)} className="text-[10px] px-2 py-0.5 text-cc-muted hover:text-cc-fg hover:bg-cc-hover rounded transition-colors">Edit</button>
+                    <button onClick={() => handleReschedule(p.id)} className="text-[10px] px-2 py-0.5 text-cc-accent hover:bg-cc-accent/10 rounded transition-colors">Reschedule</button>
+                    <button onClick={() => handleDeletePost(p.id)} className="text-[10px] px-2 py-0.5 text-red-400 hover:bg-red-400/10 rounded transition-colors ml-auto">Delete</button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={() => onEdit(p)} className="text-[10px] text-cc-muted hover:text-cc-fg transition-colors">Edit</button>
-                  <button onClick={() => handleReschedule(p.id)} className="text-[10px] text-cc-accent hover:text-cc-accent/80 transition-colors">Reschedule</button>
-                </div>
-              </div>
-            ))
-          )}
+              ))
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -1111,12 +1296,12 @@ function SettingsTab({ showMessage }: { showMessage: (text: string, isError?: bo
   const [postizMode, setPostizMode] = useState<"hosted" | "selfhosted">("hosted");
   const [postizUrl, setPostizUrl] = useState("");
   const [postizKey, setPostizKey] = useState("");
-  const [ayrshareKey, setAyrshareKey] = useState("");
   const [bufferKey, setBufferKey] = useState("");
   const [savedBackend, setSavedBackend] = useState("");
   const [profiles, setProfiles] = useState<SocialProfile[]>([]);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [requireApproval, setRequireApproval] = useState(false);
 
   useEffect(() => {
     api.getSocialSettings().then((s: any) => {
@@ -1128,17 +1313,16 @@ function SettingsTab({ showMessage }: { showMessage: (text: string, isError?: bo
         setPostizKey(s.backends.postiz.apiKey || "");
         setPostizMode(url && url !== "https://api.postiz.com" ? "selfhosted" : "hosted");
       }
-      if (s.backends?.ayrshare) setAyrshareKey(s.backends.ayrshare.apiKey || "");
       if (s.backends?.buffer) setBufferKey(s.backends.buffer.apiKey || "");
+      if (s.requireApproval) setRequireApproval(true);
     }).catch(() => {});
   }, []);
 
   async function saveSettings() {
     const backends: Record<string, unknown> = {};
     if (backend === "postiz") backends.postiz = { url: postizMode === "selfhosted" ? postizUrl : "", apiKey: postizKey };
-    if (backend === "ayrshare") backends.ayrshare = { apiKey: ayrshareKey };
     if (backend === "buffer") backends.buffer = { apiKey: bufferKey };
-    await api.updateSocialSettings({ backend: backend || null, backends, defaultPlatforms: [] });
+    await api.updateSocialSettings({ backend: backend || null, backends, defaultPlatforms: [], requireApproval });
     setSavedBackend(backend);
   }
 
@@ -1175,7 +1359,6 @@ function SettingsTab({ showMessage }: { showMessage: (text: string, isError?: bo
 
   const backendOptions = [
     { id: "buffer", label: "Buffer", desc: "SaaS — GraphQL API" },
-    { id: "ayrshare", label: "Ayrshare", desc: "SaaS — REST API" },
     { id: "postiz", label: "Postiz", desc: "Hosted or Self-hosted" },
   ];
 
@@ -1242,9 +1425,6 @@ function SettingsTab({ showMessage }: { showMessage: (text: string, isError?: bo
           <InputField label="API Key" value={postizKey} onChange={setPostizKey} placeholder="Settings → Developers → Public API" password />
         </div>
       )}
-      {backend === "ayrshare" && (
-        <InputField label="Ayrshare API Key" value={ayrshareKey} onChange={setAyrshareKey} placeholder="API Key" password />
-      )}
       {backend === "buffer" && (
         <InputField label="Buffer API Key" value={bufferKey} onChange={setBufferKey} placeholder="Access Token from publish.buffer.com/settings/api" password />
       )}
@@ -1282,6 +1462,257 @@ function SettingsTab({ showMessage }: { showMessage: (text: string, isError?: bo
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Approval Toggle */}
+      <div className="flex items-center justify-between p-3 rounded-lg bg-cc-bg border border-cc-border">
+        <div>
+          <div className="text-xs font-medium text-cc-fg">Require Approval</div>
+          <div className="text-[9px] text-cc-muted mt-0.5">Voice assistant must get manual approval before publishing</div>
+        </div>
+        <button
+          onClick={() => setRequireApproval(!requireApproval)}
+          className={`w-10 h-5 rounded-full transition-colors relative ${requireApproval ? "bg-cc-accent" : "bg-cc-border"}`}
+        >
+          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${requireApproval ? "left-5" : "left-0.5"}`} />
+        </button>
+      </div>
+
+      {/* Hashtag Pools */}
+      <HashtagPoolsSection showMessage={showMessage} />
+    </div>
+  );
+}
+
+// ─── Hashtag Pools UI ────────────────────────────────────────────────────────
+
+interface HashtagPool {
+  id: string;
+  name: string;
+  industry: string;
+  language: string;
+  popular: string[];
+  medium: string[];
+  niche: string[];
+  branded: string[];
+  blocked: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+const TIER_META: Array<{ key: keyof Pick<HashtagPool, "popular" | "medium" | "niche" | "branded" | "blocked">; label: string; desc: string; color: string }> = [
+  { key: "popular", label: "Popular", desc: ">1M posts, high reach", color: "text-green-400" },
+  { key: "medium", label: "Medium", desc: "100K-1M posts, balanced", color: "text-blue-400" },
+  { key: "niche", label: "Niche", desc: "<100K posts, targeted", color: "text-purple-400" },
+  { key: "branded", label: "Branded", desc: "Your own brand hashtags", color: "text-cc-accent" },
+  { key: "blocked", label: "Blocked", desc: "Never use these", color: "text-red-400" },
+];
+
+function HashtagPoolsSection({ showMessage }: { showMessage: (text: string, isError?: boolean) => void }) {
+  const [pools, setPools] = useState<HashtagPool[]>([]);
+  const [editingPool, setEditingPool] = useState<HashtagPool | null>(null);
+  const [isNew, setIsNew] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const loadPools = useCallback(async () => {
+    try {
+      const data = await api.listHashtagPools();
+      setPools(data.pools || []);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => { loadPools(); }, [loadPools]);
+
+  function startNew() {
+    setEditingPool({
+      id: "",
+      name: "",
+      industry: "",
+      language: "de",
+      popular: [],
+      medium: [],
+      niche: [],
+      branded: [],
+      blocked: [],
+      createdAt: "",
+      updatedAt: "",
+    });
+    setIsNew(true);
+  }
+
+  function startEdit(pool: HashtagPool) {
+    setEditingPool({ ...pool });
+    setIsNew(false);
+  }
+
+  async function handleSave() {
+    if (!editingPool || !editingPool.name.trim()) {
+      showMessage("Name is required", true);
+      return;
+    }
+    setSaving(true);
+    try {
+      if (isNew) {
+        await api.createHashtagPool(editingPool);
+      } else {
+        await api.updateHashtagPool(editingPool.id, editingPool);
+      }
+      showMessage("Hashtag pool saved.");
+      setEditingPool(null);
+      await loadPools();
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : "Failed to save", true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(pool: HashtagPool) {
+    if (!confirm(`Delete hashtag pool "${pool.name}"?`)) return;
+    try {
+      await api.deleteHashtagPool(pool.id);
+      showMessage("Pool deleted.");
+      await loadPools();
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : "Failed", true);
+    }
+  }
+
+  function updateTier(tier: keyof Pick<HashtagPool, "popular" | "medium" | "niche" | "branded" | "blocked">, value: string) {
+    if (!editingPool) return;
+    const tags = value
+      .split(/[,\n]/)
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .map((t) => (t.startsWith("#") ? t : `#${t}`));
+    setEditingPool({ ...editingPool, [tier]: tags });
+  }
+
+  // ─── Editor View ─────────────────────────────────────────────────
+  if (editingPool) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-[10px] text-cc-muted uppercase tracking-wider font-medium">
+            {isNew ? "New Hashtag Pool" : "Edit Hashtag Pool"}
+          </h3>
+          <button onClick={() => setEditingPool(null)} className="text-[10px] text-cc-muted hover:text-cc-fg">
+            Cancel
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <InputField label="Business / Brand Name" value={editingPool.name} onChange={(v) => setEditingPool({ ...editingPool, name: v })} placeholder="e.g. Ferienhaus Steiermark" />
+          <InputField label="Industry" value={editingPool.industry} onChange={(v) => setEditingPool({ ...editingPool, industry: v })} placeholder="e.g. tourism, saas, fashion" />
+        </div>
+
+        <div>
+          <label className="text-[10px] text-cc-muted block mb-1">Language</label>
+          <select
+            value={editingPool.language}
+            onChange={(e) => setEditingPool({ ...editingPool, language: e.target.value })}
+            className="bg-cc-bg border border-cc-border rounded-md p-2 text-xs text-cc-fg focus:outline-none focus:border-cc-accent/50"
+          >
+            <option value="de">Deutsch</option>
+            <option value="en">English</option>
+            <option value="fr">French</option>
+            <option value="es">Spanish</option>
+            <option value="it">Italian</option>
+          </select>
+        </div>
+
+        {TIER_META.map(({ key, label, desc, color }) => (
+          <div key={key}>
+            <label className="text-[10px] text-cc-muted block mb-1">
+              <span className={color}>{label}</span>
+              <span className="ml-1.5 text-cc-muted/60">{desc}</span>
+            </label>
+            <textarea
+              value={editingPool[key].join(", ")}
+              onChange={(e) => updateTier(key, e.target.value)}
+              placeholder={`#tag1, #tag2, #tag3`}
+              rows={2}
+              className="w-full bg-cc-bg border border-cc-border rounded-md p-2 text-xs text-cc-fg focus:outline-none focus:border-cc-accent/50 resize-none"
+            />
+            <div className="text-[9px] text-cc-muted/50 mt-0.5">{editingPool[key].length} hashtags</div>
+          </div>
+        ))}
+
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-4 py-2 text-xs font-medium rounded-md bg-cc-accent text-white hover:bg-cc-accent/90 disabled:opacity-50 transition-colors"
+        >
+          {saving ? "Saving..." : isNew ? "Create Pool" : "Save Changes"}
+        </button>
+      </div>
+    );
+  }
+
+  // ─── List View ───────────────────────────────────────────────────
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h3 className="text-[10px] text-cc-muted uppercase tracking-wider font-medium">Hashtag Pools</h3>
+          <p className="text-[9px] text-cc-muted mt-0.5">Curated hashtag sets per business. The Content Agent picks from these automatically.</p>
+        </div>
+        <button
+          onClick={startNew}
+          className="px-3 py-1.5 text-[10px] font-medium rounded-md bg-cc-accent/10 text-cc-accent hover:bg-cc-accent/20 border border-cc-accent/20 transition-colors"
+        >
+          + New Pool
+        </button>
+      </div>
+
+      {pools.length === 0 ? (
+        <div className="text-center py-6 border border-dashed border-cc-border rounded-lg">
+          <p className="text-xs text-cc-muted mb-1">No hashtag pools yet</p>
+          <p className="text-[9px] text-cc-muted/60">Create a pool to give the Content Agent curated hashtags for your businesses.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {pools.map((pool) => {
+            const totalTags = pool.popular.length + pool.medium.length + pool.niche.length + pool.branded.length;
+            return (
+              <div key={pool.id} className="p-3 rounded-lg border border-cc-border bg-cc-card">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="text-xs font-medium text-cc-fg">{pool.name}</div>
+                    <div className="text-[9px] text-cc-muted mt-0.5">
+                      {pool.industry && <span>{pool.industry} · </span>}
+                      {totalTags} hashtags
+                      {pool.blocked.length > 0 && <span> · {pool.blocked.length} blocked</span>}
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <button onClick={() => startEdit(pool)} className="text-[10px] text-cc-muted hover:text-cc-accent transition-colors">Edit</button>
+                    <button onClick={() => handleDelete(pool)} className="text-[10px] text-cc-muted hover:text-red-400 transition-colors">Delete</button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {pool.popular.slice(0, 3).map((t) => (
+                    <span key={t} className="text-[9px] px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/20">{t}</span>
+                  ))}
+                  {pool.medium.slice(0, 3).map((t) => (
+                    <span key={t} className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">{t}</span>
+                  ))}
+                  {pool.niche.slice(0, 2).map((t) => (
+                    <span key={t} className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">{t}</span>
+                  ))}
+                  {pool.branded.slice(0, 2).map((t) => (
+                    <span key={t} className="text-[9px] px-1.5 py-0.5 rounded-full bg-cc-accent/10 text-cc-accent border border-cc-accent/20">{t}</span>
+                  ))}
+                  {totalTags > 10 && (
+                    <span className="text-[9px] px-1.5 py-0.5 text-cc-muted">+{totalTags - 10} more</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -1334,12 +1765,14 @@ function StatusBadge({ status }: { status: string }) {
 
 function CreatedByBadge({ by }: { by: string }) {
   const styles: Record<string, string> = {
-    gemini: "text-blue-400 border-blue-400/30 bg-blue-400/5",
-    agent: "text-purple-400 border-purple-400/30 bg-purple-400/5",
+    gemini: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
+    agent: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+    user: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
   };
+  const label = by === "gemini" ? "Voice" : by === "agent" ? "Agent" : "Manual";
   return (
-    <span className={`inline-block text-[9px] font-medium border rounded-full px-1.5 py-0.5 ${styles[by] || "text-cc-muted border-cc-border"}`}>
-      {by === "gemini" ? "✦ Gemini" : by === "agent" ? "⚡ Agent" : by}
+    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${styles[by] || styles.user}`}>
+      {label}
     </span>
   );
 }
@@ -1350,5 +1783,75 @@ function PlatformBadge({ platform }: { platform: string }) {
       <span className="text-[8px]">{PLATFORM_ICONS[platform] || ""}</span>
       {platform}
     </span>
+  );
+}
+
+function MediaPickerModal({ open, onClose, onSelect }: {
+  open: boolean;
+  onClose: () => void;
+  onSelect: (urls: string[]) => void;
+}) {
+  const [media, setMedia] = useState<Array<{ filename: string; path: string; type: string; createdAt: string }>>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    setSelected(new Set());
+    api.listMedia().then((data: any) => {
+      setMedia((data.files || data.media || []).filter((f: any) => !f.type || f.type.startsWith("image/")));
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, [open]);
+
+  if (!open) return null;
+
+  function toggle(path: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-cc-card border border-cc-border rounded-xl w-full max-w-lg max-h-[70vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-3 border-b border-cc-border">
+          <h3 className="text-sm font-semibold text-cc-fg">Media Library</h3>
+          <button onClick={onClose} className="text-cc-muted hover:text-cc-fg text-lg">&times;</button>
+        </div>
+        <div className="flex-1 overflow-auto p-3">
+          {loading ? (
+            <p className="text-xs text-cc-muted text-center py-8">Loading...</p>
+          ) : media.length === 0 ? (
+            <p className="text-xs text-cc-muted text-center py-8">No images found. Generate images via Hank or upload files.</p>
+          ) : (
+            <div className="grid grid-cols-4 gap-2">
+              {media.map((m) => (
+                <button key={m.filename} onClick={() => toggle(`/api/media/file/${m.filename}`)}
+                  className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${
+                    selected.has(`/api/media/file/${m.filename}`) ? "border-cc-accent ring-2 ring-cc-accent/30" : "border-transparent hover:border-cc-border"
+                  }`}>
+                  <img src={`/api/media/file/${m.filename}`} alt={m.filename} className="w-full h-full object-cover" />
+                  {selected.has(`/api/media/file/${m.filename}`) && (
+                    <div className="absolute top-1 right-1 w-5 h-5 rounded-full bg-cc-accent text-white flex items-center justify-center text-[10px] font-bold">&#10003;</div>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {selected.size > 0 && (
+          <div className="p-3 border-t border-cc-border flex justify-between items-center">
+            <span className="text-xs text-cc-muted">{selected.size} selected</span>
+            <button onClick={() => { onSelect(Array.from(selected)); onClose(); }}
+              className="px-3 py-1.5 text-xs font-medium rounded-md bg-cc-accent text-white hover:bg-cc-accent/90 transition-colors">
+              Attach Selected
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
