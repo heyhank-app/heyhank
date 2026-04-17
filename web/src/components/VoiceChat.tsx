@@ -763,7 +763,7 @@ export function VoiceChat() {
           {state === "idle" ? (
             <button
               type="button"
-              onClick={startSession}
+              onClick={() => startSession()}
               className="px-4 py-2 rounded-lg bg-cc-primary text-white text-sm font-medium hover:bg-cc-primary/90 transition-colors"
             >
               Start

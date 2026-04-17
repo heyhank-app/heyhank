@@ -945,6 +945,57 @@ const TOOL_DECLARATIONS = [{
         required: ["postId", "text"],
       },
     },
+    // ─── Memory Tools ──────────────────────────────────────────────
+    {
+      name: "save_memory",
+      description: "Save a fact about the user to long-term memory. Use when the user says something personal, a preference, or a fact worth remembering.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          content: {
+            type: "STRING",
+            description: "The fact to remember (e.g. 'User prefers dark mode', 'User's birthday is March 5').",
+          },
+        },
+        required: ["content"],
+      },
+    },
+    {
+      name: "search_memory",
+      description: "Search long-term memory for facts about the user. Use when you need to recall something previously saved.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          query: {
+            type: "STRING",
+            description: "Search query (e.g. 'birthday', 'food preferences').",
+          },
+        },
+        required: ["query"],
+      },
+    },
+    {
+      name: "list_memories",
+      description: "List all saved memories/facts about the user.",
+      parameters: {
+        type: "OBJECT",
+        properties: {},
+      },
+    },
+    {
+      name: "delete_memory",
+      description: "Delete a specific memory by ID.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          id: {
+            type: "STRING",
+            description: "The memory ID to delete.",
+          },
+        },
+        required: ["id"],
+      },
+    },
   ],
 }];
 

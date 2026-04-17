@@ -243,9 +243,14 @@ export class AudioBridge {
       };
 
       this.geminiWs!.onclose = () => {
+        const wasSettingUp = !this.setupDone;
         this.setupDone = false;
         this.flushTextBuffer();
         this.config.onStatusChange("ended");
+        if (wasSettingUp) {
+          clearTimeout(timeout);
+          reject(new Error(`Gemini WebSocket closed before setup completed (${this.backendLabel})`));
+        }
       };
     });
   }
@@ -304,7 +309,15 @@ export class AudioBridge {
         // Execute tools and send response back
         this.config.onToolCall(calls).then((responses) => {
           this.sendToolResponse(responses);
-        }).catch(() => {});
+        }).catch((err) => {
+          // Send error responses back to Gemini so it doesn't hang waiting for tool results
+          const errorResponses = calls.map((c) => ({
+            id: c.id,
+            name: c.name,
+            response: { error: `Tool call failed: ${err instanceof Error ? err.message : String(err)}` },
+          }));
+          this.sendToolResponse(errorResponses);
+        });
       }
       return;
     }
@@ -550,11 +563,7 @@ export function downsampleTo8k(input: Uint8Array, inputRate: number): Uint8Array
  * frame support in the future.
  */
 function bufferToBase64(buf: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < buf.byteLength; i++) {
-    binary += String.fromCharCode(buf[i]);
-  }
-  return btoa(binary);
+  return Buffer.from(buf).toString('base64');
 }
 
 /** Convert base64 string to Uint8Array */

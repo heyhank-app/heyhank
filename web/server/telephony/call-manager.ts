@@ -4,12 +4,14 @@
 
 import type { ServerWebSocket } from "bun";
 import type { CallConfig, CallState, CallEvent, TranscriptEntry, CallFlow, TelephonyContact } from "./call-types.js";
-import { AudioBridge, downsampleTo8k, base64ToBuffer } from "./audio-bridge.js";
+import { AudioRecorder } from "./audio-recorder.js";
 import { getSettings, saveCall } from "./telephony-store.js";
 import { getSettings as getMainSettings } from "../settings-manager.js";
-import { eslCommand } from "./esl-client.js";
+import { eslCommand, eslSubscribe } from "./esl-client.js";
 import { DEFAULT_PORT_DEV, DEFAULT_PORT_PROD } from "../constants.js";
 import { randomUUID } from "node:crypto";
+import { createGeminiLiveEngine } from "../voice-pipeline/gemini-live-adapter.js";
+import { createPipelineEngine, getPipelineSettingsFrom, prepareGreeting, lookupContactForCall, resolveEngine, type VoiceEngineSession } from "../voice-pipeline/manager.js";
 
 // Gemini tool declarations for telephony calls (subset — focused on conversation)
 const TELEPHONY_TOOL_DECLARATIONS = [{
@@ -32,6 +34,8 @@ const TELEPHONY_TOOL_DECLARATIONS = [{
   ],
 }];
 
+const MAX_CONCURRENT_CALLS = 5;
+
 type EventListener = (event: CallEvent) => void;
 
 /**
@@ -47,16 +51,33 @@ type EventListener = (event: CallEvent) => void;
 export class CallManager {
   private activeCalls = new Map<string, {
     state: CallState;
-    bridge: AudioBridge;
+    engine: VoiceEngineSession;
+    recorder: AudioRecorder;
     fsSockets: Set<ServerWebSocket<unknown>>; // FreeSWITCH audio fork WebSockets
     transcriptSockets: Set<ServerWebSocket<unknown>>; // Browser WebSockets for live transcript
     listenSockets: Set<ServerWebSocket<unknown>>; // Browser WebSockets for live audio listen
     listenMode: boolean;
     maxDurationTimer?: ReturnType<typeof setTimeout>;
+    /** Ad-hoc timers (end_call grace period, force-hangup safeties) — all cleared on endCall */
+    pendingTimers: Set<ReturnType<typeof setTimeout>>;
     pendingHangup?: boolean; // end_call was requested, waiting for audio to finish
+    /** Whether the greeting has been triggered yet (for pipeline engine) */
+    greetingTriggered?: boolean;
   }>();
 
+  /** Register a setTimeout that belongs to a call so it gets cleared on endCall */
+  private trackTimer(callId: string, timer: ReturnType<typeof setTimeout>): void {
+    const call = this.activeCalls.get(callId);
+    if (call) {
+      call.pendingTimers.add(timer);
+    } else {
+      // Call already ended before we could register — clear immediately to avoid a leak
+      clearTimeout(timer);
+    }
+  }
+
   private listeners = new Set<EventListener>();
+  private inboundSubscription: { stop: () => void } | null = null;
 
   /** Subscribe to call events */
   onEvent(listener: EventListener): () => void {
@@ -72,6 +93,16 @@ export class CallManager {
 
   /** Start a new outbound call */
   async startCall(config: CallConfig): Promise<CallState> {
+    // Validate phone number to prevent ESL command injection
+    if (!config.phone || !/^\+?[0-9\-\s]+$/.test(config.phone)) {
+      throw new Error("Invalid phone number. Only digits, spaces, hyphens, and an optional leading + are allowed.");
+    }
+
+    // Enforce concurrent calls limit
+    if (this.activeCalls.size >= MAX_CONCURRENT_CALLS) {
+      throw new Error(`Maximum concurrent calls limit reached (${MAX_CONCURRENT_CALLS}). Please wait for an active call to end.`);
+    }
+
     const telSettings = getSettings();
 
     if (!telSettings.enabled) {
@@ -100,7 +131,7 @@ export class CallManager {
     const contact = telSettings.contacts.find(c => c.phone === config.phone) || null;
 
     // Build telephony-specific system prompt
-    const systemPrompt = buildTelephonyPrompt(config.prompt, config.phone, contact, contact?.language || "en");
+    const systemPrompt = buildTelephonyPrompt(config.prompt, config.phone, contact, contact?.language || telSettings.defaultLanguage || "de");
 
     // Create call state
     const callState: CallState = {
@@ -109,6 +140,7 @@ export class CallManager {
       prompt: config.prompt,
       voice,
       status: "initiating",
+      direction: "outbound",
       trunkId: trunk.id,
       callerId: config.callerId || trunk.callerId,
       transcript: [],
@@ -121,86 +153,123 @@ export class CallManager {
       listenMode: config.listen ?? false,
     };
 
-    // Create audio bridge to Gemini
-    const bridge = new AudioBridge(callId, {
-      geminiApiKey: geminiKey,
-      voice,
-      systemPrompt,
-      // Pass Vertex AI config from telephony settings (overrides env vars)
-      vertexAI: telSettings.geminiBackend === "vertexai" ? {
-        enabled: true,
-        projectId: telSettings.gcpProjectId,
-        location: telSettings.gcpLocation,
-        serviceAccountKey: telSettings.gcpServiceAccountKey,
-      } : undefined,
-      tools: [...TELEPHONY_TOOL_DECLARATIONS, { googleSearch: {} }],
-      onTranscript: (entry) => {
-        callState.transcript.push(entry);
-        this.emit({ type: "transcript", callId, entry });
-        this.broadcastTranscript(callId, entry);
-      },
-      onStatusChange: (status) => {
-        callState.status = status;
-        if (status === "active" && !callState.connectedAt) {
-          callState.connectedAt = Date.now();
-        }
-        this.emit({ type: "status", callId, status });
-      },
-      onToolCall: async (calls) => {
-        return this.handleToolCalls(callId, calls);
-      },
-    });
+    // Create audio recorder for this call
+    const recorder = new AudioRecorder(callId);
 
-    // When Gemini finishes a turn, check if we're waiting to hang up
+    // Common transcript/status callbacks
+    const onTranscript = (entry: TranscriptEntry) => {
+      callState.transcript.push(entry);
+      this.emit({ type: "transcript", callId, entry });
+      this.broadcastTranscript(callId, entry);
+    };
+    const onStatusChange = (status: CallState["status"]) => {
+      callState.status = status;
+      if (status === "active" && !callState.connectedAt) {
+        callState.connectedAt = Date.now();
+      }
+      this.emit({ type: "status", callId, status });
+    };
+
+    // Decide engine: pipeline (with greeting) or Gemini Live
+    const pipelineSettings = getPipelineSettingsFrom(telSettings);
+    const chosenEngine = resolveEngine(pipelineSettings);
+
+    let engine: VoiceEngineSession;
+    if (chosenEngine === "pipeline") {
+      try {
+        const greeting = await prepareGreeting({ direction: "outbound", contact, pipelineSettings });
+        engine = await createPipelineEngine({
+          callId,
+          direction: "outbound",
+          remoteNumber: config.phone,
+          contact,
+          systemPrompt,
+          telephonySettings: telSettings,
+          pipelineSettings,
+          greetingText: greeting.text,
+          greetingPcm: greeting.pcm,
+          onToolCall: (calls) => this.handleToolCalls(callId, calls),
+          onTranscript,
+          onStatusChange,
+        });
+      } catch (err) {
+        console.error(`[telephony] Pipeline engine failed, fallback to Gemini Live:`, err);
+        if (!pipelineSettings.fallbackToGeminiLive) throw err;
+        engine = createGeminiLiveEngine({
+          callId,
+          voice,
+          systemPrompt,
+          geminiKey,
+          telSettings,
+          tools: [...TELEPHONY_TOOL_DECLARATIONS, { googleSearch: {} }],
+          isInbound: false,
+          onTranscript,
+          onStatusChange,
+          onToolCall: (calls) => this.handleToolCalls(callId, calls),
+        });
+      }
+    } else {
+      engine = createGeminiLiveEngine({
+        callId,
+        voice,
+        systemPrompt,
+        geminiKey,
+        telSettings,
+        tools: [...TELEPHONY_TOOL_DECLARATIONS, { googleSearch: {} }],
+        isInbound: false,
+        onTranscript,
+        onStatusChange,
+        onToolCall: (calls) => this.handleToolCalls(callId, calls),
+      });
+    }
+
+    // Wire AI audio → FreeSWITCH + listen sockets + recorder
+    engine.onAudio = (pcm8k: Uint8Array) => {
+      recorder.addAiAudio(pcm8k);
+      const call = this.activeCalls.get(callId);
+      if (!call) return;
+      for (const ws of call.fsSockets) {
+        try { ws.send(pcm8k); } catch { /* socket closed */ }
+      }
+      if (call.listenMode) {
+        const base64 = Buffer.from(pcm8k).toString('base64');
+        const msg = JSON.stringify({ type: "audio", speaker: "ai", data: base64 });
+        for (const ws of call.listenSockets) {
+          try { ws.send(msg); } catch { /* ignore */ }
+        }
+      }
+    };
+
+    // Hangup-after-turn-complete logic
     let hangupScheduled = false;
-    bridge.onTurnComplete = () => {
-      const call = this.activeCalls.get(callId);
-      if (call?.pendingHangup && !hangupScheduled) {
-        hangupScheduled = true;
-        console.log(`[telephony] Call ${callId}: turn complete after end_call — hanging up in 5s`);
-        // Grace period for remaining audio to play through the phone line
-        // 5s accounts for audio buffering in FreeSWITCH + network latency
-        setTimeout(() => this.endCall(callId).catch(() => {}), 5000);
-      }
-    };
-
-    // When Gemini produces response audio, send it to FreeSWITCH + listen sockets
-    bridge.onGeminiAudio = (base64Pcm: string) => {
-      const pcm = base64ToBuffer(base64Pcm);
-      // Gemini outputs 24kHz PCM, FreeSWITCH expects 8kHz
-      const downsampled = downsampleTo8k(pcm, 24000);
-      const call = this.activeCalls.get(callId);
-      if (call) {
-        for (const ws of call.fsSockets) {
-          try {
-            ws.send(downsampled);
-          } catch { /* socket closed */ }
+    if (engine.onTurnComplete !== undefined) {
+      engine.onTurnComplete = () => {
+        const call = this.activeCalls.get(callId);
+        if (call?.pendingHangup && !hangupScheduled) {
+          hangupScheduled = true;
+          console.log(`[telephony] Call ${callId}: turn complete after end_call — hanging up in 5s`);
+          this.trackTimer(callId, setTimeout(() => this.endCall(callId).catch(() => {}), 5000));
         }
-        // Stream AI audio to listen sockets (browser)
-        if (call.listenMode) {
-          const msg = JSON.stringify({ type: "audio", speaker: "ai", data: base64Pcm });
-          for (const ws of call.listenSockets) {
-            try { ws.send(msg); } catch { /* ignore */ }
-          }
-        }
-      }
-    };
+      };
+    }
 
     this.activeCalls.set(callId, {
       state: callState,
-      bridge,
+      engine,
+      recorder,
       fsSockets: new Set(),
       transcriptSockets: new Set(),
       listenSockets: new Set(),
       listenMode: config.listen ?? false,
+      pendingTimers: new Set(),
     });
 
-    // Connect to Gemini first
+    // Connect engine
     try {
-      await bridge.connect();
+      await engine.connect();
     } catch (err) {
       callState.status = "failed";
-      callState.error = err instanceof Error ? err.message : "Gemini connection failed";
+      callState.error = err instanceof Error ? err.message : "Engine connection failed";
       callState.endedAt = Date.now();
       saveCall(callState);
       this.activeCalls.delete(callId);
@@ -217,7 +286,7 @@ export class CallManager {
       callState.status = "failed";
       callState.error = err instanceof Error ? err.message : "FreeSWITCH originate failed";
       callState.endedAt = Date.now();
-      bridge.disconnect();
+      engine.disconnect();
       saveCall(callState);
       this.activeCalls.delete(callId);
       throw err;
@@ -241,13 +310,20 @@ export class CallManager {
     const call = this.activeCalls.get(callId);
     if (!call) return null;
 
-    const { state, bridge } = call;
+    // Delete from activeCalls FIRST to prevent concurrent entry (race condition guard)
+    this.activeCalls.delete(callId);
+
+    // Store references before cleanup
+    const { state, engine, recorder, maxDurationTimer, pendingTimers } = call;
 
     // Clear safety timer
-    if (call.maxDurationTimer) clearTimeout(call.maxDurationTimer);
+    if (maxDurationTimer) clearTimeout(maxDurationTimer);
+    // Clear all ad-hoc pending timers (end_call grace, force-hangup safety) to prevent leaks
+    for (const t of pendingTimers) clearTimeout(t);
+    pendingTimers.clear();
 
-    // Disconnect Gemini
-    bridge.disconnect();
+    // Disconnect engine (Pipeline or Gemini Live)
+    engine.disconnect();
 
     // Hangup FreeSWITCH
     try {
@@ -261,12 +337,21 @@ export class CallManager {
       state.durationSeconds = Math.round((state.endedAt - state.connectedAt) / 1000);
     }
 
+    // Save audio recording
+    try {
+      const audioFile = recorder.save();
+      if (audioFile) {
+        state.audioFile = audioFile;
+      }
+    } catch (err) {
+      console.error(`[telephony] Failed to save recording for ${callId}:`, err);
+    }
+
     // Generate summary from transcript
     state.summary = this.generateSummary(state);
 
     this.emit({ type: "ended", callId, summary: state.summary });
     saveCall(state);
-    this.activeCalls.delete(callId);
 
     return state;
   }
@@ -275,14 +360,12 @@ export class CallManager {
   handleFreeSwitchAudio(callId: string, data: Buffer | Uint8Array): void {
     const call = this.activeCalls.get(callId);
     if (!call) return;
-    call.bridge.sendCallerAudio(data);
+    // Record caller audio (8kHz PCM)
+    call.recorder.addCallerAudio(data);
+    call.engine.sendCallerAudio(data);
     // Stream callee audio to listen sockets (browser)
     if (call.listenMode && call.listenSockets.size > 0) {
-      let binary = "";
-      for (let i = 0; i < data.byteLength; i++) {
-        binary += String.fromCharCode(data[i]);
-      }
-      const base64 = btoa(binary);
+      const base64 = Buffer.from(data).toString('base64');
       const msg = JSON.stringify({ type: "audio", speaker: "callee", data: base64 });
       for (const ws of call.listenSockets) {
         try { ws.send(msg); } catch { /* ignore */ }
@@ -295,18 +378,28 @@ export class CallManager {
     const call = this.activeCalls.get(callId);
     if (call) {
       call.fsSockets.add(ws);
-      // Audio fork connected = callee picked up. Trigger Gemini to start speaking immediately.
-      // Without this, Gemini waits for caller audio before responding (several seconds of silence).
-      if (call.fsSockets.size === 1) {
-        console.log(`[telephony] Call ${callId}: audio connected — triggering greeting`);
-        call.bridge.sendTrigger("The callee just picked up the phone. Start speaking NOW — greet them immediately according to your instructions.");
+      // Audio fork connected = callee picked up. Play greeting immediately.
+      // For Pipeline: pre-rendered greeting MP3 plays at 0ms latency.
+      // For Gemini Live: text trigger makes it start speaking (1-2s latency).
+      if (call.fsSockets.size === 1 && !call.greetingTriggered) {
+        const isInbound = call.state.direction === "inbound";
+        console.log(`[telephony] Call ${callId}: audio connected (${isInbound ? "inbound" : "outbound"}) — triggering greeting via ${call.engine.engineLabel}`);
+        call.greetingTriggered = true;
+        call.engine.playGreetingIfReady?.();
       }
     }
   }
 
   removeFreeSwitchSocket(callId: string, ws: ServerWebSocket<unknown>): void {
     const call = this.activeCalls.get(callId);
-    if (call) call.fsSockets.delete(ws);
+    if (call) {
+      call.fsSockets.delete(ws);
+      // If no more FreeSWITCH sockets remain, the caller has hung up — end the call
+      if (call.fsSockets.size === 0 && call.state.status === "active") {
+        console.log(`[telephony] Call ${callId}: all audio sockets closed — caller hung up, ending call`);
+        this.endCall(callId).catch(() => {});
+      }
+    }
   }
 
   /** Register a browser WebSocket for live transcript */
@@ -381,13 +474,13 @@ export class CallManager {
             activeCall.pendingHangup = true;
             console.log(`[telephony] Call ${callId}: end_call requested — waiting for turn to complete`);
             // Safety: if turnComplete never comes, force hangup after 15s
-            setTimeout(() => {
+            this.trackTimer(callId, setTimeout(() => {
               const c = this.activeCalls.get(callId);
               if (c?.pendingHangup) {
                 console.log(`[telephony] Call ${callId}: force hangup (turnComplete timeout)`);
                 this.endCall(callId).catch(() => {});
               }
-            }, 15000);
+            }, 15000));
           }
           results.push({ id: call.id, name: call.name, response: { success: true, message: "Will hang up after finishing current speech" } });
           break;
@@ -507,8 +600,240 @@ export class CallManager {
       lines.slice(-6).join("\n"); // Last 6 lines as summary
   }
 
+  /** Handle an inbound call detected by ESL event subscription */
+  async handleInboundCall(uuid: string, callerNumber: string): Promise<void> {
+    const telSettings = getSettings();
+    const mainSettings = getMainSettings();
+
+    if (!telSettings.inboundEnabled) {
+      console.log(`[telephony] Inbound call from ${callerNumber} ignored — inbound disabled`);
+      return;
+    }
+
+    // Check if we already have this call (avoid duplicates)
+    if (this.activeCalls.has(uuid)) {
+      console.log(`[telephony] Inbound call ${uuid} already tracked`);
+      return;
+    }
+
+    // Enforce concurrent calls limit
+    if (this.activeCalls.size >= MAX_CONCURRENT_CALLS) {
+      console.log(`[telephony] Inbound call from ${callerNumber} rejected — max concurrent calls (${MAX_CONCURRENT_CALLS}) reached`);
+      return;
+    }
+
+    const geminiKey = telSettings.geminiApiKey || mainSettings.geminiApiKey;
+    if (!geminiKey) {
+      console.error("[telephony] Cannot handle inbound call — no Gemini API key");
+      return;
+    }
+
+    console.log(`[telephony] Handling inbound call from ${callerNumber} (UUID: ${uuid})`);
+
+    // Look up contact by phone number
+    const contact = telSettings.contacts.find(c => {
+      const normalized = callerNumber.replace(/^\+/, "");
+      const contactNorm = c.phone.replace(/^\+/, "");
+      return normalized === contactNorm || callerNumber === c.phone;
+    }) || null;
+
+    const voice = telSettings.defaultInboundVoice || telSettings.defaultVoice || "Kore";
+    const prompt = contact?.script || telSettings.defaultInboundPrompt || "You are Hank, a helpful AI assistant answering the phone.";
+    const maxDuration = telSettings.maxCallDurationSeconds || 600;
+
+    // Build telephony-specific system prompt (include knowledge base for inbound)
+    const systemPrompt = buildTelephonyPrompt(prompt, callerNumber, contact, contact?.language || telSettings.defaultLanguage || "de", "inbound", telSettings.inboundKnowledgeBase);
+
+    // Create call state — already answered by dialplan
+    const callState: CallState = {
+      id: uuid,
+      phone: callerNumber,
+      prompt,
+      voice,
+      status: "active",
+      direction: "inbound",
+      trunkId: "",
+      callerId: callerNumber,
+      transcript: [],
+      summary: null,
+      durationSeconds: 0,
+      startedAt: Date.now(),
+      connectedAt: Date.now(), // Already connected (dialplan answered)
+      endedAt: null,
+      error: null,
+      listenMode: false,
+    };
+
+    // Create audio recorder for inbound call
+    const recorder = new AudioRecorder(uuid);
+
+    // Common transcript/status callbacks
+    const onTranscript = (entry: TranscriptEntry) => {
+      callState.transcript.push(entry);
+      this.emit({ type: "transcript", callId: uuid, entry });
+      this.broadcastTranscript(uuid, entry);
+    };
+    const onStatusChange = (status: CallState["status"]) => {
+      callState.status = status;
+      this.emit({ type: "status", callId: uuid, status });
+    };
+
+    // Decide engine
+    const pipelineSettings = getPipelineSettingsFrom(telSettings);
+    const chosenEngine = resolveEngine(pipelineSettings);
+    const lookupContact = lookupContactForCall("inbound", callerNumber, contact, telSettings.contacts);
+
+    let engine: VoiceEngineSession;
+    if (chosenEngine === "pipeline") {
+      try {
+        const greeting = await prepareGreeting({ direction: "inbound", contact: lookupContact, pipelineSettings });
+        engine = await createPipelineEngine({
+          callId: uuid,
+          direction: "inbound",
+          remoteNumber: callerNumber,
+          contact: lookupContact,
+          systemPrompt,
+          telephonySettings: telSettings,
+          pipelineSettings,
+          greetingText: greeting.text,
+          greetingPcm: greeting.pcm,
+          onToolCall: (calls) => this.handleToolCalls(uuid, calls),
+          onTranscript,
+          onStatusChange,
+        });
+      } catch (err) {
+        console.error(`[telephony] Inbound pipeline failed, fallback to Gemini Live:`, err);
+        if (!pipelineSettings.fallbackToGeminiLive) {
+          callState.status = "failed";
+          callState.error = err instanceof Error ? err.message : "Pipeline init failed";
+          callState.endedAt = Date.now();
+          saveCall(callState);
+          return;
+        }
+        engine = createGeminiLiveEngine({
+          callId: uuid,
+          voice,
+          systemPrompt,
+          geminiKey,
+          telSettings,
+          tools: [...TELEPHONY_TOOL_DECLARATIONS, { googleSearch: {} }],
+          isInbound: true,
+          onTranscript,
+          onStatusChange,
+          onToolCall: (calls) => this.handleToolCalls(uuid, calls),
+        });
+      }
+    } else {
+      engine = createGeminiLiveEngine({
+        callId: uuid,
+        voice,
+        systemPrompt,
+        geminiKey,
+        telSettings,
+        tools: [...TELEPHONY_TOOL_DECLARATIONS, { googleSearch: {} }],
+        isInbound: true,
+        onTranscript,
+        onStatusChange,
+        onToolCall: (calls) => this.handleToolCalls(uuid, calls),
+      });
+    }
+
+    // Wire AI audio → FreeSWITCH + recorder
+    engine.onAudio = (pcm8k: Uint8Array) => {
+      recorder.addAiAudio(pcm8k);
+      const call = this.activeCalls.get(uuid);
+      if (!call) return;
+      for (const ws of call.fsSockets) {
+        try { ws.send(pcm8k); } catch { /* socket closed */ }
+      }
+    };
+
+    // Hangup-after-turn-complete
+    let hangupScheduled = false;
+    if (engine.onTurnComplete !== undefined) {
+      engine.onTurnComplete = () => {
+        const call = this.activeCalls.get(uuid);
+        if (call?.pendingHangup && !hangupScheduled) {
+          hangupScheduled = true;
+          console.log(`[telephony] Inbound call ${uuid}: turn complete after end_call — hanging up in 5s`);
+          this.trackTimer(uuid, setTimeout(() => this.endCall(uuid).catch(() => {}), 5000));
+        }
+      };
+    }
+
+    this.activeCalls.set(uuid, {
+      state: callState,
+      engine,
+      recorder,
+      fsSockets: new Set(),
+      transcriptSockets: new Set(),
+      listenSockets: new Set(),
+      listenMode: false,
+      pendingTimers: new Set(),
+    });
+
+    // Connect engine
+    try {
+      await engine.connect();
+      console.log(`[telephony] Inbound call ${uuid}: ${engine.engineLabel} connected, waiting for audio fork`);
+    } catch (err) {
+      console.error(`[telephony] Inbound call ${uuid}: engine connection failed:`, err);
+      callState.status = "failed";
+      callState.error = err instanceof Error ? err.message : "Engine connection failed";
+      callState.endedAt = Date.now();
+      saveCall(callState);
+      this.activeCalls.delete(uuid);
+      return;
+    }
+
+    // Safety: auto-hangup after max duration
+    const timer = setTimeout(() => {
+      console.log(`[telephony] Inbound call ${uuid} hit max duration (${maxDuration}s), hanging up`);
+      this.endCall(uuid).catch(() => {});
+    }, maxDuration * 1000);
+
+    const call = this.activeCalls.get(uuid);
+    if (call) call.maxDurationTimer = timer;
+
+    saveCall(callState);
+    this.emit({ type: "status", callId: uuid, status: "active" });
+  }
+
+  /** Start listening for inbound calls via ESL event subscription */
+  startInboundListener(): void {
+    const telSettings = getSettings();
+    if (!telSettings.inboundEnabled) {
+      console.log("[telephony] Inbound listener not started — inbound disabled");
+      return;
+    }
+
+    if (this.inboundSubscription) {
+      this.inboundSubscription.stop();
+    }
+
+    console.log("[telephony] Starting inbound call listener");
+    this.inboundSubscription = eslSubscribe(
+      telSettings.freeswitch,
+      ({ uuid, callerNumber }) => {
+        this.handleInboundCall(uuid, callerNumber).catch(err => {
+          console.error("[telephony] Failed to handle inbound call:", err);
+        });
+      },
+    );
+  }
+
+  /** Stop inbound listener */
+  stopInboundListener(): void {
+    if (this.inboundSubscription) {
+      this.inboundSubscription.stop();
+      this.inboundSubscription = null;
+      console.log("[telephony] Inbound listener stopped");
+    }
+  }
+
   /** Shutdown: end all calls */
   async shutdown(): Promise<void> {
+    this.stopInboundListener();
     const callIds = Array.from(this.activeCalls.keys());
     await Promise.all(callIds.map((id) => this.endCall(id)));
   }
@@ -536,11 +861,12 @@ const LANGUAGE_NAMES: Record<string, string> = {
   ar: "Arabic (العربية)",
 };
 
-function buildTelephonyPrompt(taskPrompt: string, phoneNumber: string, contact?: TelephonyContact | null, language?: string): string {
+function buildTelephonyPrompt(taskPrompt: string, phoneNumber: string, contact?: TelephonyContact | null, language?: string, direction: "outbound" | "inbound" = "outbound", knowledgeBase?: string): string {
   const langCode = language || "de";
   const langName = LANGUAGE_NAMES[langCode] || langCode;
+  const isInbound = direction === "inbound";
 
-  let prompt = `You are conducting a PHONE CALL. You are speaking to a real person on the telephone.
+  let prompt = `You are ${isInbound ? "ANSWERING" : "conducting"} a PHONE CALL. You are speaking to a real person on the telephone.
 
 YOUR TASK: ${taskPrompt}
 
@@ -548,14 +874,16 @@ LANGUAGE: You MUST speak ${langName}. All your responses must be in ${langName}.
 
 CRITICAL PHONE CALL RULES:
 - You are on a TELEPHONE. Speak naturally, briefly, and conversationally.
-- When you receive the signal that the callee picked up, START SPEAKING IMMEDIATELY with your greeting. Do not wait for them to say something first.
+- ${isInbound
+    ? "Someone is calling YOU. Answer warmly and ask how you can help."
+    : "When you receive the signal that the callee picked up, START SPEAKING IMMEDIATELY with your greeting. Do not wait for them to say something first."}
 - Maximum 2-3 short sentences per response. Nobody likes long monologues on the phone.
 - Use natural filler words appropriate for ${langName}.
 - If you don't understand something, politely ask them to repeat.
-- When your task is complete, summarize the result and say goodbye politely.
+- When the conversation is complete, say goodbye politely.
 - If asked directly whether you're an AI, be honest.
 - NEVER mention that you are calling on behalf of "HeyHank" or a "platform" unless asked.
-- The phone number you're calling is: ${phoneNumber}`;
+- ${isInbound ? `The caller's phone number is: ${phoneNumber}` : `The phone number you're calling is: ${phoneNumber}`}`;
 
   // Inject contact info
   if (contact) {
@@ -573,7 +901,15 @@ CRITICAL PHONE CALL RULES:
   const hasScript = (contact?.callFlow && contact.callFlow.nodes.length > 0) || contact?.script;
 
   if (!hasScript) {
-    prompt += `\n\nDEFAULT CALL FLOW:
+    prompt += isInbound
+      ? `\n\nDEFAULT INBOUND CALL FLOW:
+1. Answer warmly (e.g., "Hello, how can I help you?")
+2. Listen to what the caller needs
+3. Help them to the best of your ability
+4. If you cannot help, politely explain and suggest alternatives
+5. When the caller is satisfied, thank them and say goodbye
+6. Use the end_call tool when the conversation is finished`
+      : `\n\nDEFAULT CALL FLOW:
 1. Greet the person naturally (e.g., "Hello, good day!")
 2. State your request concisely
 3. Listen and respond to their questions
@@ -589,6 +925,11 @@ HANGING UP — FOLLOW THESE RULES STRICTLY:
 - Only call end_call after a clear mutual goodbye — NEVER during or right after speaking.
 - If unsure whether to hang up, DON'T. Let the other person end the conversation naturally.
 - It is MUCH better to stay on the line too long than to hang up too early.`;
+
+  // Inject knowledge base for inbound calls
+  if (knowledgeBase?.trim()) {
+    prompt += `\n\nKNOWLEDGE BASE — Use this information to answer the caller's questions accurately:\n${knowledgeBase.trim()}`;
+  }
 
   return prompt;
 }

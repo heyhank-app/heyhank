@@ -1,7 +1,8 @@
 // ─── Telephony Store ──────────────────────────────────────────────────────────
 // File-based persistence for telephony settings and call history.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { atomicWriteFileSync } from "../fs-utils.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { TelephonySettings, CallState, TelephonyContact } from "./call-types.js";
@@ -31,7 +32,7 @@ export function getSettings(): TelephonySettings {
 
 export function saveSettings(settings: TelephonySettings): void {
   ensureDirs();
-  writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf-8");
+  atomicWriteFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
 }
 
 // ─── Contacts ───────────────────────────────────────────────────────────────
@@ -85,7 +86,7 @@ export function resolveContactByName(nameQuery: string): TelephonyContact | null
 export function saveCall(call: CallState): void {
   ensureDirs();
   const file = join(CALLS_DIR, `${call.id}.json`);
-  writeFileSync(file, JSON.stringify(call, null, 2), "utf-8");
+  atomicWriteFileSync(file, JSON.stringify(call, null, 2));
 }
 
 export function getCall(callId: string): CallState | null {
@@ -102,17 +103,17 @@ export function listCalls(limit = 50): CallState[] {
   ensureDirs();
   try {
     const files = readdirSync(CALLS_DIR)
-      .filter((f) => f.endsWith(".json"))
-      .sort()
-      .reverse()
-      .slice(0, limit);
-    return files.map((f) => {
+      .filter((f) => f.endsWith(".json"));
+    // Parse all calls, sort by startedAt descending (newest first), then apply limit
+    const calls = files.map((f) => {
       try {
         return JSON.parse(readFileSync(join(CALLS_DIR, f), "utf-8")) as CallState;
       } catch {
         return null;
       }
     }).filter(Boolean) as CallState[];
+    calls.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+    return calls.slice(0, limit);
   } catch {
     return [];
   }

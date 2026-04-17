@@ -8,8 +8,10 @@ interface CallInfo {
   prompt: string;
   durationSeconds: number;
   startedAt: number;
+  direction?: "outbound" | "inbound";
   summary?: string | null;
   transcript?: Array<{ speaker: string; text: string; ts: number }>;
+  audioFile?: string | null;
 }
 
 interface CallFlowNode {
@@ -77,7 +79,8 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
   const [phone, setPhone] = useState("");
   const [prompt, setPrompt] = useState("");
   const [calling, setCalling] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [historyLimit, setHistoryLimit] = useState(50);
   // Settings state
   const [telSettings, setTelSettings] = useState<{
     enabled: boolean;
@@ -118,12 +121,12 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
     loadData();
     const interval = setInterval(loadData, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [historyLimit]);
 
   // Load contacts + settings
   useEffect(() => {
-    api.getContacts().then((r) => setContacts(r.contacts)).catch(() => {});
-    api.getTelephonySettings().then((s) => setTelSettings(s as typeof telSettings)).catch(() => {});
+    api.getContacts().then((r) => setContacts(r.contacts)).catch((e) => { setError(e instanceof Error ? e.message : "Failed to load contacts"); setTimeout(() => setError(null), 5000); });
+    api.getTelephonySettings().then((s) => setTelSettings(s as typeof telSettings)).catch((e) => { setError(e instanceof Error ? e.message : "Failed to load settings"); setTimeout(() => setError(null), 5000); });
   }, []);
 
   // Auto-scroll transcript
@@ -137,17 +140,17 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
     try {
       const [active, hist] = await Promise.all([
         api.getActiveCalls(),
-        api.getCallHistory(20),
+        api.getCallHistory(historyLimit),
       ]);
       setActiveCalls(active.calls);
       setHistory(hist.calls);
-    } catch { /* silent */ }
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to load call data"); setTimeout(() => setError(null), 5000); }
   }
 
   async function handleCall() {
     if (!phone.trim() || !prompt.trim() || calling) return;
     setCalling(true);
-    setError("");
+    setError(null);
     try {
       const result = await api.startCall({ phone: phone.trim(), prompt: prompt.trim() });
       if (result.error) {
@@ -190,10 +193,11 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
   }
 
   async function handleEndCall(callId: string) {
+    if (!confirm("End this call?")) return;
     try {
       await api.endCall(callId);
       loadData();
-    } catch { /* silent */ }
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to end call"); setTimeout(() => setError(null), 5000); }
   }
 
   async function addContact() {
@@ -203,14 +207,15 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
       setContacts((prev) => [...prev, c]);
       setNewContact({ name: "", phone: "", notes: "", language: "en" });
       setShowAddContact(false);
-    } catch { /* silent */ }
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to add contact"); setTimeout(() => setError(null), 5000); }
   }
 
   async function removeContact(id: string) {
+    if (!confirm("Remove this contact?")) return;
     try {
       await api.deleteContact(id);
       setContacts((prev) => prev.filter((c) => c.id !== id));
-    } catch { /* silent */ }
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to remove contact"); setTimeout(() => setError(null), 5000); }
   }
 
   async function saveContactEdit() {
@@ -219,7 +224,7 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
       const updated = await api.updateContact(editingContactId, editContactData);
       setContacts((prev) => prev.map((c) => c.id === editingContactId ? updated : c));
       setEditingContactId(null);
-    } catch { /* silent */ }
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to save contact"); setTimeout(() => setError(null), 5000); }
   }
 
   function openScriptEditor(contact: Contact) {
@@ -250,7 +255,7 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
       }
       const updated = await api.updateContact(scriptContactId, patch);
       setContacts(prev => prev.map(c => c.id === scriptContactId ? { ...c, ...updated } : c));
-    } catch { /* silent */ }
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to save script"); setTimeout(() => setError(null), 5000); }
     setSavingScript(false);
     setScriptContactId(null);
   }
@@ -279,6 +284,7 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
 
   function deleteFlowNode(nodeId: string) {
     if (!callFlow) return;
+    if (!confirm("Delete this flow node? Connected edges will also be removed.")) return;
     setCallFlow({
       ...callFlow,
       nodes: callFlow.nodes.filter(n => n.id !== nodeId),
@@ -297,6 +303,7 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
 
   function deleteFlowEdge(edgeId: string) {
     if (!callFlow) return;
+    if (!confirm("Delete this flow edge?")) return;
     setCallFlow({
       ...callFlow,
       edges: callFlow.edges.filter(e => e.id !== edgeId),
@@ -328,7 +335,7 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
       await api.updateTelephonySettings(updates);
       const fresh = await api.getTelephonySettings();
       setTelSettings(fresh as typeof telSettings);
-    } catch { /* silent */ }
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to save settings"); setTimeout(() => setError(null), 5000); }
     setSaving(false);
   }
 
@@ -352,13 +359,19 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
         gcpProjectId: telSettings.gcpProjectId,
         gcpLocation: telSettings.gcpLocation,
         gcpServiceAccountKey: telSettings.gcpServiceAccountKey,
+        ...(telSettings as any).defaultLanguage && { defaultLanguage: (telSettings as any).defaultLanguage },
+        ...(telSettings as any).inboundEnabled !== undefined && { inboundEnabled: (telSettings as any).inboundEnabled },
+        ...(telSettings as any).defaultInboundPrompt && { defaultInboundPrompt: (telSettings as any).defaultInboundPrompt },
+        ...(telSettings as any).defaultInboundVoice && { defaultInboundVoice: (telSettings as any).defaultInboundVoice },
+        ...(telSettings as any).inboundKnowledgeBase !== undefined && { inboundKnowledgeBase: (telSettings as any).inboundKnowledgeBase },
+        ...(telSettings as any).voicePipeline !== undefined && { voicePipeline: (telSettings as any).voicePipeline },
       });
       const fresh = await api.getTelephonySettings();
       setTelSettings(fresh as typeof telSettings);
       setSettingsDirty(false);
       setSettingsSaved(true);
       setTimeout(() => setSettingsSaved(false), 3000);
-    } catch { /* silent */ }
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to save settings"); setTimeout(() => setError(null), 5000); }
     setSaving(false);
   }
 
@@ -380,15 +393,16 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
       setTelSettings(fresh as typeof telSettings);
       setShowAddTrunk(false);
       setNewTrunk({ name: "peoplefone", provider: "peoplefone", username: "", password: "", server: "sip.peoplefone.at", callerId: "", enabled: true });
-    } catch { /* silent */ }
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to add trunk"); setTimeout(() => setError(null), 5000); }
   }
 
   async function removeTrunk(id: string) {
+    if (!confirm("Remove this SIP trunk? Inbound calls via this trunk will stop working.")) return;
     try {
       await fetch(`/api/telephony/trunks/${encodeURIComponent(id)}`, { method: "DELETE" });
       const fresh = await api.getTelephonySettings();
       setTelSettings(fresh as typeof telSettings);
-    } catch { /* silent */ }
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to remove trunk"); setTimeout(() => setError(null), 5000); }
   }
 
   function viewCall(call: CallInfo) {
@@ -400,13 +414,30 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
       api.getCall(call.id).then((full) => {
         setSelectedCall({ ...call, ...full });
         setLiveTranscript(full.transcript || []);
-      }).catch(() => {});
+      }).catch((e) => { setError(e instanceof Error ? e.message : "Failed to load call details"); setTimeout(() => setError(null), 5000); });
     }
   }
 
+  if (telSettings === null) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-6 h-6 border-2 border-cc-muted/30 border-t-cc-primary rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-sm text-cc-muted">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`h-full overflow-auto ${embedded ? "" : ""}`}>
-      <div className="max-w-3xl mx-auto px-4 py-8 sm:px-6">
+    <div className="h-full overflow-y-auto bg-cc-bg">
+      {/* Error toast */}
+      {error && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm shadow-lg max-w-md" role="alert">
+          {error}
+        </div>
+      )}
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10 pb-safe">
         <div className="mb-8">
           <h1 className="text-lg font-semibold text-cc-fg">Telephony</h1>
           <p className="text-xs text-cc-muted mt-1">
@@ -424,6 +455,7 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="+43 664 1234567"
+                aria-label="Phone number to call"
                 className="w-full px-3 py-2 text-sm bg-cc-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted/60 focus:outline-none focus:border-cc-primary"
               />
             </div>
@@ -433,6 +465,7 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder="Task for the AI (e.g. 'Reserve a table for 4 at 7pm on Friday')"
                 rows={2}
+                aria-label="Call prompt or task for the AI"
                 className="w-full px-3 py-2 text-sm bg-cc-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted/60 focus:outline-none focus:border-cc-primary resize-none"
               />
             </div>
@@ -456,11 +489,7 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
           </div>
         </div>
 
-        {error && (
-          <div className="mb-4 px-3 py-2 rounded-lg bg-cc-error/5 border border-cc-error/20">
-            <p className="text-xs text-cc-error">{error}</p>
-          </div>
-        )}
+        {/* Error display removed — errors are now shown via the fixed-position toast above */}
 
         {/* Contacts */}
         <div className="bg-cc-card border border-cc-border rounded-xl p-4 mb-6">
@@ -560,23 +589,24 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                           {(c.script || c.callFlow) && <span className="ml-1.5 text-green-500 text-[9px]">(script)</span>}
                         </p>
                       </button>
-                      <div className="flex items-center gap-2 ml-2 shrink-0">
+                      <div className="flex items-center gap-1 ml-2 shrink-0">
                         <button
                           onClick={() => openScriptEditor(c)}
-                          className={`text-[11px] transition-colors cursor-pointer ${c.script || c.callFlow ? "text-green-500 hover:text-green-400" : "text-cc-muted hover:text-cc-fg"}`}
+                          className={`px-2 py-1.5 text-[11px] rounded transition-colors cursor-pointer ${c.script || c.callFlow ? "text-green-500 hover:text-green-400 hover:bg-green-500/10" : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"}`}
                           title={c.script || c.callFlow ? "Edit call script" : "Add call script"}
                         >
                           {c.script || c.callFlow ? "Script" : "+ Script"}
                         </button>
                         <button
                           onClick={() => { setEditingContactId(c.id); setEditContactData({ name: c.name, phone: c.phone, notes: c.notes || "", language: c.language || "en" }); }}
-                          className="text-[11px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                          className="px-3 py-2 min-h-[44px] text-[11px] text-cc-muted hover:text-cc-fg hover:bg-cc-hover rounded transition-colors cursor-pointer"
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => removeContact(c.id)}
-                          className="text-[11px] text-red-400 hover:text-red-300 transition-colors cursor-pointer"
+                          aria-label={`Remove contact ${c.name}`}
+                          className="px-3 py-2 min-h-[44px] text-[11px] text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors cursor-pointer"
                         >
                           Remove
                         </button>
@@ -709,7 +739,8 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                             {node.type !== "start" && (
                               <button
                                 onClick={() => deleteFlowNode(node.id)}
-                                className="text-[10px] text-red-400 hover:text-red-300 cursor-pointer"
+                                aria-label={`Remove ${node.type} node ${node.label || ""}`}
+                                className="px-3 py-2 min-h-[44px] text-[10px] text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded cursor-pointer"
                               >
                                 remove
                               </button>
@@ -809,7 +840,8 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                             </select>
                             <button
                               onClick={() => deleteFlowEdge(edge.id)}
-                              className="text-[10px] text-red-400 hover:text-red-300 cursor-pointer"
+                              aria-label="Remove flow edge"
+                              className="px-3 py-2 min-h-[44px] min-w-[44px] text-[10px] text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded cursor-pointer"
                             >
                               x
                             </button>
@@ -948,12 +980,14 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
           </div>
         )}
 
-        {/* Live Transcript */}
+        {/* Live Transcript / Call Detail */}
         {(liveTranscript.length > 0 || selectedCall) && (
           <div className="mb-6">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">
-                {selectedCall ? `Transcript — ${selectedCall.phone}` : "Live Transcript"}
+                {selectedCall
+                  ? `${selectedCall.direction === "inbound" ? "Inbound" : "Outbound"} — ${selectedCall.phone}`
+                  : "Live Transcript"}
               </h2>
               {selectedCall && (
                 <button
@@ -964,6 +998,29 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                 </button>
               )}
             </div>
+
+            {/* Audio Player */}
+            {selectedCall?.audioFile && (
+              <div className="mb-3 bg-cc-card border border-cc-border rounded-xl p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <svg className="w-3.5 h-3.5 text-cc-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" /></svg>
+                  <span className="text-[11px] text-cc-muted font-medium">Recording</span>
+                  {selectedCall.durationSeconds > 0 && (
+                    <span className="text-[10px] text-cc-muted">({formatDuration(selectedCall.durationSeconds)})</span>
+                  )}
+                </div>
+                <audio
+                  controls
+                  preload="metadata"
+                  className="w-full h-8"
+                  style={{ filter: "invert(0.8) hue-rotate(180deg)" }}
+                  src={`/api/telephony/calls/${selectedCall.id}/audio`}
+                />
+                <p className="text-[10px] text-cc-muted mt-1">Stereo: Left = Caller, Right = AI (Hank)</p>
+              </div>
+            )}
+
+            {/* Transcript */}
             <div
               ref={transcriptRef}
               className="bg-cc-card border border-cc-border rounded-xl p-3 max-h-[300px] overflow-y-auto space-y-2"
@@ -983,7 +1040,7 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                     }`}
                   >
                     <span className="text-[10px] text-cc-muted font-medium">
-                      {entry.speaker === "callee" ? "Callee" : entry.speaker === "ai" ? "AI" : "System"}
+                      {entry.speaker === "callee" ? "Caller" : entry.speaker === "ai" ? "Hank" : "System"}
                     </span>
                     <p className="mt-0.5">{entry.text}</p>
                   </div>
@@ -1027,21 +1084,21 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                     <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">FreeSWITCH ESL</h3>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="text-[11px] text-cc-muted">Host</label>
-                        <input type="text" value={telSettings.freeswitch.eslHost}
+                        <label htmlFor="fs-esl-host" className="text-[11px] text-cc-muted">Host</label>
+                        <input id="fs-esl-host" type="text" value={telSettings.freeswitch.eslHost}
                           onChange={(e) => editTelSettings({ freeswitch: { ...telSettings.freeswitch, eslHost: e.target.value } })}
                           className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
                       </div>
                       <div>
-                        <label className="text-[11px] text-cc-muted">Port</label>
-                        <input type="number" value={telSettings.freeswitch.eslPort}
+                        <label htmlFor="fs-esl-port" className="text-[11px] text-cc-muted">Port</label>
+                        <input id="fs-esl-port" type="number" value={telSettings.freeswitch.eslPort}
                           onChange={(e) => editTelSettings({ freeswitch: { ...telSettings.freeswitch, eslPort: parseInt(e.target.value) || 8021 } })}
                           className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
                       </div>
                     </div>
                     <div>
-                      <label className="text-[11px] text-cc-muted">ESL Password</label>
-                      <input type="password" value={telSettings.freeswitch.eslPassword || ""}
+                      <label htmlFor="fs-esl-password" className="text-[11px] text-cc-muted">ESL Password</label>
+                      <input id="fs-esl-password" type="password" value={telSettings.freeswitch.eslPassword || ""}
                         onChange={(e) => editTelSettings({ freeswitch: { ...telSettings.freeswitch, eslPassword: e.target.value } })}
                         className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
                     </div>
@@ -1079,7 +1136,8 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                         <div className="flex items-center gap-2">
                           <span className={`w-2 h-2 rounded-full ${trunk.enabled ? "bg-green-500" : "bg-cc-muted"}`} />
                           <button onClick={() => removeTrunk(trunk.id)}
-                            className="text-[11px] text-red-400 hover:text-red-300 transition-colors cursor-pointer">Remove</button>
+                            aria-label={`Remove trunk ${trunk.name}`}
+                            className="px-3 py-2 min-h-[44px] text-[11px] text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors cursor-pointer">Remove</button>
                         </div>
                       </div>
                     ))}
@@ -1139,8 +1197,8 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                   <div className="bg-cc-bg rounded-lg p-3 space-y-2 border border-cc-border">
                     <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Defaults</h3>
                     <div>
-                      <label className="text-[11px] text-cc-muted">Max Call Duration (seconds)</label>
-                      <input type="number" value={telSettings.maxCallDurationSeconds || 600}
+                      <label htmlFor="max-call-duration" className="text-[11px] text-cc-muted">Max Call Duration (seconds)</label>
+                      <input id="max-call-duration" type="number" value={telSettings.maxCallDurationSeconds || 600}
                         onChange={(e) => editTelSettings({ maxCallDurationSeconds: parseInt(e.target.value) || 600 })}
                         className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg" />
                       <p className="text-[10px] text-cc-muted mt-0.5">Safety limit — calls are automatically ended after this duration</p>
@@ -1151,8 +1209,9 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                   <div className="bg-cc-bg rounded-lg p-3 space-y-3 border border-cc-border">
                     <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Gemini Live Backend</h3>
                     <div>
-                      <label className="text-[11px] text-cc-muted">Backend</label>
+                      <label htmlFor="gemini-backend" className="text-[11px] text-cc-muted">Backend</label>
                       <select
+                        id="gemini-backend"
                         value={telSettings.geminiBackend || "aistudio"}
                         onChange={(e) => editTelSettings({ geminiBackend: e.target.value as "aistudio" | "vertexai" })}
                         className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg"
@@ -1169,8 +1228,8 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
 
                     {/* Voice — changes based on backend */}
                     <div>
-                      <label className="text-[11px] text-cc-muted">Default Voice</label>
-                      <select value={telSettings.defaultVoice || "Puck"} onChange={(e) => editTelSettings({ defaultVoice: e.target.value })}
+                      <label htmlFor="default-voice" className="text-[11px] text-cc-muted">Default Voice</label>
+                      <select id="default-voice" value={telSettings.defaultVoice || "Puck"} onChange={(e) => editTelSettings({ defaultVoice: e.target.value })}
                         className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg">
                         {telSettings.geminiBackend === "vertexai" ? (
                           <>
@@ -1231,6 +1290,32 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                       </p>
                     </div>
 
+                    {/* Default Language */}
+                    <div>
+                      <label htmlFor="default-language" className="text-[11px] text-cc-muted">Default Language</label>
+                      <select id="default-language" value={(telSettings as any).defaultLanguage || "de"} onChange={(e) => editTelSettings({ defaultLanguage: e.target.value } as any)}
+                        className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg">
+                        <option value="de">Deutsch</option>
+                        <option value="en">English</option>
+                        <option value="fr">Français</option>
+                        <option value="it">Italiano</option>
+                        <option value="es">Español</option>
+                        <option value="pt">Português</option>
+                        <option value="nl">Nederlands</option>
+                        <option value="pl">Polski</option>
+                        <option value="cs">Čeština</option>
+                        <option value="hu">Magyar</option>
+                        <option value="ro">Română</option>
+                        <option value="tr">Türkçe</option>
+                        <option value="ru">Русский</option>
+                        <option value="ja">日本語</option>
+                        <option value="zh">中文</option>
+                        <option value="ko">한국어</option>
+                        <option value="ar">العربية</option>
+                      </select>
+                      <p className="text-[10px] text-cc-muted mt-0.5">Used for outbound and inbound calls when a contact has no language set.</p>
+                    </div>
+
                     {telSettings.geminiBackend === "vertexai" && (
                       <div className="space-y-3 mt-1 pl-2 border-l-2 border-cc-primary/30">
                         <div className="text-[10px] text-cc-muted space-y-1">
@@ -1243,8 +1328,9 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <div>
-                            <label className="text-[11px] text-cc-muted">GCP Project ID</label>
+                            <label htmlFor="gcp-project-id" className="text-[11px] text-cc-muted">GCP Project ID</label>
                             <input
+                              id="gcp-project-id"
                               type="text"
                               value={telSettings.gcpProjectId || ""}
                               onChange={(e) => editTelSettings({ gcpProjectId: e.target.value })}
@@ -1254,8 +1340,9 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                             <p className="text-[10px] text-cc-muted mt-0.5">Find this in the GCP Console dashboard</p>
                           </div>
                           <div>
-                            <label className="text-[11px] text-cc-muted">Region</label>
+                            <label htmlFor="gcp-region" className="text-[11px] text-cc-muted">Region</label>
                             <select
+                              id="gcp-region"
                               value={telSettings.gcpLocation || "europe-west4"}
                               onChange={(e) => editTelSettings({ gcpLocation: e.target.value })}
                               className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg"
@@ -1269,8 +1356,9 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                           </div>
                         </div>
                         <div>
-                          <label className="text-[11px] text-cc-muted">Service Account Key</label>
+                          <label htmlFor="gcp-service-key" className="text-[11px] text-cc-muted">Service Account Key</label>
                           <input
+                            id="gcp-service-key"
                             type="text"
                             value={telSettings.gcpServiceAccountKey || ""}
                             onChange={(e) => editTelSettings({ gcpServiceAccountKey: e.target.value })}
@@ -1279,6 +1367,230 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                           />
                           <p className="text-[10px] text-cc-muted mt-0.5">Absolute path to the JSON key file on this server. Create one in GCP Console → IAM → Service Accounts → Keys.</p>
                         </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Inbound Call Handling */}
+                  <div className="bg-cc-bg rounded-lg p-3 space-y-3 border border-cc-border">
+                    <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Inbound Call Handling</h3>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={(telSettings as any).inboundEnabled || false}
+                        onChange={(e) => editTelSettings({ inboundEnabled: e.target.checked } as any)}
+                        className="rounded border-cc-border"
+                      />
+                      <span className="text-xs text-cc-fg">Enable inbound call handling</span>
+                    </label>
+                    <p className="text-[10px] text-cc-muted">When enabled, Hank will automatically answer incoming calls and respond using Gemini Live.</p>
+                    {(telSettings as any).inboundEnabled && (
+                      <div className="space-y-3 pl-2 border-l-2 border-cc-primary/30">
+                        <div>
+                          <label className="text-[11px] text-cc-muted">Default Inbound Prompt</label>
+                          <textarea
+                            value={(telSettings as any).defaultInboundPrompt || "You are Hank, a helpful AI assistant answering the phone."}
+                            onChange={(e) => editTelSettings({ defaultInboundPrompt: e.target.value } as any)}
+                            className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg resize-y"
+                            rows={3}
+                            placeholder="System prompt for inbound calls..."
+                          />
+                          <p className="text-[10px] text-cc-muted mt-0.5">This prompt is used when the caller is not a known contact (or the contact has no script).</p>
+                        </div>
+                        <div>
+                          <label className="text-[11px] text-cc-muted">Knowledge Base</label>
+                          <textarea
+                            value={(telSettings as any).inboundKnowledgeBase || ""}
+                            onChange={(e) => editTelSettings({ inboundKnowledgeBase: e.target.value } as any)}
+                            className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg resize-y font-mono"
+                            rows={10}
+                            placeholder="Business info, FAQs, services, pricing — everything Hank should know when answering calls..."
+                          />
+                          <p className="text-[10px] text-cc-muted mt-0.5">This information is injected into every inbound call so Hank can answer questions about your business accurately.</p>
+                        </div>
+                        <div>
+                          <label className="text-[11px] text-cc-muted">Inbound Voice</label>
+                          <select
+                            value={(telSettings as any).defaultInboundVoice || telSettings.defaultVoice || "Kore"}
+                            onChange={(e) => editTelSettings({ defaultInboundVoice: e.target.value } as any)}
+                            className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg"
+                          >
+                            <option value="">Same as outbound ({telSettings.defaultVoice || "Kore"})</option>
+                            <optgroup label="Male">
+                              <option value="Puck">Puck</option>
+                              <option value="Charon">Charon</option>
+                              <option value="Fenrir">Fenrir</option>
+                            </optgroup>
+                            <optgroup label="Female">
+                              <option value="Kore">Kore</option>
+                              <option value="Aoede">Aoede</option>
+                              <option value="Leda">Leda</option>
+                            </optgroup>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Voice Pipeline (Alternative Engine) */}
+                  <div className="bg-cc-bg rounded-lg p-3 space-y-3 border border-cc-border">
+                    <h3 className="text-xs font-semibold text-cc-muted uppercase tracking-wider">Voice Engine</h3>
+                    <p className="text-[10px] text-cc-muted">
+                      Alternative zu Gemini Live: Pipeline-basierte Engine mit Google Cloud STT + TTS und konfigurierbarem LLM.
+                      Vorteil: <strong>vorgerendertes Begrüßungs-Audio</strong> spielt sofort beim Abheben (0ms Latenz).
+                    </p>
+
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={(telSettings as any).voicePipeline?.enabled || false}
+                        onChange={(e) => editTelSettings({
+                          voicePipeline: {
+                            ...((telSettings as any).voicePipeline || {}),
+                            enabled: e.target.checked,
+                          },
+                        } as any)}
+                        className="rounded border-cc-border"
+                      />
+                      <span className="text-xs text-cc-fg">Pipeline-Engine aktivieren</span>
+                    </label>
+
+                    {(telSettings as any).voicePipeline?.enabled && (
+                      <div className="space-y-3 pl-2 border-l-2 border-cc-primary/30">
+                        <div>
+                          <label htmlFor="vp-engine" className="text-[11px] text-cc-muted">Default Engine</label>
+                          <select
+                            id="vp-engine"
+                            value={(telSettings as any).voicePipeline?.engine || "pipeline"}
+                            onChange={(e) => editTelSettings({
+                              voicePipeline: { ...((telSettings as any).voicePipeline || {}), engine: e.target.value },
+                            } as any)}
+                            className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg"
+                          >
+                            <option value="pipeline">Pipeline (Google STT/TTS + LLM)</option>
+                            <option value="gemini-live">Gemini Live (klassisch)</option>
+                          </select>
+                          <p className="text-[10px] text-cc-muted mt-0.5">Welche Engine wird für neue Anrufe verwendet?</p>
+                        </div>
+
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={(telSettings as any).voicePipeline?.fallbackToGeminiLive ?? true}
+                            onChange={(e) => editTelSettings({
+                              voicePipeline: { ...((telSettings as any).voicePipeline || {}), fallbackToGeminiLive: e.target.checked },
+                            } as any)}
+                            className="rounded border-cc-border"
+                          />
+                          <span className="text-xs text-cc-fg">Fallback auf Gemini Live bei Pipeline-Fehler</span>
+                        </label>
+
+                        <div>
+                          <label htmlFor="vp-tts-voice" className="text-[11px] text-cc-muted">TTS Voice (Google Cloud)</label>
+                          <select
+                            id="vp-tts-voice"
+                            value={(telSettings as any).voicePipeline?.tts?.voice || "de-DE-Chirp-HD-D"}
+                            onChange={(e) => editTelSettings({
+                              voicePipeline: {
+                                ...((telSettings as any).voicePipeline || {}),
+                                tts: { ...((telSettings as any).voicePipeline?.tts || {}), voice: e.target.value },
+                              },
+                            } as any)}
+                            className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg"
+                          >
+                            <optgroup label="Chirp HD (neueste, ~$16/1M chars)">
+                              <option value="de-DE-Chirp-HD-D">de-DE-Chirp-HD-D (männlich)</option>
+                              <option value="de-DE-Chirp-HD-O">de-DE-Chirp-HD-O (männlich)</option>
+                              <option value="de-DE-Chirp-HD-F">de-DE-Chirp-HD-F (weiblich)</option>
+                            </optgroup>
+                            <optgroup label="Studio (Premium, ~$160/1M chars)">
+                              <option value="de-DE-Studio-B">de-DE-Studio-B (männlich)</option>
+                              <option value="de-DE-Studio-C">de-DE-Studio-C (weiblich)</option>
+                            </optgroup>
+                            <optgroup label="Neural2 (Standard, ~$16/1M chars)">
+                              <option value="de-DE-Neural2-G">de-DE-Neural2-G (männlich)</option>
+                              <option value="de-DE-Neural2-H">de-DE-Neural2-H (männlich)</option>
+                            </optgroup>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label htmlFor="vp-language" className="text-[11px] text-cc-muted">STT/TTS Language</label>
+                          <select
+                            id="vp-language"
+                            value={(telSettings as any).voicePipeline?.stt?.language || "de-DE"}
+                            onChange={(e) => {
+                              const lang = e.target.value;
+                              editTelSettings({
+                                voicePipeline: {
+                                  ...((telSettings as any).voicePipeline || {}),
+                                  stt: { ...((telSettings as any).voicePipeline?.stt || {}), language: lang },
+                                },
+                              } as any);
+                            }}
+                            className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg"
+                          >
+                            <option value="de-DE">Deutsch (DE)</option>
+                            <option value="de-AT">Deutsch (AT)</option>
+                            <option value="en-US">English (US)</option>
+                            <option value="en-GB">English (GB)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label htmlFor="vp-llm-provider" className="text-[11px] text-cc-muted">LLM Provider (nur für Telephony)</label>
+                          <select
+                            id="vp-llm-provider"
+                            value={(telSettings as any).voicePipeline?.llm?.provider || "groq"}
+                            onChange={(e) => {
+                              const provider = e.target.value;
+                              editTelSettings({
+                                voicePipeline: {
+                                  ...((telSettings as any).voicePipeline || {}),
+                                  llm: { ...((telSettings as any).voicePipeline?.llm || {}), provider },
+                                },
+                              } as any);
+                            }}
+                            className="w-full px-2 py-1.5 text-xs bg-cc-hover border border-cc-border rounded text-cc-fg"
+                          >
+                            <optgroup label="Empfohlen für Voice (niedrigste Latenz)">
+                              <option value="groq">Groq (Llama 3.3 70B, ~50ms TTFT)</option>
+                            </optgroup>
+                            <optgroup label="Cloud-Anbieter">
+                              <option value="anthropic">Anthropic (Claude)</option>
+                              <option value="openai">OpenAI (GPT)</option>
+                              <option value="mistral">Mistral AI</option>
+                              <option value="deepseek">DeepSeek</option>
+                              <option value="xai">xAI (Grok)</option>
+                              <option value="qwen">Qwen</option>
+                              <option value="moonshot">Moonshot (Kimi)</option>
+                              <option value="venice">Venice AI</option>
+                            </optgroup>
+                            <optgroup label="Gateways">
+                              <option value="openrouter">OpenRouter</option>
+                              <option value="together">Together AI</option>
+                            </optgroup>
+                          </select>
+                          <p className="mt-1 text-[10px] text-cc-muted">
+                            Der gewählte Provider muss unter <em>Settings → Providers</em> konfiguriert sein (API-Key hinterlegt).
+                          </p>
+                        </div>
+
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={(telSettings as any).voicePipeline?.preRenderGreetings ?? true}
+                            onChange={(e) => editTelSettings({
+                              voicePipeline: { ...((telSettings as any).voicePipeline || {}), preRenderGreetings: e.target.checked },
+                            } as any)}
+                            className="rounded border-cc-border"
+                          />
+                          <span className="text-xs text-cc-fg">Begrüßungs-Audio pro Kontakt vorrendern (Cache)</span>
+                        </label>
+
+                        <p className="text-[10px] text-cc-muted">
+                          Voraussetzung: Cloud Speech-to-Text + Cloud Text-to-Speech APIs müssen im GCP-Projekt aktiviert sein. Service Account braucht zusätzlich die Rollen <em>Cloud Speech Client</em> + <em>Service Usage Consumer</em>.
+                        </p>
                       </div>
                     )}
                   </div>
@@ -1328,9 +1640,13 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                       <span className={`w-1.5 h-1.5 rounded-full ${
                         call.status === "ended" ? "bg-cc-muted" : call.status === "failed" ? "bg-red-500" : "bg-green-500"
                       }`} />
+                      <span className="text-[10px] text-cc-muted">{call.direction === "inbound" ? "IN" : "OUT"}</span>
                       <span className="text-sm text-cc-fg">{call.phone}</span>
                     </div>
                     <div className="flex items-center gap-3">
+                      {call.audioFile && (
+                        <svg className="w-3 h-3 text-cc-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /></svg>
+                      )}
                       {call.durationSeconds > 0 && (
                         <span className="text-[11px] text-cc-muted">{formatDuration(call.durationSeconds)}</span>
                       )}
@@ -1343,6 +1659,14 @@ export function TelephonyPage({ embedded }: { embedded?: boolean }) {
                   )}
                 </button>
               ))}
+              {history.length >= historyLimit && (
+                <button
+                  onClick={() => setHistoryLimit((prev) => prev + 50)}
+                  className="w-full text-center py-2 text-xs text-cc-primary hover:text-cc-primary/80 transition-colors cursor-pointer"
+                >
+                  Load more
+                </button>
+              )}
             </div>
           )}
         </div>

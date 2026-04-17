@@ -1,20 +1,24 @@
 <!-- HeyHank Inbound Dialplan (public context) -->
 <!-- peoplefone sends inbound calls with format "43720271025" (country code, no +) -->
-<!-- Routes incoming calls to the default context for further processing -->
+<!-- Answers inbound calls and bridges audio to HeyHank via mod_audio_fork WebSocket -->
 <include>
   <extension name="heyhank_inbound">
     <!-- Match Austrian number format from peoplefone (43XXXXXXXXX) -->
     <condition field="destination_number" expression="^(43\d+)$">
-      <action application="set" data="domain_name=$${domain}"/>
-      <action application="transfer" data="+$1 XML default"/>
+      <action application="answer"/>
+      <action application="set" data="RECORD_STEREO=true"/>
+      <action application="export" data="nolocal:execute_on_answer=audio_fork::ws://localhost:3457/ws/telephony/audio/${uuid} mono 8000 heyhank {} true true 8000"/>
+      <action application="playback" data="silence_stream://-1"/>
     </condition>
   </extension>
 
   <extension name="heyhank_inbound_plus">
     <!-- Match if it arrives with + prefix -->
     <condition field="destination_number" expression="^(\+43\d+)$">
-      <action application="set" data="domain_name=$${domain}"/>
-      <action application="transfer" data="$1 XML default"/>
+      <action application="answer"/>
+      <action application="set" data="RECORD_STEREO=true"/>
+      <action application="export" data="nolocal:execute_on_answer=audio_fork::ws://localhost:3457/ws/telephony/audio/${uuid} mono 8000 heyhank {} true true 8000"/>
+      <action application="playback" data="silence_stream://-1"/>
     </condition>
   </extension>
 </include>

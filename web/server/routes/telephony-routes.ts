@@ -8,6 +8,30 @@ import type { CallConfig, SipTrunkConfig, TelephonyContact } from "../telephony/
 import { eslCommand, eslStatus } from "../telephony/esl-client.js";
 import { syncAndReload, checkGatewayStatus } from "../telephony/freeswitch-sync.js";
 import { randomUUID } from "node:crypto";
+import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { getPipelineSettingsFrom } from "../voice-pipeline/manager.js";
+import { preRenderAllGreetings, clearCache } from "../voice-pipeline/greeting-cache.js";
+
+/**
+ * Background-warm the greeting cache so the first call has 0ms TTS latency.
+ * Fire-and-forget — failures are logged but don't block the calling endpoint.
+ */
+function warmGreetingsAsync(opts: { clearFirst?: boolean } = {}): void {
+  setImmediate(async () => {
+    try {
+      const settings = store.getSettings();
+      const pipelineSettings = getPipelineSettingsFrom(settings);
+      if (!pipelineSettings.enabled || !pipelineSettings.preRenderGreetings) return;
+      if (opts.clearFirst) clearCache();
+      const stats = await preRenderAllGreetings(settings.contacts, pipelineSettings);
+      console.log(`[telephony] Greeting cache warmed: ${stats.rendered} rendered, ${stats.cached} cached, ${stats.errors} errors`);
+    } catch (e) {
+      console.error("[telephony] Greeting warm failed:", e);
+    }
+  });
+}
 
 export function registerTelephonyRoutes(api: Hono): void {
   // ─── Calls ───────────────────────────────────────────────────────────
@@ -74,6 +98,29 @@ export function registerTelephonyRoutes(api: Hono): void {
     }
   });
 
+  /** Serve call audio recording (WAV) */
+  api.get("/telephony/calls/:id/audio", (c) => {
+    const id = c.req.param("id");
+    // Validate UUID format to prevent path traversal
+    if (!/^[a-f0-9-]{36}$/.test(id)) {
+      return c.json({ error: "Invalid call ID" }, 400);
+    }
+    const wavPath = join(homedir(), ".heyhank", "telephony", "calls", `${id}.wav`);
+    if (!existsSync(wavPath)) {
+      return c.json({ error: "Audio recording not found" }, 404);
+    }
+    const file = Bun.file(wavPath);
+    const stat = statSync(wavPath);
+    return new Response(file, {
+      headers: {
+        "Content-Type": "audio/wav",
+        "Content-Length": String(stat.size),
+        "Content-Disposition": `inline; filename="${id}.wav"`,
+        "Cache-Control": "private, max-age=86400",
+      },
+    });
+  });
+
   /** Call history */
   api.get("/telephony/history", (c) => {
     const limit = parseInt(c.req.query("limit") || "50", 10);
@@ -124,6 +171,13 @@ export function registerTelephonyRoutes(api: Hono): void {
       }
 
       store.saveSettings(updated);
+
+      // If voice settings changed, invalidate greeting cache and re-warm
+      const oldVoice = getPipelineSettingsFrom(current).tts.voice;
+      const newVoice = getPipelineSettingsFrom(updated).tts.voice;
+      const voiceChanged = oldVoice !== newVoice;
+      warmGreetingsAsync({ clearFirst: voiceChanged });
+
       return c.json({ success: true });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Failed to save settings" }, 500);
@@ -201,6 +255,7 @@ export function registerTelephonyRoutes(api: Hono): void {
         notes: body.notes?.trim() || undefined,
       };
       store.addContact(contact);
+      warmGreetingsAsync();
       return c.json(contact);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Failed to add contact" }, 500);
@@ -222,6 +277,8 @@ export function registerTelephonyRoutes(api: Hono): void {
       }
       const updated = store.updateContact(id, body);
       if (!updated) return c.json({ error: "Contact not found" }, 404);
+      // Re-render greeting if name/phone changed
+      if (body.name || body.phone) warmGreetingsAsync();
       return c.json(updated);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Failed to update contact" }, 500);

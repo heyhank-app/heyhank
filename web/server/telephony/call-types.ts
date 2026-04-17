@@ -50,6 +50,7 @@ export interface CallState {
   prompt: string;
   voice: string;
   status: CallStatus;
+  direction: "outbound" | "inbound";
   trunkId: string;
   callerId: string;
   transcript: TranscriptEntry[];
@@ -60,6 +61,7 @@ export interface CallState {
   endedAt: number | null;
   error: string | null;
   listenMode: boolean;
+  audioFile?: string | null; // Path to WAV recording (stereo: caller L, AI R)
 }
 
 /** Message from FreeSWITCH audio fork WebSocket (PCM audio chunks) */
@@ -134,12 +136,18 @@ export interface TelephonySettings {
   contacts: TelephonyContact[];
   defaultTrunkId: string | null;
   defaultVoice: string;
+  defaultLanguage: string; // e.g. "de", "en" — used when contact has no language set
   maxCallDurationSeconds: number;
   geminiApiKey?: string; // Override; falls back to main Gemini key
   geminiBackend?: "aistudio" | "vertexai"; // Default: aistudio
   gcpProjectId?: string; // Required for Vertex AI
   gcpLocation?: string; // e.g. "europe-west4" (default for Vertex AI)
   gcpServiceAccountKey?: string; // Path to service account JSON key file
+  // Inbound call handling
+  inboundEnabled?: boolean;
+  defaultInboundPrompt?: string; // System prompt for answering calls
+  defaultInboundVoice?: string; // Voice for inbound (default: same as defaultVoice)
+  inboundKnowledgeBase?: string; // Business info, FAQs, etc. injected into every inbound call
 }
 
 export const DEFAULT_TELEPHONY_SETTINGS: TelephonySettings = {
@@ -153,5 +161,8 @@ export const DEFAULT_TELEPHONY_SETTINGS: TelephonySettings = {
   contacts: [],
   defaultTrunkId: null,
   defaultVoice: "Kore",
+  defaultLanguage: "de",
   maxCallDurationSeconds: 600, // 10 min safety limit
+  inboundEnabled: false,
+  defaultInboundPrompt: "You are Hank, a helpful AI assistant answering the phone. Be friendly, concise, and helpful. Ask the caller how you can help them.",
 };

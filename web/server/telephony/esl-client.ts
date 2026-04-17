@@ -139,6 +139,128 @@ function parseHeaders(block: string): Record<string, string> {
 }
 
 /**
+ * Subscribe to FreeSWITCH events for inbound call detection.
+ * Maintains a persistent ESL connection that listens for CHANNEL_CREATE events.
+ * Auto-reconnects on disconnect.
+ */
+export function eslSubscribe(
+  config: FreeSwitchConfig,
+  onInboundCall: (info: { uuid: string; callerNumber: string }) => void,
+): { stop: () => void } {
+  let stopped = false;
+  let socket: Socket | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectDelay = 5000; // Start at 5s, exponential backoff up to 60s
+  let authFailed = false;
+
+  function connectAndSubscribe() {
+    if (stopped) return;
+
+    let buffer = "";
+    let authenticated = false;
+    let subscribed = false;
+    authFailed = false;
+
+    socket = connect(config.eslPort, config.eslHost, () => {
+      console.log("[esl-subscribe] Connected to FreeSWITCH for inbound events");
+    });
+
+    socket.setEncoding("utf-8");
+
+    socket.on("data", (chunk: string) => {
+      buffer += chunk;
+
+      while (buffer.includes("\n\n")) {
+        const delimIdx = buffer.indexOf("\n\n");
+        const block = buffer.slice(0, delimIdx);
+        buffer = buffer.slice(delimIdx + 2);
+
+        const headers = parseHeaders(block);
+
+        if (!authenticated) {
+          if (headers["Content-Type"] === "auth/request") {
+            socket!.write(`auth ${config.eslPassword}\n\n`);
+          } else if (headers["Reply-Text"]?.startsWith("+OK")) {
+            authenticated = true;
+            // Reset backoff on successful auth
+            reconnectDelay = 5000;
+            // Subscribe to channel create events
+            socket!.write("event plain CHANNEL_CREATE\n\n");
+          } else if (headers["Reply-Text"]?.startsWith("-ERR")) {
+            authFailed = true;
+            console.error("[esl-subscribe] Authentication failed:", headers["Reply-Text"]);
+            socket!.destroy();
+            return;
+          }
+        } else if (!subscribed) {
+          if (headers["Reply-Text"]?.startsWith("+OK")) {
+            subscribed = true;
+            console.log("[esl-subscribe] Subscribed to CHANNEL_CREATE events");
+          }
+        } else {
+          // Parse events — look for inbound calls
+          if (headers["Content-Type"] === "text/event-plain") {
+            const contentLength = parseInt(headers["Content-Length"] || "0", 10);
+            // Read the event body
+            let eventBody = "";
+            if (contentLength > 0 && buffer.length >= contentLength) {
+              eventBody = buffer.slice(0, contentLength);
+              buffer = buffer.slice(contentLength);
+            } else if (contentLength > 0) {
+              // Body incomplete — restore the full original buffer (headers + delimiter + remaining)
+              // so the next data event can parse the complete message
+              buffer = block + "\n\n" + buffer;
+              break;
+            }
+
+            // Parse event headers from the body
+            const eventHeaders = parseHeaders(eventBody || block);
+            const allHeaders = { ...headers, ...eventHeaders };
+            const direction = allHeaders["Call-Direction"] || allHeaders["variable_call_direction"] || "";
+            const uuid = allHeaders["Unique-ID"] || allHeaders["Channel-Call-UUID"] || "";
+            const callerNumber = allHeaders["Caller-Caller-ID-Number"] || allHeaders["variable_sip_from_user"] || "";
+
+            if (direction === "inbound" && uuid) {
+              console.log(`[esl-subscribe] Inbound call detected: UUID=${uuid}, caller=${callerNumber}`);
+              try {
+                onInboundCall({ uuid, callerNumber: callerNumber || "unknown" });
+              } catch (err) {
+                console.error("[esl-subscribe] Callback error:", err);
+              }
+            }
+          }
+        }
+      }
+    });
+
+    socket.on("error", (err) => {
+      console.error("[esl-subscribe] Connection error:", err.message);
+    });
+
+    socket.on("close", () => {
+      console.log(`[esl-subscribe] Connection closed, reconnecting in ${reconnectDelay / 1000}s`);
+      if (!stopped) {
+        reconnectTimer = setTimeout(connectAndSubscribe, reconnectDelay);
+        // Exponential backoff: 5s → 10s → 20s → 40s → 60s (max)
+        if (authFailed) {
+          reconnectDelay = Math.min(reconnectDelay * 2, 60000);
+        }
+      }
+    });
+  }
+
+  connectAndSubscribe();
+
+  return {
+    stop: () => {
+      stopped = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (socket) socket.destroy();
+    },
+  };
+}
+
+/**
  * Check if FreeSWITCH is reachable and authenticated.
  */
 export async function eslStatus(config: FreeSwitchConfig): Promise<{ connected: boolean; status: string }> {
