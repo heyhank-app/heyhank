@@ -74,7 +74,9 @@ let settings: HeyHankSettings = {
   hankChatProvider: "gemini-live",
   hankChatModel: "",
   hankChatAvatarEnabled: true,
-  hankChatAvatarUrl: "https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb",
+  // No default URL: models.readyplayer.me was retired (DNS NXDOMAIN),
+  // so the user must paste a working GLB URL in Settings.
+  hankChatAvatarUrl: "",
   mem0ApiKey: "",
   mem0UserId: "",
   memoryAutoDetect: true,
@@ -108,9 +110,9 @@ function normalize(raw: Partial<HeyHankSettings> | null | undefined): HeyHankSet
     hankChatModel: typeof raw?.hankChatModel === "string" ? raw.hankChatModel.trim() : "",
     hankChatAvatarEnabled: typeof raw?.hankChatAvatarEnabled === "boolean" ? raw.hankChatAvatarEnabled : true,
     hankChatAvatarUrl:
-      typeof raw?.hankChatAvatarUrl === "string" && raw.hankChatAvatarUrl.trim()
+      typeof raw?.hankChatAvatarUrl === "string"
         ? raw.hankChatAvatarUrl.trim()
-        : "https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb",
+        : "",
     mem0ApiKey: typeof raw?.mem0ApiKey === "string" ? raw.mem0ApiKey : "",
     mem0UserId: typeof raw?.mem0UserId === "string" ? raw.mem0UserId.trim() : "",
     memoryAutoDetect: typeof raw?.memoryAutoDetect === "boolean" ? raw.memoryAutoDetect : true,

@@ -47,7 +47,7 @@ vi.mock("./settings-manager.js", () => ({
     hankChatProvider: "gemini-live",
     hankChatModel: "",
     hankChatAvatarEnabled: true,
-    hankChatAvatarUrl: "https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb",
+    hankChatAvatarUrl: "",
     mem0ApiKey: "",
     mem0UserId: "",
     memoryAutoDetect: true,

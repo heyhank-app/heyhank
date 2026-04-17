@@ -165,8 +165,13 @@ export const TalkingHeadAvatar = forwardRef<TalkingHeadAvatarHandle, TalkingHead
       let cancelled = false;
       const Ctor = TalkingHeadLib as unknown as TalkingHeadCtor;
       const head = new Ctor(node, {
-        // Avatar + lipsync
-        lipsyncModules: ["en", "de"],
+        // Avatar + lipsync. We intentionally load no phoneme-based lipsync
+        // modules (lipsync-en.mjs etc.) because lipsync is driven entirely
+        // by pre-computed blendshape anims (jawOpen/mouthOpen) derived from
+        // the PCM RMS envelope — see feedPcm(). Loading them would both
+        // waste bundle bytes and 404 in production where they're not copied
+        // to /assets/.
+        lipsyncModules: [],
         lipsyncLang: "en",
         pcmSampleRate: SAMPLE_RATE_HZ,
         // We don't use built-in TTS — Gemini provides audio.

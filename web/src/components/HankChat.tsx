@@ -229,7 +229,7 @@ export function HankChat() {
   const [modelOverride, setModelOverride] = useState("");
   // 3D TalkingHead avatar (opt-in via settings; only used with gemini-live).
   const [avatarEnabled, setAvatarEnabled] = useState(true);
-  const [avatarUrl, setAvatarUrl] = useState("https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb");
+  const [avatarUrl, setAvatarUrl] = useState("");
   const [avatarReady, setAvatarReady] = useState(false);
   const avatarRef = useRef<TalkingHeadAvatarHandle | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -849,7 +849,7 @@ export function HankChat() {
 
   // Overlay dimensions — responsive: cap at 360px but shrink on narrow viewports.
   // The 3D avatar adds ~260px when visible, so grow the max height accordingly.
-  const avatarVisible = isGeminiLive && avatarEnabled && state !== "idle";
+  const avatarVisible = isGeminiLive && avatarEnabled && !!avatarUrl && state !== "idle";
   const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 1024;
   const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 800;
   // On mobile, when the avatar is actively speaking we switch to an immersive
@@ -1019,7 +1019,7 @@ export function HankChat() {
         </div>}
 
         {/* 3D TalkingHead avatar (Gemini Live + enabled in settings) */}
-        {isGeminiLive && avatarEnabled && state !== "idle" && (
+        {isGeminiLive && avatarEnabled && !!avatarUrl && state !== "idle" && (
           <div
             className={`relative bg-gradient-to-b from-cc-card to-cc-bg ${
               immersive ? "flex-1" : "border-b border-cc-border h-[260px]"
