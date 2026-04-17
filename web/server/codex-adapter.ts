@@ -314,7 +314,7 @@ export class StdioTransport implements ICodexTransport {
       // When the WS proxy reconnects to Codex, all pending RPC calls are
       // orphaned (Codex sees a fresh connection and won't respond to them).
       // Reject them immediately so callers don't hang until timeout.
-      if ((msg as JsonRpcNotification).method === "companion/wsReconnected") {
+      if ((msg as JsonRpcNotification).method === "heyhank/wsReconnected") {
         const pendingCount = this.pending.size;
         if (pendingCount > 0) {
           console.warn(
@@ -1659,7 +1659,7 @@ export class CodexAdapter implements IBackendAdapter {
         }
         break;
       }
-      case "companion/wsReconnected":
+      case "heyhank/wsReconnected":
         this.handleWsReconnected();
         break;
       default:

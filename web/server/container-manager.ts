@@ -20,7 +20,7 @@ export interface ContainerPortSpec {
 }
 
 export interface ContainerConfig {
-  /** Docker image to use (e.g. "the-companion:latest", "node:22-slim") */
+  /** Docker image to use (e.g. "heyhank:latest", "node:22-slim") */
   image: string;
   /** Container ports to expose (e.g. [3000, 8080] or [{ port: 6080, hostIp: "127.0.0.1" }]) */
   ports: (number | ContainerPortSpec)[];
@@ -832,7 +832,7 @@ export class ContainerManager {
    * Build a Docker image from a provided Dockerfile path.
    * Returns the build output log. Throws on failure.
    */
-  buildImage(dockerfilePath: string, tag: string = "the-companion:latest"): string {
+  buildImage(dockerfilePath: string, tag: string = "heyhank:latest"): string {
     const contextDir = dockerfilePath.replace(/\/[^/]+$/, "") || ".";
     try {
       const output = exec(
@@ -941,8 +941,8 @@ export class ContainerManager {
    * Return the Docker Hub remote path for a default image, or null for non-default images.
    */
   static getRegistryImage(localTag: string): string | null {
-    if (localTag === "the-companion:latest") {
-      return `${DOCKER_REGISTRY}/the-companion:latest`;
+    if (localTag === "heyhank:latest") {
+      return `${DOCKER_REGISTRY}/heyhank:latest`;
     }
     return null;
   }

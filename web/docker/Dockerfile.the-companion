@@ -1,10 +1,10 @@
-# The Companion — comprehensive development image
+# HeyHank — comprehensive development image
 # Ships with popular languages, runtimes, and tools pre-installed so Claude Code
 # can work on any project out of the box.
 # Includes Docker-in-Docker and PostgreSQL for full-stack development.
 #
-# Build:  docker build -t the-companion:latest -f Dockerfile.the-companion .
-# Usage:  Automatically used by The Companion when creating containerized sessions
+# Build:  docker build -t heyhank:latest -f Dockerfile.the-companion .
+# Usage:  Automatically used by HeyHank when creating containerized sessions
 # Note:   Run with --privileged for Docker-in-Docker support
 
 FROM ubuntu:24.04

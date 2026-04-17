@@ -1,10 +1,11 @@
 // ─── Node Store ───────────────────────────────────────────────────────────────
 // File-based CRUD for node configs. Stores identity + peer list in HEYHANK_HOME.
 
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { randomUUID, randomBytes } from "node:crypto";
 import { HEYHANK_HOME } from "../paths.js";
+import { atomicWriteFileSync } from "../fs-utils.js";
 import type { NodeIdentity, NodeConfig } from "./node-types.js";
 
 const IDENTITY_FILE = join(HEYHANK_HOME, "node-identity.json");
@@ -32,14 +33,14 @@ export function getNodeIdentity(): NodeIdentity {
     createdAt: new Date().toISOString(),
   };
   mkdirSync(dirname(IDENTITY_FILE), { recursive: true });
-  writeFileSync(IDENTITY_FILE, JSON.stringify(_identity, null, 2));
+  atomicWriteFileSync(IDENTITY_FILE, JSON.stringify(_identity, null, 2));
   return _identity;
 }
 
 export function updateNodeName(name: string): NodeIdentity {
   const id = getNodeIdentity();
   id.name = name;
-  writeFileSync(IDENTITY_FILE, JSON.stringify(id, null, 2));
+  atomicWriteFileSync(IDENTITY_FILE, JSON.stringify(id, null, 2));
   return id;
 }
 
@@ -56,7 +57,7 @@ function readNodes(): NodeConfig[] {
 
 function writeNodes(nodes: NodeConfig[]): void {
   mkdirSync(dirname(NODES_FILE), { recursive: true });
-  writeFileSync(NODES_FILE, JSON.stringify(nodes, null, 2));
+  atomicWriteFileSync(NODES_FILE, JSON.stringify(nodes, null, 2));
 }
 
 export function listNodes(): NodeConfig[] {

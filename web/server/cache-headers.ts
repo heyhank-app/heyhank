@@ -31,7 +31,7 @@ export function cacheControlMiddleware(): MiddlewareHandler {
 
     // index.html (served for / and /index.html): must be fresh
     if (path === "/" || path === "/index.html") {
-      c.header("Cache-Control", "no-cache");
+      c.header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
       return;
     }
 

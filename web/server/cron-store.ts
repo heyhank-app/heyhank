@@ -2,13 +2,13 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  writeFileSync,
   unlinkSync,
   existsSync,
 } from "node:fs";
 import { join } from "node:path";
 import type { CronJob, CronJobCreateInput } from "./cron-types.js";
 import { HEYHANK_HOME } from "./paths.js";
+import { atomicWriteFileSync } from "./fs-utils.js";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -92,7 +92,7 @@ export function createJob(data: CronJobCreateInput): CronJob {
     consecutiveFailures: 0,
     totalRuns: 0,
   };
-  writeFileSync(filePath(id), JSON.stringify(job, null, 2), "utf-8");
+  atomicWriteFileSync(filePath(id), JSON.stringify(job, null, 2));
   return job;
 }
 
@@ -132,7 +132,7 @@ export function updateJob(
     }
   }
 
-  writeFileSync(filePath(newId), JSON.stringify(job, null, 2), "utf-8");
+  atomicWriteFileSync(filePath(newId), JSON.stringify(job, null, 2));
   return job;
 }
 

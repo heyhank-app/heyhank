@@ -291,6 +291,7 @@ export async function createEvent(
     end: string;         // ISO datetime or YYYY-MM-DD for all-day
     allDay?: boolean;
     calendarUrl?: string;
+    alarm?: number;      // minutes before event to trigger alarm (0 = at event time)
   },
 ): Promise<{ success: boolean; uid: string }> {
   const client = await createClient(account);
@@ -330,6 +331,15 @@ export async function createEvent(
   if (event.description) lines.push(`DESCRIPTION:${escapeICS(event.description)}`);
   if (event.location) lines.push(`LOCATION:${escapeICS(event.location)}`);
   lines.push(`DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")}`);
+  if (event.alarm !== undefined) {
+    lines.push(
+      "BEGIN:VALARM",
+      "ACTION:DISPLAY",
+      `DESCRIPTION:${escapeICS(event.summary)}`,
+      `TRIGGER:${event.alarm === 0 ? "PT0S" : `-PT${event.alarm}M`}`,
+      "END:VALARM",
+    );
+  }
   lines.push("END:VEVENT", "END:VCALENDAR");
 
   const icsData = lines.join("\r\n");

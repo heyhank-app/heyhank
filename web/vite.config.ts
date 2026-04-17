@@ -24,8 +24,10 @@ export default defineConfig({
         clientsClaim: true,
         // Hash routing: all navigations hit "/" → serve index.html from cache
         navigateFallback: "index.html",
-        // Never intercept API calls, WebSocket upgrades, or SSE streams
-        navigateFallbackDenylist: [/^\/api/, /^\/ws/],
+        // Never intercept API calls, WebSocket upgrades, SSE streams, or the
+        // SocialView VNC iframe (serving index.html for /socialview/vnc/*
+        // would break the embedded noVNC viewer).
+        navigateFallbackDenylist: [/^\/api/, /^\/ws/, /^\/socialview/],
         runtimeCaching: [
           {
             // All /api/* fetch() calls: always go to network, never cache

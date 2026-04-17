@@ -19,6 +19,7 @@ import { generateSessionTitle } from "./auto-namer.js";
 import { heyHankBus } from "./event-bus.js";
 import { metricsCollector } from "./metrics-collector.js";
 import { log } from "./logger.js";
+import { authEvents, attemptRefresh } from "./claude-auth-monitor.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ export interface CreateSessionRequest {
   container?: { image?: string; ports?: number[]; volumes?: string[] };
   resumeSessionAt?: string;
   forkSession?: boolean;
+  providerId?: string;
 }
 
 export type CreateSessionResult =
@@ -195,6 +197,26 @@ export class SessionOrchestrator {
       await this.handleAutoNaming(sessionId, firstUserMessage);
     });
 
+    // Subscribe to auth failure events for auto-fix orchestration
+    authEvents.on("auth:failure", async ({ sessionId }: { error: string; sessionId?: string }) => {
+      console.log(`[orchestrator] Auth failure detected${sessionId ? ` for session ${sessionId}` : ""}`);
+      const refreshed = await attemptRefresh();
+      if (refreshed && sessionId) {
+        // Try to relaunch the failed session
+        try {
+          const session = this.launcher.getSession(sessionId);
+          if (session && session.state === "exited") {
+            console.log(`[orchestrator] Relaunching session ${sessionId} after auth refresh`);
+            await this.handleAutoRelaunch(sessionId);
+          }
+        } catch (err) {
+          console.log(`[orchestrator] Failed to relaunch session after auth refresh: ${err}`);
+        }
+      } else if (!refreshed) {
+        authEvents.emit("auth:refresh-exhausted");
+      }
+    });
+
     // Reconnection watchdog for stale sessions after server restart
     this.startReconnectionWatchdog();
   }
@@ -274,7 +296,7 @@ export class SessionOrchestrator {
       // Resolve Docker image early
       let effectiveImage: string | null = null;
       if (sandboxEnabled) {
-        effectiveImage = "the-companion:latest";
+        effectiveImage = "heyhank:latest";
       } else if (body.container?.image) {
         effectiveImage = body.container.image;
       }
@@ -425,7 +447,7 @@ export class SessionOrchestrator {
           ports: containerPorts,
           volumes: body.container?.volumes,
           env: { ...(envVars ?? {}), DISPLAY: ":99" },
-          privileged: sandboxEnabled && effectiveImage === "the-companion:latest",
+          privileged: sandboxEnabled && effectiveImage === "heyhank:latest",
         };
         try {
           containerInfo = containerManager.createContainer(tempId, cwd!, cConfig);

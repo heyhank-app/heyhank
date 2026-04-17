@@ -20,6 +20,7 @@ import {
   getLegacyCodexHome,
   resolveHeyHankCodexSessionHome,
 } from "./codex-home.js";
+import { isAuthFailure, reportAuthFailure } from "./claude-auth-monitor.js";
 
 /** Whether WebSocket transport is enabled for Codex sessions. */
 function isCodexWsTransportEnabled(): boolean {
@@ -1283,6 +1284,9 @@ export class CliLauncher {
         const text = decoder.decode(value);
         if (text.trim()) {
           log(`[session:${sessionId}:${label}] ${text.trimEnd()}`);
+          if (label === "stderr" && isAuthFailure(text)) {
+            reportAuthFailure(text.trimEnd());
+          }
         }
       }
     } catch {

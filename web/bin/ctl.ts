@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
- * CLI handler module for `companion` management subcommands.
- * Each subcommand maps 1:1 to a Companion REST API endpoint.
+ * CLI handler module for `heyhank` management subcommands.
+ * Each subcommand maps 1:1 to a HeyHank REST API endpoint.
  * All output is JSON to stdout for easy parsing by both humans and AI agents.
  */
 
@@ -13,7 +13,7 @@ function getPort(argv: string[]): number {
     const p = Number(argv[idx + 1]);
     if (!Number.isNaN(p) && p > 0) return p;
   }
-  return Number(process.env.COMPANION_PORT) || DEFAULT_PORT;
+  return Number(process.env.HEYHANK_PORT || process.env.COMPANION_PORT) || DEFAULT_PORT;
 }
 
 function getBase(argv: string[]): string {
@@ -175,7 +175,7 @@ async function handleSessions(base: string, args: string[]): Promise<void> {
     }
     case "get": {
       const id = rest[0];
-      if (!id) err("Usage: companion sessions get <sessionId>");
+      if (!id) err("Usage: heyhank sessions get <sessionId>");
       out(await apiGet(base, `/sessions/${encodeURIComponent(id)}`));
       break;
     }
@@ -195,33 +195,33 @@ async function handleSessions(base: string, args: string[]): Promise<void> {
     }
     case "kill": {
       const id = rest[0];
-      if (!id) err("Usage: companion sessions kill <sessionId>");
+      if (!id) err("Usage: heyhank sessions kill <sessionId>");
       out(await apiPost(base, `/sessions/${encodeURIComponent(id)}/kill`));
       break;
     }
     case "relaunch": {
       const id = rest[0];
-      if (!id) err("Usage: companion sessions relaunch <sessionId>");
+      if (!id) err("Usage: heyhank sessions relaunch <sessionId>");
       out(await apiPost(base, `/sessions/${encodeURIComponent(id)}/relaunch`));
       break;
     }
     case "archive": {
       const id = rest[0];
-      if (!id) err("Usage: companion sessions archive <sessionId>");
+      if (!id) err("Usage: heyhank sessions archive <sessionId>");
       out(await apiPost(base, `/sessions/${encodeURIComponent(id)}/archive`));
       break;
     }
     case "rename": {
       const id = rest[0];
       const name = rest.slice(1).join(" ");
-      if (!id || !name) err("Usage: companion sessions rename <sessionId> <name>");
+      if (!id || !name) err("Usage: heyhank sessions rename <sessionId> <name>");
       out(await apiPatch(base, `/sessions/${encodeURIComponent(id)}/name`, { name }));
       break;
     }
     case "send-message": {
       const id = rest[0];
       const content = rest.slice(1).join(" ");
-      if (!id || !content) err("Usage: companion sessions send-message <sessionId> <message>");
+      if (!id || !content) err("Usage: heyhank sessions send-message <sessionId> <message>");
       out(await apiPost(base, `/sessions/${encodeURIComponent(id)}/message`, { content }));
       break;
     }
@@ -241,20 +241,20 @@ async function handleEnvs(base: string, args: string[]): Promise<void> {
     }
     case "get": {
       const slug = rest[0];
-      if (!slug) err("Usage: companion envs get <slug>");
+      if (!slug) err("Usage: heyhank envs get <slug>");
       out(await apiGet(base, `/envs/${encodeURIComponent(slug)}`));
       break;
     }
     case "create": {
       const flags = parseFlags(rest);
       const vars = parseVars(rest);
-      if (!flags.name) err("Usage: companion envs create --name <name> [--var KEY=VALUE ...]");
+      if (!flags.name) err("Usage: heyhank envs create --name <name> [--var KEY=VALUE ...]");
       out(await apiPost(base, "/envs", { name: flags.name, variables: vars }));
       break;
     }
     case "update": {
       const slug = rest[0];
-      if (!slug) err("Usage: companion envs update <slug> [--name <name>] [--var KEY=VALUE ...]");
+      if (!slug) err("Usage: heyhank envs update <slug> [--name <name>] [--var KEY=VALUE ...]");
       const flagArgs = rest.slice(1);
       const flags = parseFlags(flagArgs);
       const vars = parseVars(flagArgs);
@@ -266,7 +266,7 @@ async function handleEnvs(base: string, args: string[]): Promise<void> {
     }
     case "delete": {
       const slug = rest[0];
-      if (!slug) err("Usage: companion envs delete <slug>");
+      if (!slug) err("Usage: heyhank envs delete <slug>");
       out(await apiDelete(base, `/envs/${encodeURIComponent(slug)}`));
       break;
     }
@@ -286,14 +286,14 @@ async function handleCron(base: string, args: string[]): Promise<void> {
     }
     case "get": {
       const id = rest[0];
-      if (!id) err("Usage: companion cron get <jobId>");
+      if (!id) err("Usage: heyhank cron get <jobId>");
       out(await apiGet(base, `/cron/jobs/${encodeURIComponent(id)}`));
       break;
     }
     case "create": {
       const flags = parseFlags(rest);
       if (!flags.name || !flags.schedule || !flags.prompt)
-        err("Usage: companion cron create --name <name> --schedule <cron|datetime> --prompt <prompt> [--cwd <path>] [--model <model>] [--env <slug>] [--recurring] [--backend <type>] [--permission-mode <mode>]");
+        err("Usage: heyhank cron create --name <name> --schedule <cron|datetime> --prompt <prompt> [--cwd <path>] [--model <model>] [--env <slug>] [--recurring] [--backend <type>] [--permission-mode <mode>]");
       const body: Record<string, unknown> = {
         name: flags.name,
         schedule: flags.schedule,
@@ -312,7 +312,7 @@ async function handleCron(base: string, args: string[]): Promise<void> {
     }
     case "update": {
       const id = rest[0];
-      if (!id) err("Usage: companion cron update <jobId> [--name <n>] [--schedule <s>] [--prompt <p>] ...");
+      if (!id) err("Usage: heyhank cron update <jobId> [--name <n>] [--schedule <s>] [--prompt <p>] ...");
       const flagArgs = rest.slice(1);
       const flags = parseFlags(flagArgs);
       const body: Record<string, unknown> = {};
@@ -330,25 +330,25 @@ async function handleCron(base: string, args: string[]): Promise<void> {
     }
     case "delete": {
       const id = rest[0];
-      if (!id) err("Usage: companion cron delete <jobId>");
+      if (!id) err("Usage: heyhank cron delete <jobId>");
       out(await apiDelete(base, `/cron/jobs/${encodeURIComponent(id)}`));
       break;
     }
     case "toggle": {
       const id = rest[0];
-      if (!id) err("Usage: companion cron toggle <jobId>");
+      if (!id) err("Usage: heyhank cron toggle <jobId>");
       out(await apiPost(base, `/cron/jobs/${encodeURIComponent(id)}/toggle`));
       break;
     }
     case "run": {
       const id = rest[0];
-      if (!id) err("Usage: companion cron run <jobId>");
+      if (!id) err("Usage: heyhank cron run <jobId>");
       out(await apiPost(base, `/cron/jobs/${encodeURIComponent(id)}/run`));
       break;
     }
     case "executions": {
       const id = rest[0];
-      if (!id) err("Usage: companion cron executions <jobId>");
+      if (!id) err("Usage: heyhank cron executions <jobId>");
       out(await apiGet(base, `/cron/jobs/${encodeURIComponent(id)}/executions`));
       break;
     }
@@ -370,7 +370,7 @@ async function handleSettings(base: string, args: string[]): Promise<void> {
       const body: Record<string, unknown> = {};
       if (flags["anthropic-key"]) body.anthropicApiKey = flags["anthropic-key"];
       if (flags["anthropic-model"]) body.anthropicModel = flags["anthropic-model"];
-      if (Object.keys(body).length === 0) err("Usage: companion settings set --anthropic-key <key> or --anthropic-model <model>");
+      if (Object.keys(body).length === 0) err("Usage: heyhank settings set --anthropic-key <key> or --anthropic-model <model>");
       out(await apiPut(base, "/settings", body));
       break;
     }
@@ -425,13 +425,13 @@ async function handleSkills(base: string, args: string[]): Promise<void> {
     }
     case "get": {
       const slug = rest[0];
-      if (!slug) err("Usage: companion skills get <slug>");
+      if (!slug) err("Usage: heyhank skills get <slug>");
       out(await apiGet(base, `/skills/${encodeURIComponent(slug)}`));
       break;
     }
     case "create": {
       const flags = parseFlags(rest);
-      if (!flags.name) err("Usage: companion skills create --name <name> [--description <desc>] [--content <markdown>]");
+      if (!flags.name) err("Usage: heyhank skills create --name <name> [--description <desc>] [--content <markdown>]");
       const body: Record<string, unknown> = { name: flags.name };
       if (flags.description) body.description = flags.description;
       if (flags.content) body.content = flags.content;
@@ -440,15 +440,15 @@ async function handleSkills(base: string, args: string[]): Promise<void> {
     }
     case "update": {
       const slug = rest[0];
-      if (!slug) err("Usage: companion skills update <slug> --content <markdown>");
+      if (!slug) err("Usage: heyhank skills update <slug> --content <markdown>");
       const flags = parseFlags(rest.slice(1));
-      if (!flags.content) err("Usage: companion skills update <slug> --content <full SKILL.md content>");
+      if (!flags.content) err("Usage: heyhank skills update <slug> --content <full SKILL.md content>");
       out(await apiPut(base, `/skills/${encodeURIComponent(slug)}`, { content: flags.content }));
       break;
     }
     case "delete": {
       const slug = rest[0];
-      if (!slug) err("Usage: companion skills delete <slug>");
+      if (!slug) err("Usage: heyhank skills delete <slug>");
       out(await apiDelete(base, `/skills/${encodeURIComponent(slug)}`));
       break;
     }
@@ -463,18 +463,18 @@ function printCtlUsage(): void {
   console.log(`
 Management commands:
 
-  companion status                        Overall Companion status
-  companion sessions <subcommand>         Manage sessions
-  companion envs <subcommand>             Manage environment profiles
-  companion cron <subcommand>             Manage scheduled jobs
-  companion skills <subcommand>           Manage Claude Code skills
-  companion settings <subcommand>         Manage settings
-  companion assistant <subcommand>        Manage the Companion Assistant
+  heyhank status                        Overall HeyHank status
+  heyhank sessions <subcommand>         Manage sessions
+  heyhank envs <subcommand>             Manage environment profiles
+  heyhank cron <subcommand>             Manage scheduled jobs
+  heyhank skills <subcommand>           Manage Claude Code skills
+  heyhank settings <subcommand>         Manage settings
+  heyhank assistant <subcommand>        Manage the HeyHank Assistant
 
 Global options:
-  --port <n>    Override the Companion API port (default: 3456, or COMPANION_PORT env)
+  --port <n>    Override the HeyHank API port (default: 3456, or HEYHANK_PORT env)
 
-Run 'companion <command>' without subcommand for available subcommands.
+Run 'heyhank <command>' without subcommand for available subcommands.
 `);
 }
 
@@ -488,27 +488,27 @@ export async function handleCtlCommand(command: string, rawArgv: string[]): Prom
         await handleStatus(base);
         break;
       case "sessions":
-        if (argv.length === 0) err("Usage: companion sessions <list|get|create|kill|relaunch|archive|rename|send-message>");
+        if (argv.length === 0) err("Usage: heyhank sessions <list|get|create|kill|relaunch|archive|rename|send-message>");
         await handleSessions(base, argv);
         break;
       case "envs":
-        if (argv.length === 0) err("Usage: companion envs <list|get|create|update|delete>");
+        if (argv.length === 0) err("Usage: heyhank envs <list|get|create|update|delete>");
         await handleEnvs(base, argv);
         break;
       case "cron":
-        if (argv.length === 0) err("Usage: companion cron <list|get|create|update|delete|toggle|run|executions>");
+        if (argv.length === 0) err("Usage: heyhank cron <list|get|create|update|delete|toggle|run|executions>");
         await handleCron(base, argv);
         break;
       case "settings":
-        if (argv.length === 0) err("Usage: companion settings <get|set>");
+        if (argv.length === 0) err("Usage: heyhank settings <get|set>");
         await handleSettings(base, argv);
         break;
       case "skills":
-        if (argv.length === 0) err("Usage: companion skills <list|get|create|update|delete>");
+        if (argv.length === 0) err("Usage: heyhank skills <list|get|create|update|delete>");
         await handleSkills(base, argv);
         break;
       case "assistant":
-        if (argv.length === 0) err("Usage: companion assistant <status|launch|stop|config>");
+        if (argv.length === 0) err("Usage: heyhank assistant <status|launch|stop|config>");
         await handleAssistant(base, argv);
         break;
       case "ctl-help":
@@ -521,7 +521,7 @@ export async function handleCtlCommand(command: string, rawArgv: string[]): Prom
     const message = e instanceof Error ? e.message : String(e);
     // Check if it's a connection error
     if (message.includes("ECONNREFUSED") || message.includes("fetch failed")) {
-      err(`Cannot connect to The Companion at ${base}. Is the server running?`);
+      err(`Cannot connect to HeyHank at ${base}. Is the server running?`);
     }
     err(message);
   }

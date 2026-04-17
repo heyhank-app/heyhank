@@ -307,7 +307,7 @@ export function AgentsPage({ route }: Props) {
 
   return (
     <div className="h-full overflow-y-auto bg-cc-bg">
-      <div className="max-w-4xl mx-auto p-6">
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10 pb-safe">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>

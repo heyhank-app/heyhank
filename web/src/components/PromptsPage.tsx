@@ -151,7 +151,7 @@ export function PromptsPage({ embedded = false }: PromptsPageProps) {
 
   return (
     <div className={`${embedded ? "h-full" : "h-[100dvh]"} bg-cc-bg text-cc-fg font-sans-ui antialiased overflow-y-auto`}>
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-10 pb-safe">
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10 pb-safe">
         {/* Header */}
         <div className="flex items-start justify-between gap-3 mb-2">
           <div className="min-w-0">

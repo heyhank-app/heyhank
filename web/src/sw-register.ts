@@ -22,11 +22,37 @@ registerSW({
   onRegisteredSW(_swUrl: string, registration: ServiceWorkerRegistration | undefined) {
     swRegistration = registration;
     if (registration) {
-      // Check for SW updates every 60 minutes while the app is open.
-      // Catches deployments that happen while a user has the app open.
+      // Check for SW updates every 60 seconds while the app is open.
       setInterval(() => {
         registration.update();
-      }, 60 * 60 * 1000);
+      }, 60 * 1000);
+
+      // Also check immediately on page visibility change (user returns to tab)
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          registration.update();
+        }
+      });
+
+      // When a new SW is waiting, force it to activate and reload the page
+      // so users always get the latest code without manual hard-refresh.
+      const promptReload = () => {
+        if (registration.waiting) {
+          registration.waiting.postMessage({ type: "SKIP_WAITING" });
+          window.location.reload();
+        }
+      };
+      if (registration.waiting) promptReload();
+      registration.addEventListener("updatefound", () => {
+        const newSW = registration.installing;
+        if (newSW) {
+          newSW.addEventListener("statechange", () => {
+            if (newSW.state === "installed" && navigator.serviceWorker.controller) {
+              promptReload();
+            }
+          });
+        }
+      });
     }
   },
   onOfflineReady() {

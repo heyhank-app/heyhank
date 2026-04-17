@@ -101,15 +101,18 @@ export function RunsPage() {
   return (
     <div className="h-full flex flex-col bg-cc-bg">
       {/* Header */}
-      <div className="shrink-0 border-b border-cc-border px-6 py-4">
+      <div className="shrink-0 border-b border-cc-border">
+        <div className="max-w-4xl mx-auto w-full px-4 sm:px-8 py-4">
         <h1 className="text-lg font-semibold text-cc-fg">Runs</h1>
         <p className="text-sm text-cc-muted mt-1">
           Monitor agent executions across all triggers
         </p>
+        </div>
       </div>
 
       {/* Filters */}
-      <div className="shrink-0 border-b border-cc-border px-6 py-3 flex items-center gap-4 flex-wrap">
+      <div className="shrink-0 border-b border-cc-border">
+        <div className="max-w-4xl mx-auto w-full px-4 sm:px-8 py-3 flex items-center gap-4 flex-wrap">
         {/* Agent filter */}
         <select
           value={agentFilter}
@@ -160,10 +163,12 @@ export function RunsPage() {
         <span className="text-xs text-cc-muted ml-auto">
           {total} total
         </span>
+        </div>
       </div>
 
       {/* Table */}
       <div className="flex-1 overflow-auto">
+        <div className="max-w-4xl mx-auto w-full px-4 sm:px-8 py-6 pb-safe">
         {loading ? (
           <div className="text-sm text-cc-muted text-center py-12">Loading...</div>
         ) : executions.length === 0 ? (
@@ -245,6 +250,7 @@ export function RunsPage() {
             </tbody>
           </table>
         )}
+        </div>
       </div>
 
       {/* Detail panel (slide up from bottom when a row is selected) */}

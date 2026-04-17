@@ -95,7 +95,7 @@ export function registerMediaRoutes(api: Hono): void {
         }
         const mime = body.mimeType || "image/png";
         const ext = mime.includes("png") ? "png" : mime.includes("jpeg") || mime.includes("jpg") ? "jpg" : mime.includes("webp") ? "webp" : mime.includes("mp4") ? "mp4" : "bin";
-        filename = body.filename || `upload_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        filename = basename(body.filename || `upload_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`);
         data = Buffer.from(body.base64, "base64");
       }
 

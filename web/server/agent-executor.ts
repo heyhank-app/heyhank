@@ -23,6 +23,7 @@ export interface ExecuteAgentOptions {
   triggerType?: "manual" | "webhook" | "schedule";
   additionalEnv?: Record<string, string>;
   systemPrompt?: string;
+  cwdOverride?: string;
 }
 
 export class AgentExecutor {
@@ -155,7 +156,7 @@ export class AgentExecutor {
       }
 
       // Resolve working directory
-      let cwd = agent.cwd;
+      let cwd = opts?.cwdOverride || agent.cwd;
       if (cwd === "temp" || !cwd) {
         cwd = mkdtempSync(join(tmpdir(), `heyhank-agent-${agent.id}-`));
       }

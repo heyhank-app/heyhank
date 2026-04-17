@@ -29,7 +29,7 @@ heyhank status
 - **Gemini Live Voice Assistant** — Hands-free voice control with tool calling
 - **Scheduled Agents** — Cron-based agent automation
 - **Media Generation** — Image (Imagen 4) and video (Veo 3.1) generation
-- **Social Media** — Multi-backend posting (Postiz, Buffer, Ayrshare)
+- **Social Media** — Multi-backend posting (Postiz, Buffer)
 - **Telephony** — Voice calls via FreeSWITCH SIP integration
 - **Federation** — Connect multiple HeyHank instances across machines
 - **Tailscale Funnel** — Public HTTPS access without port forwarding

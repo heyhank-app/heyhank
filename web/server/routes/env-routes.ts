@@ -65,7 +65,7 @@ export function registerEnvRoutes(
       return c.json({ error: "Base Dockerfile not found at " + dockerfilePath }, 404);
     }
     try {
-      const log = containerManager.buildImage(dockerfilePath, "the-companion:latest");
+      const log = containerManager.buildImage(dockerfilePath, "heyhank:latest");
       return c.json({ success: true, log });
     } catch (e: unknown) {
       return c.json({ success: false, error: e instanceof Error ? e.message : String(e) }, 500);
@@ -73,8 +73,8 @@ export function registerEnvRoutes(
   });
 
   api.get("/docker/base-image", (c) => {
-    const exists = containerManager.imageExists("the-companion:latest");
-    return c.json({ exists, image: "the-companion:latest" });
+    const exists = containerManager.imageExists("heyhank:latest");
+    return c.json({ exists, image: "heyhank:latest" });
   });
 
   api.get("/images/:tag/status", (c) => {

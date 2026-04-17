@@ -18,8 +18,8 @@ export function MediaPage({ embedded }: { embedded?: boolean }) {
   }, []);
 
   return (
-    <div className={`h-full overflow-auto ${embedded ? "" : ""}`}>
-      <div className="max-w-3xl mx-auto px-4 py-8 sm:px-6">
+    <div className="h-full overflow-y-auto bg-cc-bg">
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10 pb-safe">
         <div className="mb-6">
           <h1 className="text-lg font-semibold text-cc-fg">Media</h1>
           <p className="text-xs text-cc-muted mt-1">

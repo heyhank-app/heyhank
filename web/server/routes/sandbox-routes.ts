@@ -81,7 +81,7 @@ export function registerSandboxRoutes(
 
     if (!containerManager.checkDocker()) return c.json({ error: "Docker is not available" }, 503);
 
-    const effectiveImage = "the-companion:latest";
+    const effectiveImage = "heyhank:latest";
     if (!imagePullManager.isReady(effectiveImage)) {
       return c.json({ error: `Docker image ${effectiveImage} is not available. Pull it first.` }, 503);
     }

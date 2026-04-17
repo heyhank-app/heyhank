@@ -108,7 +108,7 @@ export async function executeSessionCreation(
   // Resolve Docker image early
   let effectiveImage: string | null = null;
   if (sandboxEnabled) {
-    effectiveImage = "the-companion:latest";
+    effectiveImage = "heyhank:latest";
   } else if ((body.container as Record<string, unknown>)?.image) {
     effectiveImage = (body.container as Record<string, unknown>).image as string;
   }
@@ -269,7 +269,7 @@ export async function executeSessionCreation(
       ports: containerPorts,
       volumes: (body.container as Record<string, unknown>)?.volumes as string[] | undefined,
       env: { ...(envVars ?? {}), DISPLAY: ":99" },
-      privileged: sandboxEnabled && effectiveImage === "the-companion:latest",
+      privileged: sandboxEnabled && effectiveImage === "heyhank:latest",
     };
     try {
       containerInfo = containerManager.createContainer(tempId, cwd!, cConfig);

@@ -110,8 +110,8 @@ function QuickNav() {
 
 export function HelpPage() {
   return (
-    <div className="h-full overflow-auto">
-      <div className="mx-auto max-w-3xl px-6 py-8 space-y-6 pb-24">
+    <div className="h-full overflow-y-auto bg-cc-bg">
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10 pb-safe space-y-6">
         {/* Header */}
         <div>
           <h1 className="text-xl font-bold text-cc-fg">HeyHank Help</h1>
@@ -480,6 +480,28 @@ export function HelpPage() {
             <li><strong>Operator mode needed:</strong> On Linux, if you see permission errors, run <Code>sudo tailscale set --operator=$USER</Code> and restart HeyHank.</li>
             <li><strong>Binary not found:</strong> Ensure <Code>tailscale</Code> is on your PATH. HeyHank checks for it automatically on startup.</li>
             <li><strong>Funnel not working:</strong> Make sure Funnel is enabled in your Tailscale admin console under the DNS tab (Access Controls).</li>
+          </ul>
+
+          <h4 className="font-semibold text-cc-fg mt-4">Remote Ollama via Tailscale</h4>
+          <p>If you run HeyHank on a VPS but Ollama on a local GPU machine, Tailscale provides a secure private connection without port forwarding or HTTPS certificates.</p>
+
+          <h4 className="font-semibold text-cc-fg mt-3">Setup</h4>
+          <ol className="list-decimal pl-5 space-y-1.5">
+            <li>Install Tailscale on <strong className="text-cc-fg">both</strong> machines (VPS + GPU machine)</li>
+            <li>Join the same Tailnet: <Code>tailscale up</Code> on each</li>
+            <li>On the GPU machine, ensure Ollama listens on all interfaces:
+              <div className="font-mono text-xs bg-cc-bg rounded p-2 mt-1">OLLAMA_HOST=0.0.0.0 ollama serve</div>
+            </li>
+            <li>In HeyHank Settings → Providers, set the Ollama URL to your Tailscale hostname:
+              <div className="font-mono text-xs bg-cc-bg rounded p-2 mt-1">http://gpu-machine.tail1234.ts.net:11434</div>
+            </li>
+          </ol>
+
+          <h4 className="font-semibold text-cc-fg mt-3">Why Tailscale?</h4>
+          <ul className="list-disc pl-5 space-y-1">
+            <li><strong className="text-cc-fg">Encrypted:</strong> WireGuard encryption between all nodes — no need for HTTPS</li>
+            <li><strong className="text-cc-fg">No port forwarding:</strong> Works behind NAT and firewalls</li>
+            <li><strong className="text-cc-fg">Private:</strong> Only your devices can reach the Ollama API</li>
           </ul>
         </Section>
 

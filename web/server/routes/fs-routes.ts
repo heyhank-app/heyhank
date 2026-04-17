@@ -112,7 +112,7 @@ export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }):
     const cwd = process.cwd();
     // Only report cwd if the user launched heyhank from a real project directory
     // (not from the package root or the home directory itself)
-    const packageRoot = process.env.__HEYHANK_PACKAGE_ROOT || process.env.__COMPANION_PACKAGE_ROOT;
+    const packageRoot = process.env.__HEYHANK_PACKAGE_ROOT || process.env.__COMPANION_PACKAGE_ROOT /* legacy */;
     const isProjectDir =
       cwd !== home &&
       (!packageRoot || !cwd.startsWith(packageRoot));
@@ -243,14 +243,15 @@ export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }):
     const filePath = c.req.query("path");
     if (!filePath) return c.json({ error: "path required" }, 400);
     const base = c.req.query("base");
-    const absPath = resolve(filePath);
+    const absPath = guardPath(filePath, allowedBases());
+    if (!absPath) return c.json({ error: "Path outside allowed directories" }, 403);
     try {
       const repoRoot = execSync("git rev-parse --show-toplevel", {
         cwd: dirname(absPath),
         encoding: "utf-8",
         timeout: 5000,
       }).trim();
-      const relPath = execSync(`git -C "${repoRoot}" ls-files --full-name -- "${absPath}"`, {
+      const relPath = execSync(`git -C ${shellEscapeArg(repoRoot)} ls-files --full-name -- ${shellEscapeArg(absPath)}`, {
         encoding: "utf-8",
         timeout: 5000,
       }).trim() || absPath;
@@ -261,7 +262,7 @@ export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }):
         const diffBases = resolveBranchDiffBases(repoRoot);
         for (const b of diffBases) {
           try {
-            diff = execCaptureStdout(`git diff ${b} -- "${relPath}"`, {
+            diff = execCaptureStdout(`git diff ${shellEscapeArg(b)} -- ${shellEscapeArg(relPath)}`, {
               cwd: repoRoot,
               encoding: "utf-8",
               timeout: 5000,
@@ -273,7 +274,7 @@ export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }):
         }
       } else {
         try {
-          diff = execCaptureStdout(`git diff HEAD -- "${relPath}"`, {
+          diff = execCaptureStdout(`git diff HEAD -- ${shellEscapeArg(relPath)}`, {
             cwd: repoRoot,
             encoding: "utf-8",
             timeout: 5000,
@@ -284,13 +285,13 @@ export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }):
       }
 
       if (!diff.trim()) {
-        const untracked = execSync(`git ls-files --others --exclude-standard -- "${relPath}"`, {
+        const untracked = execSync(`git ls-files --others --exclude-standard -- ${shellEscapeArg(relPath)}`, {
           cwd: repoRoot,
           encoding: "utf-8",
           timeout: 5000,
         }).trim();
         if (untracked) {
-          diff = execCaptureStdout(`git diff --no-index -- /dev/null "${absPath}"`, {
+          diff = execCaptureStdout(`git diff --no-index -- /dev/null ${shellEscapeArg(absPath)}`, {
             cwd: repoRoot,
             encoding: "utf-8",
             timeout: 5000,
@@ -312,7 +313,8 @@ export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }):
     const cwd = c.req.query("cwd");
     if (!cwd) return c.json({ error: "cwd required" }, 400);
     const base = c.req.query("base"); // "last-commit" | "default-branch" | undefined
-    const resolvedCwd = resolve(cwd);
+    const resolvedCwd = guardPath(cwd, allowedBases());
+    if (!resolvedCwd) return c.json({ error: "Path outside allowed directories" }, 403);
     try {
       const repoRoot = execSync("git rev-parse --show-toplevel", {
         cwd: resolvedCwd,
@@ -604,7 +606,8 @@ export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }):
     if (base !== "CLAUDE.md") {
       return c.json({ error: "Can only write CLAUDE.md files" }, 400);
     }
-    const absPath = resolve(filePath);
+    const absPath = guardPath(filePath, allowedBases());
+    if (!absPath) return c.json({ error: "Path outside allowed directories" }, 403);
     if (!absPath.endsWith("/CLAUDE.md") && !absPath.endsWith("/.claude/CLAUDE.md")) {
       return c.json({ error: "Invalid CLAUDE.md path" }, 400);
     }

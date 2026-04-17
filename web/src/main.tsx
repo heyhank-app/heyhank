@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App.js";
 import { initAnalytics } from "./analytics.js";
 import { AppErrorBoundary } from "./components/AppErrorBoundary.js";
-import { VoiceChat } from "./components/VoiceChat.js";
+import { HankChat } from "./components/HankChat.js";
 import "./index.css";
 
 initAnalytics();
@@ -22,10 +22,10 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>
 );
 
-// Render VoiceChat in its own root so it's independent of the main app tree
+// Render HankChat in its own root so it's independent of the main app tree
 const voiceRoot = document.getElementById("voice-chat-root");
 if (voiceRoot) {
-  createRoot(voiceRoot).render(<VoiceChat />);
+  createRoot(voiceRoot).render(<HankChat />);
 }
 
 // Register Service Worker in production (no-op in dev).

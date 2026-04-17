@@ -129,6 +129,15 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
     }
   }, [openaiKey]);
 
+  const finishOnboarding = useCallback(async () => {
+    try {
+      await api.updateSettings({ onboardingCompleted: true });
+    } catch {
+      // non-fatal
+    }
+    setStep("done");
+  }, []);
+
   const handleSaveGemini = useCallback(async () => {
     if (!geminiKey.trim()) {
       await finishOnboarding();
@@ -146,15 +155,6 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
       setSaving(false);
     }
   }, [geminiKey, finishOnboarding]);
-
-  const finishOnboarding = useCallback(async () => {
-    try {
-      await api.updateSettings({ onboardingCompleted: true });
-    } catch {
-      // non-fatal
-    }
-    setStep("done");
-  }, []);
 
   const handleDone = useCallback(() => {
     onComplete();

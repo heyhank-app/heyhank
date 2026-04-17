@@ -140,7 +140,7 @@ function connect() {
     // rejects all pending calls and cleans up.
     if (wasReconnect) {
       const reconnectNotification = JSON.stringify({
-        method: "companion/wsReconnected",
+        method: "heyhank/wsReconnected",
         params: {},
       });
       process.stdout.write(reconnectNotification + "\n");

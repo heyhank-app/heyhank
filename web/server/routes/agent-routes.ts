@@ -164,8 +164,9 @@ export function registerAgentRoutes(
     if (!agent) return c.json({ error: "Agent not found" }, 404);
     const body = await c.req.json().catch(() => ({}));
     const input = typeof body.input === "string" ? body.input : undefined;
+    const cwdOverride = typeof body.cwd === "string" ? body.cwd : undefined;
     try {
-      const sessionInfo = await agentExecutor?.executeAgent(id, input, { force: true, triggerType: "manual" });
+      const sessionInfo = await agentExecutor?.executeAgent(id, input, { force: true, triggerType: "manual", cwdOverride });
       return c.json({
         ok: true,
         message: "Agent triggered",

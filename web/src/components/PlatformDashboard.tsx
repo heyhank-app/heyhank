@@ -349,7 +349,8 @@ function formatNumber(n: number): string {
 
 export default function PlatformDashboard() {
   return (
-    <div className="mx-auto max-w-4xl space-y-8 p-6">
+    <div className="h-full overflow-y-auto bg-cc-bg">
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10 pb-safe space-y-8">
       <div>
         <h1 className="text-lg font-semibold text-cc-text-primary">HeyHank Dashboard</h1>
         <p className="text-xs text-cc-text-secondary">Multi-Agent Platform</p>
@@ -360,6 +361,7 @@ export default function PlatformDashboard() {
       <ProvidersPanel />
       <MessagesPanel />
       <SharedContextPanel />
+      </div>
     </div>
   );
 }

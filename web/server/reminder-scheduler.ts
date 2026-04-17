@@ -1,10 +1,15 @@
 // ─── Reminder Scheduler ──────────────────────────────────────────────────────
 // Checks every 60 seconds for due reminders and sends push notifications.
 
-import { getDueReminders, fireReminder } from "./assistant-store.js";
+import { getDueReminders, fireReminder, listTodos } from "./assistant-store.js";
 import { sendNotification } from "./push-notifications.js";
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
+
+// Dedup set for delegation notifications: key `${todoId}:${dueDate}`.
+// Prevents the same "delegation is due today/tomorrow" notification from
+// firing every minute. Cleared on process restart (at most one duplicate).
+const notifiedDelegations = new Set<string>();
 
 async function checkReminders(): Promise<void> {
   const due = getDueReminders();
@@ -19,6 +24,37 @@ async function checkReminders(): Promise<void> {
       console.error(`[reminder-scheduler] Failed to send notification for "${reminder.text}":`, err);
     }
     fireReminder(reminder.id);
+  }
+
+  // Check for delegated todos with approaching due dates.
+  // Notify once per (todoId, dueDate) pair to avoid per-minute spam.
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    const todos = listTodos({ done: false });
+
+    // Garbage-collect keys whose dueDate is neither today nor tomorrow anymore
+    for (const key of notifiedDelegations) {
+      const dueDate = key.split(":")[1];
+      if (dueDate !== today && dueDate !== tomorrow) notifiedDelegations.delete(key);
+    }
+
+    for (const todo of todos) {
+      if (!todo.delegatedTo || !todo.dueDate) continue;
+      if (todo.dueDate !== today && todo.dueDate !== tomorrow) continue;
+      const key = `${todo.id}:${todo.dueDate}`;
+      if (notifiedDelegations.has(key)) continue;
+
+      const label = todo.dueDate === today ? "heute" : "morgen";
+      await sendNotification(
+        "Delegation fällig",
+        `${todo.delegatedTo}: "${todo.text}" — fällig ${label}`,
+        { tag: `delegation-${todo.id}-${todo.dueDate}`, icon: "/icon-192.png" },
+      );
+      notifiedDelegations.add(key);
+    }
+  } catch (err) {
+    console.error("[reminder-scheduler] Failed to check delegation due dates:", err);
   }
 }
 

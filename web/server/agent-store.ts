@@ -2,12 +2,12 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  writeFileSync,
   unlinkSync,
   existsSync,
 } from "node:fs";
 import { join } from "node:path";
 import { HEYHANK_HOME } from "./paths.js";
+import { atomicWriteFileSync } from "./fs-utils.js";
 import { randomBytes } from "node:crypto";
 import type { AgentConfig, AgentConfigCreateInput } from "./agent-types.js";
 
@@ -115,7 +115,7 @@ export function createAgent(data: AgentConfigCreateInput): AgentConfig {
     totalRuns: 0,
     consecutiveFailures: 0,
   };
-  writeFileSync(filePath(id), JSON.stringify(agent, null, 2), "utf-8");
+  atomicWriteFileSync(filePath(id), JSON.stringify(agent, null, 2));
   return agent;
 }
 
@@ -155,7 +155,7 @@ export function updateAgent(
     }
   }
 
-  writeFileSync(filePath(newId), JSON.stringify(agent, null, 2), "utf-8");
+  atomicWriteFileSync(filePath(newId), JSON.stringify(agent, null, 2));
   return agent;
 }
 

@@ -411,6 +411,9 @@ export interface AppSettings {
   publicUrl: string;
   updateChannel: "stable" | "prerelease";
   dockerAutoUpdate: boolean;
+  hankChatProvider: string;
+  hankChatModel: string;
+  openrouterApiKeyConfigured: boolean;
   /** Enhanced Claude CLI auth detection */
   claudeCliAuth?: { installed: boolean; loggedIn: boolean; oauthTokenConfigured: boolean; cliVersion: string | null };
   /** Enhanced Codex CLI auth detection */
@@ -926,6 +929,9 @@ export const api = {
     publicUrl?: string;
     updateChannel?: "stable" | "prerelease";
     dockerAutoUpdate?: boolean;
+    hankChatProvider?: string;
+    hankChatModel?: string;
+    obsidianVaultPath?: string;
   }) => put<AppSettings>("/settings", data),
   verifyAnthropicKey: (apiKey: string) =>
     post<{ valid: boolean; error?: string }>("/settings/anthropic/verify", { apiKey }),
@@ -1334,6 +1340,16 @@ export const api = {
   getSocialAccountAnalytics: (profileId: string) =>
     get<{ followers: number; following: number; posts: number }>(`/socialmedia/analytics/${encodeURIComponent(profileId)}`),
 
+  // ─── Hashtag Pools ─────────────────────────────────────────────────
+  listHashtagPools: () =>
+    get<{ pools: Array<{ id: string; name: string; industry: string; language: string; popular: string[]; medium: string[]; niche: string[]; branded: string[]; blocked: string[]; createdAt: string; updatedAt: string }> }>("/socialmedia/hashtag-pools"),
+  createHashtagPool: (pool: { name: string; industry?: string; language?: string; popular?: string[]; medium?: string[]; niche?: string[]; branded?: string[]; blocked?: string[] }) =>
+    post<{ id: string; name: string }>("/socialmedia/hashtag-pools", pool),
+  updateHashtagPool: (id: string, data: Record<string, unknown>) =>
+    put<{ id: string; name: string }>(`/socialmedia/hashtag-pools/${encodeURIComponent(id)}`, data),
+  deleteHashtagPool: (id: string) =>
+    del<{ ok: boolean }>(`/socialmedia/hashtag-pools/${encodeURIComponent(id)}`),
+
   // ─── Assistant (Todos, Notes, Reminders) ─────────────────────────
   listTodos: (filter?: { done?: boolean; priority?: string; category?: string }) => {
     const params = new URLSearchParams();
@@ -1359,9 +1375,33 @@ export const api = {
   listReminders: (all?: boolean) =>
     get<{ reminders: Array<{ id: string; text: string; triggerAt: string; fired: boolean; createdAt: string }> }>(`/assistant/reminders${all ? "?all=true" : ""}`),
   addReminder: (data: { text: string; triggerAt: string }) =>
-    post<{ id: string; text: string; triggerAt: string; fired: boolean }>("/assistant/reminders", data),
+    post<{ id: string; text: string; triggerAt: string; fired: boolean; calendarEventUid?: string }>("/assistant/reminders", data),
+  updateReminder: (id: string, data: { text?: string; triggerAt?: string }) =>
+    patch<{ id: string; text: string; triggerAt: string; fired: boolean; calendarEventUid?: string }>(`/assistant/reminders/${encodeURIComponent(id)}`, data),
   deleteReminder: (id: string) =>
     del<{ ok: boolean }>(`/assistant/reminders/${encodeURIComponent(id)}`),
+
+  // ─── CRM Contacts ───────────────────────────────────────────────────
+  listCrmContacts: (search?: string) =>
+    get<{ contacts: Array<{ id: string; name: string; company?: string; email?: string; phone?: string; notes?: string; tags: string[]; lastContactDate?: string; interactions: Array<{ date: string; type: string; summary: string }>; createdAt: string; updatedAt: string }> }>(`/assistant/contacts${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+  addCrmContact: (data: { name: string; company?: string; email?: string; phone?: string; notes?: string; tags?: string[] }) =>
+    post<{ id: string; name: string; company?: string; email?: string; phone?: string; tags: string[]; createdAt: string }>("/assistant/contacts", data),
+  getCrmContact: (id: string) =>
+    get<{ id: string; name: string; company?: string; email?: string; phone?: string; notes?: string; tags: string[]; lastContactDate?: string; interactions: Array<{ date: string; type: string; summary: string }>; createdAt: string; updatedAt: string }>(`/assistant/contacts/${encodeURIComponent(id)}`),
+  updateCrmContact: (id: string, data: { name?: string; company?: string; email?: string; phone?: string; notes?: string; tags?: string[] }) =>
+    patch<{ id: string; name: string; company?: string; email?: string; phone?: string; tags: string[] }>(`/assistant/contacts/${encodeURIComponent(id)}`, data),
+  deleteCrmContact: (id: string) =>
+    del<{ ok: boolean }>(`/assistant/contacts/${encodeURIComponent(id)}`),
+  logCrmInteraction: (id: string, data: { type: "call" | "email" | "meeting" | "note"; summary: string }) =>
+    post<{ id: string; name: string; interactions: Array<{ date: string; type: string; summary: string }> }>(`/assistant/contacts/${encodeURIComponent(id)}/interactions`, data),
+
+  // ─── Decisions ──────────────────────────────────────────────────────
+  listDecisions: (search?: string) =>
+    get<{ decisions: Array<{ id: string; title: string; context: string; decision: string; alternatives: string[]; reasoning: string; tags: string[]; createdAt: string }> }>(`/assistant/decisions${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+  addDecision: (data: { title: string; context: string; decision: string; alternatives?: string[]; reasoning?: string; tags?: string[] }) =>
+    post<{ id: string; title: string; context: string; decision: string; alternatives: string[]; reasoning: string; tags: string[]; createdAt: string }>("/assistant/decisions", data),
+  deleteDecision: (id: string) =>
+    del<{ ok: boolean }>(`/assistant/decisions/${encodeURIComponent(id)}`),
 
   // ─── Email ─────────────────────────────────────────────────────────
   listEmailAccounts: () =>
@@ -1432,4 +1472,172 @@ export const api = {
     put<{ configured: boolean; enabled: boolean }>(`/providers/${encodeURIComponent(id)}`, data),
   deleteProvider: (id: string) =>
     del<{ ok: boolean }>(`/providers/${encodeURIComponent(id)}`),
+
+  getDailyBriefing: (date?: string) =>
+    get<{
+      date: string;
+      email: { accounts: Array<{ accountName: string; email: string; unread: number }>; totalUnread: number };
+      calendar: { events: Array<Record<string, unknown>>; count: number };
+      todos: { open: number; overdue: number; dueToday: number };
+      delegations: { count: number };
+      projects: Array<{ name: string; total: number; done: number; open: number }>;
+    }>(date ? `/assistant/briefing?date=${date}` : "/assistant/briefing"),
+};
+
+// ─── Documents ────────────────────────────────────────────────────────────
+export const documentsApi = {
+  list: (folder?: string, tag?: string) => {
+    const params = new URLSearchParams();
+    if (folder) params.set("folder", folder);
+    if (tag) params.set("tag", tag);
+    const qs = params.toString();
+    return get<{ documents: Array<{ id: string; title: string; fileType: string; size: number; folder: string; tags: string[]; createdAt: string; updatedAt: string; summary?: string }> }>(`/assistant/documents${qs ? `?${qs}` : ""}`);
+  },
+  create: (data: { title: string; content: string; fileType: string; folder?: string; tags?: string[]; summary?: string }) =>
+    post<{ id: string; title: string; fileType: string; folder: string; tags: string[]; createdAt: string }>("/assistant/documents", data),
+  get: (id: string) =>
+    get<{ meta: { id: string; title: string; fileType: string; size: number; folder: string; tags: string[]; summary?: string }; content: string }>(`/assistant/documents/${encodeURIComponent(id)}`),
+  update: (id: string, data: { title?: string; tags?: string[]; folder?: string; summary?: string }) =>
+    patch<{ id: string; title: string; folder: string; tags: string[] }>(`/assistant/documents/${encodeURIComponent(id)}`, data),
+  delete: (id: string) =>
+    del<{ success: boolean }>(`/assistant/documents/${encodeURIComponent(id)}`),
+  search: (q: string) =>
+    get<{ documents: Array<{ id: string; title: string; fileType: string; folder: string; tags: string[]; summary?: string }> }>(`/assistant/documents/search?q=${encodeURIComponent(q)}`),
+  folders: () =>
+    get<{ folders: string[] }>("/assistant/documents/folders"),
+};
+
+// ─── Templates ────────────────────────────────────────────────────────────
+export const templatesApi = {
+  list: (category?: string) =>
+    get<{ templates: Array<{ id: string; name: string; category: string; content: string; variables: Array<{ name: string; description?: string; defaultValue?: string; required?: boolean }>; tags: string[]; usageCount: number; createdAt: string }> }>(`/assistant/templates${category ? `?category=${encodeURIComponent(category)}` : ""}`),
+  create: (data: { name: string; content: string; category: string; tags?: string[] }) =>
+    post<{ id: string; name: string; category: string; variables: Array<{ name: string }>; createdAt: string }>("/assistant/templates", data),
+  get: (id: string) =>
+    get<{ id: string; name: string; category: string; content: string; variables: Array<{ name: string; description?: string }> }>(`/assistant/templates/${encodeURIComponent(id)}`),
+  update: (id: string, data: { name?: string; content?: string; category?: string; tags?: string[] }) =>
+    patch<{ id: string; name: string; category: string }>(`/assistant/templates/${encodeURIComponent(id)}`, data),
+  delete: (id: string) =>
+    del<{ success: boolean }>(`/assistant/templates/${encodeURIComponent(id)}`),
+  use: (id: string, variables: Record<string, string>) =>
+    post<{ result: string; templateName: string }>(`/assistant/templates/${encodeURIComponent(id)}/use`, { variables }),
+  search: (q: string) =>
+    get<{ templates: Array<{ id: string; name: string; category: string }> }>(`/assistant/templates/search?q=${encodeURIComponent(q)}`),
+  categories: () =>
+    get<{ categories: string[] }>("/assistant/templates/categories"),
+};
+
+// ─── News & Monitoring ───────────────────────────────────────────────────
+export const newsApi = {
+  listSources: () =>
+    get<{ sources: Array<{ id: string; name: string; type: string; url?: string; keywords?: string[]; category: string; enabled: boolean; lastChecked?: string }> }>("/assistant/news/sources"),
+  addSource: (data: { name: string; type: string; category: string; url?: string; keywords?: string[]; checkInterval?: number }) =>
+    post<{ id: string; name: string; type: string; category: string }>("/assistant/news/sources", data),
+  updateSource: (id: string, data: Record<string, unknown>) =>
+    patch<{ id: string; name: string; enabled: boolean }>(`/assistant/news/sources/${encodeURIComponent(id)}`, data),
+  deleteSource: (id: string) =>
+    del<{ success: boolean }>(`/assistant/news/sources/${encodeURIComponent(id)}`),
+  list: (opts?: { category?: string; unread?: boolean; saved?: boolean; limit?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.category) params.set("category", opts.category);
+    if (opts?.unread) params.set("unread", "true");
+    if (opts?.saved) params.set("saved", "true");
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    return get<{ items: Array<{ id: string; sourceId: string; sourceName: string; title: string; summary: string; url?: string; category: string; publishedAt: string; read: boolean; saved: boolean; relevance?: number }> }>(`/assistant/news${qs ? `?${qs}` : ""}`);
+  },
+  stats: () =>
+    get<{ total: number; unread: number; sources: number; byCategory: Record<string, number> }>("/assistant/news/stats"),
+  search: (q: string) =>
+    get<{ items: Array<{ id: string; title: string; summary: string; sourceName: string }> }>(`/assistant/news/search?q=${encodeURIComponent(q)}`),
+  markRead: (id: string) =>
+    patch<{ success: boolean }>(`/assistant/news/${encodeURIComponent(id)}/read`, {}),
+  markAllRead: (category?: string) =>
+    post<{ markedRead: number }>("/assistant/news/mark-all-read", { category }),
+  toggleSaved: (id: string) =>
+    patch<{ id: string; saved: boolean }>(`/assistant/news/${encodeURIComponent(id)}/save`, {}),
+};
+
+// ─── Time Tracking ───────────────────────────────────────────────────────
+export const timeApi = {
+  getTimer: () =>
+    get<{ timer: { id: string; task: string; project?: string; category?: string; startTime: string } | null }>("/assistant/time/timer"),
+  startTimer: (task: string, project?: string, category?: string) =>
+    post<{ id: string; task: string; startTime: string }>("/assistant/time/timer/start", { task, project, category }),
+  stopTimer: (notes?: string) =>
+    post<{ id: string; task: string; duration: number; startTime: string; endTime: string }>("/assistant/time/timer/stop", { notes }),
+  logTime: (data: { task: string; duration: number; project?: string; category?: string; notes?: string; date?: string }) =>
+    post<{ id: string; task: string; duration: number }>("/assistant/time/log", data),
+  listEntries: (start?: string, end?: string, project?: string) => {
+    const params = new URLSearchParams();
+    if (start) params.set("start", start);
+    if (end) params.set("end", end);
+    if (project) params.set("project", project);
+    const qs = params.toString();
+    return get<{ entries: Array<{ id: string; task: string; project?: string; category?: string; startTime: string; duration?: number; notes?: string; source: string }> }>(`/assistant/time/entries${qs ? `?${qs}` : ""}`);
+  },
+  report: (period?: string) =>
+    get<{ period: string; totalMinutes: number; byProject: Record<string, number>; byCategory: Record<string, number>; byDay: Record<string, number> }>(`/assistant/time/report?period=${period || "week"}`),
+  projects: () =>
+    get<{ projects: string[] }>("/assistant/time/projects"),
+  deleteEntry: (id: string) =>
+    del<{ success: boolean }>(`/assistant/time/entries/${encodeURIComponent(id)}`),
+};
+
+// ─── Finance ─────────────────────────────────────────────────────────────
+export const financeApi = {
+  listInvoices: (status?: string) =>
+    get<{ invoices: Array<{ id: string; invoiceNumber: string; clientName: string; total: number; currency: string; status: string; issueDate: string; dueDate: string; paidDate?: string }> }>(`/assistant/invoices${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  createInvoice: (data: { clientName: string; items: Array<{ description: string; quantity: number; unitPrice: number; total: number }>; clientEmail?: string; taxRate?: number; currency?: string; dueDate?: string; notes?: string }) =>
+    post<{ id: string; invoiceNumber: string; clientName: string; total: number; currency: string; status: string }>("/assistant/invoices", data),
+  getInvoice: (id: string) =>
+    get<{ id: string; invoiceNumber: string; clientName: string; items: Array<{ description: string; quantity: number; unitPrice: number; total: number }>; total: number; currency: string; status: string }>(`/assistant/invoices/${encodeURIComponent(id)}`),
+  updateInvoice: (id: string, data: Record<string, unknown>) =>
+    patch<{ id: string; invoiceNumber: string; status: string }>(`/assistant/invoices/${encodeURIComponent(id)}`, data),
+  markPaid: (id: string) =>
+    post<{ id: string; invoiceNumber: string; status: string }>(`/assistant/invoices/${encodeURIComponent(id)}/paid`, {}),
+  deleteInvoice: (id: string) =>
+    del<{ success: boolean }>(`/assistant/invoices/${encodeURIComponent(id)}`),
+  listExpenses: (category?: string, start?: string, end?: string) => {
+    const params = new URLSearchParams();
+    if (category) params.set("category", category);
+    if (start) params.set("start", start);
+    if (end) params.set("end", end);
+    const qs = params.toString();
+    return get<{ expenses: Array<{ id: string; description: string; amount: number; currency: string; category: string; date: string; vendor?: string; project?: string }> }>(`/assistant/expenses${qs ? `?${qs}` : ""}`);
+  },
+  logExpense: (data: { description: string; amount: number; category: string; vendor?: string; project?: string; date?: string; notes?: string }) =>
+    post<{ id: string; description: string; amount: number; category: string }>("/assistant/expenses", data),
+  deleteExpense: (id: string) =>
+    del<{ success: boolean }>(`/assistant/expenses/${encodeURIComponent(id)}`),
+  expenseCategories: () =>
+    get<{ categories: string[] }>("/assistant/expenses/categories"),
+  summary: (period?: string) =>
+    get<{ totalRevenue: number; totalExpenses: number; netProfit: number; currency: string; invoicesByStatus: Record<string, { count: number; total: number }>; outstandingInvoices: Array<{ id: string; invoiceNumber: string; clientName: string; total: number; dueDate: string }> }>(`/assistant/finance/summary?period=${period || "month"}`),
+  getSettings: () =>
+    get<{ defaultCurrency: string; defaultTaxRate: number; invoicePrefix: string; companyName?: string }>("/assistant/finance/settings"),
+  updateSettings: (data: Record<string, unknown>) =>
+    patch<{ defaultCurrency: string; defaultTaxRate: number }>("/assistant/finance/settings", data),
+};
+
+// ─── KPI Dashboard ───────────────────────────────────────────────────────
+export const kpiApi = {
+  list: (category?: string) =>
+    get<{ kpis: Array<{ id: string; name: string; unit: string; category: string; target?: number; currentValue?: number; trend?: string; trendPercent?: number; direction: string }> }>(`/assistant/kpis${category ? `?category=${encodeURIComponent(category)}` : ""}`),
+  dashboard: () =>
+    get<{ kpis: Array<{ id: string; name: string; unit: string; category: string; target?: number; currentValue?: number; trend?: string; trendPercent?: number; direction: string }>; summary: { total: number; onTarget: number; warning: number; critical: number; noData: number } }>("/assistant/kpis/dashboard"),
+  define: (data: { name: string; unit: string; category: string; target?: number; direction?: string; description?: string }) =>
+    post<{ id: string; name: string; unit: string; category: string }>("/assistant/kpis", data),
+  get: (id: string) =>
+    get<{ id: string; name: string; unit: string; currentValue?: number; target?: number; history: Array<{ value: number; date: string }> }>(`/assistant/kpis/${encodeURIComponent(id)}`),
+  update: (id: string, data: Record<string, unknown>) =>
+    patch<{ id: string; name: string }>(`/assistant/kpis/${encodeURIComponent(id)}`, data),
+  record: (id: string, value: number, date?: string, note?: string) =>
+    post<{ id: string; name: string; currentValue: number; trend?: string }>(`/assistant/kpis/${encodeURIComponent(id)}/record`, { value, date, note }),
+  history: (id: string, period?: string) =>
+    get<{ history: Array<{ value: number; date: string; note?: string }> }>(`/assistant/kpis/${encodeURIComponent(id)}/history${period ? `?period=${period}` : ""}`),
+  delete: (id: string) =>
+    del<{ success: boolean }>(`/assistant/kpis/${encodeURIComponent(id)}`),
+  categories: () =>
+    get<{ categories: string[] }>("/assistant/kpis/categories"),
 };

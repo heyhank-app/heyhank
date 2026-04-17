@@ -133,8 +133,8 @@ export function registerSystemRoutes(
         if (getSettings().dockerAutoUpdate) {
           try {
             console.log("[update] Re-pulling Docker image (dockerAutoUpdate enabled)...");
-            imagePullManager.pull("the-companion:latest");
-            const ready = await imagePullManager.waitForReady("the-companion:latest", 120_000);
+            imagePullManager.pull("heyhank:latest");
+            const ready = await imagePullManager.waitForReady("heyhank:latest", 120_000);
             if (ready) {
               console.log("[update] Docker image re-pull complete.");
             } else {
