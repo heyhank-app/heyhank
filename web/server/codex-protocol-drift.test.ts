@@ -74,9 +74,9 @@ describe("Codex adapter method drift vs upstream protocol snapshot", () => {
       "codex/event/agent_reasoning",
       "codex/event/agent_reasoning_delta",
       "codex/event/agent_reasoning_section_break",
-      // Companion-internal notification emitted by codex-ws-proxy.cjs on
+      // HeyHank-internal notification emitted by codex-ws-proxy.cjs on
       // WebSocket reconnection — not part of the upstream Codex protocol.
-      "companion/wsReconnected",
+      "heyhank/wsReconnected",
     ]);
 
     const legacyServerRequests = new Set([

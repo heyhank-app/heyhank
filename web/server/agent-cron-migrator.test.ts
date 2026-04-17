@@ -37,18 +37,18 @@ vi.mock("./agent-store.js", () => ({
 }));
 
 /**
- * Mock for paths.js. We point COMPANION_HOME at a fake temp directory
+ * Mock for paths.js. We point HEYHANK_HOME at a fake temp directory
  * so that CRON_DIR and MIGRATION_FLAG paths are deterministic in tests.
  */
 vi.mock("./paths.js", () => ({
-  COMPANION_HOME: "/tmp/test-companion-home",
+  HEYHANK_HOME: "/tmp/test-heyhank-home",
 }));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-const COMPANION_HOME = "/tmp/test-companion-home";
-const CRON_DIR = `${COMPANION_HOME}/cron`;
-const MIGRATION_FLAG = `${COMPANION_HOME}/.cron-migrated`;
+const HEYHANK_HOME = "/tmp/test-heyhank-home";
+const CRON_DIR = `${HEYHANK_HOME}/cron`;
+const MIGRATION_FLAG = `${HEYHANK_HOME}/.cron-migrated`;
 
 /**
  * Build a valid CronJob object with sensible defaults.

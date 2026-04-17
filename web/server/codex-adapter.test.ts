@@ -85,7 +85,7 @@ describe("CodexAdapter", () => {
     // Check stdin received the initialize request
     const allWritten = stdin.chunks.join("");
     expect(allWritten).toContain('"method":"initialize"');
-    expect(allWritten).toContain("thecompanion");
+    expect(allWritten).toContain("maxxagent");
   });
 
   it("translates agent message streaming to content_block_delta events", async () => {
@@ -3024,7 +3024,7 @@ describe("CodexAdapter", () => {
 
   it("fails closed on unknown JSON-RPC requests", async () => {
     // Unknown Codex requests should fail closed so new protocol behavior does
-    // not get silently approved by Companion.
+    // not get silently approved by HeyHank.
     const messages: BrowserIncomingMessage[] = [];
     const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
     adapter.onBrowserMessage((msg) => messages.push(msg));
@@ -4490,8 +4490,8 @@ describe("StdioTransport RPC timeout", () => {
     void transport;
   });
 
-  it("rejects pending RPC calls when companion/wsReconnected notification arrives", async () => {
-    // When the WS proxy reconnects to Codex, it sends a companion/wsReconnected
+  it("rejects pending RPC calls when heyhank/wsReconnected notification arrives", async () => {
+    // When the WS proxy reconnects to Codex, it sends a heyhank/wsReconnected
     // notification. Any pending RPC calls should be immediately rejected because
     // Codex sees the reconnection as a fresh connection and won't respond to old requests.
     const streams = createStreams();
@@ -4502,13 +4502,13 @@ describe("StdioTransport RPC timeout", () => {
 
     // Simulate the proxy sending the reconnection notification
     await new Promise((r) => setTimeout(r, 20));
-    streams.pushResponse({ method: "companion/wsReconnected", params: {} });
+    streams.pushResponse({ method: "heyhank/wsReconnected", params: {} });
 
     await expect(p1).rejects.toThrow("Transport reconnected");
     await expect(p2).rejects.toThrow("Transport reconnected");
   });
 
-  it("forwards companion/wsReconnected as notification after rejecting pending calls", async () => {
+  it("forwards heyhank/wsReconnected as notification after rejecting pending calls", async () => {
     // The reconnection notification should still be delivered to the notification
     // handler so the adapter can perform its own cleanup.
     const streams = createStreams();
@@ -4527,7 +4527,7 @@ describe("StdioTransport RPC timeout", () => {
     await new Promise((r) => setTimeout(r, 20));
 
     // Send the reconnection notification
-    streams.pushResponse({ method: "companion/wsReconnected", params: {} });
+    streams.pushResponse({ method: "heyhank/wsReconnected", params: {} });
     await new Promise((r) => setTimeout(r, 20));
 
     // Pending call should be rejected
@@ -4537,7 +4537,7 @@ describe("StdioTransport RPC timeout", () => {
 
     // Notification should also be delivered to the handler
     expect(notifications).toHaveLength(1);
-    expect(notifications[0].method).toBe("companion/wsReconnected");
+    expect(notifications[0].method).toBe("heyhank/wsReconnected");
   });
 });
 
@@ -4889,7 +4889,7 @@ describe("CodexAdapter WS reconnection handling", () => {
     const permReqId = (permReqs[0] as { request: { request_id: string } }).request.request_id;
 
     // Trigger the wsReconnected notification
-    notifHandler!("companion/wsReconnected", {});
+    notifHandler!("heyhank/wsReconnected", {});
     await new Promise((r) => setTimeout(r, 50));
 
     // Should NOT have triggered full disconnect (this is a transient recovery)
@@ -4923,7 +4923,7 @@ describe("CodexAdapter WS reconnection handling", () => {
   });
 
   it("re-initializes Codex after ws reconnect before starting the next turn", async () => {
-    // Regression: after companion/wsReconnected, Codex may reject turn/start
+    // Regression: after heyhank/wsReconnected, Codex may reject turn/start
     // with "Not initialized" unless we run initialize + initialized again.
     let notifHandler: ((m: string, p: Record<string, unknown>) => void) | null = null;
     let initializedOnServer = false;
@@ -4961,7 +4961,7 @@ describe("CodexAdapter WS reconnection handling", () => {
     // Simulate that server lost initialization state when WS reconnected.
     initializedOnServer = false;
     expect(notifHandler).not.toBeNull();
-    notifHandler!("companion/wsReconnected", {});
+    notifHandler!("heyhank/wsReconnected", {});
     await new Promise((r) => setTimeout(r, 50));
 
     adapter.sendBrowserMessage({ type: "user_message", content: "after reconnect" });
@@ -4979,7 +4979,7 @@ describe("CodexAdapter WS reconnection handling", () => {
     expect(turnStartCalls.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("resets overloadRetryCount on companion/wsReconnected", async () => {
+  it("resets overloadRetryCount on heyhank/wsReconnected", async () => {
     let notifHandler: ((m: string, p: Record<string, unknown>) => void) | null = null;
 
     const transport: ICodexTransport = {
@@ -5005,7 +5005,7 @@ describe("CodexAdapter WS reconnection handling", () => {
     await new Promise((r) => setTimeout(r, 100));
 
     (adapter as any).overloadRetryCount = 4;
-    notifHandler!("companion/wsReconnected", {});
+    notifHandler!("heyhank/wsReconnected", {});
     await new Promise((r) => setTimeout(r, 50));
 
     expect((adapter as any).overloadRetryCount).toBe(0);
@@ -5297,7 +5297,7 @@ describe("CodexAdapter streaming state reset on WS reconnect", () => {
     messages.length = 0;
 
     // Trigger WS reconnect
-    notifHandler!("companion/wsReconnected", {});
+    notifHandler!("heyhank/wsReconnected", {});
     await new Promise((r) => setTimeout(r, 100));
 
     // Should have emitted content_block_stop
@@ -5347,7 +5347,7 @@ describe("CodexAdapter streaming state reset on WS reconnect", () => {
     messages.length = 0;
 
     // Trigger WS reconnect without any streaming active
-    notifHandler!("companion/wsReconnected", {});
+    notifHandler!("heyhank/wsReconnected", {});
     await new Promise((r) => setTimeout(r, 100));
 
     // Should NOT have emitted any content_block_stop or message_delta

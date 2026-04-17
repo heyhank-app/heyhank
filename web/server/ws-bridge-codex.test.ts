@@ -11,6 +11,14 @@ vi.mock("./ai-validator.js", () => ({
   validatePermission: vi.fn(),
 }));
 
+// Mock internal-ai so hasInternalAI() doesn't read real providers.json from disk.
+// Default to true (most tests expect AI to be available); override per-test as needed.
+const mockHasInternalAI = vi.hoisted(() => vi.fn(() => true));
+vi.mock("./internal-ai.js", () => ({
+  hasInternalAI: mockHasInternalAI,
+  callInternalAI: vi.fn(),
+}));
+
 import { attachCodexAdapterHandlers } from "./ws-bridge-codex.js";
 import type { BrowserIncomingMessage, SessionState } from "./session-types.js";
 import type { Session } from "./ws-bridge-types.js";
@@ -105,6 +113,8 @@ describe("attachCodexAdapterHandlers", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Restore default: hasInternalAI returns true (most tests need AI available)
+    mockHasInternalAI.mockReturnValue(true);
     heyHankBus.clear();
     session = createMockSession();
     adapter = createMockAdapter();
@@ -130,6 +140,12 @@ describe("attachCodexAdapterHandlers", () => {
       assistantName: "",
       userName: "",
       internalAiProvider: "",
+        hankChatProvider: "gemini-live",
+        hankChatModel: "",
+        mem0ApiKey: "",
+        mem0UserId: "",
+        memoryAutoDetect: true,
+        obsidianVaultPath: "",
     });
   });
 
@@ -1110,6 +1126,12 @@ describe("attachCodexAdapterHandlers", () => {
         assistantName: "",
         userName: "",
         internalAiProvider: "",
+        hankChatProvider: "gemini-live",
+        hankChatModel: "",
+        mem0ApiKey: "",
+        mem0UserId: "",
+        memoryAutoDetect: true,
+        obsidianVaultPath: "",
       });
     }
 
@@ -1280,6 +1302,12 @@ describe("attachCodexAdapterHandlers", () => {
         assistantName: "",
         userName: "",
         internalAiProvider: "",
+        hankChatProvider: "gemini-live",
+        hankChatModel: "",
+        mem0ApiKey: "",
+        mem0UserId: "",
+        memoryAutoDetect: true,
+        obsidianVaultPath: "",
       });
 
       attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
@@ -1301,6 +1329,7 @@ describe("attachCodexAdapterHandlers", () => {
     it("skips AI validation when anthropicApiKey is empty", () => {
       // Even if aiValidationEnabled is true, an empty API key means we can't call
       // the AI — fall through to normal manual flow.
+      mockHasInternalAI.mockReturnValue(false);
       vi.mocked(settingsManager.getSettings).mockReturnValue({
         anthropicApiKey: "",  // empty
         anthropicModel: "claude-sonnet-4-6",
@@ -1320,6 +1349,12 @@ describe("attachCodexAdapterHandlers", () => {
         assistantName: "",
         userName: "",
         internalAiProvider: "",
+        hankChatProvider: "gemini-live",
+        hankChatModel: "",
+        mem0ApiKey: "",
+        mem0UserId: "",
+        memoryAutoDetect: true,
+        obsidianVaultPath: "",
       });
 
       attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
@@ -1425,6 +1460,12 @@ describe("attachCodexAdapterHandlers", () => {
         assistantName: "",
         userName: "",
         internalAiProvider: "",
+        hankChatProvider: "gemini-live",
+        hankChatModel: "",
+        mem0ApiKey: "",
+        mem0UserId: "",
+        memoryAutoDetect: true,
+        obsidianVaultPath: "",
       });
 
       vi.mocked(aiValidator.validatePermission).mockResolvedValue({
@@ -1549,6 +1590,12 @@ describe("attachCodexAdapterHandlers", () => {
         assistantName: "",
         userName: "",
         internalAiProvider: "",
+        hankChatProvider: "gemini-live",
+        hankChatModel: "",
+        mem0ApiKey: "",
+        mem0UserId: "",
+        memoryAutoDetect: true,
+        obsidianVaultPath: "",
       });
 
       vi.mocked(aiValidator.validatePermission).mockResolvedValue({

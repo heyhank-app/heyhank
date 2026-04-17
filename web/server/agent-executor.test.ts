@@ -75,7 +75,7 @@ vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
     ...actual,
-    mkdtempSync: vi.fn().mockReturnValue("/tmp/companion-agent-test-abc123"),
+    mkdtempSync: vi.fn().mockReturnValue("/tmp/heyhank-agent-test-abc123"),
   };
 });
 
@@ -643,7 +643,7 @@ describe("AgentExecutor", () => {
 
       expect(launcher.launch).toHaveBeenCalledWith(
         expect.objectContaining({
-          cwd: "/tmp/companion-agent-test-abc123",
+          cwd: "/tmp/heyhank-agent-test-abc123",
         }),
       );
     });
@@ -659,7 +659,7 @@ describe("AgentExecutor", () => {
 
       expect(launcher.launch).toHaveBeenCalledWith(
         expect.objectContaining({
-          cwd: "/tmp/companion-agent-test-abc123",
+          cwd: "/tmp/heyhank-agent-test-abc123",
         }),
       );
     });

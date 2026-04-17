@@ -145,10 +145,10 @@ let launcher: CliLauncher;
 beforeEach(() => {
   vi.clearAllMocks();
   heyHankBus.clear();
-  delete process.env.COMPANION_CONTAINER_SDK_HOST;
-  delete process.env.COMPANION_FORCE_BYPASS_IN_CONTAINER;
+  delete process.env.HEYHANK_CONTAINER_SDK_HOST;
+  delete process.env.HEYHANK_FORCE_BYPASS_IN_CONTAINER;
   // Default to stdio for most tests; WS launcher behavior is covered explicitly below.
-  process.env.COMPANION_CODEX_TRANSPORT = "stdio";
+  process.env.HEYHANK_CODEX_TRANSPORT = "stdio";
   tempDir = mkdtempSync(join(tmpdir(), "launcher-test-"));
   store = new SessionStore(tempDir);
   launcher = new CliLauncher(3456);
@@ -160,9 +160,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete process.env.COMPANION_CODEX_TRANSPORT;
-  delete process.env.COMPANION_CODEX_WS_CONNECT_TIMEOUT_MS;
-  delete process.env.COMPANION_CODEX_PONG_TIMEOUT_MS;
+  delete process.env.HEYHANK_CODEX_TRANSPORT;
+  delete process.env.HEYHANK_CODEX_WS_CONNECT_TIMEOUT_MS;
+  delete process.env.HEYHANK_CODEX_PONG_TIMEOUT_MS;
   rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -218,7 +218,7 @@ describe("launch", () => {
 
   it("passes --permission-mode when provided", () => {
     // Allow bypassPermissions through even when tests run as root
-    process.env.COMPANION_FORCE_BYPASS_AS_ROOT = "1";
+    process.env.HEYHANK_FORCE_BYPASS_AS_ROOT = "1";
     try {
       launcher.launch({ permissionMode: "bypassPermissions", cwd: "/tmp" });
 
@@ -227,7 +227,7 @@ describe("launch", () => {
       expect(modeIdx).toBeGreaterThan(-1);
       expect(cmdAndArgs[modeIdx + 1]).toBe("bypassPermissions");
     } finally {
-      delete process.env.COMPANION_FORCE_BYPASS_AS_ROOT;
+      delete process.env.HEYHANK_FORCE_BYPASS_AS_ROOT;
     }
   });
 
@@ -236,7 +236,7 @@ describe("launch", () => {
       cwd: "/tmp/project",
       permissionMode: "bypassPermissions",
       containerId: "abc123def456",
-      containerName: "companion-test",
+      containerName: "heyhank-test",
     });
 
     const [cmdAndArgs] = mockSpawn.mock.calls[0];
@@ -272,12 +272,12 @@ describe("launch", () => {
     }
   });
 
-  it("uses COMPANION_CONTAINER_SDK_HOST for containerized sdk-url when set", () => {
-    process.env.COMPANION_CONTAINER_SDK_HOST = "172.17.0.1";
+  it("uses HEYHANK_CONTAINER_SDK_HOST for containerized sdk-url when set", () => {
+    process.env.HEYHANK_CONTAINER_SDK_HOST = "172.17.0.1";
     launcher.launch({
       cwd: "/tmp/project",
       containerId: "abc123def456",
-      containerName: "companion-test",
+      containerName: "heyhank-test",
     });
 
     const [cmdAndArgs] = mockSpawn.mock.calls[0];
@@ -355,12 +355,12 @@ describe("launch", () => {
     const info = launcher.launch({
       cwd: "/tmp/project",
       containerId: "abc123def456",
-      containerName: "companion-session-1",
+      containerName: "heyhank-session-1",
       containerImage: "ubuntu:22.04",
     });
 
     expect(info.containerId).toBe("abc123def456");
-    expect(info.containerName).toBe("companion-session-1");
+    expect(info.containerName).toBe("heyhank-session-1");
     expect(info.containerImage).toBe("ubuntu:22.04");
     expect(info.containerCwd).toBe("/workspace");
   });
@@ -371,7 +371,7 @@ describe("launch", () => {
       cwd: "/tmp/project",
       backendType: "codex",
       containerId: "abc123def456",
-      containerName: "companion-session-1",
+      containerName: "heyhank-session-1",
       containerImage: "ubuntu:22.04",
       containerCwd: "/workspace/repo",
     });
@@ -384,7 +384,7 @@ describe("launch", () => {
     launcher.launch({
       cwd: "/tmp/project",
       containerId: "abc123def456",
-      containerName: "companion-session-1",
+      containerName: "heyhank-session-1",
     });
 
     const [cmdAndArgs] = mockSpawn.mock.calls[0];
@@ -751,7 +751,7 @@ describe("relaunch", () => {
     launcher.launch({
       cwd: "/tmp/project",
       containerId: "abc123def456",
-      containerName: "companion-test",
+      containerName: "heyhank-test",
       env: { CLAUDE_CODE_OAUTH_TOKEN: "tok-test" },
     });
 
@@ -777,7 +777,7 @@ describe("relaunch", () => {
     launcher.launch({
       cwd: "/tmp/project",
       containerId: "abc123def456",
-      containerName: "companion-gone",
+      containerName: "heyhank-gone",
     });
 
     // Simulate container being removed
@@ -785,7 +785,7 @@ describe("relaunch", () => {
 
     const result = await launcher.relaunch("test-session-id");
     expect(result.ok).toBe(false);
-    expect(result.error).toContain("companion-gone");
+    expect(result.error).toContain("heyhank-gone");
     expect(result.error).toContain("removed externally");
 
     // Session should be marked as exited
@@ -812,7 +812,7 @@ describe("relaunch", () => {
     launcher.launch({
       cwd: "/tmp/project",
       containerId: "abc123def456",
-      containerName: "companion-stopped",
+      containerName: "heyhank-stopped",
     });
 
     // Container is stopped but can be restarted
@@ -832,7 +832,7 @@ describe("relaunch", () => {
     launcher.launch({
       cwd: "/tmp/project",
       containerId: "abc123def456",
-      containerName: "companion-dead",
+      containerName: "heyhank-dead",
     });
 
     mockIsContainerAlive.mockReturnValueOnce("stopped");
@@ -840,7 +840,7 @@ describe("relaunch", () => {
 
     const result = await launcher.relaunch("test-session-id");
     expect(result.ok).toBe(false);
-    expect(result.error).toContain("companion-dead");
+    expect(result.error).toContain("heyhank-dead");
     expect(result.error).toContain("stopped");
     expect(result.error).toContain("container start failed");
   });
@@ -849,7 +849,7 @@ describe("relaunch", () => {
     launcher.launch({
       cwd: "/tmp/project",
       containerId: "abc123def456",
-      containerName: "companion-nobin",
+      containerName: "heyhank-nobin",
     });
 
     mockIsContainerAlive.mockReturnValueOnce("running");
@@ -859,7 +859,7 @@ describe("relaunch", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain("claude");
     expect(result.error).toContain("not found");
-    expect(result.error).toContain("companion-nobin");
+    expect(result.error).toContain("heyhank-nobin");
 
     const session = launcher.getSession("test-session-id");
     expect(session?.state).toBe("exited");
@@ -899,7 +899,7 @@ describe("codex websocket launcher", () => {
     // Verify the WS transport path launches two subprocesses:
     // 1) codex app-server --listen ...
     // 2) a Node sidecar proxy that bridges stdio <-> WebSocket
-    process.env.COMPANION_CODEX_TRANSPORT = "ws";
+    process.env.HEYHANK_CODEX_TRANSPORT = "ws";
     mockResolveBinary.mockReturnValue("/opt/fake/codex");
 
     const codexProc = createMockProc(2001);
@@ -944,7 +944,7 @@ describe("codex websocket launcher", () => {
   });
 
   it("skips already-claimed ws ports when selecting Codex host listen port", async () => {
-    process.env.COMPANION_CODEX_TRANSPORT = "ws";
+    process.env.HEYHANK_CODEX_TRANSPORT = "ws";
     mockResolveBinary.mockReturnValue("/opt/fake/codex");
     (launcher as any).claimedCodexWsPorts.add(4500);
 
@@ -965,11 +965,11 @@ describe("codex websocket launcher", () => {
   });
 
   it("passes custom connect and pong timeouts from env vars to the ws proxy", async () => {
-    // When COMPANION_CODEX_WS_CONNECT_TIMEOUT_MS and COMPANION_CODEX_PONG_TIMEOUT_MS
+    // When HEYHANK_CODEX_WS_CONNECT_TIMEOUT_MS and HEYHANK_CODEX_PONG_TIMEOUT_MS
     // are set, those values should be forwarded as argv[3] and argv[4] to the proxy.
-    process.env.COMPANION_CODEX_TRANSPORT = "ws";
-    process.env.COMPANION_CODEX_WS_CONNECT_TIMEOUT_MS = "60000";
-    process.env.COMPANION_CODEX_PONG_TIMEOUT_MS = "45000";
+    process.env.HEYHANK_CODEX_TRANSPORT = "ws";
+    process.env.HEYHANK_CODEX_WS_CONNECT_TIMEOUT_MS = "60000";
+    process.env.HEYHANK_CODEX_PONG_TIMEOUT_MS = "45000";
     mockResolveBinary.mockReturnValue("/opt/fake/codex");
 
     const codexProc = createMockProc(5001);
@@ -992,7 +992,7 @@ describe("codex websocket launcher", () => {
 
   it("relaunch kills the old codex process and ws proxy before spawning replacements", async () => {
     // Verify the WS sidecar is treated as part of session lifecycle during relaunch.
-    process.env.COMPANION_CODEX_TRANSPORT = "ws";
+    process.env.HEYHANK_CODEX_TRANSPORT = "ws";
     mockResolveBinary.mockReturnValue("/opt/fake/codex");
 
     let resolveCodex1!: (code: number) => void;
@@ -1046,11 +1046,11 @@ describe("codex websocket launcher", () => {
   it("containerized codex ws mode ignores detached launcher exit and uses proxy exit for session liveness", async () => {
     // In container WS mode, docker exec -d exits immediately after launching Codex.
     // The session must remain alive until the proxy (actual transport) exits.
-    process.env.COMPANION_CODEX_TRANSPORT = "ws";
+    process.env.HEYHANK_CODEX_TRANSPORT = "ws";
     mockGetContainerById.mockReturnValue({
       containerId: "abc123def456",
-      name: "companion-codex",
-      image: "the-companion:latest",
+      name: "heyhank-codex",
+      image: "heyhank:latest",
       portMappings: [{ containerPort: 4502, hostPort: 55021 }],
       hostCwd: "/tmp/project",
       containerCwd: "/workspace",
@@ -1076,7 +1076,7 @@ describe("codex websocket launcher", () => {
       cwd: "/tmp/project",
       codexSandbox: "workspace-write",
       containerId: "abc123def456",
-      containerName: "companion-codex",
+      containerName: "heyhank-codex",
     });
 
     await new Promise((r) => setTimeout(r, 0));

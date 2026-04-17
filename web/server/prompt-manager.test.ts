@@ -128,10 +128,10 @@ describe("listPrompts", () => {
 
   it("reads legacy prompts with only projectPath (no projectPaths)", () => {
     // Simulates loading a prompts.json that was created before projectPaths existed.
-    const companionDir = join(tempDir, ".companion");
-    mkdirSync(companionDir, { recursive: true });
+    const heyhankDir = join(tempDir, ".heyhank");
+    mkdirSync(heyhankDir, { recursive: true });
     writeFileSync(
-      join(companionDir, "prompts.json"),
+      join(heyhankDir, "prompts.json"),
       JSON.stringify([
         {
           id: "legacy-1",

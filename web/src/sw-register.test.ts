@@ -43,7 +43,7 @@ describe("sw-register", () => {
     expect(typeof config.onOfflineReady).toBe("function");
   });
 
-  it("sets up periodic update check every 60 minutes", async () => {
+  it("sets up periodic update check every 5 minutes", async () => {
     await import("./sw-register.js");
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -56,12 +56,12 @@ describe("sw-register", () => {
     // No update calls yet
     expect(mockRegistration.update).not.toHaveBeenCalled();
 
-    // Advance 60 minutes
-    vi.advanceTimersByTime(60 * 60 * 1000);
+    // Advance 5 minutes
+    vi.advanceTimersByTime(5 * 60 * 1000);
     expect(mockRegistration.update).toHaveBeenCalledOnce();
 
-    // Advance another 60 minutes
-    vi.advanceTimersByTime(60 * 60 * 1000);
+    // Advance another 5 minutes
+    vi.advanceTimersByTime(5 * 60 * 1000);
     expect(mockRegistration.update).toHaveBeenCalledTimes(2);
   });
 

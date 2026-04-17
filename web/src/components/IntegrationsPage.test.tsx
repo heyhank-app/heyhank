@@ -45,8 +45,8 @@ vi.mock("../utils/routing.js", () => ({
 import { IntegrationsPage } from "./IntegrationsPage.js";
 
 // Mock global fetch for the raw fetch() calls in IntegrationsPage
-const mockFetch = vi.fn() as unknown as typeof fetch;
-globalThis.fetch = mockFetch;
+const mockFetch = vi.fn();
+globalThis.fetch = mockFetch as unknown as typeof fetch;
 
 beforeEach(() => {
   vi.clearAllMocks();

@@ -47,11 +47,11 @@ describe("LoginPage", () => {
     // a submit button, and help text about scanning QR with native camera
     render(<LoginPage />);
 
-    expect(screen.getByText("The Companion")).toBeInTheDocument();
+    expect(screen.getByText("HeyHank")).toBeInTheDocument();
     expect(screen.getByLabelText("Auth Token")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Paste your token here")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Login" })).toBeInTheDocument();
-    expect(screen.getByText(/Scan the QR code/)).toBeInTheDocument();
+    expect(screen.getByText(/Scan QR code/)).toBeInTheDocument();
   });
 
   it("disables submit button when input is empty", () => {

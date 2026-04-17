@@ -54,6 +54,17 @@ import { AgentsPage } from "./AgentsPage.js";
 
 // ─── Test Helpers ────────────────────────────────────────────────────────────
 
+/**
+ * Navigate through the template picker to open the blank editor.
+ * After clicking "+ New Agent", the component shows a template picker.
+ * We click "Blank Agent" to go to the editor with an empty form.
+ */
+async function openBlankEditor() {
+  fireEvent.click(screen.getByText("+ New Agent"));
+  // Template picker shows "Blank Agent" button
+  fireEvent.click(screen.getByText("Blank Agent"));
+}
+
 function makeAgent(overrides: Partial<AgentInfo> = {}): AgentInfo {
   return {
     id: "agent-1",
@@ -93,7 +104,7 @@ beforeEach(() => {
   // Reset publicUrl mock to empty (no public URL configured)
   mockPublicUrl = "";
   // Clear the PublicUrlBanner dismiss key so banner tests work correctly
-  localStorage.removeItem("companion_public_url_dismissed");
+  localStorage.removeItem("heyhank_public_url_dismissed");
 });
 
 describe("AgentsPage", () => {
@@ -270,7 +281,7 @@ describe("AgentsPage", () => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Editor should now be visible with "New Agent" heading
     expect(screen.getByText("New Agent")).toBeInTheDocument();
@@ -289,7 +300,7 @@ describe("AgentsPage", () => {
     });
 
     // Open editor
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     expect(screen.getByText("New Agent")).toBeInTheDocument();
 
     // Click Cancel — there are two Cancel buttons in the editor (back arrow area and header)
@@ -426,7 +437,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Controls row should be present
     const controlsRow = screen.getByTestId("controls-row");
@@ -445,7 +456,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Folder pill shows "temp" by default
     expect(screen.getByText("temp")).toBeInTheDocument();
@@ -462,7 +473,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Env pill shows "None" by default
     await waitFor(() => {
@@ -542,7 +553,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Default is Claude, so Internet pill should not be visible
     expect(screen.queryByText("Internet")).not.toBeInTheDocument();
@@ -568,7 +579,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Advanced header should be visible
     expect(screen.getByText("Advanced")).toBeInTheDocument();
@@ -619,7 +630,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Expand Advanced
     fireEvent.click(screen.getByText("Advanced"));
@@ -655,7 +666,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     // Expand Advanced
     fireEvent.click(screen.getByText("Advanced"));
 
@@ -673,7 +684,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     fireEvent.click(screen.getByText("Advanced"));
 
     expect(screen.getByText("No skills found in ~/.claude/skills/")).toBeInTheDocument();
@@ -688,7 +699,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     fireEvent.click(screen.getByText("Advanced"));
 
     // Initially shows empty state
@@ -729,7 +740,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     fireEvent.click(screen.getByText("Advanced"));
 
     // Type a tool name and press Enter
@@ -761,7 +772,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Both trigger pills should be visible
     expect(screen.getByText("Webhook")).toBeInTheDocument();
@@ -840,7 +851,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // None of these old section headers should exist
     expect(screen.queryByText("Basics")).not.toBeInTheDocument();
@@ -911,7 +922,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     const results = await axe(container, axeRules);
     expect(results).toHaveNoViolations();
   });
@@ -925,7 +936,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     fireEvent.click(screen.getByText("Advanced"));
     const results = await axe(container, axeRules);
     expect(results).toHaveNoViolations();
@@ -946,7 +957,7 @@ describe("AgentsPage", () => {
     });
 
     // Open create form
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     expect(screen.getByText("Create")).toBeInTheDocument();
 
     // Fill in required fields: name and prompt
@@ -1195,7 +1206,7 @@ describe("AgentsPage", () => {
     });
 
     // Open create form and fill in fields
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     fireEvent.change(screen.getByPlaceholderText("Agent name *"), {
       target: { value: "Duplicate" },
     });
@@ -1276,7 +1287,7 @@ describe("AgentsPage", () => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     fireEvent.change(screen.getByPlaceholderText("Agent name *"), {
       target: { value: "Test" },
     });
@@ -1344,7 +1355,7 @@ describe("AgentsPage", () => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     fireEvent.click(screen.getByText("Schedule"));
 
     // Recurring should be selected by default
@@ -1372,7 +1383,7 @@ describe("AgentsPage", () => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     fireEvent.click(screen.getByText("Schedule"));
 
     // Default expression is "0 8 * * *"
@@ -1394,7 +1405,7 @@ describe("AgentsPage", () => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     fireEvent.click(screen.getByText("Schedule"));
 
     // Initially in recurring mode - cron presets visible
@@ -1473,7 +1484,7 @@ describe("AgentsPage", () => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Create button should be disabled initially (empty name and prompt)
     const createButton = screen.getByText("Create");
@@ -1521,7 +1532,7 @@ describe("AgentsPage", () => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // No webhook helper text initially
     expect(screen.queryByText(/unique URL will be generated/)).not.toBeInTheDocument();
@@ -1546,7 +1557,7 @@ describe("AgentsPage", () => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Fill required fields
     fireEvent.change(screen.getByPlaceholderText("Agent name *"), {
@@ -1587,7 +1598,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Find the model dropdown button by its aria-expanded attribute
     // The controls row has three expandable buttons: model, mode, env
@@ -1617,7 +1628,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Find mode dropdown - it's the second aria-expanded button in controls row
     const controlsRow = screen.getByTestId("controls-row");
@@ -1645,7 +1656,7 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Wait for env profiles to load
     await waitFor(() => {
@@ -1881,7 +1892,7 @@ describe("AgentsPage", () => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     fireEvent.click(screen.getByText("Advanced"));
 
     // Wait for skills to load
@@ -1956,7 +1967,7 @@ describe("AgentsPage", () => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
     fireEvent.click(screen.getByText("Advanced"));
     fireEvent.click(screen.getByText("+ Add Server"));
 
@@ -2021,7 +2032,7 @@ describe("AgentsPage", () => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Click the icon picker button (labeled "Choose agent icon")
     const iconButton = screen.getByLabelText("Choose agent icon");
@@ -2051,7 +2062,7 @@ describe("AgentsPage", () => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Initially Claude is selected
     const controlsRow = screen.getByTestId("controls-row");
@@ -2088,7 +2099,7 @@ describe("AgentsPage", () => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("+ New Agent"));
+    await openBlankEditor();
 
     // Fill required fields
     fireEvent.change(screen.getByPlaceholderText("Agent name *"), {

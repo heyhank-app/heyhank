@@ -41,7 +41,7 @@ beforeEach(() => {
 describe("OnboardingModal", () => {
   it("renders the welcome step with provider options", () => {
     render(<OnboardingModal onComplete={vi.fn()} />);
-    expect(screen.getByText("Welcome to The Companion")).toBeInTheDocument();
+    expect(screen.getByText("Welcome to HeyHank")).toBeInTheDocument();
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
     expect(screen.getByText("Codex")).toBeInTheDocument();
   });
@@ -107,7 +107,7 @@ describe("OnboardingModal", () => {
     expect(screen.getByText("Set up Codex")).toBeInTheDocument();
   });
 
-  it("saves Codex API key and completes onboarding", async () => {
+  it("saves Codex API key and advances to Gemini step", async () => {
     const onComplete = vi.fn();
     render(<OnboardingModal onComplete={onComplete} />);
 
@@ -128,7 +128,11 @@ describe("OnboardingModal", () => {
       expect(mockUpdateSettings).toHaveBeenCalledWith({ openaiApiKey: "sk-test-key" });
     });
 
-    // Should show done step
+    // Should advance to Gemini step, then skip to done
+    await waitFor(() => {
+      expect(screen.getByText("Set up Gemini")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Skip"));
     await waitFor(() => {
       expect(screen.getByText("Get Started")).toBeInTheDocument();
     });
@@ -159,7 +163,14 @@ describe("OnboardingModal", () => {
       expect(screen.getByText("Set up Codex")).toBeInTheDocument();
     });
 
-    // Skip Codex
+    // Skip Codex -> goes to Gemini
+    fireEvent.click(screen.getByText("Skip"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Set up Gemini")).toBeInTheDocument();
+    });
+
+    // Skip Gemini -> goes to Done
     fireEvent.click(screen.getByText("Skip"));
 
     await waitFor(() => {
@@ -171,10 +182,11 @@ describe("OnboardingModal", () => {
   it("shows 'Setup Skipped' when no providers configured", async () => {
     render(<OnboardingModal onComplete={vi.fn()} />);
 
-    // Skip through Claude and Codex
+    // Skip through Claude, Codex, and Gemini
     fireEvent.click(screen.getByText("Claude Code"));
-    fireEvent.click(screen.getByText("Skip"));
-    fireEvent.click(screen.getByText("Skip"));
+    fireEvent.click(screen.getByText("Skip")); // skip claude -> codex
+    fireEvent.click(screen.getByText("Skip")); // skip codex -> gemini
+    fireEvent.click(screen.getByText("Skip")); // skip gemini -> done
 
     await waitFor(() => {
       expect(screen.getByText("Setup Skipped")).toBeInTheDocument();
@@ -185,10 +197,11 @@ describe("OnboardingModal", () => {
     const onComplete = vi.fn();
     render(<OnboardingModal onComplete={onComplete} />);
 
-    // Skip everything to get to done
+    // Skip everything to get to done (claude -> codex -> gemini -> done)
     fireEvent.click(screen.getByText("Claude Code"));
-    fireEvent.click(screen.getByText("Skip"));
-    fireEvent.click(screen.getByText("Skip"));
+    fireEvent.click(screen.getByText("Skip")); // skip claude -> codex
+    fireEvent.click(screen.getByText("Skip")); // skip codex -> gemini
+    fireEvent.click(screen.getByText("Skip")); // skip gemini -> done
 
     await waitFor(() => {
       expect(screen.getByText("Get Started")).toBeInTheDocument();
@@ -248,9 +261,9 @@ describe("OnboardingModal", () => {
     await waitFor(() => {
       expect(mockGetSettings).toHaveBeenCalled();
     });
-    // Device auth found — should complete onboarding
+    // Device auth found — should advance to Gemini step
     await waitFor(() => {
-      expect(screen.getByText("You're all set!")).toBeInTheDocument();
+      expect(screen.getByText("Set up Gemini")).toBeInTheDocument();
     });
   });
 

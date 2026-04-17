@@ -43,44 +43,38 @@ describe("analytics", () => {
     expect(posthogCaptureExceptionMock).not.toHaveBeenCalled();
   });
 
-  it("initializes PostHog and captures events when key is configured", async () => {
-    // Validates successful initialization and the main event/error/pageview wrappers.
+  it("always returns false for HeyHank (self-hosted) even when key is configured", async () => {
+    // Analytics module is now entirely no-op for self-hosted HeyHank.
+    // Even with a PostHog key, initAnalytics returns false and no events are captured.
     vi.stubEnv("VITE_POSTHOG_KEY", "phc_test_key");
     vi.stubEnv("VITE_POSTHOG_HOST", "https://eu.i.posthog.com");
     const mod = await import("./analytics.js");
 
-    expect(mod.initAnalytics()).toBe(true);
-    expect(mod.isAnalyticsEnabled()).toBe(true);
-    expect(posthogOptInMock).toHaveBeenCalled();
+    expect(mod.initAnalytics()).toBe(false);
+    expect(mod.isAnalyticsEnabled()).toBe(false);
 
-    expect(posthogInitMock).toHaveBeenCalledWith(
-      "phc_test_key",
-      expect.objectContaining({
-        api_host: "https://eu.i.posthog.com",
-        capture_pageview: false,
-        capture_exceptions: true,
-        respect_dnt: true,
-      }),
-    );
+    // PostHog should never be initialized for self-hosted
+    expect(posthogInitMock).not.toHaveBeenCalled();
 
     mod.captureEvent("test_event", { foo: "bar" });
     mod.captureException(new Error("boom"), { source: "unit_test" });
     mod.capturePageView("#/settings");
 
-    expect(posthogCaptureMock).toHaveBeenCalledWith("test_event", { foo: "bar" });
-    expect(posthogCaptureExceptionMock).toHaveBeenCalled();
-    expect(posthogCaptureMock).toHaveBeenCalledWith("$pageview", { $current_url: "#/settings" });
+    // All capture calls are no-ops
+    expect(posthogCaptureMock).not.toHaveBeenCalled();
+    expect(posthogCaptureExceptionMock).not.toHaveBeenCalled();
   });
 
-  it("respects telemetry preference opt-out", async () => {
-    // Validates persisted user opt-out prevents all event capture even when key exists.
+  it("respects telemetry preference opt-out (always disabled for self-hosted)", async () => {
+    // Even with a key and opt-out preference, everything is a no-op for self-hosted.
     vi.stubEnv("VITE_POSTHOG_KEY", "phc_test_key");
     localStorage.setItem("cc-telemetry-enabled", "false");
     const mod = await import("./analytics.js");
 
-    expect(mod.initAnalytics()).toBe(true);
+    expect(mod.initAnalytics()).toBe(false);
     expect(mod.isAnalyticsEnabled()).toBe(false);
-    expect(posthogOptOutMock).toHaveBeenCalled();
+    // PostHog is never initialized, so opt-out is never called
+    expect(posthogOptOutMock).not.toHaveBeenCalled();
     mod.captureEvent("test_event");
     expect(posthogCaptureMock).not.toHaveBeenCalled();
   });

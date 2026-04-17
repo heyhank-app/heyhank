@@ -94,8 +94,8 @@ describe("ContainerManager git identity seeding from host .gitconfig", () => {
     mockExistsSync.mockReturnValue(false);
   });
 
-  it("copies user.name and user.email from /companion-host-gitconfig into container global config", () => {
-    // The host .gitconfig is mounted read-only at /companion-host-gitconfig.
+  it("copies user.name and user.email from /heyhank-host-gitconfig into container global config", () => {
+    // The host .gitconfig is mounted read-only at /heyhank-host-gitconfig.
     // seedGitAuth should read identity from that file and write it into the
     // container's writable /root/.gitconfig via git config --global.
     mockExecSync.mockImplementation((...args: unknown[]) => {
@@ -109,18 +109,18 @@ describe("ContainerManager git identity seeding from host .gitconfig", () => {
 
     const commands = mockExecSync.mock.calls.map((call) => String(call[0] ?? ""));
     // The seeding command should reference the staged host gitconfig path
-    const identityCmd = commands.find((cmd) => cmd.includes("companion-host-gitconfig"));
+    const identityCmd = commands.find((cmd) => cmd.includes("heyhank-host-gitconfig"));
     expect(identityCmd).toBeDefined();
     // It should use git config -f to read from the mounted file
-    expect(identityCmd).toContain("git config -f /companion-host-gitconfig user.name");
-    expect(identityCmd).toContain("git config -f /companion-host-gitconfig user.email");
+    expect(identityCmd).toContain("git config -f /heyhank-host-gitconfig user.name");
+    expect(identityCmd).toContain("git config -f /heyhank-host-gitconfig user.email");
     // It should write user.name and user.email via git config --global
     expect(identityCmd).toContain("git config --global user.name");
     expect(identityCmd).toContain("git config --global user.email");
   });
 
   it("disables gpgsign in writable global config (not the read-only mount)", () => {
-    // With the host .gitconfig mounted at /companion-host-gitconfig instead
+    // With the host .gitconfig mounted at /heyhank-host-gitconfig instead
     // of /root/.gitconfig, git config --global writes succeed in the container.
     mockExecSync.mockImplementation((...args: unknown[]) => {
       const cmd = String(args[0] ?? "");
@@ -159,7 +159,7 @@ describe("ContainerManager Codex file seeding", () => {
     mockExistsSync.mockReturnValue(false);
   });
 
-  it("seeds Codex auth files when /companion-host-codex is available", () => {
+  it("seeds Codex auth files when /heyhank-host-codex is available", () => {
     // seedCodexFiles is called internally during createContainer and startContainer.
     // Since we can't call createContainer in a unit test (it needs docker), we
     // test the seeding indirectly via a restart (startContainer).
@@ -175,7 +175,7 @@ describe("ContainerManager Codex file seeding", () => {
     const commands = mockExecSync.mock.calls.map((call) => String(call[0] ?? ""));
     // Should attempt to copy Codex files from bind mount
     expect(commands.some((cmd) =>
-      cmd.includes("/companion-host-codex") && cmd.includes("/root/.codex"),
+      cmd.includes("/heyhank-host-codex") && cmd.includes("/root/.codex"),
     )).toBe(true);
   });
 
@@ -186,7 +186,7 @@ describe("ContainerManager Codex file seeding", () => {
     (manager as unknown as Record<string, (id: string) => void>)["seedCodexFiles"]("container789");
 
     const commands = mockExecSync.mock.calls.map((call) => String(call[0] ?? ""));
-    const seedCmd = commands.find((cmd) => cmd.includes("companion-host-codex"));
+    const seedCmd = commands.find((cmd) => cmd.includes("heyhank-host-codex"));
     expect(seedCmd).toBeDefined();
     // Verify it copies the expected files
     expect(seedCmd).toContain("auth.json");
@@ -512,7 +512,7 @@ describe("ContainerManager tracking", () => {
     const manager = new ContainerManager();
     const info = {
       containerId: "abc123def456",
-      name: "companion-abc123de",
+      name: "heyhank-abc123de",
       image: "node:22",
       portMappings: [],
       hostCwd: "/tmp",
@@ -539,7 +539,7 @@ describe("ContainerManager tracking", () => {
     const manager = new ContainerManager();
     const info = {
       containerId: "abc123def456",
-      name: "companion-abc123de",
+      name: "heyhank-abc123de",
       image: "node:22",
       portMappings: [],
       hostCwd: "/tmp",
@@ -584,9 +584,9 @@ describe("ContainerManager removeContainer", () => {
     mockExecSync.mockReturnValue("true");
     const manager = new ContainerManager();
     manager.restoreContainer("sess-1", {
-      containerId: "abc123", name: "companion-abc", image: "node:22",
+      containerId: "abc123", name: "heyhank-abc", image: "node:22",
       portMappings: [], hostCwd: "/tmp", containerCwd: "/workspace",
-      state: "running", volumeName: "companion-ws-abc",
+      state: "running", volumeName: "heyhank-ws-abc",
     });
     expect(manager.getContainer("sess-1")).toBeDefined();
 
@@ -611,7 +611,7 @@ describe("ContainerManager removeContainer", () => {
     mockExecSync.mockReturnValue("true");
     const manager = new ContainerManager();
     manager.restoreContainer("sess-1", {
-      containerId: "abc123", name: "companion-abc", image: "node:22",
+      containerId: "abc123", name: "heyhank-abc", image: "node:22",
       portMappings: [], hostCwd: "/tmp", containerCwd: "/workspace",
       state: "running", volumeName: "vol-1",
     });
@@ -878,9 +878,9 @@ describe("ContainerManager buildImage", () => {
 // ---------------------------------------------------------------------------
 
 describe("ContainerManager.getRegistryImage", () => {
-  it("returns registry path for the-companion:latest", () => {
-    const result = ContainerManager.getRegistryImage("the-companion:latest");
-    expect(result).toContain("stangirard/the-companion:latest");
+  it("returns registry path for heyhank:latest", () => {
+    const result = ContainerManager.getRegistryImage("heyhank:latest");
+    expect(result).toContain("stangirard/heyhank:latest");
   });
 
   it("returns null for non-default images", () => {
@@ -940,7 +940,7 @@ describe("ContainerManager createContainer", () => {
     mockExecSync.mockImplementation((...args: unknown[]) => {
       callCount++;
       const cmd = String(args[0] ?? "");
-      if (cmd.includes("docker volume create")) return "companion-ws-test1234";
+      if (cmd.includes("docker volume create")) return "heyhank-ws-test1234";
       if (cmd.startsWith("docker create") || cmd.startsWith("'docker' 'create'") || cmd.includes("docker create")) return "abcdef1234567890";
       if (cmd.includes("docker start")) return "";
       if (cmd.includes("docker port")) return "0.0.0.0:49152";
@@ -959,7 +959,7 @@ describe("ContainerManager createContainer", () => {
     expect(info.portMappings).toHaveLength(1);
     expect(info.portMappings[0].hostPort).toBe(49152);
     expect(info.portMappings[0].containerPort).toBe(3000);
-    expect(info.volumeName).toBe("companion-ws-test1234");
+    expect(info.volumeName).toBe("heyhank-ws-test1234");
   });
 
   it("rejects invalid port numbers", () => {
@@ -1029,7 +1029,7 @@ describe("ContainerManager createContainer", () => {
 
     const manager = new ContainerManager();
     manager.createContainer("sess-1", "/tmp", { image: "node:22", ports: [] });
-    expect(createCmd).toContain("companion-host-gitconfig");
+    expect(createCmd).toContain("heyhank-host-gitconfig");
   });
 });
 
@@ -1044,14 +1044,14 @@ describe("ContainerManager seedAuthFiles via startContainer", () => {
     mockExistsSync.mockReturnValue(false);
   });
 
-  it("copies auth files from /companion-host-claude to /root/.claude", () => {
+  it("copies auth files from /heyhank-host-claude to /root/.claude", () => {
     mockExecSync.mockReturnValue("");
     const manager = new ContainerManager();
     manager.startContainer("abc123");
 
     const cmds = mockExecSync.mock.calls.map((c) => String(c[0] ?? ""));
-    // seedAuthFiles runs a docker exec with companion-host-claude
-    expect(cmds.some((c) => c.includes("companion-host-claude") && c.includes("/root/.claude"))).toBe(true);
+    // seedAuthFiles runs a docker exec with heyhank-host-claude
+    expect(cmds.some((c) => c.includes("heyhank-host-claude") && c.includes("/root/.claude"))).toBe(true);
   });
 });
 

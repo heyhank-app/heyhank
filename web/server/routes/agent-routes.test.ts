@@ -53,6 +53,7 @@ function createMockExecutor() {
     scheduleAgent: vi.fn(),
     stopAgent: vi.fn(),
     executeAgentManually: vi.fn(),
+    executeAgent: vi.fn(() => Promise.resolve({ sessionId: "mock-session" })),
     getExecutions: vi.fn(() => []),
     listAllExecutions: vi.fn(() => ({ executions: [] as Record<string, unknown>[], total: 0 })),
   };
@@ -384,7 +385,7 @@ describe("POST /api/agents/:id/run", () => {
     const json = await res.json();
     expect(json.ok).toBe(true);
     expect(json.message).toBe("Agent triggered");
-    expect(executor.executeAgentManually).toHaveBeenCalledWith("runner", undefined);
+    expect(executor.executeAgent).toHaveBeenCalledWith("runner", undefined, { force: true, triggerType: "manual" });
   });
 
   it("passes an input string to the executor when provided", async () => {
@@ -397,7 +398,7 @@ describe("POST /api/agents/:id/run", () => {
       body: JSON.stringify({ input: "custom input" }),
     });
 
-    expect(executor.executeAgentManually).toHaveBeenCalledWith("runner", "custom input");
+    expect(executor.executeAgent).toHaveBeenCalledWith("runner", "custom input", { force: true, triggerType: "manual" });
   });
 
   it("returns 404 when agent does not exist", async () => {

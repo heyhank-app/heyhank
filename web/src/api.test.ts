@@ -74,7 +74,7 @@ describe("createSession", () => {
       backend: "claude",
       cwd: "/repo",
       container: {
-        image: "companion-core:latest",
+        image: "heyhank-core:latest",
         ports: [3000, 5173],
       },
     });
@@ -84,7 +84,7 @@ describe("createSession", () => {
       backend: "claude",
       cwd: "/repo",
       container: {
-        image: "companion-core:latest",
+        image: "heyhank-core:latest",
         ports: [3000, 5173],
       },
     });
@@ -404,10 +404,10 @@ describe("getCloudProviderPlan", () => {
     const plan = {
       provider: "modal",
       sessionId: "s1",
-      image: "companion-core:latest",
+      image: "heyhank-core:latest",
       cwd: "/repo",
       mappedPorts: [{ containerPort: 3000, hostPort: 49152 }],
-      commandPreview: "modal run companion_cloud.py --manifest /repo/.companion/cloud/environments/s1.json",
+      commandPreview: "modal run heyhank_cloud.py --manifest /repo/.heyhank/cloud/environments/s1.json",
     };
     mockFetch.mockResolvedValueOnce(mockResponse(plan));
 
@@ -771,7 +771,7 @@ describe("environment API", () => {
   });
 
   it("buildBaseImage sends POST to /api/docker/build-base", async () => {
-    const data = { ok: true, tag: "companion-base:latest" };
+    const data = { ok: true, tag: "heyhank-base:latest" };
     mockFetch.mockResolvedValueOnce(mockResponse(data));
 
     const result = await api.buildBaseImage();
@@ -783,7 +783,7 @@ describe("environment API", () => {
   });
 
   it("getBaseImageStatus sends GET to /api/docker/base-image", async () => {
-    const data = { exists: true, tag: "companion-base:latest" };
+    const data = { exists: true, tag: "heyhank-base:latest" };
     mockFetch.mockResolvedValueOnce(mockResponse(data));
 
     const result = await api.getBaseImageStatus();
@@ -943,7 +943,7 @@ describe("containers API", () => {
   });
 
   it("getContainerImages sends GET to /api/containers/images", async () => {
-    const images = ["node:20", "companion-core:latest"];
+    const images = ["node:20", "heyhank-core:latest"];
     mockFetch.mockResolvedValueOnce(mockResponse(images));
 
     const result = await api.getContainerImages();

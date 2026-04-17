@@ -192,7 +192,7 @@ describe("MessageFeed - empty state", () => {
     render(<MessageFeed sessionId={sid} />);
 
     expect(screen.getByText("Start a conversation")).toBeTruthy();
-    expect(screen.getByText(/Send a message to begin/)).toBeTruthy();
+    expect(screen.getByText(/Send a message to get started/)).toBeTruthy();
   });
 
   it("does not show empty state when there are messages", () => {

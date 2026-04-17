@@ -21,7 +21,7 @@ vi.mock("node:child_process", () => ({ execSync: mockExecSync }));
 vi.mock("node:crypto", () => ({ randomUUID: () => "test-uuid" }));
 
 // Mock settings-manager to prevent AI validation from interfering with tests.
-// Without this mock, the real settings file (~/.companion/settings.json) may have
+// Without this mock, the real settings file (~/.heyhank/settings.json) may have
 // aiValidationEnabled: true, causing handleControlRequest to call validatePermission
 // (an external API call) and auto-approve/deny permissions before they reach pendingPermissions.
 vi.mock("./settings-manager.js", () => ({
@@ -44,6 +44,11 @@ vi.mock("./settings-manager.js", () => ({
     assistantName: "",
     userName: "",
     internalAiProvider: "",
+    hankChatProvider: "gemini-live",
+    hankChatModel: "",
+    mem0ApiKey: "",
+    mem0UserId: "",
+    memoryAutoDetect: true,
   }),
   DEFAULT_ANTHROPIC_MODEL: "claude-sonnet-4-6",
 }));
@@ -494,13 +499,13 @@ describe("CLI handlers", () => {
     expect(callback).toHaveBeenCalledWith("s1", "cli-internal-id");
   });
 
-  it("handleCLIMessage: system.init preserves Companion session_id (does not overwrite with CLI internal ID)", async () => {
+  it("handleCLIMessage: system.init preserves HeyHank session_id (does not overwrite with CLI internal ID)", async () => {
     // Regression test for duplicate sidebar entries bug.
     // The CLI sends its own internal session_id in the system.init message.
     // The bridge must NOT allow this to overwrite session.state.session_id
-    // (which is the Companion's session ID used by the browser as a Map key).
+    // (which is the HeyHank's session ID used by the browser as a Map key).
     // If overwritten, the browser adds the session under the CLI's ID while
-    // the sdkSessions poll uses the Companion's ID — creating two entries.
+    // the sdkSessions poll uses the HeyHank's ID — creating two entries.
     mockExecSync.mockImplementation(() => {
       throw new Error("not a git repo");
     });
@@ -511,21 +516,21 @@ describe("CLI handlers", () => {
     bridge.handleBrowserOpen(browser, "s1");
     browser.send.mockClear();
 
-    // CLI reports a different session_id than the Companion's "s1"
+    // CLI reports a different session_id than HeyHank's "s1"
     await bridge.handleCLIMessage(cli, makeInitMsg({ session_id: "cli-internal-uuid-abc123" }));
 
     const session = bridge.getSession("s1")!;
-    // session.state.session_id must remain the Companion's ID
+    // session.state.session_id must remain the HeyHank's ID
     expect(session.state.session_id).toBe("s1");
 
-    // The broadcast to the browser must also use the Companion's ID
+    // The broadcast to the browser must also use the HeyHank's ID
     const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
     const initCall = calls.find((c: any) => c.type === "session_init");
     expect(initCall).toBeDefined();
     expect(initCall.session.session_id).toBe("s1");
   });
 
-  it("handleCLIMessage: session_update preserves Companion session_id (does not overwrite with CLI internal ID)", async () => {
+  it("handleCLIMessage: session_update preserves HeyHank session_id (does not overwrite with CLI internal ID)", async () => {
     // Regression test: after session_init lands, a subsequent session_update
     // from the adapter must NOT overwrite session.state.session_id with the
     // CLI's internal ID.  This mirrors the session_init regression test above.
@@ -555,7 +560,7 @@ describe("CLI handlers", () => {
       },
     });
 
-    // session.state.session_id must still be the Companion's ID
+    // session.state.session_id must still be the HeyHank's ID
     expect(session.state.session_id).toBe("s1");
     // The model update should still have been applied
     expect(session.state.model).toBe("claude-opus-4-6");
@@ -639,8 +644,8 @@ describe("CLI handlers", () => {
     bridge.markContainerized("s1", "/Users/stan/Dev/myproject");
     const getContainerSpy = vi.spyOn(containerManager, "getContainer").mockReturnValue({
       containerId: "abc123def456",
-      name: "companion-test",
-      image: "the-companion:latest",
+      name: "heyhank-test",
+      image: "heyhank:latest",
       portMappings: [],
       hostCwd: "/Users/stan/Dev/myproject",
       containerCwd: "/workspace",
@@ -676,8 +681,8 @@ describe("CLI handlers", () => {
     bridge.markContainerized("s1", "/Users/stan/Dev/myproject");
     const getContainerSpy = vi.spyOn(containerManager, "getContainer").mockReturnValue({
       containerId: "abc123def456",
-      name: "companion-test",
-      image: "the-companion:latest",
+      name: "heyhank-test",
+      image: "heyhank:latest",
       portMappings: [],
       hostCwd: "/Users/stan/Dev/myproject",
       containerCwd: "/workspace",

@@ -1,7 +1,14 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+// Mock internal-ai so hasInternalAI() doesn't read real provider config from disk
+const mockHasInternalAI = vi.hoisted(() => vi.fn(() => false));
+vi.mock("./internal-ai.js", () => ({
+  hasInternalAI: mockHasInternalAI,
+}));
+
 import {
   _resetForTest,
   updateSettings,
@@ -55,11 +62,14 @@ afterEach(() => {
 describe("getEffectiveAiValidation", () => {
   it("returns global defaults when session fields are undefined", () => {
     // Global defaults: enabled=false, autoApprove=true, autoDeny=false
+    // anthropicApiKey is now a derived boolean-like field: "configured" or ""
+    // With no provider configured, it should be ""
     const session = makeSessionState();
     const result = getEffectiveAiValidation(session);
     expect(result.enabled).toBe(false);
     expect(result.autoApprove).toBe(true);
     expect(result.autoDeny).toBe(false);
+    // No provider configured in fresh temp settings → empty string
     expect(result.anthropicApiKey).toBe("");
   });
 
@@ -112,15 +122,19 @@ describe("getEffectiveAiValidation", () => {
     expect(result.autoDeny).toBe(false);
   });
 
-  it("anthropicApiKey always comes from global settings", () => {
-    updateSettings({ anthropicApiKey: "sk-test-key-123" });
+  it("anthropicApiKey returns 'configured' when internal AI is available", () => {
+    // hasInternalAI() returns true → anthropicApiKey should be "configured"
+    mockHasInternalAI.mockReturnValue(true);
 
     const session = makeSessionState({ aiValidationEnabled: true });
     const result = getEffectiveAiValidation(session);
-    expect(result.anthropicApiKey).toBe("sk-test-key-123");
+    expect(result.anthropicApiKey).toBe("configured");
   });
 
-  it("returns empty API key when global has none, regardless of session settings", () => {
+  it("returns empty API key when no internal AI provider is available", () => {
+    // hasInternalAI() returns false → anthropicApiKey should be ""
+    mockHasInternalAI.mockReturnValue(false);
+
     const session = makeSessionState({ aiValidationEnabled: true });
     const result = getEffectiveAiValidation(session);
     expect(result.anthropicApiKey).toBe("");

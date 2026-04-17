@@ -1,15 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ruleBasedFilter, parseAiResponse, validatePermission, aiEvaluate } from "./ai-validator.js";
-import { _resetForTest, updateSettings } from "./settings-manager.js";
-import { join } from "node:path";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 
-// Setup temp settings for each test
-let tempDir: string;
+// Mock callInternalAI so tests don't depend on real provider config or network
+const mockCallInternalAI = vi.hoisted(() => vi.fn());
+vi.mock("./internal-ai.js", () => ({
+  callInternalAI: mockCallInternalAI,
+}));
+
+import { ruleBasedFilter, parseAiResponse, validatePermission, aiEvaluate } from "./ai-validator.js";
+
 beforeEach(() => {
-  tempDir = mkdtempSync(join(tmpdir(), "ai-validator-test-"));
-  _resetForTest(join(tempDir, "settings.json"));
+  vi.clearAllMocks();
 });
 
 afterEach(() => {
@@ -164,24 +164,24 @@ describe("parseAiResponse", () => {
 });
 
 describe("aiEvaluate", () => {
-  it("returns uncertain when no API key is configured", async () => {
-    // No API key set
+  it("returns uncertain when no AI provider is configured", async () => {
+    // callInternalAI returns an error when no provider is available
+    mockCallInternalAI.mockResolvedValueOnce({
+      text: "",
+      ok: false,
+      error: "No AI provider configured for internal features",
+    });
+
     const result = await aiEvaluate("Bash", { command: "ls" });
     expect(result.verdict).toBe("uncertain");
-    expect(result.reason).toContain("API key");
+    expect(result.reason).toContain("No AI provider configured");
   });
 
-  it("calls Anthropic and returns parsed result", async () => {
-    updateSettings({ anthropicApiKey: "test-key", anthropicModel: "test-model" });
-
-    const mockResponse = {
-      content: [{ type: "text", text: '{"verdict": "safe", "reason": "Simple list command"}' }],
-    };
-
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+  it("calls internal AI and returns parsed result", async () => {
+    mockCallInternalAI.mockResolvedValueOnce({
+      text: '{"verdict": "safe", "reason": "Simple list command"}',
       ok: true,
-      json: () => Promise.resolve(mockResponse),
-    } as Response);
+    });
 
     const result = await aiEvaluate("Bash", { command: "ls -la" });
     expect(result.verdict).toBe("safe");
@@ -189,161 +189,121 @@ describe("aiEvaluate", () => {
     expect(result.ruleBasedOnly).toBe(false);
   });
 
-  it("returns actionable reason for 401 Unauthorized (invalid API key)", async () => {
-    // When the Anthropic API returns 401, the reason should indicate an invalid key
-    // so the user knows exactly what to fix in settings.
-    updateSettings({ anthropicApiKey: "test-key" });
-
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+  it("returns uncertain when API returns an error", async () => {
+    // When the internal AI call fails (e.g., Anthropic API error),
+    // aiEvaluate returns uncertain with the error message.
+    mockCallInternalAI.mockResolvedValueOnce({
+      text: "",
       ok: false,
-      status: 401,
-      statusText: "Unauthorized",
-      text: () => Promise.resolve(JSON.stringify({
-        error: { type: "authentication_error", message: "invalid x-api-key" },
-      })),
-    } as Response);
+      error: "Anthropic API error: 401",
+    });
 
     const result = await aiEvaluate("Bash", { command: "ls" });
     expect(result.verdict).toBe("uncertain");
-    expect(result.reason).toContain("Invalid Anthropic API key");
-    expect(result.reason).toContain("invalid x-api-key");
+    expect(result.reason).toContain("Anthropic API error: 401");
   });
 
-  it("returns actionable reason for 404 (model not found)", async () => {
-    // When the model is not found, the reason should tell the user which model failed.
-    updateSettings({ anthropicApiKey: "test-key", anthropicModel: "claude-nonexistent" });
-
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+  it("returns uncertain for non-ok API responses (404)", async () => {
+    mockCallInternalAI.mockResolvedValueOnce({
+      text: "",
       ok: false,
-      status: 404,
-      statusText: "Not Found",
-      text: () => Promise.resolve(JSON.stringify({
-        error: { type: "not_found_error", message: "model: claude-nonexistent" },
-      })),
-    } as Response);
+      error: "Anthropic API error: 404",
+    });
 
     const result = await aiEvaluate("Bash", { command: "ls" });
     expect(result.verdict).toBe("uncertain");
-    expect(result.reason).toContain("Model not found");
-    expect(result.reason).toContain("claude-nonexistent");
+    expect(result.reason).toContain("404");
   });
 
-  it("returns actionable reason for 429 (rate limited)", async () => {
-    // Rate limit errors should be clearly identified so users know to wait.
-    updateSettings({ anthropicApiKey: "test-key" });
-
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+  it("returns uncertain for rate limit errors (429)", async () => {
+    mockCallInternalAI.mockResolvedValueOnce({
+      text: "",
       ok: false,
-      status: 429,
-      statusText: "Too Many Requests",
-      text: () => Promise.resolve(JSON.stringify({
-        error: { type: "rate_limit_error", message: "Rate limit reached" },
-      })),
-    } as Response);
+      error: "Anthropic API error: 429",
+    });
 
     const result = await aiEvaluate("Bash", { command: "ls" });
     expect(result.verdict).toBe("uncertain");
-    expect(result.reason).toContain("rate limit");
+    expect(result.reason).toContain("429");
   });
 
-  it("returns actionable reason for 500 (server error)", async () => {
-    // Server errors should identify Anthropic's side as the issue.
-    updateSettings({ anthropicApiKey: "test-key" });
-
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+  it("returns uncertain for server errors (500)", async () => {
+    mockCallInternalAI.mockResolvedValueOnce({
+      text: "",
       ok: false,
-      status: 500,
-      statusText: "Internal Server Error",
-      text: () => Promise.resolve(""),
-    } as Response);
+      error: "Anthropic API error: 500",
+    });
 
     const result = await aiEvaluate("Bash", { command: "ls" });
     expect(result.verdict).toBe("uncertain");
-    expect(result.reason).toContain("Anthropic internal server error");
+    expect(result.reason).toContain("500");
   });
 
-  it("returns actionable reason for 529 (overloaded)", async () => {
-    // Overloaded API should be clearly reported.
-    updateSettings({ anthropicApiKey: "test-key" });
-
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+  it("returns uncertain for overloaded errors (529)", async () => {
+    mockCallInternalAI.mockResolvedValueOnce({
+      text: "",
       ok: false,
-      status: 529,
-      statusText: "Overloaded",
-      text: () => Promise.resolve(JSON.stringify({
-        error: { type: "overloaded_error", message: "Overloaded" },
-      })),
-    } as Response);
+      error: "Anthropic API error: 529",
+    });
 
     const result = await aiEvaluate("Bash", { command: "ls" });
     expect(result.verdict).toBe("uncertain");
-    expect(result.reason).toContain("overloaded");
+    expect(result.reason).toContain("529");
   });
 
-  it("handles non-JSON error response body gracefully", async () => {
-    // Some error responses may not have JSON bodies (e.g., proxy errors).
-    // The parser should not throw and should fall back to status-based reason.
-    updateSettings({ anthropicApiKey: "test-key" });
-
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+  it("handles non-JSON AI provider errors gracefully", async () => {
+    mockCallInternalAI.mockResolvedValueOnce({
+      text: "",
       ok: false,
-      status: 502,
-      statusText: "Bad Gateway",
-      text: () => Promise.resolve("<html>Bad Gateway</html>"),
-    } as Response);
+      error: "AI API error: 502",
+    });
 
     const result = await aiEvaluate("Bash", { command: "ls" });
     expect(result.verdict).toBe("uncertain");
-    expect(result.reason).toContain("temporarily unavailable");
+    expect(result.reason).toContain("502");
   });
 
-  it("handles unknown HTTP status codes with generic service error", async () => {
-    // Unknown status codes should still produce a useful message including the code.
-    updateSettings({ anthropicApiKey: "test-key" });
-
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+  it("handles unknown HTTP status codes", async () => {
+    mockCallInternalAI.mockResolvedValueOnce({
+      text: "",
       ok: false,
-      status: 418,
-      statusText: "I'm a teapot",
-      text: () => Promise.resolve(""),
-    } as Response);
+      error: "AI API error: 418",
+    });
 
     const result = await aiEvaluate("Bash", { command: "ls" });
     expect(result.verdict).toBe("uncertain");
-    expect(result.reason).toContain("HTTP 418");
+    expect(result.reason).toContain("418");
   });
 
-  it("returns specific reason on network error (ECONNREFUSED)", async () => {
-    // Network errors that prevent reaching the API should be clearly identified.
-    updateSettings({ anthropicApiKey: "test-key" });
-
-    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("fetch failed: ECONNREFUSED"));
+  it("returns uncertain on network error (ECONNREFUSED)", async () => {
+    mockCallInternalAI.mockResolvedValueOnce({
+      text: "",
+      ok: false,
+      error: "AI request failed: fetch failed: ECONNREFUSED",
+    });
 
     const result = await aiEvaluate("Bash", { command: "ls" });
     expect(result.verdict).toBe("uncertain");
-    expect(result.reason).toContain("unreachable");
     expect(result.reason).toContain("ECONNREFUSED");
   });
 
-  it("returns specific reason on generic network error", async () => {
-    // Other network failures should mention unavailability with the error detail.
-    updateSettings({ anthropicApiKey: "test-key" });
-
-    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network error: socket hang up"));
+  it("returns uncertain on generic network error", async () => {
+    mockCallInternalAI.mockResolvedValueOnce({
+      text: "",
+      ok: false,
+      error: "AI request failed: Network error: socket hang up",
+    });
 
     const result = await aiEvaluate("Bash", { command: "ls" });
     expect(result.verdict).toBe("uncertain");
-    expect(result.reason).toContain("unavailable");
     expect(result.reason).toContain("socket hang up");
   });
 
   it("returns uncertain on malformed API response", async () => {
-    updateSettings({ anthropicApiKey: "test-key" });
-
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+    mockCallInternalAI.mockResolvedValueOnce({
+      text: "not json",
       ok: true,
-      json: () => Promise.resolve({ content: [{ type: "text", text: "not json" }] }),
-    } as Response);
+    });
 
     const result = await aiEvaluate("Bash", { command: "ls" });
     expect(result.verdict).toBe("uncertain");
@@ -352,33 +312,25 @@ describe("aiEvaluate", () => {
 
 describe("validatePermission", () => {
   it("uses rule-based filter for Read tool (no API call)", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-
     const result = await validatePermission("Read", { file_path: "/src/index.ts" });
     expect(result.verdict).toBe("safe");
     expect(result.ruleBasedOnly).toBe(true);
-    // Fetch should NOT have been called
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // callInternalAI should NOT have been called
+    expect(mockCallInternalAI).not.toHaveBeenCalled();
   });
 
   it("uses rule-based filter for dangerous Bash command (no API call)", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-
     const result = await validatePermission("Bash", { command: "rm -rf /" });
     expect(result.verdict).toBe("dangerous");
     expect(result.ruleBasedOnly).toBe(true);
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(mockCallInternalAI).not.toHaveBeenCalled();
   });
 
   it("falls through to AI for unknown commands", async () => {
-    updateSettings({ anthropicApiKey: "test-key" });
-
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+    mockCallInternalAI.mockResolvedValueOnce({
+      text: '{"verdict": "safe", "reason": "Standard dev command"}',
       ok: true,
-      json: () => Promise.resolve({
-        content: [{ type: "text", text: '{"verdict": "safe", "reason": "Standard dev command"}' }],
-      }),
-    } as Response);
+    });
 
     const result = await validatePermission("Bash", { command: "npm test" });
     expect(result.verdict).toBe("safe");
