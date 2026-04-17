@@ -153,7 +153,7 @@ export function getSettings(): HeyHankSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<HeyHankSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "geminiApiKey" | "geminiVoice" | "assistantName" | "userName" | "hankChatProvider" | "hankChatModel" | "mem0ApiKey" | "mem0UserId" | "memoryAutoDetect" | "editorTabEnabled" | "internalAiProvider" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "obsidianVaultPath">>,
+  patch: Partial<Pick<HeyHankSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "geminiApiKey" | "geminiVoice" | "assistantName" | "userName" | "hankChatProvider" | "hankChatModel" | "hankChatAvatarEnabled" | "hankChatAvatarUrl" | "mem0ApiKey" | "mem0UserId" | "memoryAutoDetect" | "editorTabEnabled" | "internalAiProvider" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "obsidianVaultPath">>,
 ): HeyHankSettings {
   ensureLoaded();
   settings = normalize({
@@ -168,6 +168,8 @@ export function updateSettings(
     userName: patch.userName ?? settings.userName,
     hankChatProvider: patch.hankChatProvider ?? settings.hankChatProvider,
     hankChatModel: patch.hankChatModel ?? settings.hankChatModel,
+    hankChatAvatarEnabled: patch.hankChatAvatarEnabled ?? settings.hankChatAvatarEnabled,
+    hankChatAvatarUrl: patch.hankChatAvatarUrl ?? settings.hankChatAvatarUrl,
     mem0ApiKey: patch.mem0ApiKey ?? settings.mem0ApiKey,
     mem0UserId: patch.mem0UserId ?? settings.mem0UserId,
     memoryAutoDetect: patch.memoryAutoDetect ?? settings.memoryAutoDetect,

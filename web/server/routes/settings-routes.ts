@@ -89,6 +89,8 @@ export function registerSettingsRoutes(api: Hono): void {
       dockerAutoUpdate: settings.dockerAutoUpdate,
       hankChatProvider: settings.hankChatProvider,
       hankChatModel: settings.hankChatModel,
+      hankChatAvatarEnabled: settings.hankChatAvatarEnabled,
+      hankChatAvatarUrl: settings.hankChatAvatarUrl,
       obsidianVaultPath: settings.obsidianVaultPath,
       openrouterApiKeyConfigured: !!process.env.OPENROUTER_API_KEY?.trim(),
     });
@@ -147,6 +149,12 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.obsidianVaultPath !== undefined && typeof body.obsidianVaultPath !== "string") {
       return c.json({ error: "obsidianVaultPath must be a string" }, 400);
     }
+    if (body.hankChatAvatarEnabled !== undefined && typeof body.hankChatAvatarEnabled !== "boolean") {
+      return c.json({ error: "hankChatAvatarEnabled must be a boolean" }, 400);
+    }
+    if (body.hankChatAvatarUrl !== undefined && typeof body.hankChatAvatarUrl !== "string") {
+      return c.json({ error: "hankChatAvatarUrl must be a string" }, 400);
+    }
     const hasAnyField = body.anthropicApiKey !== undefined || body.anthropicModel !== undefined
       || body.claudeCodeOAuthToken !== undefined || body.openaiApiKey !== undefined
       || body.onboardingCompleted !== undefined
@@ -160,6 +168,8 @@ export function registerSettingsRoutes(api: Hono): void {
       || body.dockerAutoUpdate !== undefined
       || body.hankChatProvider !== undefined
       || body.hankChatModel !== undefined
+      || body.hankChatAvatarEnabled !== undefined
+      || body.hankChatAvatarUrl !== undefined
       || body.obsidianVaultPath !== undefined;
     if (!hasAnyField) {
       return c.json({ error: "At least one settings field is required" }, 400);
@@ -242,6 +252,14 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.hankChatModel === "string"
           ? body.hankChatModel.trim()
           : undefined,
+      hankChatAvatarEnabled:
+        typeof body.hankChatAvatarEnabled === "boolean"
+          ? body.hankChatAvatarEnabled
+          : undefined,
+      hankChatAvatarUrl:
+        typeof body.hankChatAvatarUrl === "string"
+          ? body.hankChatAvatarUrl.trim()
+          : undefined,
       obsidianVaultPath:
         typeof body.obsidianVaultPath === "string"
           ? body.obsidianVaultPath.trim()
@@ -277,6 +295,8 @@ export function registerSettingsRoutes(api: Hono): void {
       dockerAutoUpdate: settings.dockerAutoUpdate,
       hankChatProvider: settings.hankChatProvider,
       hankChatModel: settings.hankChatModel,
+      hankChatAvatarEnabled: settings.hankChatAvatarEnabled,
+      hankChatAvatarUrl: settings.hankChatAvatarUrl,
       obsidianVaultPath: settings.obsidianVaultPath,
       openrouterApiKeyConfigured: !!process.env.OPENROUTER_API_KEY?.trim(),
     });

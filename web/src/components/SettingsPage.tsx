@@ -170,6 +170,8 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [updateError, setUpdateError] = useState("");
   const [hankChatProvider, setHankChatProvider] = useState("gemini-live");
   const [hankChatModel, setHankChatModel] = useState("");
+  const [hankChatAvatarEnabled, setHankChatAvatarEnabled] = useState(true);
+  const [hankChatAvatarUrl, setHankChatAvatarUrl] = useState("");
   const [aiValidationEnabled, setAiValidationEnabled] = useState(false);
   const [aiValidationAutoApprove, setAiValidationAutoApprove] = useState(true);
   const [aiValidationAutoDeny, setAiValidationAutoDeny] = useState(false);
@@ -341,6 +343,8 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
         if (typeof s.aiValidationAutoDeny === "boolean") setAiValidationAutoDeny(s.aiValidationAutoDeny);
         if (typeof s.hankChatProvider === "string") setHankChatProvider(s.hankChatProvider);
         if (typeof s.hankChatModel === "string") setHankChatModel(s.hankChatModel);
+        if (typeof s.hankChatAvatarEnabled === "boolean") setHankChatAvatarEnabled(s.hankChatAvatarEnabled);
+        if (typeof s.hankChatAvatarUrl === "string") setHankChatAvatarUrl(s.hankChatAvatarUrl);
         if (s.updateChannel === "stable" || s.updateChannel === "prerelease") setUpdateChannel(s.updateChannel);
         if (typeof s.dockerAutoUpdate === "boolean") setDockerAutoUpdate(s.dockerAutoUpdate);
         if (typeof s.publicUrl === "string") {
@@ -1784,6 +1788,58 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                 >
                   Test Connection
                 </button>
+
+                {/* Divider */}
+                <div className="border-t border-cc-border my-2" />
+
+                {/* 3D Avatar (Gemini Live only) */}
+                <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-1.5">3D Avatar</label>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const next = !hankChatAvatarEnabled;
+                    setHankChatAvatarEnabled(next);
+                    try {
+                      await api.updateSettings({ hankChatAvatarEnabled: next });
+                      window.dispatchEvent(new Event("heyhank-settings-changed"));
+                    } catch {
+                      setHankChatAvatarEnabled(!next);
+                    }
+                  }}
+                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-cc-hover hover:bg-cc-active text-cc-fg transition-colors cursor-pointer"
+                >
+                  <div className="text-left">
+                    <span className="text-sm">Show 3D Avatar</span>
+                    <p className="text-[11px] text-cc-muted mt-0.5">
+                      Animate a talking avatar when Gemini Live is speaking (WebGL required).
+                    </p>
+                  </div>
+                  <span className={`text-xs font-medium ${hankChatAvatarEnabled ? "text-cc-success" : "text-cc-muted"}`}>
+                    {hankChatAvatarEnabled ? "On" : "Off"}
+                  </span>
+                </button>
+
+                {hankChatAvatarEnabled && (
+                  <div>
+                    <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-1.5">Avatar URL</label>
+                    <p className="text-[9px] text-cc-muted mb-1.5">
+                      GLB file with Ready Player Me / ARKit + Oculus visemes. Leave empty for default.
+                    </p>
+                    <input
+                      type="url"
+                      value={hankChatAvatarUrl}
+                      onChange={(e) => setHankChatAvatarUrl(e.target.value)}
+                      onBlur={async () => {
+                        try {
+                          await api.updateSettings({ hankChatAvatarUrl });
+                          window.dispatchEvent(new Event("heyhank-settings-changed"));
+                        } catch { /* ignore */ }
+                      }}
+                      placeholder="https://models.readyplayer.me/<id>.glb"
+                      className="w-full bg-cc-bg border border-cc-border rounded-md p-2 text-xs text-cc-fg focus:outline-none focus:border-cc-accent/50"
+                    />
+                  </div>
+                )}
 
                 {/* Divider */}
                 <div className="border-t border-cc-border my-2" />

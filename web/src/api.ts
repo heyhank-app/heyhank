@@ -413,6 +413,8 @@ export interface AppSettings {
   dockerAutoUpdate: boolean;
   hankChatProvider: string;
   hankChatModel: string;
+  hankChatAvatarEnabled: boolean;
+  hankChatAvatarUrl: string;
   openrouterApiKeyConfigured: boolean;
   /** Enhanced Claude CLI auth detection */
   claudeCliAuth?: { installed: boolean; loggedIn: boolean; oauthTokenConfigured: boolean; cliVersion: string | null };
@@ -931,6 +933,8 @@ export const api = {
     dockerAutoUpdate?: boolean;
     hankChatProvider?: string;
     hankChatModel?: string;
+    hankChatAvatarEnabled?: boolean;
+    hankChatAvatarUrl?: string;
     obsidianVaultPath?: string;
   }) => put<AppSettings>("/settings", data),
   verifyAnthropicKey: (apiKey: string) =>

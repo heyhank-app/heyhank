@@ -823,15 +823,22 @@ export function HankChat() {
   // Overlay dimensions — responsive: cap at 360px but shrink on narrow viewports.
   // The 3D avatar adds ~260px when visible, so grow the max height accordingly.
   const avatarVisible = isGeminiLive && avatarEnabled && state !== "idle";
-  const overlayWidth = typeof window !== "undefined"
-    ? Math.min(360, window.innerWidth - 16)
-    : 360;
-  const overlayMaxHeight = typeof window !== "undefined"
-    ? Math.min(
+  const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 1024;
+  const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 800;
+  // On mobile, when the avatar is actively speaking we switch to an immersive
+  // fullscreen layout — big face, floating controls — for a FaceTime-style feel.
+  const isMobile = viewportWidth < 768;
+  const immersive = isMobile && avatarVisible && (state === "speaking" || state === "listening");
+
+  const overlayWidth = immersive
+    ? viewportWidth
+    : Math.min(360, viewportWidth - 16);
+  const overlayMaxHeight = immersive
+    ? viewportHeight
+    : Math.min(
         (cameraActive ? 620 : 520) + (avatarVisible ? 260 : 0),
-        window.innerHeight - 40,
-      )
-    : 520;
+        viewportHeight - 40,
+      );
 
   useEffect(() => {
     if (expanded && typeof window !== "undefined") {
@@ -901,11 +908,15 @@ export function HankChat() {
       <input ref={fileInputRef} type="file" accept="image/*,video/*,.pdf,.txt,.md,.json,.csv" multiple className="hidden" onChange={handleFileSelect} />
 
       <div
-        className="fixed z-[10000] rounded-xl border border-cc-border bg-cc-bg shadow-2xl overflow-hidden flex flex-col"
-        style={{ left: clampedLeft, top: clampedTop, width: overlayWidth, maxHeight: overlayMaxHeight }}
+        className={`fixed z-[10000] bg-cc-bg shadow-2xl overflow-hidden flex flex-col ${
+          immersive ? "inset-0 rounded-none border-0" : "rounded-xl border border-cc-border"
+        }`}
+        style={immersive
+          ? { left: 0, top: 0, width: "100vw", height: "100vh", maxHeight: "100vh" }
+          : { left: clampedLeft, top: clampedTop, width: overlayWidth, maxHeight: overlayMaxHeight }}
       >
-        {/* Header */}
-        <div
+        {/* Header — hidden on immersive mobile to maximize avatar */}
+        {!immersive && <div
           onPointerDown={onOverlayPointerDown}
           className="flex items-center justify-between px-4 py-3 border-b border-cc-border bg-cc-card cursor-grab active:cursor-grabbing touch-none select-none"
         >
@@ -978,11 +989,15 @@ export function HankChat() {
               <CloseIcon className="w-4 h-4" />
             </button>
           </div>
-        </div>
+        </div>}
 
         {/* 3D TalkingHead avatar (Gemini Live + enabled in settings) */}
         {isGeminiLive && avatarEnabled && state !== "idle" && (
-          <div className="relative border-b border-cc-border bg-gradient-to-b from-cc-card to-cc-bg h-[260px]">
+          <div
+            className={`relative bg-gradient-to-b from-cc-card to-cc-bg ${
+              immersive ? "flex-1" : "border-b border-cc-border h-[260px]"
+            }`}
+          >
             <Suspense fallback={
               <div className="absolute inset-0 flex items-center justify-center text-xs text-cc-muted">
                 Loading avatar...
@@ -991,11 +1006,18 @@ export function HankChat() {
               <TalkingHeadAvatar
                 ref={avatarRef}
                 avatarUrl={avatarUrl}
-                cameraView="upper"
+                cameraView={immersive ? "head" : "upper"}
                 onReady={() => setAvatarReady(true)}
                 onError={() => setAvatarReady(false)}
               />
             </Suspense>
+            {immersive && (
+              <div className="absolute top-4 left-0 right-0 flex justify-center pointer-events-none">
+                <span className="px-3 py-1.5 rounded-full bg-black/40 text-white text-xs backdrop-blur-md">
+                  {state === "speaking" ? `${displayName} speaking...` : muted ? "Muted" : "Listening..."}
+                </span>
+              </div>
+            )}
           </div>
         )}
 
@@ -1010,8 +1032,8 @@ export function HankChat() {
           </div>
         )}
 
-        {/* Status bar */}
-        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-cc-border">
+        {/* Status bar — hidden on immersive (overlay label on avatar instead) */}
+        {!immersive && <div className="flex items-center gap-3 px-4 py-2.5 border-b border-cc-border">
           <div className="flex-shrink-0">
             {state === "connecting" && <ConnectingAnimation />}
             {state === "listening" && <ListeningAnimation />}
@@ -1031,10 +1053,10 @@ export function HankChat() {
             {state === "toolCall" && (lastAction ? `${lastAction}...` : "Action...")}
             {state === "streaming" && "Thinking..."}
           </span>
-        </div>
+        </div>}
 
-        {/* Transcript */}
-        <div ref={transcriptRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-2 min-h-[100px] max-h-[260px]">
+        {/* Transcript — hidden on immersive */}
+        {!immersive && <div ref={transcriptRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-2 min-h-[100px] max-h-[260px]">
           {transcript.length === 0 && state !== "idle" && (
             <p className="text-xs text-cc-muted text-center py-4">
               {isGeminiLive ? "Say something..." : "Type a message..."}
@@ -1088,10 +1110,10 @@ export function HankChat() {
               </div>
             </div>
           )}
-        </div>
+        </div>}
 
-        {/* Text input — always shown for text providers, shown during active session for Gemini Live */}
-        {(state !== "idle" || !isGeminiLive) && (
+        {/* Text input — always shown for text providers, shown during active session for Gemini Live, hidden on immersive mobile */}
+        {!immersive && (state !== "idle" || !isGeminiLive) && (
           <div className="px-3 py-2 border-t border-cc-border">
             {/* Attachment previews */}
             {attachments.length > 0 && (
@@ -1162,8 +1184,24 @@ export function HankChat() {
           </div>
         )}
 
-        {/* Controls */}
-        <div className="flex items-center justify-center gap-2 px-4 py-3 border-t border-cc-border">
+        {/* Controls — absolute floating bar on immersive, normal footer otherwise */}
+        <div
+          className={
+            immersive
+              ? "absolute left-0 right-0 bottom-0 pb-8 pt-6 px-6 flex items-center justify-center gap-3 bg-gradient-to-t from-black/60 to-transparent"
+              : "flex items-center justify-center gap-2 px-4 py-3 border-t border-cc-border"
+          }
+        >
+          {immersive && (
+            <button
+              type="button"
+              onClick={handleMinimize}
+              className="p-3 rounded-full bg-white/15 text-white backdrop-blur-md hover:bg-white/25 transition-colors"
+              title="Back to compact view"
+            >
+              <MinimizeIcon className="w-5 h-5" />
+            </button>
+          )}
           {isGeminiLive ? (
             state === "idle" ? (
               <button
