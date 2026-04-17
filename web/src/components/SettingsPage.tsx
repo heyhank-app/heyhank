@@ -1823,7 +1823,8 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   <div>
                     <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-1.5">Avatar URL</label>
                     <p className="text-[9px] text-cc-muted mb-1.5">
-                      GLB file with Ready Player Me / ARKit + Oculus visemes. Leave empty for default.
+                      GLB file with ARKit + Oculus visemes (e.g. Ready Player Me export).
+                      No URL? Use the demo avatar below.
                     </p>
                     <input
                       type="url"
@@ -1835,9 +1836,37 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                           window.dispatchEvent(new Event("heyhank-settings-changed"));
                         } catch { /* ignore */ }
                       }}
-                      placeholder="https://models.readyplayer.me/<id>.glb"
+                      placeholder="https://example.com/your-avatar.glb"
                       className="w-full bg-cc-bg border border-cc-border rounded-md p-2 text-xs text-cc-fg focus:outline-none focus:border-cc-accent/50"
                     />
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {[
+                        { id: "brunette", label: "Brunette (demo)" },
+                        { id: "brunette-t", label: "Brunette T (demo)" },
+                        { id: "avaturn", label: "Avaturn (demo)" },
+                        { id: "vroid", label: "VRoid (demo)" },
+                      ].map((a) => (
+                        <button
+                          key={a.id}
+                          type="button"
+                          onClick={async () => {
+                            const url = `https://met4citizen.github.io/TalkingHead/avatars/${a.id}.glb`;
+                            setHankChatAvatarUrl(url);
+                            try {
+                              await api.updateSettings({ hankChatAvatarUrl: url });
+                              window.dispatchEvent(new Event("heyhank-settings-changed"));
+                            } catch { /* ignore */ }
+                          }}
+                          className="px-2 py-1 text-[10px] rounded-md bg-cc-hover hover:bg-cc-active text-cc-fg border border-cc-border hover:border-cc-accent/30 transition-colors"
+                        >
+                          {a.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[9px] text-cc-muted mt-1">
+                      Demo avatars are CC BY-NC 4.0 (non-commercial use).
+                      For your own: export a GLB from Ready Player Me, Avaturn, or VRoid — any HTTPS-reachable URL works.
+                    </p>
                   </div>
                 )}
 
