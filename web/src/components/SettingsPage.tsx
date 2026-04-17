@@ -1841,10 +1841,10 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     />
                     <div className="mt-1.5 flex flex-wrap gap-1.5">
                       {[
-                        { id: "brunette", label: "Brunette (demo)" },
-                        { id: "brunette-t", label: "Brunette T (demo)" },
-                        { id: "avaturn", label: "Avaturn (demo)" },
-                        { id: "vroid", label: "VRoid (demo)" },
+                        { id: "avatarsdk", label: "Male (Avatar SDK)" },
+                        { id: "brunette", label: "Female (Brunette)" },
+                        { id: "avaturn", label: "Avaturn" },
+                        { id: "vroid", label: "VRoid (anime)" },
                       ].map((a) => (
                         <button
                           key={a.id}
