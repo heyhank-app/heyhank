@@ -5,12 +5,13 @@
 
 import { useState, useRef, useCallback, useEffect, lazy, Suspense } from "react";
 import { api } from "../api.js";
-import type { TalkingHeadAvatarHandle } from "./TalkingHeadAvatar";
+import type { JarvisHUDHandle } from "./JarvisHUD";
 
-// Lazy-load the 3D avatar so three.js (~600kB) only ships when a user opens
-// the chat overlay. Also lets devices without WebGL fail gracefully.
-const TalkingHeadAvatar = lazy(() =>
-  import("./TalkingHeadAvatar").then(m => ({ default: m.TalkingHeadAvatar })),
+// Lazy-load the HUD for parity with the previous 3D avatar import path.
+// JarvisHUD is tiny (SVG-only) so this is mainly for code-splitting
+// consistency, not bundle size.
+const JarvisHUD = lazy(() =>
+  import("./JarvisHUD").then(m => ({ default: m.JarvisHUD })),
 );
 
 type ChatProvider = "gemini-live" | "ollama" | "claude" | "openai" | "openrouter" | "gemini-text";
@@ -164,9 +165,25 @@ function captureVideoFrame(video: HTMLVideoElement, quality = 0.7): { base64: st
   return { base64, dataUrl };
 }
 
-/** Draggable position hook */
-function useDraggable(initialX: number, initialY: number) {
-  const [pos, setPos] = useState({ x: initialX, y: initialY });
+/** Draggable position hook. Clamps to the visible viewport both while
+ *  dragging AND whenever the viewport itself changes (rotate phone, resize
+ *  browser, soft keyboard shows/hides) so the floating button never ends
+ *  up stranded off-screen after a rotation. */
+function useDraggable(initialX: number, initialY: number, elemSize = 60) {
+  // Clamp the initial position too — if we're hydrating from a small-screen
+  // layout on a now-tiny viewport the defaults may already be out of bounds.
+  const clamp = (x: number, y: number) => ({
+    x: Math.max(8, Math.min((typeof window !== "undefined" ? window.innerWidth : 1024) - elemSize - 8, x)),
+    y: Math.max(8, Math.min((typeof window !== "undefined" ? window.innerHeight : 800) - elemSize - 8, y)),
+  });
+  const [pos, setPosRaw] = useState(() => clamp(initialX, initialY));
+  const setPos = useCallback((p: { x: number; y: number } | ((prev: { x: number; y: number }) => { x: number; y: number })) => {
+    setPosRaw((prev) => {
+      const next = typeof p === "function" ? p(prev) : p;
+      return clamp(next.x, next.y);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const dragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const hasMoved = useRef(false);
@@ -183,18 +200,29 @@ function useDraggable(initialX: number, initialY: number) {
     const onPointerMove = (e: PointerEvent) => {
       if (!dragging.current) return;
       hasMoved.current = true;
-      const newX = Math.max(0, Math.min(window.innerWidth - 60, e.clientX - dragStart.current.x));
-      const newY = Math.max(0, Math.min(window.innerHeight - 60, e.clientY - dragStart.current.y));
-      setPos({ x: newX, y: newY });
+      setPos({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
     };
     const onPointerUp = () => { dragging.current = false; };
+    // Re-clamp when the viewport changes: orientation flip, browser resize,
+    // and the visualViewport resize that fires when mobile Safari's URL bar
+    // collapses or the on-screen keyboard opens/closes.
+    const onViewportChange = () => {
+      setPos((prev) => prev);
+    };
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("resize", onViewportChange);
+    window.addEventListener("orientationchange", onViewportChange);
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", onViewportChange);
     return () => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("resize", onViewportChange);
+      window.removeEventListener("orientationchange", onViewportChange);
+      vv?.removeEventListener("resize", onViewportChange);
     };
-  }, []);
+  }, [setPos]);
 
   return { pos, setPos, onPointerDown, didDrag: () => hasMoved.current };
 }
@@ -227,11 +255,12 @@ export function HankChat() {
   const [providerDropdownOpen, setProviderDropdownOpen] = useState(false);
   const [providerKeyStatus, setProviderKeyStatus] = useState<Record<string, boolean>>({});
   const [modelOverride, setModelOverride] = useState("");
-  // 3D TalkingHead avatar (opt-in via settings; only used with gemini-live).
+  // Jarvis HUD — faceless audio-reactive visualisation shown during
+  // Gemini Live sessions. Gated by the same `hankChatAvatarEnabled` setting
+  // that previously controlled the 3D TalkingHead avatar.
   const [avatarEnabled, setAvatarEnabled] = useState(true);
-  const [avatarUrl, setAvatarUrl] = useState("");
   const [avatarReady, setAvatarReady] = useState(false);
-  const avatarRef = useRef<TalkingHeadAvatarHandle | null>(null);
+  const avatarRef = useRef<JarvisHUDHandle | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const textInputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -277,7 +306,9 @@ export function HankChat() {
         if (s.assistantName) setDisplayName(s.assistantName || "Hank");
         if (s.hankChatModel) setModelOverride(s.hankChatModel);
         if (typeof s.hankChatAvatarEnabled === "boolean") setAvatarEnabled(s.hankChatAvatarEnabled);
-        if (typeof s.hankChatAvatarUrl === "string" && s.hankChatAvatarUrl) setAvatarUrl(s.hankChatAvatarUrl);
+        // hankChatAvatarUrl is kept in the server schema for backwards compat
+        // with older settings files, but unused now that the HUD replaced the
+        // 3D TalkingHead avatar. Intentionally not read.
         const keyMap: Record<string, boolean> = {
           "gemini-live": !!s.geminiApiKeyConfigured || !!s.geminiApiKey,
           "claude": !!s.anthropicApiKeyConfigured || !!s.anthropicApiKey,
@@ -847,23 +878,42 @@ export function HankChat() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, [expanded]);
 
-  // Overlay dimensions — responsive: cap at 360px but shrink on narrow viewports.
-  // The 3D avatar adds ~260px when visible, so grow the max height accordingly.
-  const avatarVisible = isGeminiLive && avatarEnabled && !!avatarUrl && state !== "idle";
-  const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 1024;
-  const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 800;
-  // On mobile, when the avatar is actively speaking we switch to an immersive
-  // fullscreen layout — big face, floating controls — for a FaceTime-style feel.
+  // Live viewport — recomputed on resize/rotation/keyboard-open so the
+  // `immersive` switch, the overlay clamp, and the button position all
+  // react correctly on mobile.
+  const [viewport, setViewport] = useState(() => ({
+    w: typeof window !== "undefined" ? window.innerWidth : 1024,
+    h: typeof window !== "undefined" ? window.innerHeight : 800,
+  }));
+  useEffect(() => {
+    const sync = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", sync);
+    window.addEventListener("orientationchange", sync);
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", sync);
+    return () => {
+      window.removeEventListener("resize", sync);
+      window.removeEventListener("orientationchange", sync);
+      vv?.removeEventListener("resize", sync);
+    };
+  }, []);
+  const viewportWidth = viewport.w;
+  const viewportHeight = viewport.h;
+
+  const avatarVisible = isGeminiLive && avatarEnabled && state !== "idle";
   const isMobile = viewportWidth < 768;
-  const immersive = isMobile && avatarVisible && (state === "speaking" || state === "listening");
+  // On mobile: once a Gemini-Live session is running we switch to an
+  // app-like fullscreen layout (HUD on top, transcript + input + controls
+  // underneath) — no more tiny draggable bubble on small screens.
+  const immersive = isMobile && isGeminiLive && state !== "idle";
 
   const overlayWidth = immersive
     ? viewportWidth
-    : Math.min(360, viewportWidth - 16);
+    : Math.min(380, viewportWidth - 16);
   const overlayMaxHeight = immersive
     ? viewportHeight
     : Math.min(
-        (cameraActive ? 620 : 520) + (avatarVisible ? 260 : 0),
+        (cameraActive ? 620 : 520) + (avatarVisible ? 220 : 0),
         viewportHeight - 40,
       );
 
@@ -935,14 +985,65 @@ export function HankChat() {
       <input ref={fileInputRef} type="file" accept="image/*,video/*,.pdf,.txt,.md,.json,.csv" multiple className="hidden" onChange={handleFileSelect} />
 
       <div
-        className={`fixed z-[10000] bg-cc-bg shadow-2xl overflow-hidden flex flex-col ${
-          immersive ? "inset-0 rounded-none border-0" : "rounded-xl border border-cc-border"
+        className={`fixed z-[10000] shadow-2xl overflow-hidden flex flex-col ${
+          immersive
+            ? "inset-0 rounded-none border-0 bg-[#06101c] text-cyan-50"
+            : "rounded-xl border border-cc-border bg-cc-bg"
         }`}
         style={immersive
-          ? { left: 0, top: 0, width: "100vw", height: "100vh", maxHeight: "100vh" }
+          ? {
+              left: 0,
+              top: 0,
+              width: "100vw",
+              // Use 100dvh so mobile browsers exclude the URL bar on iOS/Android
+              // and the app-style layout isn't clipped by the bottom browser chrome.
+              height: "100dvh",
+              maxHeight: "100dvh",
+              paddingTop: "env(safe-area-inset-top, 0px)",
+              paddingBottom: "env(safe-area-inset-bottom, 0px)",
+            }
           : { left: clampedLeft, top: clampedTop, width: overlayWidth, maxHeight: overlayMaxHeight }}
       >
-        {/* Header — hidden on immersive mobile to maximize avatar */}
+        {/* Compact header (immersive mobile) — just title + close */}
+        {immersive && (
+          <div className="flex items-center justify-between px-3 py-2 bg-[#061422] border-b border-cyan-900/40 text-cyan-100">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className={`w-2 h-2 rounded-full shrink-0 ${
+                state === "connecting" ? "bg-yellow-400 animate-pulse"
+                  : state === "toolCall" ? "bg-blue-400 animate-pulse"
+                  : state === "streaming" ? "bg-blue-400 animate-pulse"
+                  : state === "speaking" ? "bg-emerald-400"
+                  : "bg-cyan-300"
+              }`} />
+              <span className="text-sm font-medium truncate">{displayName}</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-900/40 text-cyan-200/80">
+                {provider ? PROVIDER_LABELS[provider] : "..."}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleMinimize}
+                className="p-2 rounded-full text-cyan-200/80 hover:text-white hover:bg-white/10 transition-colors"
+                title="Minimize"
+                aria-label="Minimize"
+              >
+                <MinimizeIcon className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={handleClose}
+                className="p-2 rounded-full text-cyan-200/80 hover:text-red-300 hover:bg-white/10 transition-colors"
+                title="End session"
+                aria-label="End session"
+              >
+                <CloseIcon className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Draggable desktop/tablet header */}
         {!immersive && <div
           onPointerDown={onOverlayPointerDown}
           className="flex items-center justify-between px-4 py-3 border-b border-cc-border bg-cc-card cursor-grab active:cursor-grabbing touch-none select-none"
@@ -1018,33 +1119,43 @@ export function HankChat() {
           </div>
         </div>}
 
-        {/* 3D TalkingHead avatar (Gemini Live + enabled in settings) */}
-        {isGeminiLive && avatarEnabled && !!avatarUrl && state !== "idle" && (
+        {/* Jarvis HUD (Gemini Live + enabled in settings) */}
+        {avatarVisible && (
           <div
-            className={`relative bg-gradient-to-b from-cc-card to-cc-bg ${
-              immersive ? "flex-1" : "border-b border-cc-border h-[260px]"
-            }`}
+            className={
+              immersive
+                // Fixed proportional height on mobile so the transcript/input
+                // get ample room. 42vh feels balanced on most phones; min/max
+                // bounds keep it sane on short landscape and tall portrait.
+                ? "relative shrink-0 h-[42vh] min-h-[240px] max-h-[380px] bg-[#06101c]"
+                : "relative border-b border-cc-border h-[220px] bg-[#06101c]"
+            }
           >
             <Suspense fallback={
-              <div className="absolute inset-0 flex items-center justify-center text-xs text-cc-muted">
-                Loading avatar...
+              <div className="absolute inset-0 flex items-center justify-center text-xs text-cyan-200/70">
+                Initializing HUD...
               </div>
             }>
-              <TalkingHeadAvatar
+              <JarvisHUD
                 ref={avatarRef}
-                avatarUrl={avatarUrl}
-                cameraView={immersive ? "head" : "upper"}
+                state={
+                  state === "speaking" ? "speaking"
+                  : state === "streaming" || state === "toolCall" || state === "connecting" ? "thinking"
+                  : state === "listening" ? "listening"
+                  : "idle"
+                }
+                label={
+                  state === "speaking" ? `${displayName} speaking`
+                  : state === "streaming" ? "Thinking"
+                  : state === "toolCall" ? (lastAction ? lastAction : "Working")
+                  : state === "connecting" ? "Connecting"
+                  : state === "listening" ? (muted ? "Muted" : "Listening")
+                  : "Ready"
+                }
                 onReady={() => setAvatarReady(true)}
                 onError={() => setAvatarReady(false)}
               />
             </Suspense>
-            {immersive && (
-              <div className="absolute top-4 left-0 right-0 flex justify-center pointer-events-none">
-                <span className="px-3 py-1.5 rounded-full bg-black/40 text-white text-xs backdrop-blur-md">
-                  {state === "speaking" ? `${displayName} speaking...` : muted ? "Muted" : "Listening..."}
-                </span>
-              </div>
-            )}
           </div>
         )}
 
@@ -1059,8 +1170,8 @@ export function HankChat() {
           </div>
         )}
 
-        {/* Status bar — hidden on immersive (overlay label on avatar instead) */}
-        {!immersive && <div className="flex items-center gap-3 px-4 py-2.5 border-b border-cc-border">
+        {/* Status bar — hidden on immersive (the HUD itself shows a label) */}
+        {!immersive && !avatarVisible && <div className="flex items-center gap-3 px-4 py-2.5 border-b border-cc-border">
           <div className="flex-shrink-0">
             {state === "connecting" && <ConnectingAnimation />}
             {state === "listening" && <ListeningAnimation />}
@@ -1082,8 +1193,16 @@ export function HankChat() {
           </span>
         </div>}
 
-        {/* Transcript — hidden on immersive */}
-        {!immersive && <div ref={transcriptRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-2 min-h-[100px] max-h-[260px]">
+        {/* Transcript — always visible on immersive (flex-1) so it behaves
+            like a proper chat app between the HUD and input bar. */}
+        <div
+          ref={transcriptRef}
+          className={
+            immersive
+              ? "flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-2"
+              : "flex-1 overflow-y-auto px-3 py-2 space-y-2 min-h-[100px] max-h-[260px]"
+          }
+        >
           {transcript.length === 0 && state !== "idle" && (
             <p className="text-xs text-cc-muted text-center py-4">
               {isGeminiLive ? "Say something..." : "Type a message..."}
@@ -1100,7 +1219,9 @@ export function HankChat() {
                 <div className={`px-3 py-1 text-[10px] rounded-full ${
                   /error|fail|denied|refused/i.test(entry.text)
                     ? "bg-red-500/20 text-red-400"
-                    : "text-cc-muted bg-cc-hover"
+                    : immersive
+                      ? "bg-cyan-900/40 text-cyan-200/80"
+                      : "text-cc-muted bg-cc-hover"
                 }`}>
                   {entry.text}
                 </div>
@@ -1109,10 +1230,16 @@ export function HankChat() {
               <div key={i} className={`flex ${entry.role === "user" ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[85%] rounded-lg px-3 py-1.5 text-xs ${
                   entry.role === "user"
-                    ? "bg-cc-primary/20 text-cc-fg"
+                    ? immersive
+                      ? "bg-cyan-500/25 text-cyan-50 border border-cyan-400/20"
+                      : "bg-cc-primary/20 text-cc-fg"
                     : entry.role === "system"
-                      ? "bg-cc-hover text-cc-muted italic"
-                      : "bg-cc-card text-cc-fg border border-cc-border"
+                      ? immersive
+                        ? "bg-cyan-900/30 text-cyan-200/70 italic"
+                        : "bg-cc-hover text-cc-muted italic"
+                      : immersive
+                        ? "bg-[#0b1d32] text-cyan-50 border border-cyan-900/40"
+                        : "bg-cc-card text-cc-fg border border-cc-border"
                 }`}>
                   {entry.imageUrl && (
                     <img src={entry.imageUrl} alt="" className="w-full max-h-24 object-cover rounded mb-1" />
@@ -1137,20 +1264,21 @@ export function HankChat() {
               </div>
             </div>
           )}
-        </div>}
+        </div>
 
-        {/* Text input — always shown for text providers, shown during active session for Gemini Live, hidden on immersive mobile */}
-        {!immersive && (state !== "idle" || !isGeminiLive) && (
-          <div className="px-3 py-2 border-t border-cc-border">
+        {/* Text input — shown on immersive too so mobile users can type + attach
+            while the HUD visualizes speech. */}
+        {(state !== "idle" || !isGeminiLive) && (
+          <div className={immersive ? "px-3 py-2 border-t border-cyan-900/30 bg-[#061422]" : "px-3 py-2 border-t border-cc-border"}>
             {/* Attachment previews */}
             {attachments.length > 0 && (
               <div className="flex gap-1.5 mb-1.5 flex-wrap">
                 {attachments.map((att, i) => (
                   <div key={i} className="relative group">
                     {att.dataUrl ? (
-                      <img src={att.dataUrl} alt={att.name} className="w-12 h-12 rounded object-cover border border-cc-border" />
+                      <img src={att.dataUrl} alt={att.name} className={`w-12 h-12 rounded object-cover border ${immersive ? "border-cyan-400/30" : "border-cc-border"}`} />
                     ) : (
-                      <div className="w-12 h-12 rounded border border-cc-border bg-cc-hover flex items-center justify-center text-[9px] text-cc-muted truncate px-0.5">
+                      <div className={`w-12 h-12 rounded flex items-center justify-center text-[9px] truncate px-0.5 ${immersive ? "border border-cyan-400/30 bg-[#0a1a2a] text-cyan-200/70" : "border border-cc-border bg-cc-hover text-cc-muted"}`}>
                         {att.name.split(".").pop()}
                       </div>
                     )}
@@ -1165,15 +1293,19 @@ export function HankChat() {
                 ))}
               </div>
             )}
-            <div className="flex gap-1.5 items-end">
+            <div className={`flex items-end ${immersive ? "gap-2" : "gap-1.5"}`}>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="p-1.5 rounded-lg bg-cc-hover text-cc-muted hover:text-cc-fg hover:bg-cc-border transition-colors shrink-0"
+                className={
+                  immersive
+                    ? "p-2.5 rounded-xl bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 border border-cyan-400/20 transition-colors shrink-0"
+                    : "p-1.5 rounded-lg bg-cc-hover text-cc-muted hover:text-cc-fg hover:bg-cc-border transition-colors shrink-0"
+                }
                 title="Attach file"
                 disabled={state === "streaming" || state === "toolCall"}
               >
-                <ImageIcon className="w-3.5 h-3.5" />
+                <ImageIcon className={immersive ? "w-4 h-4" : "w-3.5 h-3.5"} />
               </button>
               <textarea
                 ref={textInputRef}
@@ -1186,7 +1318,11 @@ export function HankChat() {
                 }}
                 onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendTextMessage(); } }}
                 placeholder={isGeminiLive ? "Type a message..." : `Message ${provider ? PROVIDER_LABELS[provider] : "..."}...`}
-                className="flex-1 px-2.5 py-1.5 text-xs bg-cc-bg rounded-lg border border-cc-border text-cc-fg placeholder:text-cc-muted/60 focus:outline-none focus:ring-1 focus:ring-cc-primary resize-none"
+                className={
+                  immersive
+                    ? "flex-1 px-3 py-2.5 text-sm bg-[#0a1a2a] rounded-xl border border-cyan-400/20 text-cyan-50 placeholder:text-cyan-200/40 focus:outline-none focus:ring-1 focus:ring-cyan-400/60 resize-none"
+                    : "flex-1 px-2.5 py-1.5 text-xs bg-cc-bg rounded-lg border border-cc-border text-cc-fg placeholder:text-cc-muted/60 focus:outline-none focus:ring-1 focus:ring-cc-primary resize-none"
+                }
                 rows={1}
                 style={{ maxHeight: "120px", overflowY: "auto" }}
                 disabled={state === "streaming" || state === "toolCall"}
@@ -1195,10 +1331,14 @@ export function HankChat() {
                 type="button"
                 onClick={sendTextMessage}
                 disabled={(!textInput.trim() && attachments.length === 0) || state === "streaming" || state === "toolCall"}
-                className="px-2.5 py-1.5 rounded-lg bg-cc-primary text-white text-xs disabled:opacity-30 hover:bg-cc-primary-hover transition-colors shrink-0"
+                className={
+                  immersive
+                    ? "px-3 py-2.5 rounded-xl bg-cyan-500 text-[#04121f] text-sm font-medium disabled:opacity-30 hover:bg-cyan-400 transition-colors shrink-0"
+                    : "px-2.5 py-1.5 rounded-lg bg-cc-primary text-white text-xs disabled:opacity-30 hover:bg-cc-primary-hover transition-colors shrink-0"
+                }
                 title="Send"
               >
-                <SendIcon className="w-3.5 h-3.5" />
+                <SendIcon className={immersive ? "w-4 h-4" : "w-3.5 h-3.5"} />
               </button>
             </div>
           </div>
@@ -1211,24 +1351,16 @@ export function HankChat() {
           </div>
         )}
 
-        {/* Controls — absolute floating bar on immersive, normal footer otherwise */}
+        {/* Controls — unified footer. On immersive we use bigger pills for
+            fat-finger tap targets; the floating overlay is gone so it no
+            longer obscures the text input. */}
         <div
           className={
             immersive
-              ? "absolute left-0 right-0 bottom-0 pb-8 pt-6 px-6 flex items-center justify-center gap-3 bg-gradient-to-t from-black/60 to-transparent"
+              ? "flex items-center justify-center gap-2 px-4 py-3 border-t border-cyan-900/30 bg-[#061422]"
               : "flex items-center justify-center gap-2 px-4 py-3 border-t border-cc-border"
           }
         >
-          {immersive && (
-            <button
-              type="button"
-              onClick={handleMinimize}
-              className="p-3 rounded-full bg-white/15 text-white backdrop-blur-md hover:bg-white/25 transition-colors"
-              title="Back to compact view"
-            >
-              <MinimizeIcon className="w-5 h-5" />
-            </button>
-          )}
           {isGeminiLive ? (
             state === "idle" ? (
               <button
@@ -1240,35 +1372,40 @@ export function HankChat() {
               </button>
             ) : (
               <>
-                <button type="button" onClick={endSession} className="px-3 py-2 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700 transition-colors">
+                <button
+                  type="button"
+                  onClick={endSession}
+                  className={`${immersive ? "px-4 py-2.5 text-sm" : "px-3 py-2 text-xs"} rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition-colors`}
+                >
                   End
                 </button>
                 <button
                   type="button"
                   onClick={toggleMute}
-                  className={`px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
-                    muted ? "bg-yellow-600 text-white hover:bg-yellow-700" : "bg-cc-hover text-cc-fg hover:bg-cc-border"
+                  className={`${immersive ? "px-4 py-2.5 text-sm" : "px-3 py-2 text-xs"} rounded-lg font-medium transition-colors ${
+                    muted
+                      ? "bg-yellow-600 text-white hover:bg-yellow-700"
+                      : immersive
+                        ? "bg-cyan-900/40 text-cyan-100 hover:bg-cyan-800/50"
+                        : "bg-cc-hover text-cc-fg hover:bg-cc-border"
                   }`}
                 >
                   {muted ? "Unmute" : "Mute"}
                 </button>
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="p-2 rounded-lg bg-cc-hover text-cc-fg hover:bg-cc-border transition-colors"
-                  title="Send image or video"
-                >
-                  <ImageIcon className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
                   onClick={toggleCamera}
-                  className={`p-2 rounded-lg transition-colors ${
-                    cameraActive ? "bg-red-600 text-white hover:bg-red-700" : "bg-cc-hover text-cc-fg hover:bg-cc-border"
+                  className={`${immersive ? "p-2.5" : "p-2"} rounded-lg transition-colors ${
+                    cameraActive
+                      ? "bg-red-600 text-white hover:bg-red-700"
+                      : immersive
+                        ? "bg-cyan-900/40 text-cyan-100 hover:bg-cyan-800/50"
+                        : "bg-cc-hover text-cc-fg hover:bg-cc-border"
                   }`}
                   title={cameraActive ? "Stop camera" : "Start camera"}
+                  aria-label={cameraActive ? "Stop camera" : "Start camera"}
                 >
-                  <CameraIcon className="w-4 h-4" />
+                  <CameraIcon className={immersive ? "w-5 h-5" : "w-4 h-4"} />
                 </button>
               </>
             )

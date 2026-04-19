@@ -171,7 +171,6 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [hankChatProvider, setHankChatProvider] = useState("gemini-live");
   const [hankChatModel, setHankChatModel] = useState("");
   const [hankChatAvatarEnabled, setHankChatAvatarEnabled] = useState(true);
-  const [hankChatAvatarUrl, setHankChatAvatarUrl] = useState("");
   const [aiValidationEnabled, setAiValidationEnabled] = useState(false);
   const [aiValidationAutoApprove, setAiValidationAutoApprove] = useState(true);
   const [aiValidationAutoDeny, setAiValidationAutoDeny] = useState(false);
@@ -344,7 +343,6 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
         if (typeof s.hankChatProvider === "string") setHankChatProvider(s.hankChatProvider);
         if (typeof s.hankChatModel === "string") setHankChatModel(s.hankChatModel);
         if (typeof s.hankChatAvatarEnabled === "boolean") setHankChatAvatarEnabled(s.hankChatAvatarEnabled);
-        if (typeof s.hankChatAvatarUrl === "string") setHankChatAvatarUrl(s.hankChatAvatarUrl);
         if (s.updateChannel === "stable" || s.updateChannel === "prerelease") setUpdateChannel(s.updateChannel);
         if (typeof s.dockerAutoUpdate === "boolean") setDockerAutoUpdate(s.dockerAutoUpdate);
         if (typeof s.publicUrl === "string") {
@@ -1792,8 +1790,8 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                 {/* Divider */}
                 <div className="border-t border-cc-border my-2" />
 
-                {/* 3D Avatar (Gemini Live only) */}
-                <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-1.5">3D Avatar</label>
+                {/* Jarvis HUD (Gemini Live only) */}
+                <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-1.5">Visualization</label>
                 <button
                   type="button"
                   onClick={async () => {
@@ -1809,66 +1807,15 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-cc-hover hover:bg-cc-active text-cc-fg transition-colors cursor-pointer"
                 >
                   <div className="text-left">
-                    <span className="text-sm">Show 3D Avatar</span>
+                    <span className="text-sm">Show HUD</span>
                     <p className="text-[11px] text-cc-muted mt-0.5">
-                      Animate a talking avatar when Gemini Live is speaking (WebGL required).
+                      HUD-style, audio-reactive visualization that reacts when Hank speaks or thinks. No face.
                     </p>
                   </div>
                   <span className={`text-xs font-medium ${hankChatAvatarEnabled ? "text-cc-success" : "text-cc-muted"}`}>
                     {hankChatAvatarEnabled ? "On" : "Off"}
                   </span>
                 </button>
-
-                {hankChatAvatarEnabled && (
-                  <div>
-                    <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-1.5">Avatar URL</label>
-                    <p className="text-[9px] text-cc-muted mb-1.5">
-                      GLB file with ARKit + Oculus visemes (e.g. Ready Player Me export).
-                      No URL? Use the demo avatar below.
-                    </p>
-                    <input
-                      type="url"
-                      value={hankChatAvatarUrl}
-                      onChange={(e) => setHankChatAvatarUrl(e.target.value)}
-                      onBlur={async () => {
-                        try {
-                          await api.updateSettings({ hankChatAvatarUrl });
-                          window.dispatchEvent(new Event("heyhank-settings-changed"));
-                        } catch { /* ignore */ }
-                      }}
-                      placeholder="https://example.com/your-avatar.glb"
-                      className="w-full bg-cc-bg border border-cc-border rounded-md p-2 text-xs text-cc-fg focus:outline-none focus:border-cc-accent/50"
-                    />
-                    <div className="mt-1.5 flex flex-wrap gap-1.5">
-                      {[
-                        { id: "avatarsdk", label: "Male (Avatar SDK)" },
-                        { id: "brunette", label: "Female (Brunette)" },
-                        { id: "avaturn", label: "Avaturn" },
-                        { id: "vroid", label: "VRoid (anime)" },
-                      ].map((a) => (
-                        <button
-                          key={a.id}
-                          type="button"
-                          onClick={async () => {
-                            const url = `https://met4citizen.github.io/TalkingHead/avatars/${a.id}.glb`;
-                            setHankChatAvatarUrl(url);
-                            try {
-                              await api.updateSettings({ hankChatAvatarUrl: url });
-                              window.dispatchEvent(new Event("heyhank-settings-changed"));
-                            } catch { /* ignore */ }
-                          }}
-                          className="px-2 py-1 text-[10px] rounded-md bg-cc-hover hover:bg-cc-active text-cc-fg border border-cc-border hover:border-cc-accent/30 transition-colors"
-                        >
-                          {a.label}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-[9px] text-cc-muted mt-1">
-                      Demo avatars are CC BY-NC 4.0 (non-commercial use).
-                      For your own: export a GLB from Ready Player Me, Avaturn, or VRoid — any HTTPS-reachable URL works.
-                    </p>
-                  </div>
-                )}
 
                 {/* Divider */}
                 <div className="border-t border-cc-border my-2" />
