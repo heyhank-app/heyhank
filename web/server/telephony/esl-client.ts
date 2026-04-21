@@ -139,13 +139,14 @@ function parseHeaders(block: string): Record<string, string> {
 }
 
 /**
- * Subscribe to FreeSWITCH events for inbound call detection.
- * Maintains a persistent ESL connection that listens for CHANNEL_CREATE events.
- * Auto-reconnects on disconnect.
+ * Subscribe to FreeSWITCH events for inbound call detection + hangup cleanup.
+ * Maintains a persistent ESL connection that listens for CHANNEL_CREATE and
+ * CHANNEL_HANGUP_COMPLETE events. Auto-reconnects on disconnect.
  */
 export function eslSubscribe(
   config: FreeSwitchConfig,
   onInboundCall: (info: { uuid: string; callerNumber: string }) => void,
+  onHangup?: (info: { uuid: string }) => void,
 ): { stop: () => void } {
   let stopped = false;
   let socket: Socket | null = null;
@@ -184,8 +185,8 @@ export function eslSubscribe(
             authenticated = true;
             // Reset backoff on successful auth
             reconnectDelay = 5000;
-            // Subscribe to channel create events
-            socket!.write("event plain CHANNEL_CREATE\n\n");
+            // Subscribe to channel create (inbound detection) + hangup (cleanup).
+            socket!.write("event plain CHANNEL_CREATE CHANNEL_HANGUP_COMPLETE\n\n");
           } else if (headers["Reply-Text"]?.startsWith("-ERR")) {
             authFailed = true;
             console.error("[esl-subscribe] Authentication failed:", headers["Reply-Text"]);
@@ -195,10 +196,10 @@ export function eslSubscribe(
         } else if (!subscribed) {
           if (headers["Reply-Text"]?.startsWith("+OK")) {
             subscribed = true;
-            console.log("[esl-subscribe] Subscribed to CHANNEL_CREATE events");
+            console.log("[esl-subscribe] Subscribed to CHANNEL_CREATE + CHANNEL_HANGUP_COMPLETE events");
           }
         } else {
-          // Parse events — look for inbound calls
+          // Parse events — look for inbound calls + hangups
           if (headers["Content-Type"] === "text/event-plain") {
             const contentLength = parseInt(headers["Content-Length"] || "0", 10);
             // Read the event body
@@ -216,16 +217,31 @@ export function eslSubscribe(
             // Parse event headers from the body
             const eventHeaders = parseHeaders(eventBody || block);
             const allHeaders = { ...headers, ...eventHeaders };
-            const direction = allHeaders["Call-Direction"] || allHeaders["variable_call_direction"] || "";
+            const eventName = allHeaders["Event-Name"] || "";
             const uuid = allHeaders["Unique-ID"] || allHeaders["Channel-Call-UUID"] || "";
-            const callerNumber = allHeaders["Caller-Caller-ID-Number"] || allHeaders["variable_sip_from_user"] || "";
 
-            if (direction === "inbound" && uuid) {
-              console.log(`[esl-subscribe] Inbound call detected: UUID=${uuid}, caller=${callerNumber}`);
+            if (eventName === "CHANNEL_CREATE") {
+              const direction = allHeaders["Call-Direction"] || allHeaders["variable_call_direction"] || "";
+              const callerNumber = allHeaders["Caller-Caller-ID-Number"] || allHeaders["variable_sip_from_user"] || "";
+              const destNumber = allHeaders["Caller-Destination-Number"] || allHeaders["variable_destination_number"] || "";
+              // Filter out SIP scanner probes / keepalive INVITEs (destination "0",
+              // empty, or anything that doesn't match our DID pattern). Only real
+              // inbound calls to 43… reach the heyhank dialplan, but CHANNEL_CREATE
+              // fires for every INVITE even when NO_ROUTE_DESTINATION rejects it.
+              const isRealDid = /^\+?43\d+$/.test(destNumber);
+              if (direction === "inbound" && uuid && isRealDid) {
+                console.log(`[esl-subscribe] Inbound call detected: UUID=${uuid}, caller=${callerNumber}, dest=${destNumber}`);
+                try {
+                  onInboundCall({ uuid, callerNumber: callerNumber || "unknown" });
+                } catch (err) {
+                  console.error("[esl-subscribe] onInboundCall error:", err);
+                }
+              }
+            } else if (eventName === "CHANNEL_HANGUP_COMPLETE" && uuid && onHangup) {
               try {
-                onInboundCall({ uuid, callerNumber: callerNumber || "unknown" });
+                onHangup({ uuid });
               } catch (err) {
-                console.error("[esl-subscribe] Callback error:", err);
+                console.error("[esl-subscribe] onHangup error:", err);
               }
             }
           }

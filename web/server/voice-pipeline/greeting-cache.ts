@@ -84,7 +84,10 @@ export async function getOrRenderGreeting(params: {
     format: "PCM_8000",
     speakingRate: params.settings.tts.speakingRate,
   };
-  const result = await ttsProvider.synthesize(text, config);
+  // Phonetic fix: German TTS says "Hank" with a long A ("Haank").
+  // Spelling it "Henk" yields the English short-A pronunciation.
+  const ttsText = text.replace(/\bHank\b/g, "Henk");
+  const result = await ttsProvider.synthesize(ttsText, config);
 
   // Save to cache
   writeFileSync(pcmPath, Buffer.from(result.audio));

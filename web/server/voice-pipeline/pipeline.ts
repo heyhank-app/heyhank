@@ -21,6 +21,26 @@ import type {
 } from "./types.js";
 import { getLLMProvider, getSTTProvider, getTTSProvider } from "./providers/index.js";
 
+/**
+ * Remove tool-call markup that some LLMs leak into the text stream instead
+ * of emitting through the provider's structured tool-call channel. Common
+ * patterns: `<function=name>{...}</function>`, `<tool_call>...</tool_call>`,
+ * `<|python_tag|>...`, and bare `<function=name/>` self-closing tags.
+ * Without this, goodbye lines like
+ *   "Schönen Tag noch! <function=end_call></function>"
+ * get TTS'd literally by the German voice.
+ */
+function sanitizeForTts(text: string): string {
+  return text
+    .replace(/<function\b[^>]*>[\s\S]*?<\/function>/gi, "")
+    .replace(/<function\b[^>]*\/>/gi, "")
+    .replace(/<tool_call\b[^>]*>[\s\S]*?<\/tool_call>/gi, "")
+    .replace(/<\|python_tag\|>[\s\S]*$/g, "")
+    .replace(/<\|?[a-z_]+\|?>/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 /** Split text into sentence-like chunks for incremental TTS playback */
 function* splitSentences(buffer: string): Generator<{ sentence: string; rest: string }> {
   // Split on sentence-ending punctuation followed by space or end
@@ -149,19 +169,25 @@ class PipelineSessionImpl implements PipelineSession {
       ts: Date.now(),
     });
     this.history.push({ role: "user", content: trimmed });
-    this.runLLMTurn().catch((e) => {
+    const tSttFinal = Date.now();
+    console.log(`[voice-pipeline][timing] call=${this.config.callId} STT_FINAL t=${tSttFinal} text="${trimmed.slice(0, 80)}"`);
+    this.runLLMTurn(tSttFinal).catch((e) => {
       console.error(`[voice-pipeline] LLM turn error:`, e);
     });
   }
 
-  private async runLLMTurn(): Promise<void> {
+  private async runLLMTurn(tSttFinal: number = Date.now()): Promise<void> {
     const myTurnId = ++this.currentTurnId;
     const llm = getLLMProvider(this.config.settings.llm.provider);
     const ttsProvider = getTTSProvider(this.config.settings.tts.provider);
+    const callId = this.config.callId;
+    const tLlmStart = Date.now();
 
     // Reset buffer for this turn
     this.llmBuffer = "";
     let assistantText = "";
+    let firstChunkLogged = false;
+    let firstTtsLogged = false;
     /** Track in-flight TTS promises so we can await them before signalling turn-complete */
     const ttsInflight: Promise<void>[] = [];
 
@@ -174,11 +200,21 @@ class PipelineSessionImpl implements PipelineSession {
 
     /** Synthesize a sentence and pipe to FreeSWITCH (if turn still active) */
     const speakSentence = async (sentence: string): Promise<void> => {
-      if (!sentence.trim()) return;
+      const cleaned = sanitizeForTts(sentence);
+      if (!cleaned.trim()) return;
       if (myTurnId !== this.currentTurnId) return; // barge-in cancelled this turn
+      const tTtsStart = Date.now();
       try {
-        const result = await ttsProvider.synthesize(sentence, ttsConfig);
+        // Phonetic fix: German TTS says "Hank" with a long A ("Haank").
+        // Spelling it "Henk" yields the English short-A pronunciation.
+        const ttsText = cleaned.replace(/\bHank\b/g, "Henk");
+        const result = await ttsProvider.synthesize(ttsText, ttsConfig);
         if (myTurnId !== this.currentTurnId) return; // double-check after await
+        const tTtsDone = Date.now();
+        if (!firstTtsLogged) {
+          firstTtsLogged = true;
+          console.log(`[voice-pipeline][timing] call=${callId} FIRST_TTS_AUDIO t=${tTtsDone} dSinceSttFinal=${tTtsDone - tSttFinal}ms dSinceLlmStart=${tTtsDone - tLlmStart}ms synthMs=${tTtsDone - tTtsStart} len=${sentence.length}`);
+        }
         this.config.onAudioOut(result.audio);
       } catch (e) {
         console.error(`[voice-pipeline] TTS error:`, e);
@@ -191,6 +227,11 @@ class PipelineSessionImpl implements PipelineSession {
     };
 
     const onChunk = (chunk: string): void => {
+      if (!firstChunkLogged) {
+        firstChunkLogged = true;
+        const now = Date.now();
+        console.log(`[voice-pipeline][timing] call=${callId} LLM_FIRST_TOKEN t=${now} dSinceSttFinal=${now - tSttFinal}ms dSinceLlmStart=${now - tLlmStart}ms`);
+      }
       assistantText += chunk;
       this.llmBuffer += chunk;
       // Try to extract a complete sentence and speak it immediately (low latency)
@@ -244,13 +285,16 @@ class PipelineSessionImpl implements PipelineSession {
 
     // Wait for all TTS to finish dispatching (so onTurnComplete fires after audio is sent)
     await Promise.allSettled(ttsInflight);
+    const tTurnDone = Date.now();
+    console.log(`[voice-pipeline][timing] call=${callId} TURN_COMPLETE t=${tTurnDone} totalFromSttFinal=${tTurnDone - tSttFinal}ms llmMs=${tTurnDone - tLlmStart}ms replyLen=${assistantText.length}`);
 
-    // Save assistant turn to history
-    if (myTurnId === this.currentTurnId && assistantText.trim()) {
-      this.history.push({ role: "assistant", content: assistantText.trim() });
+    // Save assistant turn to history (strip any leaked tool-call markup)
+    const cleanedAssistant = sanitizeForTts(assistantText).trim();
+    if (myTurnId === this.currentTurnId && cleanedAssistant) {
+      this.history.push({ role: "assistant", content: cleanedAssistant });
       this.config.onTranscript({
         speaker: "ai",
-        text: assistantText.trim(),
+        text: cleanedAssistant,
         isFinal: true,
         ts: Date.now(),
       });
