@@ -31,3 +31,9 @@ freeswitch/conf/sip_profiles/external/heyhank_*.xml
 gcp-service-account.json
 *-service-account.json
 web/test-results/
+
+# Stray browser downloads / large media at repo root
+/Download*.mp4
+/Download*.png
+/Download*.jpg
+/screenshot.png

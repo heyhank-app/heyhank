@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       REGISTRY: docker.io
-      IMAGE_NAME: stangirard/the-companion
+      IMAGE_NAME: heyhank/heyhank
     steps:
       - uses: actions/checkout@v4
 
