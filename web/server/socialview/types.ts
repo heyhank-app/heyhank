@@ -91,3 +91,76 @@ export interface LibraryQuery {
   tags?: string[];
   limit?: number;
 }
+
+/**
+ * Distilled writing-style profile derived from all library posts of a single
+ * handle. Used as an "instruction block" in the content-generation prompt so
+ * the agent writes in the role-model's voice without us having to ship 5+ raw
+ * example posts every time (token-efficient + interpretable).
+ *
+ * One profile per (platform, handle). Saved at:
+ *   ~/.heyhank/socialview/style-profiles/<platform>-<handle>.json
+ */
+export interface StyleProfile {
+  id: string;
+  platform: SocialPlatform;
+  handle: string;
+  displayName: string;
+
+  /** How many library posts the profile was distilled from. */
+  basedOnPostCount: number;
+  /** Library post IDs used in the analysis (for re-runs / audit). */
+  basedOnPostIds: string[];
+
+  /** Avg word count across analyzed posts. */
+  averageWordCount: number;
+  /** Coarse length descriptor — useful as a one-word hint to the LLM. */
+  lengthCategory: "kompakt" | "mittel" | "lang";
+
+  /** Common opening-hook patterns and their relative frequency [0..1]. */
+  hookPatterns: Array<{
+    type: string;
+    frequency: number;
+    examples: string[];
+  }>;
+
+  /** Common closing/CTA patterns and frequency. */
+  ctaPatterns: Array<{
+    type: string;
+    frequency: number;
+    examples: string[];
+  }>;
+
+  emojiStyle: "keine" | "sparsam" | "moderat" | "dicht";
+  /** Frequently used emojis (most-common first). */
+  emojiList: string[];
+
+  hashtagStyle: "keine" | "wenige" | "viele";
+
+  /** High-level content themes the handle posts about. */
+  contentPillars: string[];
+
+  /** Free-form description of voice/tone. */
+  toneOfVoice: string;
+
+  /**
+   * Engagement strategy observed in the post-author's own comments under
+   * their posts. Captures patterns like "antwortet mit Frage zurück" or
+   * "ergänzt CTA in erstem Eigenkommentar". May be empty if no own-comments
+   * were extracted.
+   */
+  commentEngagementPattern: string;
+
+  /**
+   * Synthesis of the visual style across all analyzed posts: composition,
+   * color palette, recurring overlay patterns, production quality. Distilled
+   * from the per-post image descriptions. Empty string if no images present.
+   */
+  visualStyle: string;
+
+  /** Full LLM analysis as prose — for transparency / manual editing. */
+  rawAnalysis: string;
+
+  createdAt: string;
+  updatedAt: string;
+}

@@ -1310,7 +1310,9 @@ export const api = {
 
   // ─── Social Media ────────────────────────────────────────────────
   getSocialSettings: () =>
-    get<{ backend: string | null; backends: Record<string, { url?: string; apiKey?: string }>; defaultPlatforms: string[] }>("/socialmedia/settings"),
+    get<{ backend: string | null; backends: Record<string, { url?: string; apiKey?: string }>; defaultPlatforms: string[]; browserPlatforms?: string[]; requireApproval?: boolean }>("/socialmedia/settings"),
+  getSocialBrowserStatus: () =>
+    get<{ platforms: Array<{ platform: string; running: boolean; loggedIn: boolean | null; currentUrl: string | null; hasProfile: boolean }> }>("/socialmedia/browser-status"),
   updateSocialSettings: (settings: Record<string, unknown>) =>
     put<{ ok: boolean }>("/socialmedia/settings", settings),
   testSocialConnection: () =>
@@ -1331,8 +1333,14 @@ export const api = {
   updateSocialPost: (id: string, data: { text?: string; scheduledAt?: string | null; platforms?: string[] }) =>
     patch<{ id: string; text: string; status: string }>(`/socialmedia/posts/${encodeURIComponent(id)}`, data),
   publishSocialPost: (id: string) => post<any>(`/socialmedia/posts/${id}/publish`),
+  moveSocialPostToDraft: (id: string) =>
+    post<{ id: string; status: string }>(`/socialmedia/posts/${encodeURIComponent(id)}/move-to-draft`),
   deleteSocialPost: (id: string) =>
     del<{ ok: boolean }>(`/socialmedia/posts/${encodeURIComponent(id)}`),
+  archiveSocialPost: (id: string) =>
+    post<{ id: string; status: string }>(`/socialmedia/posts/${encodeURIComponent(id)}/archive`),
+  unarchiveSocialPost: (id: string) =>
+    post<{ id: string; status: string }>(`/socialmedia/posts/${encodeURIComponent(id)}/unarchive`),
   getSocialPostAnalytics: (id: string) =>
     get<{ impressions: number; likes: number; shares: number; comments: number }>(`/socialmedia/posts/${encodeURIComponent(id)}/analytics`),
   getSocialPostComments: (id: string) =>

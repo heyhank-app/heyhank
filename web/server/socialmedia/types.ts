@@ -35,7 +35,7 @@ export interface SocialPost {
   platforms: SocialPlatform[];
   scheduledAt?: string | null;
   mediaUrls: string[];
-  status: "published" | "scheduled" | "failed" | "draft";
+  status: "published" | "scheduled" | "failed" | "draft" | "partial" | "archived";
   backendId: SocialBackendId | null;
   backendPostId?: string | null;
   backendData?: unknown;
@@ -75,6 +75,12 @@ export interface SocialMediaSettings {
   backends: Partial<Record<SocialBackendId, SocialBackendConfig>>;
   defaultPlatforms: SocialPlatform[];
   requireApproval?: boolean;
+  /**
+   * Platforms for which posting should use the BrowserAdapter (persistent
+   * Playwright session via SocialView) instead of the primary backend (Postiz).
+   * v1 supports only "twitter" and "tiktok".
+   */
+  browserPlatforms?: SocialPlatform[];
 }
 
 export interface ListPostsOpts {
@@ -88,6 +94,7 @@ export const DEFAULT_SOCIAL_SETTINGS: SocialMediaSettings = {
   backends: {},
   defaultPlatforms: [],
   requireApproval: false,
+  browserPlatforms: [],
 };
 
 // ─── Hashtag Pools ─────────────────────────────────────────────────────────

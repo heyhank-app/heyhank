@@ -6,6 +6,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { basename, join } from "node:path";
+import sharp from "sharp";
 import type { SocialMediaAdapter } from "../adapter.js";
 import type { SocialProfile, CreatePostInput, PostAnalytics, AccountAnalytics, SocialComment, SocialPlatform } from "../types.js";
 import { getSettings as getAppSettings } from "../../settings-manager.js";
@@ -21,6 +22,125 @@ const MIME_BY_EXT: Record<string, string> = {
   mov: "video/quicktime",
   webm: "video/webm",
 };
+
+/**
+ * Detect the true MIME type from the file's magic bytes. Some generators
+ * (e.g. Google's nanobanana MCP) save JPEG content under a `.png` filename,
+ * which causes IG/X/Meta to reject the post because the declared content
+ * type doesn't match the actual bytes. Always trust the bytes over the name.
+ * Returns null if no known signature matches — caller falls back to extension.
+ */
+function detectMimeFromBytes(buf: Uint8Array): string | null {
+  if (buf.length < 12) return null;
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";
+  // GIF: 47 49 46 38
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) return "image/gif";
+  // WebP: RIFF....WEBP
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46
+      && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return "image/webp";
+  // MP4 (ISO BMFF): bytes 4-7 = "ftyp"
+  if (buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) return "video/mp4";
+  return null;
+}
+
+// Instagram feed aspect ratio bounds (width / height).
+// Spec is [0.8, 1.91] but we leave a safety margin to avoid rejections at
+// the exact boundary (Instagram occasionally rounds and rejects 0.800).
+const IG_ASPECT_MIN = 0.81;
+const IG_ASPECT_MAX = 1.90;
+
+// Canonical IG sizes — pad/resize to one of these so IG always accepts the
+// container creation request.
+const IG_PORTRAIT_W = 1080;
+const IG_PORTRAIT_H = 1350; // 4:5
+const IG_SQUARE = 1080;
+const IG_LANDSCAPE_W = 1080;
+const IG_LANDSCAPE_H = 566;  // ~1.91:1
+
+/**
+ * Normalize an image so Instagram's Graph API will accept it.
+ *
+ * Instagram returns the misleading error "Media fetch failed, please try
+ * again" (error code 2207052) for several distinct reasons, all of which
+ * we hit in practice:
+ *   1. Aspect ratio outside [0.8, 1.91] (NB2 default 896×1200 = 0.747).
+ *   2. JPEG written without a JFIF/Exif APP marker (Sharp's default
+ *      output via `.jpeg()` after `.extend()`).
+ *   3. Non-sRGB color space.
+ *
+ * To eliminate all three at once, we always re-encode through Sharp into
+ * a canonical IG size (1080×1350 portrait, 1080×1080 square, 1080×566
+ * landscape) as sRGB JPEG with explicit metadata. Padded background is
+ * white. This is only invoked when Instagram is among the target
+ * platforms, so other platforms still see the user's original image.
+ */
+async function normalizeForInstagram(
+  buf: Buffer,
+  inMime: string,
+): Promise<{ buffer: Buffer; mime: string; changed: boolean }> {
+  if (!inMime.startsWith("image/")) return { buffer: buf, mime: inMime, changed: false };
+  // GIFs: IG doesn't accept GIF in feed, and Sharp would lose animation
+  // frames anyway. Pass through untouched.
+  if (inMime === "image/gif") return { buffer: buf, mime: inMime, changed: false };
+
+  const meta = await sharp(buf).metadata();
+  const w = meta.width ?? 0;
+  const h = meta.height ?? 0;
+  if (!w || !h) return { buffer: buf, mime: inMime, changed: false };
+
+  const aspect = w / h;
+
+  // Choose the closest canonical canvas based on the original aspect.
+  let targetW: number;
+  let targetH: number;
+  if (aspect < IG_ASPECT_MIN || aspect < 0.95) {
+    targetW = IG_PORTRAIT_W;
+    targetH = IG_PORTRAIT_H;
+  } else if (aspect > IG_ASPECT_MAX || aspect > 1.5) {
+    targetW = IG_LANDSCAPE_W;
+    targetH = IG_LANDSCAPE_H;
+  } else {
+    targetW = IG_SQUARE;
+    targetH = IG_SQUARE;
+  }
+
+  // `fit: contain` resizes the original to fit inside the target canvas
+  // and pads the rest with the background color (white). No cropping.
+  const out = await sharp(buf)
+    .resize({
+      width: targetW,
+      height: targetH,
+      fit: "contain",
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    })
+    .toColorspace("srgb")
+    .jpeg({
+      quality: 90,
+      chromaSubsampling: "4:2:0",
+      // `force: true` guarantees JPEG output even if input was PNG/WebP.
+      force: true,
+    })
+    .withMetadata({ density: 72 })
+    .toBuffer();
+
+  return { buffer: out, mime: "image/jpeg", changed: true };
+}
+
+function extForMime(mime: string): string {
+  switch (mime) {
+    case "image/jpeg": return "jpg";
+    case "image/png": return "png";
+    case "image/gif": return "gif";
+    case "image/webp": return "webp";
+    case "video/mp4": return "mp4";
+    case "video/quicktime": return "mov";
+    case "video/webm": return "webm";
+    default: return "bin";
+  }
+}
 
 /**
  * Detect URLs that point to HeyHank's own media route. Works for both
@@ -178,11 +298,42 @@ export class PostizAdapter implements SocialMediaAdapter {
             continue;
           }
           try {
-            const fileBuf = readFileSync(localPath);
-            const ext = localFilename.split(".").pop()?.toLowerCase() ?? "";
-            const mime = MIME_BY_EXT[ext] ?? "application/octet-stream";
+            const rawBuf = readFileSync(localPath);
+            const extFromName = localFilename.split(".").pop()?.toLowerCase() ?? "";
+            // Prefer magic-byte detection over extension. Some image generators
+            // (e.g. nanobanana MCP) save JPEG content with a `.png` name, which
+            // makes IG reject the post ("Media fetch failed") and X fail with
+            // "bad_body" because the declared vs actual format disagree.
+            const sniffedMime = detectMimeFromBytes(rawBuf);
+            const baseMime = sniffedMime ?? MIME_BY_EXT[extFromName] ?? "application/octet-stream";
+
+            // If Instagram is one of the targets, ensure the image aspect ratio
+            // is within IG's accepted range. NB2 generates 896×1200 (0.747:1)
+            // by default which IG rejects as "Media fetch failed". Pad to 4:5.
+            let fileBuf: Buffer = rawBuf;
+            let mime = baseMime;
+            let normalized = false;
+            if (input.platforms.includes("instagram")) {
+              const norm = await normalizeForInstagram(rawBuf, baseMime);
+              fileBuf = norm.buffer;
+              mime = norm.mime;
+              normalized = norm.changed;
+            }
+
+            // If the on-disk extension disagrees with the sniffed (or
+            // re-encoded) content, rename the upload filename to the correct
+            // extension so that Postiz / downstream CDNs serve it with a
+            // matching Content-Type.
+            const finalSniff = detectMimeFromBytes(fileBuf) ?? mime;
+            const correctExt = finalSniff ? extForMime(finalSniff) : extFromName;
+            const stem = localFilename.replace(/\.[^.]+$/, "");
+            const uploadName = normalized
+              ? `${stem}_ig${correctExt ? `.${correctExt}` : ""}`
+              : correctExt && correctExt !== extFromName
+                ? `${stem}.${correctExt}`
+                : localFilename;
             const form = new FormData();
-            form.append("file", new Blob([fileBuf], { type: mime }), localFilename);
+            form.append("file", new Blob([new Uint8Array(fileBuf)], { type: mime }), uploadName);
 
             // Do NOT set Content-Type — fetch/Blob sets the multipart boundary.
             const uploadRes = await fetch(this.url("/upload"), {
@@ -262,13 +413,20 @@ export class PostizAdapter implements SocialMediaAdapter {
         x: { who_can_reply_post: "everyone" },
       };
 
-      // Build post payload per Postiz API
+      // Build post payload per Postiz API.
+      // Postiz treats `value` as a thread — a second entry becomes the
+      // first comment on IG/Facebook or a thread reply on X/Threads/LinkedIn.
+      const firstCommentText = input.firstComment?.trim();
+      const valueEntries: Array<{ content: string; image: Array<{ id: string; path: string }> }> = [
+        { content: input.text, image: mediaItems },
+      ];
+      if (firstCommentText) {
+        valueEntries.push({ content: firstCommentText, image: [] });
+      }
+
       const postEntries = matchedIntegrations.map((ig) => ({
         integration: { id: ig.id },
-        value: [{
-          content: input.text,
-          image: mediaItems,
-        }],
+        value: valueEntries,
         settings: {
           __type: ig.identifier,
           ...(SETTINGS_DEFAULTS[ig.identifier] ?? {}),

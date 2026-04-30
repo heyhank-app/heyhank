@@ -64,6 +64,7 @@ export function SocialViewTab({ showMessage }: Props): React.ReactElement {
   const [loading, setLoading] = useState<Platform | "refresh" | "extract" | null>(null);
   const [gotoUrl, setGotoUrl] = useState("");
   const [extractSource, setExtractSource] = useState<"own" | "role-model">("role-model");
+  const [extractLogs, setExtractLogs] = useState<string[]>([]);
 
   const refresh = useCallback(async () => {
     try {
@@ -125,22 +126,74 @@ export function SocialViewTab({ showMessage }: Props): React.ReactElement {
 
   async function handleExtract() {
     if (!selected) return;
+    const selectedStatus = platforms.find((p) => p.platform === selected);
+    const currentUrl = selectedStatus?.currentUrl || "(unknown)";
+    const confirmMsg =
+      `Extract from this URL?\n\n${currentUrl}\n\nSource: ${extractSource}\n\n` +
+      `Make sure the browser is on the correct page (the intended profile/post) before confirming.`;
+    if (typeof window !== "undefined" && !window.confirm(confirmMsg)) return;
+
     setLoading("extract");
+    setExtractLogs([`→ Starting extract from ${currentUrl}`]);
+    const append = (line: string) => setExtractLogs((prev) => [...prev, line]);
+
     try {
-      const result = await apiPost<{ extracted: number; errors: string[]; postIds: string[] }>(
-        `/api/socialview/${selected}/extract`,
-        { source: extractSource },
-      );
-      if (result.extracted > 0) {
-        showMessage(`Extracted ${result.extracted} post${result.extracted === 1 ? "" : "s"}. Review in Library tab.`);
-      } else {
-        showMessage(
-          result.errors.length > 0 ? result.errors.join("; ") : "Nothing extracted on this page",
-          true,
-        );
+      const res = await fetch(`/api/socialview/${selected}/extract-stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ source: extractSource }),
+      });
+      if (!res.ok || !res.body) throw new Error(`${res.status} ${res.statusText}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalMsg: string | null = null;
+      let finalError = false;
+
+      // SSE frames are separated by \n\n, each event has lines "event: X" and "data: Y"
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let sep: number;
+        while ((sep = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          let evName = "message";
+          let dataStr = "";
+          for (const l of frame.split("\n")) {
+            if (l.startsWith("event:")) evName = l.slice(6).trim();
+            else if (l.startsWith("data:")) dataStr += l.slice(5).trim();
+          }
+          let payload: Record<string, unknown> = {};
+          try { payload = JSON.parse(dataStr); } catch { /* keep empty */ }
+
+          if (evName === "log") {
+            append(String(payload.message ?? ""));
+          } else if (evName === "url") {
+            append(`URL at start: ${payload.url ?? ""}`);
+          } else if (evName === "done") {
+            const n = Number(payload.extracted) || 0;
+            const errs = Array.isArray(payload.errors) ? (payload.errors as string[]) : [];
+            append(`✓ Done — extracted ${n} post${n === 1 ? "" : "s"}`);
+            for (const e of errs) append(`  ! ${e}`);
+            finalMsg = n > 0
+              ? `Extracted ${n} post${n === 1 ? "" : "s"}. Review in Library tab.`
+              : (errs.length > 0 ? errs.join("; ") : "Nothing extracted on this page");
+            finalError = n === 0;
+          } else if (evName === "fatal") {
+            append(`✗ Fatal: ${payload.error ?? "extract failed"}`);
+            finalMsg = String(payload.error ?? "Extract failed");
+            finalError = true;
+          }
+        }
       }
+      if (finalMsg) showMessage(finalMsg, finalError);
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : "Extract failed", true);
+      const msg = e instanceof Error ? e.message : "Extract failed";
+      append(`✗ ${msg}`);
+      showMessage(msg, true);
     } finally {
       setLoading(null);
     }
@@ -257,7 +310,16 @@ export function SocialViewTab({ showMessage }: Props): React.ReactElement {
               Go
             </button>
           </div>
-          <div className="flex gap-2 items-center">
+
+          {/* Current URL prominently shown so user confirms the right page is open */}
+          <div className="border border-cc-border rounded-md bg-cc-bg p-2 text-[11px]">
+            <div className="text-cc-muted mb-0.5">Browser ist aktuell auf:</div>
+            <div className="font-mono text-cc-fg break-all">
+              {platforms.find((p) => p.platform === selected)?.currentUrl || "(unbekannt — Browser starten)"}
+            </div>
+          </div>
+
+          <div className="flex gap-2 items-center flex-wrap">
             <label className="text-[11px] text-cc-muted">Source:</label>
             <select
               value={extractSource}
@@ -275,7 +337,24 @@ export function SocialViewTab({ showMessage }: Props): React.ReactElement {
             >
               {loading === "extract" ? "Extracting…" : "Extract this page → Library"}
             </button>
+            {extractLogs.length > 0 && (
+              <button
+                onClick={() => setExtractLogs([])}
+                className="text-[11px] px-2 py-1 rounded-md bg-cc-bg border border-cc-border text-cc-muted hover:text-cc-fg"
+              >
+                Clear log
+              </button>
+            )}
           </div>
+
+          {/* Live extract log */}
+          {extractLogs.length > 0 && (
+            <div className="border border-cc-border rounded-md bg-black/40 p-2 max-h-48 overflow-auto font-mono text-[11px] leading-relaxed text-cc-fg">
+              {extractLogs.map((l, i) => (
+                <div key={i} className="whitespace-pre-wrap break-all">{l}</div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

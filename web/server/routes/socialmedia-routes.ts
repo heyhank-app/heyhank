@@ -4,6 +4,8 @@
 import type { Hono } from "hono";
 import * as store from "../socialmedia/store.js";
 import * as manager from "../socialmedia/manager.js";
+import * as browser from "../socialview/browser-manager.js";
+import type { SocialPlatform as ViewPlatform } from "../socialview/types.js";
 
 export function registerSocialMediaRoutes(api: Hono): void {
   // ─── Settings ───────────────────────────────────────────────────────
@@ -54,6 +56,26 @@ export function registerSocialMediaRoutes(api: Hono): void {
     } catch (e) {
       return c.json({ ok: false, error: e instanceof Error ? e.message : "failed" });
     }
+  });
+
+  /**
+   * Browser-backed status for the platforms we post via Playwright
+   * (X / Twitter and TikTok). Other platforms continue to use the
+   * primary backend (Postiz).
+   */
+  api.get("/socialmedia/browser-status", (c) => {
+    const platforms: ViewPlatform[] = ["twitter", "tiktok"];
+    const statuses = platforms.map((p) => {
+      const s = browser.getStatus(p);
+      return {
+        platform: p,
+        running: s.running,
+        loggedIn: s.loggedIn,
+        currentUrl: s.currentUrl,
+        hasProfile: browser.hasProfile(p),
+      };
+    });
+    return c.json({ platforms: statuses });
   });
 
   /** Get connected profiles */
@@ -126,7 +148,22 @@ export function registerSocialMediaRoutes(api: Hono): void {
       if (!post) return c.json({ error: "post not found" }, 404);
       if (body.text !== undefined) post.text = body.text;
       if (body.scheduledAt !== undefined) post.scheduledAt = body.scheduledAt;
-      if (body.platforms !== undefined) post.platforms = body.platforms;
+      if (body.platforms !== undefined) {
+        // Coerce object-array shapes (`[{id, name}]`) back to string[].
+        if (Array.isArray(body.platforms)) {
+          post.platforms = body.platforms
+            .map((p: unknown) => {
+              if (typeof p === "string") return p;
+              if (p && typeof p === "object") {
+                const o = p as { name?: unknown; platform?: unknown };
+                if (typeof o.name === "string") return o.name;
+                if (typeof o.platform === "string") return o.platform;
+              }
+              return null;
+            })
+            .filter((s: unknown): s is string => typeof s === "string" && s.length > 0);
+        }
+      }
       if (body.scheduledAt && post.status === "published") post.status = "scheduled";
       store.savePost(post);
       return c.json(post);
@@ -146,10 +183,40 @@ export function registerSocialMediaRoutes(api: Hono): void {
     }
   });
 
+  /** Move a published/scheduled/failed post back to draft (deletes from backend) */
+  api.post("/socialmedia/posts/:id/move-to-draft", async (c) => {
+    try {
+      const post = await manager.moveToDraft(c.req.param("id"));
+      return c.json(post);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Failed" }, 400);
+    }
+  });
+
   /** Delete post */
   api.delete("/socialmedia/posts/:id", async (c) => {
     const ok = await manager.deletePost(c.req.param("id"));
     return c.json({ ok }, ok ? 200 : 404);
+  });
+
+  /** Archive post (hide from default queue view) */
+  api.post("/socialmedia/posts/:id/archive", async (c) => {
+    try {
+      const post = await manager.setArchived(c.req.param("id"), true);
+      return c.json(post);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "failed" }, 400);
+    }
+  });
+
+  /** Unarchive post (restore previous status) */
+  api.post("/socialmedia/posts/:id/unarchive", async (c) => {
+    try {
+      const post = await manager.setArchived(c.req.param("id"), false);
+      return c.json(post);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "failed" }, 400);
+    }
   });
 
   /** Get post analytics */

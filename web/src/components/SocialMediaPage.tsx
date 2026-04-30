@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "../api.js";
 import { SocialViewTab } from "./SocialViewTab.js";
 import { SocialLibraryTab } from "./SocialLibraryTab.js";
+import { PersonasTab } from "./PersonasTab.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -50,8 +51,40 @@ const PLATFORM_ICONS: Record<string, string> = {
   threads: "@",
 };
 
-type TabId = "posts" | "drafts" | "calendar" | "view" | "library" | "analytics" | "settings";
-type PostFilter = "all" | "published" | "scheduled" | "failed";
+type TabId = "posts" | "drafts" | "calendar" | "view" | "library" | "personas" | "analytics" | "settings";
+
+/**
+ * Defensive normalization: a regression in the agent flow saved drafts with
+ * `platforms` as `[{id, name}]` objects instead of the schema-required
+ * `string[]`. Rendering an object as a JSX child crashed the Drafts tab.
+ * This coerces both shapes back to a clean string array.
+ */
+function normalizePlatforms(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const out: string[] = [];
+  for (const p of input) {
+    if (typeof p === "string" && p) { out.push(p); continue; }
+    if (p && typeof p === "object") {
+      const o = p as { name?: unknown; platform?: unknown };
+      if (typeof o.name === "string" && o.name) { out.push(o.name); continue; }
+      if (typeof o.platform === "string" && o.platform) { out.push(o.platform); continue; }
+    }
+  }
+  return out;
+}
+
+function normalizePost(p: SocialPost): SocialPost {
+  return { ...p, platforms: normalizePlatforms(p.platforms) };
+}
+type PostFilter = "all" | "published" | "scheduled" | "failed" | "archived";
+type PostSort = "newest" | "oldest";
+
+/** Timestamp used for queue sorting: scheduled date if set, else updated/created. */
+function postSortDate(p: { scheduledAt?: string | null; updatedAt?: string; createdAt?: string }): number {
+  const raw = p.scheduledAt || p.updatedAt || p.createdAt;
+  const t = raw ? Date.parse(raw) : NaN;
+  return Number.isFinite(t) ? t : 0;
+}
 
 function formatMetric(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
@@ -78,7 +111,7 @@ export function SocialMediaPage({ embedded }: { embedded?: boolean }) {
   const initialTab = (() => {
     const hash = window.location.hash;
     const match = hash.match(/#\/socialmedia\/(\w+)/);
-    if (match && ["posts", "drafts", "calendar", "analytics", "settings"].includes(match[1])) {
+    if (match && ["posts", "drafts", "calendar", "view", "library", "personas", "analytics", "settings"].includes(match[1])) {
       return match[1] as TabId;
     }
     return "posts";
@@ -114,6 +147,7 @@ export function SocialMediaPage({ embedded }: { embedded?: boolean }) {
     { id: "calendar", label: "Calendar" },
     { id: "view", label: "View" },
     { id: "library", label: "Library" },
+    { id: "personas", label: "Personas" },
     { id: "analytics", label: "Analytics" },
     { id: "settings", label: "Settings" },
   ];
@@ -172,8 +206,9 @@ export function SocialMediaPage({ embedded }: { embedded?: boolean }) {
         {activeTab === "calendar" && <CalendarTab refreshKey={refreshKey} showMessage={showMessage} onEdit={openComposer} onRefresh={refresh} />}
         {activeTab === "view" && <SocialViewTab showMessage={showMessage} />}
         {activeTab === "library" && <SocialLibraryTab showMessage={showMessage} />}
+        {activeTab === "personas" && <PersonasTab showMessage={showMessage} />}
         {activeTab === "analytics" && <AnalyticsTab showMessage={showMessage} />}
-        {activeTab === "settings" && <SettingsTab showMessage={showMessage} />}
+        {activeTab === "settings" && <SettingsTab showMessage={showMessage} onSwitchTab={setActiveTab} />}
       </div>
     </div>
   );
@@ -291,7 +326,15 @@ function PostComposer({ post, onClose, onSuccess, showMessage }: {
 
       if (isEditing) {
         await api.updateSocialPost(post.id, payload);
-        onSuccess("Post updated!");
+        // PATCH only updates local fields — it does NOT push a draft to the
+        // backend. If the user is transitioning a draft → scheduled/now,
+        // explicitly call /publish so Postiz actually schedules/publishes.
+        if (post.status === "draft" && scheduleMode !== "draft") {
+          await api.publishSocialPost(post.id);
+          onSuccess(scheduleMode === "schedule" ? "Post scheduled!" : "Post published!");
+        } else {
+          onSuccess("Post updated!");
+        }
       } else {
         await api.createSocialPost(payload);
         onSuccess(scheduleMode === "draft" ? "Draft saved!" : scheduleMode === "schedule" ? "Post scheduled!" : "Post created!");
@@ -530,11 +573,19 @@ function QueueTab({ refreshKey, showMessage, onEdit, onRefresh }: {
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [filter, setFilter] = useState<PostFilter>("all");
   const [platformFilter, setPlatformFilter] = useState("");
+  const [sort, setSort] = useState<PostSort>("newest");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const loadPosts = useCallback(async () => {
     try {
-      const data = await api.listSocialPosts({ limit: 50 });
-      setPosts((data.posts || []).filter((p: SocialPost) => p.status !== "draft"));
+      // Pull a generous limit so archived posts are available for the Archived filter.
+      const data = await api.listSocialPosts({ limit: 200 });
+      setPosts(
+        (data.posts || [])
+          .filter((p: SocialPost) => p.status !== "draft")
+          .map(normalizePost),
+      );
     } catch { /* silent */ }
   }, []);
 
@@ -551,18 +602,90 @@ function QueueTab({ refreshKey, showMessage, onEdit, onRefresh }: {
     }
   }
 
-  const filtered = posts.filter((p) => {
-    if (filter !== "all" && p.status !== filter) return false;
-    if (platformFilter && !p.platforms.includes(platformFilter)) return false;
-    return true;
-  });
+  async function handleArchive(id: string, archived: boolean) {
+    try {
+      if (archived) await api.archiveSocialPost(id);
+      else await api.unarchiveSocialPost(id);
+      showMessage(archived ? "Post archived." : "Post unarchived.");
+      loadPosts();
+      onRefresh();
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : "Failed", true);
+    }
+  }
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  const filtered = posts
+    .filter((p) => {
+      // "all" hides archived by default — only the Archived filter shows them.
+      if (filter === "all" ? p.status === "archived" : p.status !== filter) return false;
+      if (platformFilter && !p.platforms.includes(platformFilter)) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const diff = postSortDate(b) - postSortDate(a);
+      return sort === "newest" ? diff : -diff;
+    });
+
+  const visibleIds = filtered.map((p) => p.id);
+  const visibleSelectedCount = visibleIds.filter((id) => selected.has(id)).length;
+  const allVisibleSelected = visibleIds.length > 0 && visibleSelectedCount === visibleIds.length;
+
+  function toggleSelectAllVisible() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id));
+      else visibleIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+
+  /**
+   * Run an async action for every selected post sequentially. Sequential
+   * (not Promise.all) to avoid hammering the backend and to keep errors
+   * attributable to a specific post.
+   */
+  async function runBulk(action: (id: string) => Promise<unknown>, verb: string) {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    let ok = 0;
+    let failed = 0;
+    for (const id of ids) {
+      try { await action(id); ok++; } catch { failed++; }
+    }
+    setBulkBusy(false);
+    setSelected(new Set());
+    showMessage(
+      failed === 0
+        ? `${verb} ${ok} post(s).`
+        : `${verb} ${ok} post(s) — ${failed} failed.`,
+      failed > 0,
+    );
+    loadPosts();
+    onRefresh();
+  }
+
+  async function bulkArchive()   { await runBulk((id) => api.archiveSocialPost(id),   "Archived"); }
+  async function bulkUnarchive() { await runBulk((id) => api.unarchiveSocialPost(id), "Unarchived"); }
+  async function bulkDelete() {
+    if (!confirm(`Delete ${selected.size} post(s)? This cannot be undone.`)) return;
+    await runBulk((id) => api.deleteSocialPost(id), "Deleted");
+  }
 
   return (
     <div className="space-y-3">
       {/* Filters */}
       <div className="flex flex-wrap gap-2 items-center">
         <div className="flex gap-1">
-          {(["all", "published", "scheduled", "failed"] as PostFilter[]).map((f) => (
+          {(["all", "published", "scheduled", "failed", "archived"] as PostFilter[]).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -584,8 +707,64 @@ function QueueTab({ refreshKey, showMessage, onEdit, onRefresh }: {
             <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
           ))}
         </select>
+        <button
+          onClick={() => setSort(sort === "newest" ? "oldest" : "newest")}
+          title={sort === "newest" ? "Sorted: newest first. Click for oldest first." : "Sorted: oldest first. Click for newest first."}
+          className="px-2 py-1 text-[10px] font-medium text-cc-muted hover:text-cc-fg bg-cc-bg border border-cc-border rounded-md transition-colors"
+        >
+          {sort === "newest" ? "↓ Newest" : "↑ Oldest"}
+        </button>
+        <label className="flex items-center gap-1.5 text-[10px] text-cc-muted cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={allVisibleSelected}
+            // Indeterminate when some but not all visible posts are selected.
+            ref={(el) => { if (el) el.indeterminate = visibleSelectedCount > 0 && !allVisibleSelected; }}
+            onChange={toggleSelectAllVisible}
+            disabled={filtered.length === 0}
+            className="accent-cc-accent"
+          />
+          Select all
+        </label>
         <span className="text-[10px] text-cc-muted ml-auto">{filtered.length} post(s)</span>
       </div>
+
+      {/* Bulk Action Bar */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-cc-accent/10 border border-cc-accent/30 rounded-md">
+          <span className="text-[11px] font-medium text-cc-accent">{selected.size} selected</span>
+          <div className="flex gap-1 ml-auto">
+            <button
+              onClick={bulkArchive}
+              disabled={bulkBusy}
+              className="px-2 py-1 text-[10px] font-medium text-cc-fg hover:bg-cc-hover rounded-md transition-colors disabled:opacity-50"
+            >
+              Archive
+            </button>
+            <button
+              onClick={bulkUnarchive}
+              disabled={bulkBusy}
+              className="px-2 py-1 text-[10px] font-medium text-cc-fg hover:bg-cc-hover rounded-md transition-colors disabled:opacity-50"
+            >
+              Unarchive
+            </button>
+            <button
+              onClick={bulkDelete}
+              disabled={bulkBusy}
+              className="px-2 py-1 text-[10px] font-medium text-red-400 hover:bg-red-400/10 rounded-md transition-colors disabled:opacity-50"
+            >
+              Delete
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              disabled={bulkBusy}
+              className="px-2 py-1 text-[10px] font-medium text-cc-muted hover:text-cc-fg hover:bg-cc-hover rounded-md transition-colors disabled:opacity-50"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Post List */}
       {filtered.length === 0 ? (
@@ -593,7 +772,17 @@ function QueueTab({ refreshKey, showMessage, onEdit, onRefresh }: {
       ) : (
         <div className="space-y-2">
           {filtered.map((post) => (
-            <PostCard key={post.id} post={post} onEdit={onEdit} onDelete={handleDelete} showMessage={showMessage} onRefresh={() => { loadPosts(); onRefresh(); }} />
+            <PostCard
+              key={post.id}
+              post={post}
+              selected={selected.has(post.id)}
+              onToggleSelect={toggleSelected}
+              onEdit={onEdit}
+              onDelete={handleDelete}
+              onArchive={handleArchive}
+              showMessage={showMessage}
+              onRefresh={() => { loadPosts(); onRefresh(); }}
+            />
           ))}
         </div>
       )}
@@ -615,7 +804,7 @@ function DraftsTab({ refreshKey, showMessage, onEdit, onRefresh }: {
   const loadDrafts = useCallback(async () => {
     try {
       const data = await api.listSocialPosts({ limit: 50, status: "draft" });
-      setDrafts(data.posts || []);
+      setDrafts((data.posts || []).map(normalizePost));
     } catch { /* silent */ }
   }, []);
 
@@ -708,10 +897,13 @@ function DraftsTab({ refreshKey, showMessage, onEdit, onRefresh }: {
 
 // ─── Post Card ──────────────────────────────────────────────────────────────
 
-function PostCard({ post, onEdit, onDelete, showMessage, onRefresh, onPublish, isPublishing }: {
+function PostCard({ post, selected, onToggleSelect, onEdit, onDelete, onArchive, showMessage, onRefresh, onPublish, isPublishing }: {
   post: SocialPost;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
   onEdit: (post: SocialPost) => void;
   onDelete: (id: string) => void;
+  onArchive?: (id: string, archived: boolean) => void;
   showMessage: (text: string, isError?: boolean) => void;
   onRefresh: () => void;
   onPublish?: (id: string) => void;
@@ -720,6 +912,7 @@ function PostCard({ post, onEdit, onDelete, showMessage, onRefresh, onPublish, i
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<SocialComment[]>([]);
   const isDraft = post.status === "draft";
+  const isArchived = post.status === "archived";
   const mediaList = post.mediaUrls || [];
 
   async function toggleComments() {
@@ -747,14 +940,25 @@ function PostCard({ post, onEdit, onDelete, showMessage, onRefresh, onPublish, i
   }
 
   return (
-    <div className={`border rounded-xl overflow-hidden bg-cc-card transition-colors ${
-      isDraft ? "border-yellow-500/25" : "border-cc-border/50"
+    <div className={`border rounded-xl overflow-hidden transition-colors ${
+      selected ? "bg-cc-accent/5 border-cc-accent/50" : isDraft ? "bg-cc-card border-yellow-500/25" : "bg-cc-card border-cc-border/50"
     }`}>
       <div className="p-3.5 space-y-2.5">
-        {/* Title */}
-        {post.title && (
-          <h3 className="text-xs font-semibold text-cc-fg">{post.title}</h3>
-        )}
+        {/* Header row: selection + title */}
+        <div className="flex items-start gap-2">
+          {onToggleSelect && (
+            <input
+              type="checkbox"
+              checked={!!selected}
+              onChange={() => onToggleSelect(post.id)}
+              aria-label="Select post"
+              className="mt-0.5 accent-cc-accent cursor-pointer"
+            />
+          )}
+          {post.title && (
+            <h3 className="text-xs font-semibold text-cc-fg flex-1">{post.title}</h3>
+          )}
+        </div>
 
         {/* Text */}
         <p className="text-sm text-cc-fg whitespace-pre-wrap break-words leading-relaxed">{post.text}</p>
@@ -824,9 +1028,36 @@ function PostCard({ post, onEdit, onDelete, showMessage, onRefresh, onPublish, i
         >
           Comments
         </button>
+        {!isDraft && (
+          <button
+            onClick={async () => {
+              if (!window.confirm(
+                "Move this post back to drafts? This will delete the post from your social platform(s) (best-effort) so you can edit and re-publish.",
+              )) return;
+              try {
+                await api.moveSocialPostToDraft(post.id);
+                showMessage("Moved to drafts.");
+                onRefresh();
+              } catch (err) {
+                showMessage(err instanceof Error ? err.message : "Failed", true);
+              }
+            }}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-cc-muted hover:text-cc-fg hover:bg-cc-hover rounded-md transition-colors ml-auto"
+          >
+            ↩ Move to Draft
+          </button>
+        )}
+        {onArchive && !isDraft && (
+          <button
+            onClick={() => onArchive(post.id, !isArchived)}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-cc-muted hover:text-cc-fg hover:bg-cc-hover rounded-md transition-colors"
+          >
+            {isArchived ? "Unarchive" : "Archive"}
+          </button>
+        )}
         <button
           onClick={() => onDelete(post.id)}
-          className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-red-400/70 hover:text-red-400 hover:bg-red-400/10 rounded-md transition-colors ml-auto"
+          className={`flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-red-400/70 hover:text-red-400 hover:bg-red-400/10 rounded-md transition-colors${onArchive && !isDraft ? "" : " ml-auto"}`}
         >
           Delete
         </button>
@@ -1148,7 +1379,10 @@ function AnalyticsTab({ showMessage }: { showMessage: (text: string, isError?: b
 
       const postsData = await api.listSocialPosts({ limit: 10 });
       const results = await Promise.all(
-        (postsData.posts || []).filter((p: SocialPost) => p.status === "published").map(async (p: SocialPost) => {
+        (postsData.posts || [])
+          .map(normalizePost)
+          .filter((p: SocialPost) => p.status === "published")
+          .map(async (p: SocialPost) => {
           try {
             const a = await api.getSocialPostAnalytics(p.id);
             return { post: p, analytics: a };
@@ -1291,7 +1525,7 @@ function AnalyticsTab({ showMessage }: { showMessage: (text: string, isError?: b
 
 // ─── Settings Tab ───────────────────────────────────────────────────────────
 
-function SettingsTab({ showMessage }: { showMessage: (text: string, isError?: boolean) => void }) {
+function SettingsTab({ showMessage, onSwitchTab }: { showMessage: (text: string, isError?: boolean) => void; onSwitchTab?: (tab: TabId) => void }) {
   const [backend, setBackend] = useState("");
   const [postizMode, setPostizMode] = useState<"hosted" | "selfhosted">("hosted");
   const [postizUrl, setPostizUrl] = useState("");
@@ -1302,6 +1536,19 @@ function SettingsTab({ showMessage }: { showMessage: (text: string, isError?: bo
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [requireApproval, setRequireApproval] = useState(false);
+  // Browser-backed platform toggles (X/TikTok posted via persistent Playwright
+  // instead of Postiz). Persisted as settings.browserPlatforms on the backend.
+  const [browserPlatforms, setBrowserPlatforms] = useState<string[]>([]);
+  const [browserStatus, setBrowserStatus] = useState<Array<{ platform: string; running: boolean; loggedIn: boolean | null; hasProfile: boolean }>>([]);
+
+  const loadBrowserStatus = useCallback(async () => {
+    try {
+      const res = await api.getSocialBrowserStatus();
+      setBrowserStatus(res.platforms);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   useEffect(() => {
     api.getSocialSettings().then((s: any) => {
@@ -1315,14 +1562,42 @@ function SettingsTab({ showMessage }: { showMessage: (text: string, isError?: bo
       }
       if (s.backends?.buffer) setBufferKey(s.backends.buffer.apiKey || "");
       if (s.requireApproval) setRequireApproval(true);
+      if (Array.isArray(s.browserPlatforms)) setBrowserPlatforms(s.browserPlatforms);
     }).catch(() => {});
-  }, []);
+    loadBrowserStatus();
+  }, [loadBrowserStatus]);
+
+  function toggleBrowserPlatform(platform: string) {
+    setBrowserPlatforms((prev) =>
+      prev.includes(platform) ? prev.filter((p) => p !== platform) : [...prev, platform],
+    );
+  }
+
+  async function openBrowserFor(platform: string) {
+    try {
+      // Start the platform browser, then navigate the user to the SocialView tab
+      // where the noVNC iframe lives — they can log in there.
+      const res = await fetch(`/api/socialview/${platform}/start`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (onSwitchTab) onSwitchTab("view");
+      showMessage(`Opened ${platform} browser — sign in via the noVNC viewer.`);
+      loadBrowserStatus();
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : "Failed to open browser", true);
+    }
+  }
 
   async function saveSettings() {
     const backends: Record<string, unknown> = {};
     if (backend === "postiz") backends.postiz = { url: postizMode === "selfhosted" ? postizUrl : "", apiKey: postizKey };
     if (backend === "buffer") backends.buffer = { apiKey: bufferKey };
-    await api.updateSocialSettings({ backend: backend || null, backends, defaultPlatforms: [], requireApproval });
+    await api.updateSocialSettings({
+      backend: backend || null,
+      backends,
+      defaultPlatforms: [],
+      requireApproval,
+      browserPlatforms,
+    });
     setSavedBackend(backend);
   }
 
@@ -1477,6 +1752,73 @@ function SettingsTab({ showMessage }: { showMessage: (text: string, isError?: bo
         >
           <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${requireApproval ? "left-5" : "left-0.5"}`} />
         </button>
+      </div>
+
+      {/* Browser Posting (X / TikTok) ─────────────────────────────────── */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-[10px] text-cc-muted uppercase tracking-wider">Browser Posting</label>
+          <button
+            onClick={loadBrowserStatus}
+            className="text-[9px] text-cc-muted hover:text-cc-fg"
+          >
+            Refresh status
+          </button>
+        </div>
+        <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3 text-[10px] text-yellow-200/90">
+          <strong>Account-Risiko:</strong> X und TikTok verbieten Automation formell in den ToS.
+          Nutze diese Option nur für eigene Accounts. Die Sessions bleiben lokal in{" "}
+          <code className="text-[9px]">~/.heyhank/browser-profiles/&lt;platform&gt;/</code> persistent.
+        </div>
+
+        {(["twitter", "tiktok"] as const).map((platform) => {
+          const enabled = browserPlatforms.includes(platform);
+          const status = browserStatus.find((s) => s.platform === platform);
+          const label = platform === "twitter" ? "X (Twitter)" : "TikTok";
+          return (
+            <div key={platform} className="rounded-lg border border-cc-border bg-cc-card p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <div className="text-xs font-medium text-cc-fg">{label} über Browser posten</div>
+                  <div className="text-[9px] text-cc-muted mt-0.5">
+                    Statt {savedBackend || "Postiz"} wird eine persistente Playwright-Session genutzt.
+                  </div>
+                </div>
+                <button
+                  onClick={() => toggleBrowserPlatform(platform)}
+                  className={`w-10 h-5 rounded-full transition-colors relative ${enabled ? "bg-cc-accent" : "bg-cc-border"}`}
+                  aria-label={`Toggle browser posting for ${label}`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${enabled ? "left-5" : "left-0.5"}`} />
+                </button>
+              </div>
+              {enabled && (
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-cc-border/50">
+                  <div className="text-[10px] text-cc-muted">
+                    {status?.running ? (
+                      <>
+                        <span className="text-green-400">●</span> Running
+                        {status.loggedIn === true && <span className="ml-2 text-green-400">· logged in</span>}
+                        {status.loggedIn === false && <span className="ml-2 text-yellow-400">· not logged in</span>}
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-cc-muted">○</span> Not running
+                        {status?.hasProfile && <span className="ml-2">· profile exists</span>}
+                      </>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => openBrowserFor(platform)}
+                    className="text-[10px] px-2.5 py-1 rounded-md border border-cc-border hover:border-cc-accent/50 text-cc-fg"
+                  >
+                    Browser öffnen
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Hashtag Pools */}
@@ -1755,6 +2097,8 @@ function StatusBadge({ status }: { status: string }) {
     scheduled: "text-cc-accent border-cc-accent/30 bg-cc-accent/5",
     failed: "text-red-400 border-red-400/30 bg-red-400/5",
     draft: "text-yellow-400 border-yellow-400/30 bg-yellow-400/5",
+    partial: "text-orange-400 border-orange-400/30 bg-orange-400/5",
+    archived: "text-cc-muted border-cc-border/50 bg-cc-bg",
   };
   return (
     <span className={`inline-block text-[9px] font-medium uppercase tracking-wider border rounded-full px-1.5 py-0.5 ${styles[status] || styles.draft}`}>

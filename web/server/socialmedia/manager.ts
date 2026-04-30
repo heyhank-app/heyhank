@@ -12,11 +12,46 @@ import type {
   SocialComment,
   SocialProfile,
   ListPostsOpts,
+  SocialPlatform,
 } from "./types.js";
 import * as store from "./store.js";
+import { BrowserAdapter } from "./adapters/browser-adapter.js";
 
 let cachedAdapter: SocialMediaAdapter | null = null;
 let cachedBackendKey: string | null = null;
+
+// Singleton BrowserAdapter — only one persistent Playwright session per platform,
+// so there's no per-config variation to cache.
+let browserAdapterSingleton: BrowserAdapter | null = null;
+
+function getBrowserAdapter(): BrowserAdapter {
+  if (!browserAdapterSingleton) browserAdapterSingleton = new BrowserAdapter();
+  return browserAdapterSingleton;
+}
+
+/** Platforms routed through the browser (rather than the primary backend). */
+function browserPlatformsFrom(settings: SocialMediaSettings): SocialPlatform[] {
+  return settings.browserPlatforms ?? [];
+}
+
+/**
+ * Coerce `platforms` input to a clean SocialPlatform[]. The Content Agent has
+ * occasionally sent `[{id, name}]` objects (from a Postiz integration listing)
+ * instead of plain strings, which corrupted drafts and crashed the UI.
+ */
+function coercePlatforms(input: unknown): SocialPlatform[] {
+  if (!Array.isArray(input)) return [];
+  const out: SocialPlatform[] = [];
+  for (const p of input) {
+    if (typeof p === "string" && p) { out.push(p as SocialPlatform); continue; }
+    if (p && typeof p === "object") {
+      const o = p as { name?: unknown; platform?: unknown };
+      if (typeof o.name === "string" && o.name) { out.push(o.name as SocialPlatform); continue; }
+      if (typeof o.platform === "string" && o.platform) { out.push(o.platform as SocialPlatform); continue; }
+    }
+  }
+  return out;
+}
 
 export async function getAdapter(settings?: SocialMediaSettings): Promise<SocialMediaAdapter> {
   const s = settings ?? store.getSettings();
@@ -75,6 +110,9 @@ export async function createPost(input: CreatePostInput): Promise<SocialPost> {
   const settings = store.getSettings();
   const now = new Date().toISOString();
 
+  // Defensive: agents have occasionally sent platforms as object arrays.
+  input = { ...input, platforms: coercePlatforms(input.platforms) };
+
   const post: SocialPost = {
     id: randomUUID(),
     text: input.text,
@@ -99,16 +137,114 @@ export async function createPost(input: CreatePostInput): Promise<SocialPost> {
     return post;
   }
 
-  try {
-    const adapter = await getAdapter(settings);
-    const result = await adapter.createPost(input);
-    post.backendPostId = result.id;
-    post.status = result.status as SocialPost["status"];
-    post.backendData = result.backendData;
-  } catch (err: any) {
-    post.status = "failed";
-    post.backendData = { error: err?.message };
+  // ── Partition platforms between Browser and primary backend ────────────────
+  const browserSet = new Set(browserPlatformsFrom(settings));
+  const browserPlatforms = input.platforms.filter((p) => browserSet.has(p));
+  const primaryPlatforms = input.platforms.filter((p) => !browserSet.has(p));
+
+  type GroupResult = {
+    group: "browser" | "primary";
+    ok: boolean;
+    id: string | null;
+    status: string;
+    backendData?: unknown;
+    error?: string;
+  };
+  const groupResults: GroupResult[] = [];
+
+  // Primary backend group
+  if (primaryPlatforms.length > 0) {
+    try {
+      const adapter = await getAdapter(settings);
+      const result = await adapter.createPost({ ...input, platforms: primaryPlatforms });
+      const ok = result.status === "published" || result.status === "scheduled";
+      groupResults.push({
+        group: "primary",
+        ok,
+        id: result.id,
+        status: result.status,
+        backendData: result.backendData,
+      });
+    } catch (err: any) {
+      groupResults.push({
+        group: "primary",
+        ok: false,
+        id: null,
+        status: "failed",
+        error: err?.message ?? "primary backend failed",
+      });
+    }
   }
+
+  // Browser group (X / TikTok)
+  if (browserPlatforms.length > 0) {
+    try {
+      const adapter = getBrowserAdapter();
+      adapter.setTargetPlatforms(browserPlatforms);
+      const result = await adapter.createPost({ ...input, platforms: browserPlatforms });
+      const ok = result.status === "published" || result.status === "partial";
+      groupResults.push({
+        group: "browser",
+        ok,
+        id: result.id,
+        status: result.status,
+        backendData: result.backendData,
+      });
+    } catch (err: any) {
+      groupResults.push({
+        group: "browser",
+        ok: false,
+        id: null,
+        status: "failed",
+        error: err?.message ?? "browser adapter failed",
+      });
+    }
+  }
+
+  // ── Merge group results into a single SocialPost ───────────────────────────
+  const anyOk = groupResults.some((g) => g.ok);
+  const anyFail = groupResults.some((g) => !g.ok);
+  // A primary-group result of "partial" also indicates a mixed outcome.
+  const primaryGroupPartial = groupResults.find((g) => g.group === "primary")?.status === "partial";
+  const browserGroupPartial = groupResults.find((g) => g.group === "browser")?.status === "partial";
+
+  let finalStatus: SocialPost["status"];
+  if (groupResults.length === 0) {
+    finalStatus = "failed";
+  } else if (anyOk && (anyFail || primaryGroupPartial || browserGroupPartial)) {
+    finalStatus = "partial";
+  } else if (anyOk) {
+    // Could be "scheduled" if the primary group was scheduled and there was no browser group.
+    const only = groupResults[0];
+    finalStatus = (only?.status === "scheduled" ? "scheduled" : "published");
+  } else {
+    finalStatus = "failed";
+  }
+
+  // Build a structured backendPostId-ish payload in backendData; keep the flat
+  // string field for backwards-compat (first available ID).
+  const primaryRes = groupResults.find((g) => g.group === "primary");
+  const browserRes = groupResults.find((g) => g.group === "browser");
+  post.backendPostId = primaryRes?.id ?? browserRes?.id ?? null;
+  post.backendData = {
+    postiz: primaryRes
+      ? {
+          status: primaryRes.status,
+          id: primaryRes.id,
+          data: primaryRes.backendData,
+          error: primaryRes.error,
+        }
+      : undefined,
+    browser: browserRes
+      ? {
+          status: browserRes.status,
+          id: browserRes.id,
+          data: browserRes.backendData,
+          error: browserRes.error,
+        }
+      : undefined,
+  };
+  post.status = finalStatus;
 
   post.updatedAt = new Date().toISOString();
   store.savePost(post);
@@ -121,6 +257,44 @@ export async function listPosts(opts?: ListPostsOpts): Promise<SocialPost[]> {
 
 export function getPost(id: string): SocialPost | null {
   return store.getPost(id);
+}
+
+/**
+ * Move an already-published or scheduled post back to draft state.
+ *
+ * Best-effort deletes the post from the configured backend (Postiz/Buffer)
+ * so it disappears from the platform queue / live feed, then resets the
+ * local record to status="draft" with no backend reference. The user can
+ * subsequently edit and re-publish via the normal draft flow.
+ *
+ * Note: this is destructive on the backend side — once the post is live on
+ * Instagram/LinkedIn/etc., deleting from Postiz removes it from those
+ * platforms (where the integration supports deletion). The local content
+ * (text, media, scheduledAt) is preserved.
+ */
+export async function moveToDraft(id: string): Promise<SocialPost> {
+  const post = store.getPost(id);
+  if (!post) throw new Error("Post not found");
+  if (post.status === "draft") return post;
+
+  // Best-effort backend delete — don't block the local downgrade if the
+  // backend has already cleaned up or the integration doesn't support it.
+  if (post.backendPostId) {
+    try {
+      const adapter = await getAdapter();
+      await adapter.deletePost(post.backendPostId);
+    } catch (err: any) {
+      console.error(`[socialmedia] moveToDraft: backend delete failed for ${post.backendPostId}:`, err?.message ?? err);
+    }
+  }
+
+  post.status = "draft";
+  post.backendId = null;
+  post.backendPostId = null;
+  post.backendData = undefined;
+  post.updatedAt = new Date().toISOString();
+  store.savePost(post);
+  return post;
 }
 
 export async function deletePost(id: string): Promise<boolean> {
@@ -138,6 +312,35 @@ export async function deletePost(id: string): Promise<boolean> {
   }
 
   return store.deleteLocalPost(id);
+}
+
+/**
+ * Archive or unarchive a post. Archiving hides the post from the default
+ * Queue view without removing it; `previousStatus` is preserved in
+ * `backendData._preArchiveStatus` so unarchiving restores the prior state.
+ */
+export async function setArchived(id: string, archived: boolean): Promise<SocialPost> {
+  const post = store.getPost(id);
+  if (!post) throw new Error("Post not found");
+
+  if (archived) {
+    if (post.status === "archived") return post;
+    const data = (post.backendData as Record<string, unknown> | undefined) ?? {};
+    post.backendData = { ...data, _preArchiveStatus: post.status };
+    post.status = "archived";
+  } else {
+    const data = (post.backendData as Record<string, unknown> | undefined) ?? {};
+    const prev = data._preArchiveStatus as SocialPost["status"] | undefined;
+    post.status = prev ?? "published";
+    if ("_preArchiveStatus" in data) {
+      const { _preArchiveStatus: _, ...rest } = data;
+      post.backendData = rest;
+    }
+  }
+
+  post.updatedAt = new Date().toISOString();
+  store.savePost(post);
+  return post;
 }
 
 export async function getPostAnalytics(id: string): Promise<PostAnalytics> {
@@ -172,10 +375,11 @@ export async function replyToComment(postId: string, commentId: string | null, t
 
 export async function createDraft(input: CreatePostInput & { createdBy?: "user" | "gemini" | "agent" }): Promise<SocialPost> {
   const now = new Date().toISOString();
+  const platforms = coercePlatforms(input.platforms);
   const post: SocialPost = {
     id: randomUUID(),
     text: input.text,
-    platforms: input.platforms,
+    platforms,
     scheduledAt: input.scheduledAt ?? null,
     mediaUrls: input.mediaUrls ?? [],
     status: "draft",
@@ -199,7 +403,7 @@ export async function updateDraft(id: string, updates: { text?: string; platform
   if (post.status !== "draft") throw new Error("Post is not a draft");
 
   if (updates.text !== undefined) post.text = updates.text;
-  if (updates.platforms !== undefined) post.platforms = updates.platforms as SocialPost["platforms"];
+  if (updates.platforms !== undefined) post.platforms = coercePlatforms(updates.platforms);
   if (updates.scheduledAt !== undefined) post.scheduledAt = updates.scheduledAt || null;
   post.updatedAt = new Date().toISOString();
   store.savePost(post);

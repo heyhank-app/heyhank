@@ -1,6 +1,7 @@
 // ─── SocialLibraryTab ────────────────────────────────────────────────────────
 // Reference library of extracted posts. User reviews, tags, marks gold, and
 // only gold-marked posts feed the content agent as few-shot examples.
+// Persona / style-profile management lives in the dedicated PersonasTab.
 
 import { useEffect, useState, useCallback } from "react";
 
@@ -308,3 +309,4 @@ export function SocialLibraryTab({ showMessage }: Props): React.ReactElement {
     </div>
   );
 }
+
