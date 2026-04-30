@@ -24,6 +24,9 @@ jobs:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # required for npm provenance via OIDC trusted publisher
     steps:
       - uses: actions/checkout@v4
 
@@ -57,11 +60,9 @@ jobs:
         working-directory: web
         run: npm pack --dry-run
 
-      - name: Publish to npm
+      - name: Publish to npm (OIDC trusted publisher + provenance)
         working-directory: web
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+        run: npm publish --access public --provenance
 
   docker:
     needs: release-please
