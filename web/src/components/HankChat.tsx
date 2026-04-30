@@ -344,6 +344,12 @@ export function HankChat() {
     }
   }, [transcript, geminiTextBuffer]);
 
+  // ─── Async notifications (e.g. call-ended → auto-summarise) ──────────────
+  // Deduplicate across mount + SSE: the SSE stream replays currently pending
+  // notifications on connect, which would otherwise cause the same call to be
+  // summarised twice (once via GET /pending, once via SSE event).
+  const handledNotificationIds = useRef<Set<string>>(new Set());
+
   const addTranscript = useCallback((role: TranscriptEntry["role"], text: string, imageUrl?: string, link?: TranscriptEntry["link"]) => {
     setTranscript(prev => [...prev.slice(-200), { role, text, ts: Date.now(), imageUrl, link }]);
   }, []);
@@ -648,6 +654,118 @@ export function HankChat() {
     window.addEventListener("gemini-resume", handler);
     return () => window.removeEventListener("gemini-resume", handler);
   }, [startSession, state]);
+
+  // ─── Call-ended notifications → auto-summarise in HankChat ───────────────
+  const handleCallEndedNotification = useCallback(async (notificationId: string) => {
+    if (handledNotificationIds.current.has(notificationId)) return;
+    handledNotificationIds.current.add(notificationId);
+    try {
+      const token = localStorage.getItem("heyhank_auth_token") || "";
+      const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+
+      // Load full notification (incl. transcript)
+      const res = await fetch(`/api/hank/notifications/${notificationId}`, { headers: authHeaders });
+      if (!res.ok) return;
+      const n = await res.json() as {
+        id: string;
+        callId: string;
+        phone: string;
+        contactName: string | null;
+        direction: "inbound" | "outbound";
+        durationSeconds: number;
+        summary: string | null;
+        transcript: Array<{ speaker: "callee" | "ai" | "system"; text: string; ts: number }>;
+      };
+
+      // Build a user-style message asking Hank to summarise
+      const who = n.contactName || n.phone;
+      const durStr = n.durationSeconds > 0
+        ? `${Math.floor(n.durationSeconds / 60)}:${String(n.durationSeconds % 60).padStart(2, "0")}`
+        : "kurz";
+      const transcriptLines = n.transcript
+        .filter((t) => t.speaker !== "system" && t.text.trim())
+        .map((t) => `${t.speaker === "ai" ? "Hank" : who}: ${t.text.trim()}`)
+        .join("\n");
+      const message = `📞 Telefonat beendet — ${n.direction === "inbound" ? "eingehend von" : "mit"} ${who} (Dauer: ${durStr}).
+
+Transkript:
+${transcriptLines || "(leer)"}
+
+Fasse das Gespräch kurz zusammen und nenn mir die wichtigsten Punkte und mögliche Follow-ups.`;
+
+      // Trigger Hank
+      if (isGeminiLive && clientRef.current?.isReady) {
+        clientRef.current.sendText(message);
+        addTranscript("user", message);
+      } else if (provider && !isGeminiLive) {
+        // Ensure chat surface is open so the response is visible
+        setExpanded(true);
+        await sendTextChat(message);
+      } else {
+        // No active session — render as a visible transcript hint; will get picked up
+        // when user opens chat (still marked consumed below to avoid spam).
+        addTranscript("system", `📞 Call-Ende: ${who} (${durStr}). Öffne Hank-Chat für Zusammenfassung.`);
+      }
+
+      // Mark consumed regardless of provider path
+      await fetch(`/api/hank/notifications/${notificationId}/consume`, {
+        method: "POST",
+        headers: authHeaders,
+      }).catch(() => {});
+    } catch (err) {
+      console.error("[hank-chat] Failed to process call-ended notification:", err);
+    }
+  }, [addTranscript, isGeminiLive, provider, sendTextChat]);
+
+  // Pull pending notifications on mount + open SSE stream
+  useEffect(() => {
+    if (!authenticated) return;
+    const token = localStorage.getItem("heyhank_auth_token") || "";
+    const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+
+    let cancelled = false;
+
+    // 1) Fetch whatever was pending when we mounted
+    fetch("/api/hank/notifications/pending", { headers: authHeaders })
+      .then((r) => r.ok ? r.json() : { notifications: [] })
+      .then((data: { notifications?: Array<{ id: string; type: string }> }) => {
+        if (cancelled) return;
+        const list = Array.isArray(data?.notifications) ? data.notifications : [];
+        for (const n of list) {
+          if (n.type === "call-ended") handleCallEndedNotification(n.id);
+        }
+      })
+      .catch(() => {});
+
+    // 2) Open SSE stream for live push (guarded for non-DOM test envs)
+    let es: EventSource | null = null;
+    if (typeof EventSource !== "undefined") {
+      const url = token
+        ? `/api/hank/notifications/stream?token=${encodeURIComponent(token)}`
+        : "/api/hank/notifications/stream";
+      try {
+        es = new EventSource(url);
+        es.addEventListener("call-ended", (ev) => {
+          try {
+            const data = JSON.parse((ev as MessageEvent).data) as { notificationId: string };
+            if (data.notificationId) handleCallEndedNotification(data.notificationId);
+          } catch { /* ignore */ }
+        });
+        es.addEventListener("pending", (ev) => {
+          try {
+            const data = JSON.parse((ev as MessageEvent).data) as { id: string; type: string };
+            if (data.type === "call-ended") handleCallEndedNotification(data.id);
+          } catch { /* ignore */ }
+        });
+        es.onerror = () => { /* EventSource auto-reconnects; swallow */ };
+      } catch { /* ignore — SSE unavailable */ }
+    }
+
+    return () => {
+      cancelled = true;
+      es?.close();
+    };
+  }, [authenticated, handleCallEndedNotification]);
 
   const endSession = useCallback(() => {
     // Persist conversation (voice + text) so it appears in Hank History on the home screen.

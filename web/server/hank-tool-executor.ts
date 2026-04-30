@@ -6,6 +6,7 @@ import * as assistantStore from "./assistant-store.js";
 import * as emailService from "./email-service.js";
 import * as calendarService from "./calendar-service.js";
 import { listAgents, createAgent } from "./agent-store.js";
+import { buildStyleProfileBlockFromText } from "./style-injector.js";
 
 const BASE_URL = `http://127.0.0.1:${process.env.PORT || 3100}/api`;
 
@@ -36,6 +37,19 @@ export async function executeHankTool(
         const files = (args?.files as string[]) || (args?.attachments as string[]) || [];
         if (files.length > 0) {
           task = `The user has shared these files with you: ${files.join(", ")}. They are available on the local filesystem.\n\n${task}`;
+        }
+
+        // Auto-inject SocialView persona style profile if the task references
+        // a known role-model by name/handle. The Content Agent treats this
+        // block as binding (overrides platform defaults).
+        try {
+          const styleBlock = buildStyleProfileBlockFromText(task);
+          if (styleBlock) {
+            task = task + styleBlock;
+            console.log(`[hank-tool] run_agent: injected style profile block (${styleBlock.length} chars)`);
+          }
+        } catch (e) {
+          console.error(`[hank-tool] style-injector failed:`, e);
         }
 
         // Fuzzy match agent by name or ID
@@ -640,6 +654,7 @@ export async function executeHankTool(
         const contactNameOrPhone = (args?.phone as string) || "";
         const task = (args?.task as string) || "";
         const listen = args?.listen === true;
+        const useSavedScript = args?.useSavedScript === true;
         if (!contactNameOrPhone || !task) {
           return { error: "phone (contact name) and task are required" };
         }
@@ -651,7 +666,7 @@ export async function executeHankTool(
             return { error: `Contact "${contactNameOrPhone}" not found. For safety, only saved contacts can be called. Add the contact in Settings → Telephony → Contacts first.` };
           }
           const { callManager } = await import("./telephony/call-manager.js");
-          const call = await callManager.startCall({ phone: contact.phone, prompt: task, voice: args?.voice as string, listen });
+          const call = await callManager.startCall({ phone: contact.phone, prompt: task, voice: args?.voice as string, listen, useSavedScript });
           return {
             success: true,
             callId: call.id,
@@ -1219,6 +1234,10 @@ export async function executeHankTool(
         if (!url || !platform) return { error: "url and platform are required" };
         const count = (args?.count as number) || 5;
         const journeyStage = (args?.journeyStage as string) || undefined;
+        const styleProfileHandle =
+          typeof args?.styleProfileHandle === "string" && args.styleProfileHandle.trim()
+            ? args.styleProfileHandle.trim()
+            : undefined;
         try {
           const { analyzeWebsite, createContentStrategy, generateSmartContent } = await import("./content-intelligence/content-engine.js");
           const intelligence = await analyzeWebsite(url);
@@ -1229,6 +1248,7 @@ export async function executeHankTool(
             platform,
             journeyStage: journeyStage as "attract" | "convert" | "close" | undefined,
             count,
+            styleProfileHandle,
           });
           return {
             success: true,

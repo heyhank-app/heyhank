@@ -51,6 +51,10 @@ export function registerContentRoutes(api: Hono): void {
 
       const count = body.count || 5;
       const journeyStage = body.journeyStage || undefined;
+      const styleProfileHandle =
+        typeof body.styleProfileHandle === "string" && body.styleProfileHandle.trim()
+          ? body.styleProfileHandle.trim()
+          : undefined;
 
       const { analyzeWebsite, createContentStrategy, generateSmartContent } = await import("../content-intelligence/content-engine.js");
       const intelligence = await analyzeWebsite(url);
@@ -61,6 +65,7 @@ export function registerContentRoutes(api: Hono): void {
         platform,
         journeyStage,
         count,
+        styleProfileHandle,
       });
       return c.json({ pieces, count: pieces.length });
     } catch (e) {

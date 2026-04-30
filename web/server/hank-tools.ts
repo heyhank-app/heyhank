@@ -30,7 +30,32 @@ export interface PhoneContact {
 }
 
 // ─── System Prompt Builder ──────────────────────────────────────────────────
+import { listProfiles as listStyleProfiles } from "./socialview/style-profiles.js";
+
 export function buildSystemPrompt(assistantName: string, agents: AgentInfo[], recentConversations?: ConversationContext[], activeSessions?: ActiveSession[], userName?: string, contacts?: PhoneContact[], obsidianVaultPath?: string): string {
+  // Snapshot of available style personas (loaded from ~/.heyhank/socialview/style-profiles).
+  // Hank only needs to know which handles exist so he can map a user-spoken name
+  // (e.g. "Rene Remsik") to the canonical handle for `generate_content`'s
+  // styleProfileHandle param. The actual style is consumed downstream by the
+  // content agent; Hank stays at the routing layer.
+  let personasSection = "";
+  try {
+    const profiles = listStyleProfiles();
+    if (profiles.length > 0) {
+      personasSection = `\nSTYLE PERSONAS (available for generate_content's \`styleProfileHandle\` param):
+The following personas have been distilled from extracted social posts. When the user
+asks for content "im Stil von X" / "wie X schreibt", map their name to the handle below
+and pass it as \`styleProfileHandle\`. If unsure, ask. Never invent a handle that isn't listed.
+
+${profiles.map((p) => {
+  const name = p.displayName && p.displayName !== p.handle ? ` — ${p.displayName}` : "";
+  return `- ${p.handle} (${p.platform}${name})`;
+}).join("\n")}`;
+    }
+  } catch {
+    // Reading personas is best-effort — never break Hank if storage is missing.
+  }
+
   const nameIntro = assistantName
     ? `You are "${assistantName}", a personal voice assistant on the HeyHank platform.`
     : `You are a personal voice assistant on the HeyHank platform.`;
@@ -190,6 +215,7 @@ TELEPHONY (phone calls):
   If the user provides a phone number that's not a saved contact, ask them to save it first in Settings → Telephony → Contacts.
   You can optionally pass listen=true to let the user hear the call live through their speakers.
   Example: "Call Mama and let me listen" → make_call("Mama", "...", listen=true)
+  By default the ad-hoc task takes priority. If the user explicitly says something like "run the saved script" / "nutze das gespeicherte Script", pass useSavedScript=true to inject the stored call script as primary objective.
 - list_active_calls: Show current active phone calls
 - end_active_call: Hang up an active call
 After starting a call, inform the user about the status. The call runs autonomously — you don't need to monitor it.${contacts && contacts.length > 0 ? `
@@ -316,6 +342,8 @@ Use these tools when the user wants to:
 - Generate social media content based on a business website
 - Create ad campaigns
 - Plan content calendars
+
+${personasSection}
 
 INTERNET SEARCH:
 You have access to Google Search (automatically integrated). When the user asks for current information
@@ -999,6 +1027,10 @@ const TOOL_DECLARATIONS = [{
             type: "BOOLEAN",
             description: "If true, stream live call audio to the user's browser so they can listen in real-time.",
           },
+          useSavedScript: {
+            type: "BOOLEAN",
+            description: "If true, the saved call-script for this contact (if any) is injected as PRIMARY OBJECTIVE. Default false — the ad-hoc task takes priority. Only set true when the user explicitly wants the saved script to run.",
+          },
         },
         required: ["phone", "task"],
       },
@@ -1522,6 +1554,10 @@ const TOOL_DECLARATIONS = [{
           journeyStage: {
             type: "STRING",
             description: "Customer journey stage: 'attract' (awareness), 'convert' (consideration), or 'close' (decision). Default: all stages.",
+          },
+          styleProfileHandle: {
+            type: "STRING",
+            description: "Optional handle of a SocialView role-model (e.g. 'rene.remsik') whose saved StyleProfile will drive the writing voice/structure. Use when the user asks for content 'im Stil von X' or 'wie X schreibt'. Profile must exist (created via SocialView style-profile analysis).",
           },
         },
         required: ["url", "platform"],

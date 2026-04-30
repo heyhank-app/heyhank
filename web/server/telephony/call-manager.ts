@@ -12,6 +12,8 @@ import { DEFAULT_PORT_DEV, DEFAULT_PORT_PROD } from "../constants.js";
 import { randomUUID } from "node:crypto";
 import { createGeminiLiveEngine } from "../voice-pipeline/gemini-live-adapter.js";
 import { createPipelineEngine, getPipelineSettingsFrom, prepareGreeting, lookupContactForCall, resolveEngine, type VoiceEngineSession } from "../voice-pipeline/manager.js";
+import { addNotification } from "../hank-notifications-store.js";
+import { heyHankBus } from "../event-bus.js";
 
 // Gemini tool declarations for telephony calls (subset — focused on conversation)
 const TELEPHONY_TOOL_DECLARATIONS = [{
@@ -78,6 +80,14 @@ export class CallManager {
 
   private listeners = new Set<EventListener>();
   private inboundSubscription: { stop: () => void } | null = null;
+  /**
+   * For inbound calls, the FreeSWITCH audio-fork WebSocket may connect
+   * before the ESL CHANNEL_CREATE event has been processed. We hold such
+   * sockets here for a short grace period (keyed by callId), and attach
+   * them once `handleInboundCall` has registered the call state.
+   */
+  private pendingFsSockets = new Map<string, { sockets: Set<ServerWebSocket<unknown>>; timer: ReturnType<typeof setTimeout> }>();
+  private readonly FS_SOCKET_GRACE_MS = 3000;
 
   /** Subscribe to call events */
   onEvent(listener: EventListener): () => void {
@@ -131,7 +141,7 @@ export class CallManager {
     const contact = telSettings.contacts.find(c => c.phone === config.phone) || null;
 
     // Build telephony-specific system prompt
-    const systemPrompt = buildTelephonyPrompt(config.prompt, config.phone, contact, contact?.language || telSettings.defaultLanguage || "de");
+    const systemPrompt = buildTelephonyPrompt(config.prompt, config.phone, contact, contact?.language || telSettings.defaultLanguage || "de", "outbound", undefined, config.useSavedScript === true);
 
     // Create call state
     const callState: CallState = {
@@ -158,7 +168,12 @@ export class CallManager {
 
     // Common transcript/status callbacks
     const onTranscript = (entry: TranscriptEntry) => {
-      callState.transcript.push(entry);
+      // Only persist final entries — interim STT results flood the transcript
+      // with partial ngrams ("ich", "ich möchte", "ich möchte eine", ...).
+      // Live browsers still receive all entries via broadcastTranscript for real-time UX.
+      if (entry.isFinal) {
+        callState.transcript.push(entry);
+      }
       this.emit({ type: "transcript", callId, entry });
       this.broadcastTranscript(callId, entry);
     };
@@ -313,6 +328,14 @@ export class CallManager {
     // Delete from activeCalls FIRST to prevent concurrent entry (race condition guard)
     this.activeCalls.delete(callId);
 
+    // Clear any pending audio-fork buffer entry so late arrivals don't leak
+    const pending = this.pendingFsSockets.get(callId);
+    if (pending) {
+      clearTimeout(pending.timer);
+      for (const s of pending.sockets) { try { s.close(); } catch { /* ignore */ } }
+      this.pendingFsSockets.delete(callId);
+    }
+
     // Store references before cleanup
     const { state, engine, recorder, maxDurationTimer, pendingTimers } = call;
 
@@ -353,6 +376,33 @@ export class CallManager {
     this.emit({ type: "ended", callId, summary: state.summary });
     saveCall(state);
 
+    // Persist a HankChat notification so Hank can summarise the call for the user.
+    try {
+      const telSettings = getSettings();
+      const contact = telSettings.contacts.find((c) => c.phone === state.phone) || null;
+      const notification = addNotification({
+        type: "call-ended",
+        callId,
+        phone: state.phone,
+        contactName: contact?.name ?? null,
+        direction: state.direction,
+        durationSeconds: state.durationSeconds,
+        summary: state.summary,
+        transcript: state.transcript,
+      });
+      heyHankBus.emit("telephony:call-ended", {
+        notificationId: notification.id,
+        callId,
+        phone: state.phone,
+        contactName: contact?.name ?? null,
+        direction: state.direction,
+        durationSeconds: state.durationSeconds,
+        summary: state.summary,
+      });
+    } catch (err) {
+      console.error(`[telephony] Failed to create HankChat notification for ${callId}:`, err);
+    }
+
     return state;
   }
 
@@ -377,16 +427,60 @@ export class CallManager {
   addFreeSwitchSocket(callId: string, ws: ServerWebSocket<unknown>): void {
     const call = this.activeCalls.get(callId);
     if (call) {
-      call.fsSockets.add(ws);
-      // Audio fork connected = callee picked up. Play greeting immediately.
-      // For Pipeline: pre-rendered greeting MP3 plays at 0ms latency.
-      // For Gemini Live: text trigger makes it start speaking (1-2s latency).
-      if (call.fsSockets.size === 1 && !call.greetingTriggered) {
-        const isInbound = call.state.direction === "inbound";
-        console.log(`[telephony] Call ${callId}: audio connected (${isInbound ? "inbound" : "outbound"}) — triggering greeting via ${call.engine.engineLabel}`);
-        call.greetingTriggered = true;
-        call.engine.playGreetingIfReady?.();
-      }
+      this.attachFsSocket(call, callId, ws);
+      return;
+    }
+
+    // Inbound race: audio fork connected before ESL CHANNEL_CREATE was processed.
+    // Buffer the socket and try to attach once handleInboundCall registers the call.
+    console.log(`[telephony] Audio socket for ${callId} arrived before call state — buffering (${this.FS_SOCKET_GRACE_MS}ms grace)`);
+    let pending = this.pendingFsSockets.get(callId);
+    if (!pending) {
+      const timer = setTimeout(() => {
+        const p = this.pendingFsSockets.get(callId);
+        if (p) {
+          console.warn(`[telephony] No call state for ${callId} within grace period — closing ${p.sockets.size} buffered audio socket(s)`);
+          for (const s of p.sockets) {
+            try { s.close(); } catch { /* ignore */ }
+          }
+          this.pendingFsSockets.delete(callId);
+        }
+      }, this.FS_SOCKET_GRACE_MS);
+      pending = { sockets: new Set(), timer };
+      this.pendingFsSockets.set(callId, pending);
+    }
+    pending.sockets.add(ws);
+  }
+
+  /** Attach (possibly buffered) FreeSWITCH sockets and trigger greeting if needed */
+  private attachFsSocket(
+    call: NonNullable<ReturnType<CallManager["activeCalls"]["get"]>>,
+    callId: string,
+    ws: ServerWebSocket<unknown>,
+  ): void {
+    call.fsSockets.add(ws);
+    // Audio fork connected = callee picked up. Play greeting immediately.
+    // For Pipeline: pre-rendered greeting MP3 plays at 0ms latency.
+    // For Gemini Live: text trigger makes it start speaking (1-2s latency).
+    if (call.fsSockets.size === 1 && !call.greetingTriggered) {
+      const isInbound = call.state.direction === "inbound";
+      console.log(`[telephony] Call ${callId}: audio connected (${isInbound ? "inbound" : "outbound"}) — triggering greeting via ${call.engine.engineLabel}`);
+      call.greetingTriggered = true;
+      call.engine.playGreetingIfReady?.();
+    }
+  }
+
+  /** Flush any buffered FreeSWITCH audio sockets for a call that just became known */
+  private flushPendingFsSockets(callId: string): void {
+    const pending = this.pendingFsSockets.get(callId);
+    if (!pending) return;
+    const call = this.activeCalls.get(callId);
+    clearTimeout(pending.timer);
+    this.pendingFsSockets.delete(callId);
+    if (!call) return;
+    console.log(`[telephony] Flushing ${pending.sockets.size} buffered audio socket(s) for call ${callId}`);
+    for (const s of pending.sockets) {
+      this.attachFsSocket(call, callId, s);
     }
   }
 
@@ -642,7 +736,7 @@ export class CallManager {
     const maxDuration = telSettings.maxCallDurationSeconds || 600;
 
     // Build telephony-specific system prompt (include knowledge base for inbound)
-    const systemPrompt = buildTelephonyPrompt(prompt, callerNumber, contact, contact?.language || telSettings.defaultLanguage || "de", "inbound", telSettings.inboundKnowledgeBase);
+    const systemPrompt = buildTelephonyPrompt(prompt, callerNumber, contact, contact?.language || telSettings.defaultLanguage || "de", "inbound", telSettings.inboundKnowledgeBase, true);
 
     // Create call state — already answered by dialplan
     const callState: CallState = {
@@ -669,7 +763,10 @@ export class CallManager {
 
     // Common transcript/status callbacks
     const onTranscript = (entry: TranscriptEntry) => {
-      callState.transcript.push(entry);
+      // Only persist final entries (see outbound onTranscript for rationale).
+      if (entry.isFinal) {
+        callState.transcript.push(entry);
+      }
       this.emit({ type: "transcript", callId: uuid, entry });
       this.broadcastTranscript(uuid, entry);
     };
@@ -772,6 +869,9 @@ export class CallManager {
       pendingTimers: new Set(),
     });
 
+    // If the FreeSWITCH audio fork already connected before we got here, attach it now.
+    this.flushPendingFsSockets(uuid);
+
     // Connect engine
     try {
       await engine.connect();
@@ -794,6 +894,17 @@ export class CallManager {
 
     const call = this.activeCalls.get(uuid);
     if (call) call.maxDurationTimer = timer;
+
+    // Safety: if no audio fork attaches within 30s AND no CHANNEL_HANGUP_COMPLETE
+    // arrives, treat as a ghost/orphaned channel and clean up. Prevents phantom
+    // "active" calls in the dashboard when FS drops the channel silently.
+    this.trackTimer(uuid, setTimeout(() => {
+      const c = this.activeCalls.get(uuid);
+      if (c && c.fsSockets.size === 0) {
+        console.warn(`[telephony] Inbound call ${uuid}: no audio fork within 30s — orphaned, cleaning up`);
+        this.endCall(uuid).catch(() => {});
+      }
+    }, 30000));
 
     saveCall(callState);
     this.emit({ type: "status", callId: uuid, status: "active" });
@@ -818,6 +929,25 @@ export class CallManager {
         this.handleInboundCall(uuid, callerNumber).catch(err => {
           console.error("[telephony] Failed to handle inbound call:", err);
         });
+      },
+      ({ uuid }) => {
+        // FS channel ended — clean up our call state so phantom "active" calls don't accumulate.
+        if (this.activeCalls.has(uuid)) {
+          console.log(`[telephony] CHANNEL_HANGUP_COMPLETE for ${uuid} — ending call`);
+          this.endCall(uuid).catch(err => {
+            console.error("[telephony] endCall on hangup failed:", err);
+          });
+        } else {
+          // Also clear any buffered audio-fork sockets for calls that never registered.
+          this.pendingFsSockets.get(uuid)?.sockets.forEach(ws => {
+            try { ws.close(1000, "channel hung up"); } catch { /* ignore */ }
+          });
+          const pending = this.pendingFsSockets.get(uuid);
+          if (pending) {
+            clearTimeout(pending.timer);
+            this.pendingFsSockets.delete(uuid);
+          }
+        }
       },
     );
   }
@@ -861,7 +991,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
   ar: "Arabic (العربية)",
 };
 
-function buildTelephonyPrompt(taskPrompt: string, phoneNumber: string, contact?: TelephonyContact | null, language?: string, direction: "outbound" | "inbound" = "outbound", knowledgeBase?: string): string {
+function buildTelephonyPrompt(taskPrompt: string, phoneNumber: string, contact?: TelephonyContact | null, language?: string, direction: "outbound" | "inbound" = "outbound", knowledgeBase?: string, useSavedScript: boolean = false): string {
   const langCode = language || "de";
   const langName = LANGUAGE_NAMES[langCode] || langCode;
   const isInbound = direction === "inbound";
@@ -891,14 +1021,14 @@ CRITICAL PHONE CALL RULES:
     if (contact.notes) prompt += `\n- Notes: ${contact.notes}`;
   }
 
-  // Inject call script (simple markdown) or call flow (state machine)
-  if (contact?.callFlow && contact.callFlow.nodes.length > 0) {
+  // Inject call script (simple markdown) or call flow (state machine) — only when explicitly requested
+  if (useSavedScript && contact?.callFlow && contact.callFlow.nodes.length > 0) {
     prompt += `\n\n${buildCallFlowInstructions(contact.callFlow)}`;
-  } else if (contact?.script) {
+  } else if (useSavedScript && contact?.script) {
     prompt += `\n\nCALL SCRIPT — THIS IS YOUR PRIMARY OBJECTIVE. Follow each step IN ORDER. Do NOT skip any steps. Do NOT end the call until you have completed the LAST step. After each question, WAIT for their response before moving to the next step:\n${contact.script}`;
   }
 
-  const hasScript = (contact?.callFlow && contact.callFlow.nodes.length > 0) || contact?.script;
+  const hasScript = useSavedScript && ((contact?.callFlow && contact.callFlow.nodes.length > 0) || contact?.script);
 
   if (!hasScript) {
     prompt += isInbound

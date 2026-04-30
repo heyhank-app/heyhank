@@ -69,6 +69,10 @@ mkdir -p "$FS_CONF/dialplan/public"
 if [ -d "$CUSTOM_DIR/dialplan/public" ]; then
   cp -v "$CUSTOM_DIR/dialplan/public/"*.xml "$FS_CONF/dialplan/public/" 2>/dev/null || true
 fi
+# Copy top-level dialplan files (e.g. public.xml that defines the context wrapper).
+if [ -d "$CUSTOM_DIR/dialplan" ]; then
+  cp -v "$CUSTOM_DIR/dialplan/"*.xml "$FS_CONF/dialplan/" 2>/dev/null || true
+fi
 
 echo "[HeyHank] FreeSWITCH config ready, starting..."
 

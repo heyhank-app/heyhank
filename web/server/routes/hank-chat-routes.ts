@@ -16,6 +16,7 @@ import { nodeManager } from "../federation/node-manager.js";
 import { getContextForMessage, detectMemorableFacts, addMemory } from "../memory-service.js";
 import { callLLM } from "../llm-providers.js";
 import { heyHankBus } from "../event-bus.js";
+import { listPending, markConsumed, getById } from "../hank-notifications-store.js";
 import { randomUUID } from "node:crypto";
 import { isAllowedBaseUrl } from "../url-validator.js";
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
@@ -92,6 +93,67 @@ export function registerHankChatRoutes(api: Hono): void {
     };
     const contentType = mimeMap[ext] || "application/octet-stream";
     return new Response(data, { headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=86400" } });
+  });
+
+  // ─── Notifications (async events for HankChat, e.g. call-ended) ──────────
+
+  // GET /hank/notifications/pending — returns unconsumed notifications
+  api.get("/hank/notifications/pending", (c) => {
+    return c.json({ notifications: listPending() });
+  });
+
+  // GET /hank/notifications/:id — full notification incl. transcript
+  api.get("/hank/notifications/:id", (c) => {
+    const id = c.req.param("id");
+    const n = getById(id);
+    if (!n) return c.json({ error: "Notification not found" }, 404);
+    return c.json(n);
+  });
+
+  // POST /hank/notifications/:id/consume — mark as consumed
+  api.post("/hank/notifications/:id/consume", (c) => {
+    const id = c.req.param("id");
+    const ok = markConsumed(id);
+    if (!ok) return c.json({ error: "Notification not found" }, 404);
+    return c.json({ success: true });
+  });
+
+  // GET /hank/notifications/stream — SSE push channel for live notifications
+  api.get("/hank/notifications/stream", (c) => {
+    return streamSSE(c, async (stream) => {
+      // Send any currently pending notifications immediately on connect
+      for (const n of listPending()) {
+        await stream.writeSSE({ event: "pending", data: JSON.stringify(n) });
+      }
+
+      // Subscribe to future events
+      const queue: unknown[] = [];
+      let resolveNext: (() => void) | null = null;
+      const unsubscribe = heyHankBus.on("telephony:call-ended", (payload) => {
+        queue.push({ type: "call-ended", ...payload });
+        if (resolveNext) { resolveNext(); resolveNext = null; }
+      });
+
+      const abort = c.req.raw.signal;
+      const onAbort = () => {
+        if (resolveNext) { resolveNext(); resolveNext = null; }
+      };
+      abort.addEventListener("abort", onAbort);
+
+      try {
+        while (!abort.aborted) {
+          if (queue.length === 0) {
+            await new Promise<void>((resolve) => { resolveNext = resolve; });
+            continue;
+          }
+          const ev = queue.shift();
+          await stream.writeSSE({ event: "call-ended", data: JSON.stringify(ev) });
+        }
+      } finally {
+        unsubscribe();
+        abort.removeEventListener("abort", onAbort);
+      }
+    });
   });
 
   // POST /hank/chat — SSE streaming with server-side tool loop

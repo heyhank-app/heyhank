@@ -6,7 +6,8 @@
 import { randomUUID } from "node:crypto";
 import { callInternalAI } from "../internal-ai.js";
 import { selectForFewShot } from "../socialview/library.js";
-import type { SocialPlatform } from "../socialview/types.js";
+import { getProfile as getStyleProfile } from "../socialview/style-profiles.js";
+import type { SocialPlatform, StyleProfile } from "../socialview/types.js";
 import { SOCIAL_PLATFORMS } from "../socialview/types.js";
 import {
   getPlatform,
@@ -699,6 +700,66 @@ function normalizePlatform(platform: string): SocialPlatform | null {
   return null;
 }
 
+/**
+ * Render a `StyleProfile` as an instruction block for the generation prompt.
+ * Token-efficient: structured rules, not raw post examples (those still come
+ * from `buildFewShotBlock`).
+ */
+function buildStyleProfileBlock(profile: StyleProfile): string {
+  const lines: string[] = [];
+  lines.push("");
+  lines.push(
+    `STYLE PROFILE — schreibe im Stil von ${profile.displayName} (@${profile.handle}, ${profile.platform}). ` +
+      `Imitiere Stil und Struktur, NICHT Inhalte. Diese Person ist die Vorlage:`,
+  );
+  lines.push(`- Tonfall: ${profile.toneOfVoice || "nicht spezifiziert"}`);
+  lines.push(
+    `- Länge: ~${profile.averageWordCount} Wörter (${profile.lengthCategory}). Nicht signifikant abweichen.`,
+  );
+
+  if (profile.hookPatterns.length > 0) {
+    const top = profile.hookPatterns
+      .slice()
+      .sort((a, b) => b.frequency - a.frequency)
+      .slice(0, 3)
+      .map((h) => `${h.type} (${Math.round(h.frequency * 100)}%)`)
+      .join(", ");
+    lines.push(`- Bevorzugte Hook-Pattern: ${top}`);
+    const exampleHook = profile.hookPatterns[0]?.examples?.[0];
+    if (exampleHook) lines.push(`  Beispiel-Hook: "${exampleHook}"`);
+  }
+
+  if (profile.ctaPatterns.length > 0) {
+    const top = profile.ctaPatterns
+      .slice()
+      .sort((a, b) => b.frequency - a.frequency)
+      .slice(0, 2)
+      .map((c) => `${c.type} (${Math.round(c.frequency * 100)}%)`)
+      .join(", ");
+    lines.push(`- CTA-Pattern: ${top}`);
+  }
+
+  lines.push(
+    `- Emoji-Stil: ${profile.emojiStyle}` +
+      (profile.emojiList.length > 0 ? ` — typisch: ${profile.emojiList.slice(0, 6).join(" ")}` : ""),
+  );
+  lines.push(`- Hashtag-Stil: ${profile.hashtagStyle}`);
+
+  if (profile.contentPillars.length > 0) {
+    lines.push(`- Themen-Säulen: ${profile.contentPillars.join(", ")}`);
+  }
+
+  if (profile.commentEngagementPattern) {
+    lines.push(`- Engagement-Trick (Eigenkommentare): ${profile.commentEngagementPattern}`);
+  }
+
+  if (profile.rawAnalysis) {
+    lines.push(`- Stil-Zusammenfassung: ${profile.rawAnalysis}`);
+  }
+
+  return lines.join("\n");
+}
+
 async function getHashtagPoolContext(industry: string, language: string): Promise<string> {
   try {
     const pools = listHashtagPools();
@@ -744,8 +805,15 @@ export async function generateSmartContent(opts: {
   platform: string;
   journeyStage?: JourneyStage;
   count?: number;
+  /**
+   * Handle of a SocialView role-model whose `StyleProfile` should drive the
+   * voice/structure of the generated posts. Pass e.g. "rene.remsik" to write
+   * "im Stil von Rene Remsik". If the profile doesn't exist for the given
+   * platform/handle, generation falls back to default few-shot only.
+   */
+  styleProfileHandle?: string;
 }): Promise<ContentPiece[]> {
-  const { intelligence, strategy, platform, journeyStage, count = 5 } = opts;
+  const { intelligence, strategy, platform, journeyStage, count = 5, styleProfileHandle } = opts;
 
   const spec = getPlatform(platform);
   if (!spec) {
@@ -754,6 +822,16 @@ export async function generateSmartContent(opts: {
 
   const platformSummary = buildPlatformSummary(platform);
   const fewShot = buildFewShotBlock(platform);
+
+  // Optional: pull a saved style profile for the requested handle.
+  let styleBlock = "";
+  if (styleProfileHandle) {
+    const plat = normalizePlatform(platform);
+    if (plat) {
+      const profile = getStyleProfile(plat, styleProfileHandle);
+      if (profile) styleBlock = buildStyleProfileBlock(profile);
+    }
+  }
   const stage = journeyStage || "attract";
   const pillar = strategy.pillars[Math.floor(Math.random() * strategy.pillars.length)]!;
   const painPoint = pillar.painPoints[Math.floor(Math.random() * pillar.painPoints.length)] || "General challenge";
@@ -788,6 +866,7 @@ REQUIREMENTS:
 - Write in ${intelligence.language === "de" ? "German" : intelligence.language === "fr" ? "French" : "English"}
 - Include an image generation prompt for each post
 ${await getHashtagPoolContext(intelligence.industry, intelligence.language)}
+${styleBlock}
 ${fewShot}
 
 Return ONLY valid JSON array (no markdown, no explanation):

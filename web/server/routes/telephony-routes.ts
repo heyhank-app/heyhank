@@ -178,6 +178,14 @@ export function registerTelephonyRoutes(api: Hono): void {
       const voiceChanged = oldVoice !== newVoice;
       warmGreetingsAsync({ clearFirst: voiceChanged });
 
+      // Re-sync inbound ESL listener with new settings (start if enabled, stop otherwise)
+      try {
+        callManager.stopInboundListener();
+        callManager.startInboundListener();
+      } catch (err) {
+        console.error("[telephony-routes] Failed to restart inbound listener:", err);
+      }
+
       return c.json({ success: true });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Failed to save settings" }, 500);

@@ -261,6 +261,13 @@ async function streamAnthropicWithTools(
       toolResults = toolCalls.map((c) => ({ id: c.id, name: c.name, response: { error: e instanceof Error ? e.message : String(e) } }));
     }
 
+    // If the model called `end_call`, stop the loop. The goodbye text has
+    // already been spoken in this iteration — another LLM round would just
+    // produce a second redundant goodbye that gets TTS'd on top.
+    if (toolCalls.some((c) => c.name === "end_call")) {
+      return { text: fullText, ok: true };
+    }
+
     turns.push({
       role: "user",
       content: toolResults.map((r) => ({
@@ -452,6 +459,12 @@ async function streamOpenAIWithTools(
         tool_call_id: r.id,
         content: typeof r.response === "string" ? r.response : JSON.stringify(r.response),
       });
+    }
+
+    // If the model called `end_call`, stop the loop (see Anthropic branch above
+    // for rationale — avoids a second redundant goodbye).
+    if (result.toolCalls.some((c) => c.name === "end_call")) {
+      return { text: fullText, ok: true };
     }
   }
 

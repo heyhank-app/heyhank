@@ -62,6 +62,19 @@ export interface HeyHankEventMap {
   /** A result (turn completion) was processed and broadcast to browsers. */
   "message:result": { sessionId: string; message: BrowserIncomingMessage };
 
+  // ── Telephony ──────────────────────────────────────────────────────
+
+  /** A phone call has just ended; a notification has been persisted for HankChat. */
+  "telephony:call-ended": {
+    notificationId: string;
+    callId: string;
+    phone: string;
+    contactName: string | null;
+    direction: "inbound" | "outbound";
+    durationSeconds: number;
+    summary: string | null;
+  };
+
   // ── Federation ──────────────────────────────────────────────────────
 
   /** A remote federation node connected. */

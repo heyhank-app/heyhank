@@ -26,6 +26,7 @@ export interface CallConfig {
   callerId?: string; // Override caller ID
   maxDurationSeconds?: number; // Auto-hangup after N seconds (safety)
   listen?: boolean; // Stream live audio to browser (listen mode)
+  useSavedScript?: boolean; // If true, inject contact.script/callFlow as PRIMARY OBJECTIVE. Default: false.
 }
 
 export type CallStatus =

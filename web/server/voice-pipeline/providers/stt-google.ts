@@ -11,11 +11,20 @@ function getKeyFile(): string {
     || "/opt/agentplatform/gcp-service-account.json";
 }
 
+// Google Cloud streaming recognize has a hard 305s limit per stream and the
+// underlying gRPC stream gets destroyed on any transient error. To keep the
+// call alive we auto-restart the stream whenever it ends/errors, unless the
+// session was explicitly closed.
+const STREAM_MAX_AGE_MS = 4 * 60 * 1000; // 4 min, safely below Google's 5 min cap
+
 class GoogleSTTSession implements STTSession {
   private stream: ReturnType<speechV1.SpeechClient["streamingRecognize"]> | null = null;
   private resultHandlers: Array<(r: STTResult) => void> = [];
   private errorHandlers: Array<(e: Error) => void> = [];
   private closed = false;
+  private streamStartedAt = 0;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
+  private restarting = false;
 
   constructor(private client: speechV1.SpeechClient, private config: STTConfig) {
     this.start();
@@ -37,6 +46,9 @@ class GoogleSTTSession implements STTSession {
       singleUtterance: false,
     };
 
+    this.streamStartedAt = Date.now();
+    this.restarting = false;
+
     this.stream = this.client
       .streamingRecognize(request)
       .on("data", (data: {
@@ -56,31 +68,65 @@ class GoogleSTTSession implements STTSession {
         for (const h of this.resultHandlers) h(out);
       })
       .on("error", (err: Error) => {
+        // Log once per stream instance, then restart silently so the call stays live
         for (const h of this.errorHandlers) h(err);
+        this.scheduleRestart();
       })
       .on("end", () => {
-        this.closed = true;
+        this.scheduleRestart();
       });
   }
 
+  private scheduleRestart(): void {
+    if (this.closed || this.restarting) return;
+    this.restarting = true;
+    // Destroy the old stream reference so pushAudio() stops trying to write to it
+    const old = this.stream;
+    this.stream = null;
+    try { old?.destroy(); } catch { /* ignore */ }
+    // Small backoff to avoid hammering the API if something is truly broken
+    this.restartTimer = setTimeout(() => {
+      if (this.closed) return;
+      try {
+        this.start();
+      } catch (e) {
+        for (const h of this.errorHandlers) h(e instanceof Error ? e : new Error(String(e)));
+      }
+    }, 150);
+  }
+
   pushAudio(pcm: Buffer | Uint8Array): void {
-    if (this.closed || !this.stream) return;
+    if (this.closed) return;
+    // Rotate stream before Google cuts us off at ~5 min
+    if (this.stream && Date.now() - this.streamStartedAt > STREAM_MAX_AGE_MS) {
+      this.scheduleRestart();
+    }
+    const s = this.stream;
+    if (!s || (s as unknown as { destroyed?: boolean }).destroyed) return;
     try {
-      // Streaming API expects the data inside { audioContent: <Buffer> }
-      this.stream.write({ audioContent: Buffer.isBuffer(pcm) ? pcm : Buffer.from(pcm) });
-    } catch (e) {
-      for (const h of this.errorHandlers) h(e instanceof Error ? e : new Error(String(e)));
+      // The helper client wraps raw audio bytes into { audioContent } itself
+      // via its internal PassThrough transform — writing an object here would
+      // end up double-wrapped and Google rejects it as "Malordered Data".
+      s.write(Buffer.isBuffer(pcm) ? pcm : Buffer.from(pcm));
+    } catch {
+      // Stream was destroyed between the check and the write — recover silently
+      this.scheduleRestart();
     }
   }
 
   async close(): Promise<void> {
-    if (this.closed || !this.stream) return;
+    if (this.closed) return;
     this.closed = true;
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
     try {
-      this.stream.end();
+      this.stream?.end();
     } catch {
       // ignore
     }
+    this.stream = null;
   }
 
   onResult(handler: (r: STTResult) => void): void {

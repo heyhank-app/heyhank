@@ -1,0 +1,8 @@
+<!-- HeyHank public dialplan context — required wrapper for inbound calls. -->
+<!-- Without this file FreeSWITCH logs "Context public not found" and rejects -->
+<!-- every inbound INVITE ("Rufnummer ist ungültig" at the caller). -->
+<include>
+  <context name="public">
+    <X-PRE-PROCESS cmd="include" data="public/*.xml"/>
+  </context>
+</include>

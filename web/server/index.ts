@@ -454,6 +454,15 @@ startPeriodicCheck();
 
 // ── Reminder scheduler ──────────────────────────────────────────────────────
 startReminderScheduler();
+
+// ── Telephony inbound listener ──────────────────────────────────────────────
+// Subscribes to FreeSWITCH ESL CHANNEL_CREATE events and bootstraps inbound calls.
+// No-op if `inboundEnabled` is false in telephony settings.
+try {
+  callManager.startInboundListener();
+} catch (err) {
+  console.error("[server] Failed to start telephony inbound listener:", err);
+}
 if (isRunningAsService()) {
   setServiceMode(true);
   console.log("[server] Running as background service (auto-update available)");
