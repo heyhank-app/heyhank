@@ -43,6 +43,14 @@ const NAV_ITEMS: NavItem[] = [
     iconPath: "M3 2.5A1.5 1.5 0 014.5 1h5.879c.398 0 .779.158 1.06.44l1.621 1.62c.281.282.44.663.44 1.061V13.5A1.5 1.5 0 0112 15H4.5A1.5 1.5 0 013 13.5v-11zM4.5 2a.5.5 0 00-.5.5v11a.5.5 0 00.5.5H12a.5.5 0 00.5-.5V4.121a.5.5 0 00-.146-.353l-1.621-1.621A.5.5 0 0010.379 2H4.5zm1.25 4.25a.75.75 0 01.75-.75h3a.75.75 0 010 1.5h-3a.75.75 0 01-.75-.75zm0 3a.75.75 0 01.75-.75h3.5a.75.75 0 010 1.5H6.5a.75.75 0 01-.75-.75z",
   },
   {
+    id: "skills",
+    label: "Skills",
+    hash: "#/skills",
+    activePages: ["skills"],
+    viewBox: "0 0 16 16",
+    iconPath: "M8 0a.75.75 0 01.673.418l1.882 3.815 4.21.612a.75.75 0 01.416 1.279l-3.046 2.97.719 4.193a.75.75 0 01-1.088.79L8 12.347l-3.766 1.98a.75.75 0 01-1.088-.79l.72-4.193L.819 6.124a.75.75 0 01.416-1.28l4.21-.611L7.327.418A.75.75 0 018 0z",
+  },
+  {
     id: "integrations",
     label: "Integrations",
     hash: "#/integrations",
@@ -166,7 +174,7 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const NAV_SECTIONS = [
-  { id: "workbench", label: "Workbench", itemIds: ["prompts", "integrations", "terminal", "environments", "sandboxes"] },
+  { id: "workbench", label: "Workbench", itemIds: ["prompts", "skills", "integrations", "terminal", "environments", "sandboxes"] },
   { id: "agents", label: "Agents", itemIds: ["agents", "runs", "platform"] },
   { id: "hank", label: "Hank AI", itemIds: ["assistant", "memory", "media", "business"] },
   { id: "connect", label: "Integrations", itemIds: ["telephony", "socialmedia"] },

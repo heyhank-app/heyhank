@@ -1152,6 +1152,28 @@ export const api = {
   // Skills
   listSkills: () =>
     get<{ slug: string; name: string; description: string; path: string }[]>("/skills"),
+  deleteSkill: (slug: string) =>
+    del<{ ok: boolean; slug: string }>(`/skills/${encodeURIComponent(slug)}`),
+
+  // Skill Marketplace
+  marketplaceListSources: () =>
+    get<{ id: string; name: string; owner: string; url: string; description: string }[]>(
+      "/marketplace/sources",
+    ),
+  marketplaceListSkills: (sourceId: string) =>
+    get<{ slug: string; name: string; description: string; sourceId: string }[]>(
+      `/marketplace/sources/${encodeURIComponent(sourceId)}/skills`,
+    ),
+  marketplaceInstall: (sourceId: string, slug: string, overwrite = false) =>
+    post<{ ok: true; slug: string; path: string }>("/marketplace/install", {
+      sourceId,
+      slug,
+      overwrite,
+    }),
+  marketplaceInstalledMeta: (slug: string) =>
+    get<{ sourceId: string; slug: string; ghOwner: string; ghRepo: string; branch: string; installedAt: string } | null>(
+      `/marketplace/installed/${encodeURIComponent(slug)}`,
+    ),
 
   // Cross-session messaging
   sendSessionMessage: (sessionId: string, content: string) =>

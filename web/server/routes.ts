@@ -16,6 +16,7 @@ import * as sessionNames from "./session-names.js";
 import { containerManager } from "./container-manager.js";
 import { registerFsRoutes } from "./routes/fs-routes.js";
 import { registerSkillRoutes } from "./routes/skills-routes.js";
+import { registerMarketplaceRoutes } from "./routes/marketplace-routes.js";
 import { registerEnvRoutes } from "./routes/env-routes.js";
 import { registerSandboxRoutes } from "./routes/sandbox-routes.js";
 import { registerCronRoutes } from "./routes/cron-routes.js";
@@ -1340,6 +1341,7 @@ export function createRoutes(
   });
 
   registerSkillRoutes(api);
+  registerMarketplaceRoutes(api);
   registerCronRoutes(api, cronScheduler);
   registerAgentRoutes(api, agentExecutor);
   registerMetricsRoutes(api, { gaugeProvider: wsBridge });

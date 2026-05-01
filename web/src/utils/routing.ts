@@ -23,6 +23,7 @@ export type Route =
   | { page: "help" }
   | { page: "memory" }
   | { page: "business" }
+  | { page: "skills" }
   | { page: "playground" };
 
 const SESSION_PREFIX = "#/session/";
@@ -59,6 +60,7 @@ export function parseHash(hash: string): Route {
   if (hash === "#/help") return { page: "help" };
   if (hash === "#/memory") return { page: "memory" };
   if (hash === "#/business") return { page: "business" };
+  if (hash === "#/skills") return { page: "skills" };
   if (hash === "#/new") return { page: "new-session" };
   if (hash === "#/playground") return { page: "playground" };
   // Strip query params from hash for matching (OAuth callback appends ?oauth_success=true)

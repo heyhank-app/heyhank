@@ -44,6 +44,7 @@ const HelpPage = lazy(() => import("./components/HelpPage.js").then((m) => ({ de
 const AssistantPage = lazy(() => import("./components/AssistantPage.js").then((m) => ({ default: m.AssistantPage })));
 const MemoryPage = lazy(() => import("./components/MemoryPage.js").then((m) => ({ default: m.MemoryPage })));
 const BusinessPage = lazy(() => import("./components/BusinessPage.js").then((m) => ({ default: m.BusinessPage })));
+const SkillsMarketplace = lazy(() => import("./components/SkillsMarketplace.js").then((m) => ({ default: m.SkillsMarketplace })));
 
 
 function LazyFallback() {
@@ -95,6 +96,7 @@ export default function App() {
   const isMemoryPage = route.page === "memory";
   const isAssistantPage = route.page === "assistant";
   const isBusinessPage = route.page === "business";
+  const isSkillsPage = route.page === "skills";
   const isNewSessionPage = route.page === "new-session";
   const isSessionView = route.page === "session" || route.page === "new-session";
 
@@ -335,6 +337,12 @@ export default function App() {
           {isBusinessPage && (
             <div className="absolute inset-0">
               <Suspense fallback={<LazyFallback />}><BusinessPage embedded /></Suspense>
+            </div>
+          )}
+
+          {isSkillsPage && (
+            <div className="absolute inset-0">
+              <Suspense fallback={<LazyFallback />}><SkillsMarketplace embedded /></Suspense>
             </div>
           )}
 
