@@ -3,8 +3,8 @@
 </p>
 
 <h1 align="center">HeyHank</h1>
-<p align="center"><strong>Self-hosted web UI for running Claude Code and Codex agents.</strong></p>
-<p align="center">Multi-session management with streaming, tool call visibility, and permission control.</p>
+<p align="center"><strong>Self-hosted web UI for running Claude Code agents.</strong></p>
+<p align="center">Multi-session management with streaming, tool call visibility, and permission control. Codex CLI is also supported as a secondary backend.</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/heyhank"><img src="https://img.shields.io/npm/v/heyhank.svg" alt="npm version" /></a>
@@ -14,7 +14,7 @@
 
 ## Quick Start
 
-**Requirements:** [Bun](https://bun.sh) v1.0+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and/or [Codex](https://github.com/openai/codex) CLI.
+**Requirements:** [Bun](https://bun.sh) v1.0+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (primary). [Codex](https://github.com/openai/codex) CLI is optionally supported as a secondary backend.
 
 ```bash
 bunx heyhank
@@ -36,7 +36,8 @@ heyhank start
 
 ## Features
 
-- **Multi-Session Chat** — Run multiple Claude Code / Codex sessions simultaneously
+- **Multi-Session Chat** — Run multiple Claude Code sessions simultaneously (Codex as a secondary backend)
+- **Skill Marketplace** — Browse and install Claude Code skills from curated GitHub sources straight into `~/.claude/skills/`
 - **Gemini Live Voice Assistant** — Hands-free voice control with tool calling
 - **Scheduled Agents** — Cron-based agent automation
 - **Media Generation** — Image (Imagen 4) and video (Veo 3.1) generation
@@ -71,7 +72,7 @@ Browser (React)
   <-> ws://localhost:3456/ws/browser/:session
 HeyHank Server (Bun + Hono)
   <-> ws://localhost:3456/ws/cli/:session
-Claude Code / Codex CLI
+Claude Code CLI (primary)  /  Codex CLI (secondary)
 ```
 
 The server bridges the CLI's `--sdk-url` WebSocket (NDJSON) to a browser-friendly WebSocket.

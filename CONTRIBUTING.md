@@ -1,6 +1,8 @@
 # Contributing to HeyHank
 
-Thanks for your interest in contributing!
+Thanks for your interest in contributing! HeyHank is a self-hosted web UI
+for running Claude Code agents (with optional Codex support). All new
+features should target Claude Code first; Codex compatibility is best-effort.
 
 ## Getting Started
 
