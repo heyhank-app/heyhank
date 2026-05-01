@@ -3,6 +3,7 @@
 // Extracted from platform-routes.ts POST /gemini/tool-call.
 
 import * as assistantStore from "./assistant-store.js";
+import { readSkillContent, listInstalledSkills } from "./skill-discovery.js";
 import * as emailService from "./email-service.js";
 import * as calendarService from "./calendar-service.js";
 import { listAgents, createAgent } from "./agent-store.js";
@@ -25,6 +26,28 @@ export async function executeHankTool(
 
   try {
     switch (name) {
+      // ─── Skill Invocation ─────────────────────────────────────────
+      case "run_skill": {
+        const slug = (args?.slug as string) || "";
+        const input = (args?.input as string) || "";
+        if (!slug) return { error: "slug is required" };
+        const content = readSkillContent(slug);
+        if (!content) {
+          const available = listInstalledSkills().map((s) => s.slug).join(", ");
+          return { error: `Skill "${slug}" not found. Installed: ${available}` };
+        }
+        // Return the full SKILL.md so the LLM can follow the workflow in the
+        // current chat. Hank reads the skill's instructions and continues
+        // the multi-stage dialog with the user — no agent dispatch needed.
+        return {
+          ok: true,
+          slug,
+          input: input || null,
+          skill: content,
+          instruction: "Follow the SKILL.md instructions above. Ask the user for any inputs the skill requires (one stage at a time by default), and continue the workflow turn by turn.",
+        };
+      }
+
       // ─── Agent Orchestration ──────────────────────────────────────
       case "run_agent": {
         const agentQuery = (args?.agent as string) || "";

@@ -31,8 +31,30 @@ export interface PhoneContact {
 
 // ─── System Prompt Builder ──────────────────────────────────────────────────
 import { listProfiles as listStyleProfiles } from "./socialview/style-profiles.js";
+import { listInstalledSkills } from "./skill-discovery.js";
 
 export function buildSystemPrompt(assistantName: string, agents: AgentInfo[], recentConversations?: ConversationContext[], activeSessions?: ActiveSession[], userName?: string, contacts?: PhoneContact[], obsidianVaultPath?: string): string {
+  // Snapshot of installed Claude Code skills under ~/.claude/skills/. Hank
+  // can invoke any of these directly via the `run_skill` tool to handle
+  // multi-turn structured workflows (content plans, post writing, audits…)
+  // without delegating to a fire-and-forget agent run.
+  let skillsSection = "";
+  try {
+    const skills = listInstalledSkills().filter((s) => s.description);
+    if (skills.length > 0) {
+      const lines = skills.map((s) => "- " + s.slug + ": " + s.description).join("\n");
+      skillsSection = "\nINSTALLED SKILLS (invoke via `run_skill`):\n"
+        + "Skills are structured multi-stage workflows. PREFER calling `run_skill(slug)`\n"
+        + "over delegating to an agent when the user's request matches a skill's\n"
+        + "description — the skill produces a high-quality result and you can guide the\n"
+        + "user through it in this chat (multi-turn). After loading a skill, follow the\n"
+        + "skill's own instructions: ask any inputs it needs, run its stages, present\n"
+        + "its output. Use agents only for fire-and-forget async work that does not fit\n"
+        + "a skill.\n\n" + lines;
+    }
+  } catch {
+    // Skill discovery is best-effort.
+  }
   // Snapshot of available style personas (loaded from ~/.heyhank/socialview/style-profiles).
   // Hank only needs to know which handles exist so he can map a user-spoken name
   // (e.g. "Rene Remsik") to the canonical handle for `generate_content`'s
@@ -79,6 +101,7 @@ Keep your answers short and natural — you are a voice assistant, not a text bo
 
 You are the central assistant and orchestrator of the platform with the following capabilities:
 ${agentSection}
+${skillsSection}
 
 AGENT CONTROL:
 - create_agent: Create a new specialized agent when no existing agent fits the task.
@@ -330,6 +353,11 @@ KPI DASHBOARD:
 Use when the user says "define a KPI for...", "update my revenue KPI", "show KPI dashboard", "how are my metrics?", etc.
 
 CONTENT ENGINE (website analysis & content generation):
+These tools require a WEBSITE URL — only use them when the user provides or
+clearly references a specific website / company / product to analyze. For a
+generic content plan around a niche or topic (no specific website), prefer
+the content-30day-plan skill via run_skill instead.
+
 - analyze_website: Crawl a website and extract brand identity, business type, products/services, colors, images, and tone of voice. Use when user says "analyze this website", "check out this URL", etc.
 - create_content_strategy: Create a content marketing strategy based on website analysis. Includes content pillars, pain points, posting schedules, and customer journey mapping.
 - generate_content: Generate platform-optimized content pieces with hooks, copywriting frameworks (PAS, AIDA, BAB, StoryBrand), hashtags, and image prompts.
@@ -338,10 +366,12 @@ CONTENT ENGINE (website analysis & content generation):
 - generate_content_plan: Generate a complete multi-week content plan across platforms. Combines strategy + content + ads into one comprehensive plan.
 Use these tools when the user wants to:
 - Analyze a website or competitor
-- Create a content strategy
+- Create a content strategy from a specific website
 - Generate social media content based on a business website
 - Create ad campaigns
-- Plan content calendars
+- Plan content calendars FROM A SPECIFIC WEBSITE
+Do NOT ask for a URL when the user just wants ideas/posts for a topic or niche
+without referencing a specific website — use a skill instead.
 
 ${personasSection}
 
@@ -385,6 +415,24 @@ If the user asks "where is this saved?" or "where can I find my notes?", tell th
 // ─── Gemini Tool Declarations ───────────────────────────────────────────────
 const TOOL_DECLARATIONS = [{
   functionDeclarations: [
+    {
+      name: "run_skill",
+      description: "Load a Claude Code skill from ~/.claude/skills/<slug>/SKILL.md and follow its instructions in the current chat. Use this for structured multi-stage workflows (content plans, post writing, audits, code review etc.) — the skill output is returned to you, and you continue the workflow with the user (multi-turn). PREFER this over run_agent when the request matches a skill's description and benefits from interactive back-and-forth.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          slug: {
+            type: "STRING",
+            description: "Skill slug (the directory name under ~/.claude/skills/, e.g. 'content-30day-plan').",
+          },
+          input: {
+            type: "STRING",
+            description: "Optional initial input/context the skill should start with (e.g. niche, topic, file path).",
+          },
+        },
+        required: ["slug"],
+      },
+    },
     {
       name: "run_agent",
       description: "Run a configured agent by name or ID. This starts the agent with its full configuration (system prompt, model, permissions, working directory). Use this when the user asks to activate/start a specific agent like 'Max 2.0' or 'Coding Agent'. The agent will execute the given task autonomously.",
