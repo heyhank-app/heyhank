@@ -258,6 +258,58 @@ export function registerHankChatRoutes(api: Hono): void {
       systemPrompt += `\n\nUPLOADED FILES:\nThe user has uploaded the following files: ${uploadedFiles.map(f => `${f.name} (accessible at ${f.path})`).join(", ")}. Reference these when relevant.`;
     }
 
+    // ─── Active Skill Re-injection ────────────────────────────────────────
+    // Tool calls and tool_results are NOT persisted across HTTP turns
+    // (clientMessages only carries role+content). When a prior turn invoked
+    // run_skill, the SKILL.md content is gone from context on the next turn,
+    // so the LLM forgets the workflow and stalls on continuation phrases like
+    // "mache weiter". We mandate that every stage output begins with a
+    // marker [skill:<slug> stage:N/TOTAL] (see hank-tool-executor.ts run_skill
+    // instruction), and re-inject the skill content here when found.
+    try {
+      const markerRe = /\[skill:([a-zA-Z0-9._-]+)\s+stage:(\d+)\/(\d+)\]/;
+      let activeSlug = "";
+      let lastStage = 0;
+      let totalStages = 0;
+      // Walk assistant messages from newest to oldest; first marker wins.
+      for (let i = clientMessages.length - 1; i >= 0; i--) {
+        const m = clientMessages[i];
+        if (m.role !== "assistant") continue;
+        const text = typeof m.content === "string"
+          ? m.content
+          : (m.content?.filter(p => p.type === "text").map(p => p.text || "").join("\n") || "");
+        const match = text.match(markerRe);
+        if (match) {
+          activeSlug = match[1];
+          lastStage = parseInt(match[2], 10);
+          totalStages = parseInt(match[3], 10);
+          break;
+        }
+      }
+      if (activeSlug) {
+        const { readSkillContent } = await import("../skill-discovery.js");
+        const skillContent = readSkillContent(activeSlug);
+        if (skillContent) {
+          const nextStage = lastStage + 1;
+          systemPrompt += `\n\nACTIVE SKILL CONTEXT (re-injected — do not call run_skill again):\n`
+            + `You are currently executing the skill "${activeSlug}". `
+            + `The most recent stage produced was ${lastStage}/${totalStages}.\n\n`
+            + `If the user's latest message is a continuation signal (weiter / mache weiter / next / continue / fortfahren / ja / proceed / ok), `
+            + `IMMEDIATELY produce stage ${nextStage}/${totalStages}'s output following the skill instructions below. `
+            + `Begin the response with the marker line "[skill:${activeSlug} stage:${nextStage}/${totalStages}]" exactly, then a blank line, then the stage content.\n\n`
+            + `If the user asks to revise the previous stage, redo stage ${lastStage}/${totalStages} with the same marker.\n\n`
+            + `If the user asks something off-topic, answer naturally (the skill is paused, not aborted).\n\n`
+            + `DO NOT call run_skill again — the skill is already loaded. The skill's full SKILL.md follows:\n\n`
+            + `--- BEGIN SKILL.md (${activeSlug}) ---\n`
+            + skillContent
+            + `\n--- END SKILL.md ---`;
+          console.log(`[hank-chat] Re-injected skill context: ${activeSlug} (last stage ${lastStage}/${totalStages})`);
+        }
+      }
+    } catch (err) {
+      console.log(`[hank-chat] Skill re-injection failed: ${err}`);
+    }
+
     // Resolve provider config
     const providerConfig: StreamProviderConfig = {
       provider: providerName as any,

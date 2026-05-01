@@ -47,13 +47,20 @@ export async function executeHankTool(
           instruction:
             "You are now executing a multi-stage skill workflow. The SKILL.md content above defines the stages.\n\n"
             + "PROCESS:\n"
-            + "1. If the skill needs inputs and you don\'t have them all yet, ask the user (in ONE message, all required fields).\n"
-            + "2. Once inputs are clear, IMMEDIATELY produce Stage 1\'s output exactly as the skill specifies (tables, lists, structure).\n"
-            + "3. End each stage by briefly asking: \'Weiter zum nächsten Stage oder diesen überarbeiten?\'.\n"
-            + "4. When the user replies with continuation (weiter / next / continue / fortfahren / mache weiter / ja / proceed / ok), IMMEDIATELY produce the NEXT stage\'s output following the skill\'s instructions. DO NOT ask clarifying questions. DO NOT call run_skill again. DO NOT echo the user back. Just produce the next stage.\n"
-            + "5. Track which stage you are on by referring back to the skill\'s stage list (Stage 1, Stage 2, …). Mention the stage number in your output header.\n"
-            + "6. Continue until all stages are complete or the user stops you.\n\n"
-            + "CRITICAL: when the user signals continuation, your next message MUST start with the next stage\'s output. Do not ask 'kannst du fortfahren?' — that question is for the user to ask you, not the other way around.",
+            + "1. If the skill needs inputs and you don't have them all yet, ask the user (in ONE message, all required fields).\n"
+            + "2. Once inputs are clear, IMMEDIATELY produce Stage 1's output exactly as the skill specifies (tables, lists, structure).\n"
+            + "3. End each stage by briefly asking: 'Weiter zum nächsten Stage oder diesen überarbeiten?'.\n"
+            + "4. When the user replies with continuation (weiter / mache weiter / next / continue / fortfahren / ja / proceed / ok), IMMEDIATELY produce the NEXT stage's output. DO NOT ask clarifying questions. DO NOT call run_skill again. DO NOT echo the user back. Just produce the next stage.\n"
+            + "5. Continue until all stages are complete or the user stops you.\n\n"
+            + "MANDATORY STAGE HEADER FORMAT:\n"
+            + "Every stage output (Stage 1 through final) MUST begin its first line with this exact marker so the system can track skill progress across turns:\n"
+            + `    [skill:${slug} stage:N/TOTAL]\n`
+            + "Replace N with the current stage number and TOTAL with the total number of stages defined by the skill. Then continue with a normal markdown header (e.g. `## Stage N — Title`) and the stage content.\n\n"
+            + "Example first lines of a Stage 2 output:\n"
+            + `    [skill:${slug} stage:2/7]\n`
+            + "    ## Stage 2 — Generate 30 Posts\n"
+            + "    …\n\n"
+            + "The marker is parsed by the chat backend to re-inject this skill's instructions on subsequent turns. Without the marker, the skill loses state and the next stage cannot be produced. ALWAYS include it as the very first line of every stage's output.",
         };
       }
 
