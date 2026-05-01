@@ -75,17 +75,35 @@ beforeEach(() => {
 });
 
 describe("SkillsMarketplace render & accessibility", () => {
-  it("renders heading, source, skills, and passes an axe accessibility scan", async () => {
+  it("renders heading + skills and passes an axe accessibility scan", async () => {
     // Validates the component mounts with no a11y violations and renders
-    // the loaded source plus its skills in the default state.
+    // the loaded skills in the default state. With a single configured
+    // source the source picker card is intentionally hidden — see
+    // showSourcePicker in SkillsMarketplace.tsx.
     const { axe } = await import("vitest-axe");
     const { container } = render(<SkillsMarketplace embedded />);
-    await screen.findByRole("heading", { name: /Skill Marketplace/i });
-    await screen.findByText(SOURCE.name);
+    await screen.findByRole("heading", { name: /^Skills$/i });
     await screen.findByText(SKILL_A.name);
     await screen.findByText(SKILL_B.name);
+    // Single source: no source picker card should be rendered.
+    expect(screen.queryByText(SOURCE.name)).not.toBeInTheDocument();
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+
+  it("shows the source picker when more than one source is configured", async () => {
+    // With multiple sources the picker card is rendered so users can switch.
+    const SECOND_SOURCE = {
+      id: "another-source",
+      name: "Another Source",
+      owner: "Someone Else",
+      url: "https://github.com/example/skills",
+      description: "Another marketplace",
+    };
+    mockMarketplaceListSources.mockResolvedValueOnce([SOURCE, SECOND_SOURCE]);
+    render(<SkillsMarketplace embedded />);
+    await screen.findByText(SOURCE.name);
+    expect(screen.getByText(SECOND_SOURCE.name)).toBeInTheDocument();
   });
 });
 
@@ -139,7 +157,9 @@ describe("SkillsMarketplace behavior", () => {
     await waitFor(() => {
       expect(mockListSkills).toHaveBeenCalledTimes(2);
     });
-    await screen.findByText(/Installed/i);
+    // The green "Installed" status badge appears next to the skill row.
+    // Use exact match to avoid clashing with the "Installed (N)" tab button.
+    await screen.findByText("Installed");
   });
 
   it("shows Update + Uninstall actions for already-installed skills", async () => {
@@ -179,6 +199,32 @@ describe("SkillsMarketplace behavior", () => {
       expect(mockDeleteSkill).toHaveBeenCalledWith(SKILL_A.slug);
     });
     confirmSpy.mockRestore();
+  });
+
+  it("Installed tab shows every locally-installed skill regardless of source", async () => {
+    // The Installed tab lists all skills under ~/.claude/skills/, including
+    // ones that didn't come from a configured marketplace source. This is
+    // the user's single pane of glass for managing installations.
+    const FOREIGN_SKILL = {
+      slug: "manual-skill",
+      name: "Manual Skill",
+      description: "Installed manually, not from any source",
+      path: "/root/.claude/skills/manual-skill",
+    };
+    mockListSkills.mockResolvedValueOnce([
+      { slug: SKILL_A.slug, name: SKILL_A.name, description: SKILL_A.description, path: "/p" },
+      FOREIGN_SKILL,
+    ]);
+    render(<SkillsMarketplace embedded />);
+    await screen.findByText(SKILL_A.name);
+
+    // Switch to Installed tab.
+    fireEvent.click(screen.getByRole("tab", { name: /^Installed/i }));
+
+    expect(screen.getByText(FOREIGN_SKILL.name)).toBeInTheDocument();
+    expect(screen.getByText(FOREIGN_SKILL.path)).toBeInTheDocument();
+    // Available skills that are NOT installed should not appear here.
+    expect(screen.queryByText(SKILL_B.name)).not.toBeInTheDocument();
   });
 
   it("shows an error banner when the marketplace skills endpoint fails", async () => {

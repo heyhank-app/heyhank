@@ -27,7 +27,10 @@ interface InstalledSkill {
   path: string;
 }
 
+type Tab = "available" | "installed";
+
 export function SkillsMarketplace({ embedded: _embedded }: SkillsMarketplaceProps) {
+  const [tab, setTab] = useState<Tab>("available");
   const [sources, setSources] = useState<Source[]>([]);
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
   const [skills, setSkills] = useState<MarketplaceSkill[]>([]);
@@ -77,7 +80,7 @@ export function SkillsMarketplace({ embedded: _embedded }: SkillsMarketplaceProp
 
   const installedSlugs = useMemo(() => new Set(installed.map((s) => s.slug)), [installed]);
 
-  const filteredSkills = useMemo(() => {
+  const filteredAvailableSkills = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return skills;
     return skills.filter(
@@ -87,6 +90,17 @@ export function SkillsMarketplace({ embedded: _embedded }: SkillsMarketplaceProp
         s.description.toLowerCase().includes(q),
     );
   }, [skills, search]);
+
+  const filteredInstalledSkills = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return installed;
+    return installed.filter(
+      (s) =>
+        s.slug.toLowerCase().includes(q) ||
+        s.name.toLowerCase().includes(q) ||
+        s.description.toLowerCase().includes(q),
+    );
+  }, [installed, search]);
 
   async function refreshInstalled(): Promise<void> {
     try {
@@ -127,28 +141,57 @@ export function SkillsMarketplace({ embedded: _embedded }: SkillsMarketplaceProp
     }
   }
 
-  const activeSource = sources.find((s) => s.id === activeSourceId) ?? null;
+  // Show the source picker only when more than one source is configured.
+  // With a single source the prominent owner card is just visual noise.
+  const showSourcePicker = sources.length > 1;
 
   return (
     <div className="absolute inset-0 overflow-auto bg-cc-bg text-cc-fg">
       <div className="max-w-5xl mx-auto p-6">
-        <header className="mb-6">
-          <h1 className="text-xl font-semibold mb-1">Skill Marketplace</h1>
+        <header className="mb-4">
+          <h1 className="text-xl font-semibold mb-1">Skills</h1>
           <p className="text-sm text-cc-muted">
-            Install Claude Code skills from curated GitHub repositories. Skills are downloaded to{" "}
-            <code className="text-xs bg-cc-card px-1 py-0.5 rounded">~/.claude/skills/</code> and loaded
-            automatically by Claude Code.
+            Browse and install Claude Code skills, or manage what's already in{" "}
+            <code className="text-xs bg-cc-card px-1 py-0.5 rounded">~/.claude/skills/</code>.
           </p>
         </header>
 
-        {/* Source selector */}
-        <section aria-labelledby="sources-heading" className="mb-6">
-          <h2 id="sources-heading" className="text-sm font-semibold mb-2">
-            Sources
-          </h2>
-          {sources.length === 0 ? (
-            <div className="text-sm text-cc-muted">Loading sources…</div>
-          ) : (
+        {/* Tab switcher */}
+        <div role="tablist" aria-label="Skills view" className="mb-4 flex gap-1 border-b border-cc-border">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "available"}
+            onClick={() => setTab("available")}
+            className={`px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${
+              tab === "available"
+                ? "border-cc-accent text-cc-fg font-medium"
+                : "border-transparent text-cc-muted hover:text-cc-fg"
+            }`}
+          >
+            Marketplace
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "installed"}
+            onClick={() => setTab("installed")}
+            className={`px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${
+              tab === "installed"
+                ? "border-cc-accent text-cc-fg font-medium"
+                : "border-transparent text-cc-muted hover:text-cc-fg"
+            }`}
+          >
+            Installed ({installed.length})
+          </button>
+        </div>
+
+        {/* Source selector — only visible on Marketplace tab when multiple sources exist. */}
+        {tab === "available" && showSourcePicker && (
+          <section aria-labelledby="sources-heading" className="mb-6">
+            <h2 id="sources-heading" className="text-sm font-semibold mb-2">
+              Sources
+            </h2>
             <div className="flex flex-wrap gap-2">
               {sources.map((src) => {
                 const active = src.id === activeSourceId;
@@ -170,22 +213,8 @@ export function SkillsMarketplace({ embedded: _embedded }: SkillsMarketplaceProp
                 );
               })}
             </div>
-          )}
-          {activeSource && (
-            <div className="mt-3 text-xs text-cc-muted flex items-center gap-2">
-              <a
-                href={activeSource.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline hover:text-cc-fg"
-              >
-                View source on GitHub
-              </a>
-              {activeSource.description && <span aria-hidden="true">·</span>}
-              {activeSource.description && <span>{activeSource.description}</span>}
-            </div>
-          )}
-        </section>
+          </section>
+        )}
 
         {/* Search */}
         <div className="mb-4">
@@ -212,77 +241,131 @@ export function SkillsMarketplace({ embedded: _embedded }: SkillsMarketplaceProp
           </div>
         )}
 
-        {/* Skills list */}
-        <section aria-labelledby="skills-heading">
-          <h2 id="skills-heading" className="text-sm font-semibold mb-2">
-            Available skills{loadingSkills ? " (loading…)" : ` (${filteredSkills.length})`}
-          </h2>
+        {/* Marketplace tab body */}
+        {tab === "available" && (
+          <section aria-labelledby="skills-heading">
+            <h2 id="skills-heading" className="text-sm font-semibold mb-2">
+              Available skills{loadingSkills ? " (loading…)" : ` (${filteredAvailableSkills.length})`}
+            </h2>
 
-          {loadingSkills ? (
-            <div className="text-sm text-cc-muted">Fetching skills…</div>
-          ) : filteredSkills.length === 0 ? (
-            <div className="text-sm text-cc-muted">No skills match your search.</div>
-          ) : (
-            <ul className="space-y-2">
-              {filteredSkills.map((skill) => {
-                const isInstalled = installedSlugs.has(skill.slug);
-                const isBusy = busySlug === skill.slug;
-                return (
-                  <li
-                    key={skill.slug}
-                    className="px-3 py-3 rounded-md border border-cc-border bg-cc-card flex items-start gap-3"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium">{skill.name}</span>
-                        <code className="text-xs text-cc-muted">{skill.slug}</code>
-                        {isInstalled && (
-                          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-green-500/15 text-green-400">
-                            Installed
-                          </span>
+            {loadingSkills ? (
+              <div className="text-sm text-cc-muted">Fetching skills…</div>
+            ) : filteredAvailableSkills.length === 0 ? (
+              <div className="text-sm text-cc-muted">No skills match your search.</div>
+            ) : (
+              <ul className="space-y-2">
+                {filteredAvailableSkills.map((skill) => {
+                  const isInstalled = installedSlugs.has(skill.slug);
+                  const isBusy = busySlug === skill.slug;
+                  return (
+                    <li
+                      key={skill.slug}
+                      className="px-3 py-3 rounded-md border border-cc-border bg-cc-card flex items-start gap-3"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium">{skill.name}</span>
+                          <code className="text-xs text-cc-muted">{skill.slug}</code>
+                          {isInstalled && (
+                            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-green-500/15 text-green-400">
+                              Installed
+                            </span>
+                          )}
+                        </div>
+                        {skill.description && (
+                          <p className="text-sm text-cc-muted mt-1 line-clamp-3">{skill.description}</p>
                         )}
                       </div>
-                      {skill.description && (
-                        <p className="text-sm text-cc-muted mt-1 line-clamp-3">{skill.description}</p>
-                      )}
-                    </div>
-                    <div className="flex flex-col gap-1.5 shrink-0">
-                      {isInstalled ? (
-                        <>
+                      <div className="flex flex-col gap-1.5 shrink-0">
+                        {isInstalled ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => handleInstall(skill, true)}
+                              className="px-3 py-1 text-xs rounded border border-cc-border hover:bg-cc-hover disabled:opacity-50"
+                            >
+                              {isBusy ? "Updating…" : "Update"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => handleUninstall(skill.slug)}
+                              className="px-3 py-1 text-xs rounded border border-red-500/40 text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+                            >
+                              {isBusy ? "Removing…" : "Uninstall"}
+                            </button>
+                          </>
+                        ) : (
                           <button
                             type="button"
                             disabled={isBusy}
-                            onClick={() => handleInstall(skill, true)}
-                            className="px-3 py-1 text-xs rounded border border-cc-border hover:bg-cc-hover disabled:opacity-50"
+                            onClick={() => handleInstall(skill, false)}
+                            className="px-3 py-1 text-xs rounded bg-cc-accent text-white hover:opacity-90 disabled:opacity-50"
                           >
-                            {isBusy ? "Updating…" : "Update"}
+                            {isBusy ? "Installing…" : "Install"}
                           </button>
-                          <button
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() => handleUninstall(skill.slug)}
-                            className="px-3 py-1 text-xs rounded border border-red-500/40 text-red-400 hover:bg-red-500/10 disabled:opacity-50"
-                          >
-                            {isBusy ? "Removing…" : "Uninstall"}
-                          </button>
-                        </>
-                      ) : (
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        )}
+
+        {/* Installed tab body */}
+        {tab === "installed" && (
+          <section aria-labelledby="installed-heading">
+            <h2 id="installed-heading" className="text-sm font-semibold mb-2">
+              Installed skills ({filteredInstalledSkills.length})
+            </h2>
+
+            {filteredInstalledSkills.length === 0 ? (
+              <div className="text-sm text-cc-muted">
+                {installed.length === 0
+                  ? "No skills installed yet. Switch to the Marketplace tab to browse."
+                  : "No installed skills match your search."}
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {filteredInstalledSkills.map((skill) => {
+                  const isBusy = busySlug === skill.slug;
+                  return (
+                    <li
+                      key={skill.slug}
+                      className="px-3 py-3 rounded-md border border-cc-border bg-cc-card flex items-start gap-3"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium">{skill.name}</span>
+                          <code className="text-xs text-cc-muted">{skill.slug}</code>
+                        </div>
+                        {skill.description && (
+                          <p className="text-sm text-cc-muted mt-1 line-clamp-3">{skill.description}</p>
+                        )}
+                        <div className="text-[11px] text-cc-muted mt-1 truncate" title={skill.path}>
+                          {skill.path}
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-1.5 shrink-0">
                         <button
                           type="button"
                           disabled={isBusy}
-                          onClick={() => handleInstall(skill, false)}
-                          className="px-3 py-1 text-xs rounded bg-cc-accent text-white hover:opacity-90 disabled:opacity-50"
+                          onClick={() => handleUninstall(skill.slug)}
+                          className="px-3 py-1 text-xs rounded border border-red-500/40 text-red-400 hover:bg-red-500/10 disabled:opacity-50"
                         >
-                          {isBusy ? "Installing…" : "Install"}
+                          {isBusy ? "Removing…" : "Uninstall"}
                         </button>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        )}
       </div>
     </div>
   );
