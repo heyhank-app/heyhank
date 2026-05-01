@@ -18,6 +18,21 @@ const CLI_CONNECT_TIMEOUT_MS = 30_000;
 /** Poll interval when waiting for CLI connection */
 const CLI_CONNECT_POLL_MS = 500;
 
+/** Skill-aware preamble for Claude agents (see skillRoutingEnabled below). */
+const SKILL_ROUTING_PREAMBLE = [
+  "[Skill-aware mode]",
+  "You have access to user-installed Claude Code skills via the Skill tool. Skills are structured multi-stage workflows for specific tasks (content plans, post writing, audits, code review, etc.) — their descriptions are listed in your system context.",
+  "",
+  "BEFORE following the specialized instructions below, check whether the user's request matches a skill's description. If yes, invoke that skill via the Skill tool instead of executing custom logic.",
+  "",
+  "The specialized instructions below apply when no skill is a better fit.",
+  "",
+  "---",
+  "",
+  "",
+].join("\n");
+
+
 export interface ExecuteAgentOptions {
   force?: boolean;
   triggerType?: "manual" | "webhook" | "schedule";
@@ -171,12 +186,24 @@ export class AgentExecutor {
           `but agent sessions always run with bypassPermissions`,
         );
       }
+      // Skill-aware routing: when enabled (default for Claude backends),
+      // ensure the `Skill` tool is in allowedTools so the agent can invoke
+      // any user-installed skill from ~/.claude/skills/ when its description
+      // matches the user's request.
+      const skillRoutingEnabled = agent.backendType === "claude" && agent.skillRouting !== false;
+      let effectiveAllowedTools = agent.allowedTools;
+      if (skillRoutingEnabled && Array.isArray(agent.allowedTools) && agent.allowedTools.length > 0) {
+        if (!agent.allowedTools.includes("Skill")) {
+          effectiveAllowedTools = [...agent.allowedTools, "Skill"];
+        }
+      }
+
       const sessionInfo = this.launcher.launch({
         model: agent.model,
         permissionMode: "bypassPermissions",
         cwd,
         env: envVars,
-        allowedTools: agent.allowedTools,
+        allowedTools: effectiveAllowedTools,
         backendType: agent.backendType,
         codexInternetAccess: agent.backendType === "codex" ? (agent.codexInternetAccess ?? true) : undefined,
         codexSandbox: agent.backendType === "codex"
@@ -219,6 +246,13 @@ export class AgentExecutor {
         resolvedPrompt = resolvedPrompt.replace(/\{\{input\}\}/g, input);
       } else {
         resolvedPrompt = resolvedPrompt.replace(/\{\{input\}\}/g, "");
+      }
+
+      // Skill-aware preamble: routes attention to matching skills before
+      // following specialized instructions. Skill descriptions are already
+      // in the CLI system context; this just teaches the agent to consult them.
+      if (skillRoutingEnabled) {
+        resolvedPrompt = SKILL_ROUTING_PREAMBLE + resolvedPrompt;
       }
 
       // Send the prompt with agent prefix for traceability

@@ -49,6 +49,17 @@ export interface AgentConfig {
   // ── Skills ──
   /** Skill slugs to attach (from ~/.claude/skills/) */
   skills?: string[];
+  /**
+   * Skill-aware routing. When true (default), the agent is prepended with a
+   * generic skill-discovery preamble and the `Skill` tool is added to its
+   * allowedTools, so it can invoke any user-installed skill from
+   * ~/.claude/skills/ when a skill description matches the user's request.
+   *
+   * Only applies to Claude backends (Codex/Ollama/etc. don't support skills).
+   * Set to false for agents that must follow strict, scripted instructions
+   * without skill detours (e.g. low-level coordinator agents).
+   */
+  skillRouting?: boolean;
 
   // ── Docker ──
   /** Optional Docker container configuration */
