@@ -44,7 +44,16 @@ export async function executeHankTool(
           slug,
           input: input || null,
           skill: content,
-          instruction: "Follow the SKILL.md instructions above. Ask the user for any inputs the skill requires (one stage at a time by default), and continue the workflow turn by turn.",
+          instruction:
+            "You are now executing a multi-stage skill workflow. The SKILL.md content above defines the stages.\n\n"
+            + "PROCESS:\n"
+            + "1. If the skill needs inputs and you don\'t have them all yet, ask the user (in ONE message, all required fields).\n"
+            + "2. Once inputs are clear, IMMEDIATELY produce Stage 1\'s output exactly as the skill specifies (tables, lists, structure).\n"
+            + "3. End each stage by briefly asking: \'Weiter zum nächsten Stage oder diesen überarbeiten?\'.\n"
+            + "4. When the user replies with continuation (weiter / next / continue / fortfahren / mache weiter / ja / proceed / ok), IMMEDIATELY produce the NEXT stage\'s output following the skill\'s instructions. DO NOT ask clarifying questions. DO NOT call run_skill again. DO NOT echo the user back. Just produce the next stage.\n"
+            + "5. Track which stage you are on by referring back to the skill\'s stage list (Stage 1, Stage 2, …). Mention the stage number in your output header.\n"
+            + "6. Continue until all stages are complete or the user stops you.\n\n"
+            + "CRITICAL: when the user signals continuation, your next message MUST start with the next stage\'s output. Do not ask 'kannst du fortfahren?' — that question is for the user to ask you, not the other way around.",
         };
       }
 
