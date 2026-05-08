@@ -306,7 +306,11 @@ describe("launch", () => {
   });
 
   it("passes branching flags when resumeSessionAt/forkSession are provided", () => {
-    // These flags enable starting a new branch of work from a prior session point.
+    // The "Branch from session" UI passes a *session* UUID via
+    // resumeSessionAt (not a message UUID). The launcher must map that to
+    // `--resume <id>` rather than `--resume-session-at <id>`, because the
+    // CLI rejects the latter without a paired `--resume`. forkSession=true
+    // additionally appends `--fork-session` for the fork case.
     launcher.launch({
       cwd: "/tmp",
       resumeSessionAt: "prior-session-123",
@@ -314,10 +318,29 @@ describe("launch", () => {
     });
 
     const [cmdAndArgs] = mockSpawn.mock.calls[0];
-    const resumeAtIdx = cmdAndArgs.indexOf("--resume-session-at");
-    expect(resumeAtIdx).toBeGreaterThan(-1);
-    expect(cmdAndArgs[resumeAtIdx + 1]).toBe("prior-session-123");
+    const resumeIdx = cmdAndArgs.indexOf("--resume");
+    expect(resumeIdx).toBeGreaterThan(-1);
+    expect(cmdAndArgs[resumeIdx + 1]).toBe("prior-session-123");
     expect(cmdAndArgs).toContain("--fork-session");
+    // The misleading legacy flag must not be emitted — it would crash the CLI.
+    expect(cmdAndArgs).not.toContain("--resume-session-at");
+  });
+
+  it("emits --resume without --fork-session for the Continue case", () => {
+    // forkSession=false (Continue) should resume into the same linear thread
+    // — `--resume <id>` only, no `--fork-session`.
+    launcher.launch({
+      cwd: "/tmp",
+      resumeSessionAt: "prior-session-456",
+      forkSession: false,
+    });
+
+    const [cmdAndArgs] = mockSpawn.mock.calls[0];
+    const resumeIdx = cmdAndArgs.indexOf("--resume");
+    expect(resumeIdx).toBeGreaterThan(-1);
+    expect(cmdAndArgs[resumeIdx + 1]).toBe("prior-session-456");
+    expect(cmdAndArgs).not.toContain("--fork-session");
+    expect(cmdAndArgs).not.toContain("--resume-session-at");
   });
 
   it("resolves binary path via resolveBinary when not absolute", () => {
@@ -770,6 +793,75 @@ describe("relaunch", () => {
     const result = await launcher.relaunch("nonexistent");
     expect(result.ok).toBe(false);
     expect(result.error).toContain("Session not found");
+  });
+
+  it("falls back to resumeSessionAt when cliSessionId is not yet known", async () => {
+    // Repro of the "Reconnect does nothing" bug after Branch from session.
+    // If the initial spawn crashed before sending system/init, cliSessionId
+    // is still empty. Reconnect (which calls relaunch) must still resume
+    // the user's chosen branch target rather than spawning a fresh session
+    // with no resume context at all.
+    let resolveFirst: (code: number) => void;
+    const firstProc = {
+      pid: 11111,
+      kill: vi.fn(() => { resolveFirst(0); }),
+      exited: new Promise<number>((r) => { resolveFirst = r; }),
+      stdout: null,
+      stderr: null,
+    };
+    mockSpawn.mockReturnValueOnce(firstProc);
+
+    launcher.launch({
+      cwd: "/tmp/project",
+      resumeSessionAt: "branch-target-uuid",
+      forkSession: false,
+    });
+    // NOTE: deliberately do NOT call setCLISessionId — simulate the
+    // pre-init crash state.
+
+    const secondProc = createMockProc(22222);
+    mockSpawn.mockReturnValueOnce(secondProc);
+
+    const result = await launcher.relaunch("test-session-id");
+    expect(result).toEqual({ ok: true });
+
+    const [cmdAndArgs] = mockSpawn.mock.calls[1];
+    const resumeIdx = cmdAndArgs.indexOf("--resume");
+    expect(resumeIdx).toBeGreaterThan(-1);
+    expect(cmdAndArgs[resumeIdx + 1]).toBe("branch-target-uuid");
+    // The legacy flag must never be re-emitted on relaunch.
+    expect(cmdAndArgs).not.toContain("--resume-session-at");
+  });
+
+  it("prefers cliSessionId over resumeSessionAt once the CLI has reported it", async () => {
+    // After the first system/init, cliSessionId is the authoritative resume
+    // target — relaunch must use that and stop forking.
+    let resolveFirst: (code: number) => void;
+    const firstProc = {
+      pid: 11111,
+      kill: vi.fn(() => { resolveFirst(0); }),
+      exited: new Promise<number>((r) => { resolveFirst = r; }),
+      stdout: null,
+      stderr: null,
+    };
+    mockSpawn.mockReturnValueOnce(firstProc);
+
+    launcher.launch({
+      cwd: "/tmp/project",
+      resumeSessionAt: "branch-target-uuid",
+      forkSession: true,
+    });
+    launcher.setCLISessionId("test-session-id", "post-fork-cli-uuid");
+
+    const secondProc = createMockProc(22222);
+    mockSpawn.mockReturnValueOnce(secondProc);
+
+    await launcher.relaunch("test-session-id");
+
+    const [cmdAndArgs] = mockSpawn.mock.calls[1];
+    const resumeIdx = cmdAndArgs.indexOf("--resume");
+    expect(cmdAndArgs[resumeIdx + 1]).toBe("post-fork-cli-uuid");
+    expect(cmdAndArgs).not.toContain("--fork-session");
   });
 
   it("returns error when container was removed externally", async () => {

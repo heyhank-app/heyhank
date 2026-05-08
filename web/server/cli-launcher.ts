@@ -444,11 +444,20 @@ export class CliLauncher {
         env: runtimeEnv,
       });
     } else {
+      // Prefer the CLI's reported internal session id (populated after the
+      // first system/init). Fall back to the user-chosen branch-from-session
+      // target, so that a Reconnect after an initial-spawn crash still
+      // resumes the intended session instead of starting a fresh one.
+      const resumeSessionId = info.cliSessionId || info.resumeSessionAt;
       this.spawnCLI(sessionId, info, {
         model: info.model,
         permissionMode: info.permissionMode,
         cwd: info.cwd,
-        resumeSessionId: info.cliSessionId,
+        resumeSessionId,
+        // Preserve fork intent only while we don't yet have a post-fork
+        // cliSessionId. Once cliSessionId is known, we resume into the fork
+        // directly and must not re-fork.
+        forkSession: !info.cliSessionId && info.forkSession ? true : false,
         containerId: info.containerId,
         containerName: info.containerName,
         containerImage: info.containerImage,
@@ -544,17 +553,26 @@ export class CliLauncher {
         args.push("--allowedTools", tool);
       }
     }
-    if (options.resumeSessionAt) {
-      args.push("--resume-session-at", options.resumeSessionAt);
+    // The "Branch from session" UI passes the parent CLI session UUID via
+    // `resumeSessionAt`. Despite the field name, this is a *session* UUID,
+    // not the message UUID that the CLI's `--resume-session-at` flag
+    // expects — and that flag also requires `--resume <sessionId>` to be
+    // present, so emitting it alone makes the CLI exit immediately with
+    // "Error: --resume-session-at requires --resume". Map this to
+    // `--resume <id>` instead, plus `--fork-session` for the Fork case.
+    //
+    // `resumeSessionId` (set by the relaunch path with the CLI's reported
+    // internal session id) takes precedence when both are present, since
+    // the post-init id is the authoritative resume target.
+    const resumeTarget = options.resumeSessionId || options.resumeSessionAt;
+    if (resumeTarget) {
+      args.push("--resume", resumeTarget);
     }
-    if (options.forkSession) {
+    if (options.forkSession && !options.resumeSessionId) {
+      // Only emit `--fork-session` on the *initial* spawn after the user
+      // chose Fork. Subsequent relaunches use the post-fork CLI session id
+      // via `resumeSessionId` and must not fork again.
       args.push("--fork-session");
-    }
-
-    // Always pass -p "" for headless mode. When relaunching, also pass --resume
-    // to restore the CLI's conversation context.
-    if (options.resumeSessionId) {
-      args.push("--resume", options.resumeSessionId);
     }
 
     args.push("-p", "");
