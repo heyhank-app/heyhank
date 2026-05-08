@@ -54,6 +54,11 @@ vi.mock("./auto-namer.js", () => ({
   generateSessionTitle: vi.fn(async () => "Test Title"),
 }));
 
+const mockDeleteClaudeSessionTranscript = vi.hoisted(() => vi.fn(() => ({ deleted: [] })));
+vi.mock("./claude-session-discovery.js", () => ({
+  deleteClaudeSessionTranscript: mockDeleteClaudeSessionTranscript,
+}));
+
 const mockImagePullIsReady = vi.hoisted(() => vi.fn(() => true));
 const mockImagePullGetState = vi.hoisted(() => vi.fn(() => ({ image: "", status: "ready", progress: [] })));
 const mockImagePullEnsureImage = vi.hoisted(() => vi.fn());
@@ -1095,6 +1100,53 @@ describe("SessionOrchestrator", () => {
       await orchestrator.deleteSession("s1");
 
       expect(containerManager.removeContainer).toHaveBeenCalledWith("s1");
+    });
+
+    // Bug fix: previously deleted sessions reappeared in "Branch from session"
+    // because the underlying ~/.claude/projects/<dir>/<cliSessionId>.jsonl file
+    // was never removed. deleteSession must capture cliSessionId BEFORE
+    // launcher.removeSession() wipes it from memory and then nuke the transcript.
+    it("deletes the underlying Claude transcript file for claude sessions", async () => {
+      mockDeleteClaudeSessionTranscript.mockClear();
+      deps.launcher.getSession.mockReturnValue({
+        sessionId: "s1",
+        cliSessionId: "cli-uuid-1",
+        backendType: "claude",
+      });
+
+      await orchestrator.deleteSession("s1");
+
+      expect(mockDeleteClaudeSessionTranscript).toHaveBeenCalledWith("cli-uuid-1");
+    });
+
+    // Codex stores its history elsewhere — we must not touch ~/.claude/projects/
+    // for Codex-backed sessions.
+    it("does NOT delete a Claude transcript for codex sessions", async () => {
+      mockDeleteClaudeSessionTranscript.mockClear();
+      deps.launcher.getSession.mockReturnValue({
+        sessionId: "s1",
+        cliSessionId: "cli-uuid-1",
+        backendType: "codex",
+      });
+
+      await orchestrator.deleteSession("s1");
+
+      expect(mockDeleteClaudeSessionTranscript).not.toHaveBeenCalled();
+    });
+
+    // No cliSessionId means the CLI never reported its internal session id
+    // (e.g. session never reached the "system/init" message). Nothing to
+    // delete on disk, but we still must not throw.
+    it("skips transcript deletion when cliSessionId is missing", async () => {
+      mockDeleteClaudeSessionTranscript.mockClear();
+      deps.launcher.getSession.mockReturnValue({
+        sessionId: "s1",
+        backendType: "claude",
+      });
+
+      await orchestrator.deleteSession("s1");
+
+      expect(mockDeleteClaudeSessionTranscript).not.toHaveBeenCalled();
     });
   });
 

@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, readdirSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -154,4 +154,77 @@ export function discoverClaudeSessions(
       // Defensive fallback if older records don't carry sessionId in JSONL.
       sessionId: session.sessionId || basename(session.sourceFile, ".jsonl"),
     }));
+}
+
+export interface DeleteClaudeSessionTranscriptOptions {
+  projectsRoot?: string;
+}
+
+export interface DeleteClaudeSessionTranscriptResult {
+  deleted: string[];
+}
+
+/**
+ * Delete the Claude Code transcript file (and any sidecar directory) for a
+ * given CLI session ID. Claude Code stores transcripts under
+ * `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl` and may also create a
+ * `<sessionId>/` directory next to it. We walk all project subdirs because
+ * the same session can occasionally appear under multiple encoded-cwd dirs
+ * (e.g. when the working directory was renamed mid-session).
+ *
+ * Safe to call with a session that has no transcript on disk — returns an
+ * empty `deleted` list in that case.
+ */
+export function deleteClaudeSessionTranscript(
+  sessionId: string,
+  options: DeleteClaudeSessionTranscriptOptions = {},
+): DeleteClaudeSessionTranscriptResult {
+  const deleted: string[] = [];
+  if (!sessionId || typeof sessionId !== "string") return { deleted };
+
+  const projectsRoot = options.projectsRoot
+    || process.env.CLAUDE_PROJECTS_DIR
+    || join(homedir(), ".claude", "projects");
+
+  if (!existsSync(projectsRoot)) return { deleted };
+
+  let projectDirs: string[] = [];
+  try {
+    projectDirs = readdirSync(projectsRoot);
+  } catch {
+    return { deleted };
+  }
+
+  for (const projectDir of projectDirs) {
+    const projectPath = join(projectsRoot, projectDir);
+    try {
+      if (!statSync(projectPath).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+
+    const filePath = join(projectPath, `${sessionId}.jsonl`);
+    if (existsSync(filePath)) {
+      try {
+        unlinkSync(filePath);
+        deleted.push(filePath);
+      } catch {
+        // Skip; another process may have removed it concurrently.
+      }
+    }
+
+    const sidecarPath = join(projectPath, sessionId);
+    if (existsSync(sidecarPath)) {
+      try {
+        if (statSync(sidecarPath).isDirectory()) {
+          rmSync(sidecarPath, { recursive: true, force: true });
+          deleted.push(sidecarPath);
+        }
+      } catch {
+        // no-op
+      }
+    }
+  }
+
+  return { deleted };
 }

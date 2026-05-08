@@ -20,6 +20,7 @@ import { heyHankBus } from "./event-bus.js";
 import { metricsCollector } from "./metrics-collector.js";
 import { log } from "./logger.js";
 import { authEvents, attemptRefresh } from "./claude-auth-monitor.js";
+import { deleteClaudeSessionTranscript } from "./claude-session-discovery.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -650,6 +651,12 @@ export class SessionOrchestrator {
   // ── Delete ─────────────────────────────────────────────────────────────────
 
   async deleteSession(sessionId: string): Promise<DeleteSessionResult> {
+    // Capture CLI session info BEFORE removeSession() wipes it from memory —
+    // we need cliSessionId to find the Claude Code transcript on disk.
+    const sessionInfo = this.launcher.getSession(sessionId);
+    const cliSessionId = sessionInfo?.cliSessionId;
+    const backendType = sessionInfo?.backendType;
+
     await this.launcher.kill(sessionId);
     containerManager.removeContainer(sessionId);
     const worktreeResult = this.cleanupWorktree(sessionId, true);
@@ -659,6 +666,29 @@ export class SessionOrchestrator {
     this.autoRelaunchCounts.delete(sessionId);
     this.relaunchExhaustedNotified.delete(sessionId);
     this.relaunchingSet.delete(sessionId);
+
+    // Delete the Claude Code transcript file so the session does not reappear
+    // in the "Branch from session" picker via discoverClaudeSessions.
+    // Only applies to Claude Code (Codex stores its history elsewhere).
+    if (backendType === "claude" && cliSessionId) {
+      try {
+        const result = deleteClaudeSessionTranscript(cliSessionId);
+        if (result.deleted.length > 0) {
+          log.info("session-orchestrator", "deleted claude transcript", {
+            sessionId,
+            cliSessionId,
+            paths: result.deleted,
+          });
+        }
+      } catch (err) {
+        log.warn("session-orchestrator", "failed to delete claude transcript", {
+          sessionId,
+          cliSessionId,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     return { ok: true, worktree: worktreeResult };
   }
 
