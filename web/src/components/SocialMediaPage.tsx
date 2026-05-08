@@ -800,6 +800,8 @@ function DraftsTab({ refreshKey, showMessage, onEdit, onRefresh }: {
 }) {
   const [drafts, setDrafts] = useState<SocialPost[]>([]);
   const [publishing, setPublishing] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const loadDrafts = useCallback(async () => {
     try {
@@ -809,6 +811,58 @@ function DraftsTab({ refreshKey, showMessage, onEdit, onRefresh }: {
   }, []);
 
   useEffect(() => { loadDrafts(); }, [loadDrafts, refreshKey]);
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  const visibleIds = drafts.map((d) => d.id);
+  const visibleSelectedCount = visibleIds.filter((id) => selected.has(id)).length;
+  const allVisibleSelected = visibleIds.length > 0 && visibleSelectedCount === visibleIds.length;
+
+  function toggleSelectAllVisible() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id));
+      else visibleIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+
+  /**
+   * Run an async action for every selected draft sequentially. Sequential
+   * (not Promise.all) to avoid hammering the backend and to keep errors
+   * attributable to a specific draft.
+   */
+  async function runBulk(action: (id: string) => Promise<unknown>, verb: string) {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    let ok = 0;
+    let failed = 0;
+    for (const id of ids) {
+      try { await action(id); ok++; } catch { failed++; }
+    }
+    setBulkBusy(false);
+    setSelected(new Set());
+    showMessage(
+      failed === 0
+        ? `${verb} ${ok} draft(s).`
+        : `${verb} ${ok} draft(s) — ${failed} failed.`,
+      failed > 0,
+    );
+    loadDrafts();
+    onRefresh();
+  }
+
+  async function bulkDelete() {
+    if (!confirm(`Delete ${selected.size} draft(s)? This cannot be undone.`)) return;
+    await runBulk((id) => api.deleteSocialPost(id), "Deleted");
+  }
 
   // Platform character limits (same as in PostComposer)
   const PLATFORM_LIMITS: Record<string, number> = {
@@ -869,9 +923,44 @@ function DraftsTab({ refreshKey, showMessage, onEdit, onRefresh }: {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] text-cc-muted">{drafts.length} draft(s)</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-1.5 text-[10px] text-cc-muted cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={allVisibleSelected}
+            // Indeterminate when some but not all visible drafts are selected.
+            ref={(el) => { if (el) el.indeterminate = visibleSelectedCount > 0 && !allVisibleSelected; }}
+            onChange={toggleSelectAllVisible}
+            disabled={drafts.length === 0}
+            className="accent-cc-accent"
+          />
+          Select all
+        </label>
+        <span className="text-[10px] text-cc-muted ml-auto">{drafts.length} draft(s)</span>
       </div>
+
+      {/* Bulk Action Bar */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-cc-accent/10 border border-cc-accent/30 rounded-md">
+          <span className="text-[11px] font-medium text-cc-accent">{selected.size} selected</span>
+          <div className="flex gap-1 ml-auto">
+            <button
+              onClick={bulkDelete}
+              disabled={bulkBusy}
+              className="px-2 py-1 text-[10px] font-medium text-red-400 hover:bg-red-400/10 rounded-md transition-colors disabled:opacity-50"
+            >
+              Delete
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              disabled={bulkBusy}
+              className="px-2 py-1 text-[10px] font-medium text-cc-muted hover:text-cc-fg hover:bg-cc-hover rounded-md transition-colors disabled:opacity-50"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
 
       {drafts.length === 0 ? (
         <EmptyState text="No drafts. Drafts created by you, Gemini, or agents will appear here." />
@@ -881,6 +970,8 @@ function DraftsTab({ refreshKey, showMessage, onEdit, onRefresh }: {
             <PostCard
               key={draft.id}
               post={draft}
+              selected={selected.has(draft.id)}
+              onToggleSelect={toggleSelected}
               onEdit={onEdit}
               onDelete={handleDelete}
               showMessage={showMessage}
