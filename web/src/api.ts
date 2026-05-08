@@ -12,14 +12,46 @@ function getAuthHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${token}` };
 }
 
+// Tracks an in-flight token re-verification so that a burst of failed requests
+// (the sidebar polls listSessions every few seconds, plus draft counts every
+// 30s, plus update checks) does not trigger N parallel /auth/verify probes
+// and N parallel logouts.
+let inflightAuthRecheck: Promise<void> | null = null;
+
 function handle401(status: number): void {
-  if ((status === 401 || status === 403) && typeof window !== "undefined") {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-    // Dynamic import to avoid circular dependency
-    import("./store.js").then(({ useStore }) => {
-      useStore.getState().logout();
-    }).catch(() => {});
+  if (status !== 401 && status !== 403) return;
+  if (typeof window === "undefined") return;
+  const token = localStorage.getItem(AUTH_STORAGE_KEY);
+  // No token to verify — fall through to a normal logout.
+  if (!token) {
+    triggerLogout();
+    return;
   }
+  if (inflightAuthRecheck) return;
+  // Re-verify the token explicitly before wiping it. A 401/403 from any
+  // arbitrary endpoint is not a reliable signal that the token is bad — it
+  // could be a transient backend hiccup or an endpoint-specific check. Only
+  // log out when the dedicated /auth/verify endpoint also rejects the token.
+  inflightAuthRecheck = verifyAuthToken(token)
+    .then((isValid) => {
+      if (!isValid) triggerLogout();
+    })
+    .catch(() => {
+      // Network error during re-verify — assume token is still good; another
+      // failed request will retry the check on the next 401/403.
+    })
+    .finally(() => {
+      inflightAuthRecheck = null;
+    });
+}
+
+function triggerLogout(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+  // Dynamic import to avoid circular dependency
+  import("./store.js").then(({ useStore }) => {
+    useStore.getState().logout();
+  }).catch(() => {});
 }
 
 function nowMs(): number {

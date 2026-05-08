@@ -581,6 +581,79 @@ describe("verifyAuthToken", () => {
 });
 
 // ===========================================================================
+// handle401 behavior (auth re-verification before logout)
+// ===========================================================================
+//
+// A 401/403 from any arbitrary endpoint is not a reliable signal that the
+// stored token is bad — it could be a transient backend hiccup or an
+// endpoint-specific check. handle401 should re-verify against /auth/verify
+// before clearing localStorage and forcing a logout, so the user is not
+// re-prompted for the token on every transient failure.
+describe("handle401 token re-verification", () => {
+  // Helper: trigger handle401 indirectly by causing a regular API call to fail.
+  async function triggerProtectedFailureWithStatus(status: number) {
+    mockFetch.mockResolvedValueOnce(mockResponse({ error: "unauthorized" }, status));
+    try {
+      await api.listSessions();
+    } catch {
+      // Expected — we want the side effect on auth state, not the rejection.
+    }
+  }
+
+  beforeEach(() => {
+    localStorage.setItem("heyhank_auth_token", "stored_token");
+  });
+
+  // Most common case: a transient 401/403 on listSessions arrives but the
+  // stored token is still valid. We must keep the token and not log out.
+  it("does NOT clear localStorage when /auth/verify confirms the token is valid", async () => {
+    // Second fetch (the /auth/verify probe) must say ok=true.
+    mockFetch.mockResolvedValueOnce(mockResponse({ error: "unauthorized" }, 403));
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    try {
+      await api.listSessions();
+    } catch {
+      // Expected.
+    }
+
+    // Wait for the inflight re-verify to settle.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(localStorage.getItem("heyhank_auth_token")).toBe("stored_token");
+    // The /auth/verify call must have been made.
+    const verifyCall = mockFetch.mock.calls.find(([url]) => url === "/api/auth/verify");
+    expect(verifyCall).toBeDefined();
+  });
+
+  // The token really is bad — re-verify also fails, so we drop it.
+  it("clears localStorage when /auth/verify also rejects the token", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ error: "unauthorized" }, 401));
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: false }, 401));
+
+    try {
+      await api.listSessions();
+    } catch {
+      // Expected.
+    }
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(localStorage.getItem("heyhank_auth_token")).toBeNull();
+  });
+
+  // No token in storage → nothing to verify, fall through to logout immediately.
+  it("logs out without verifying when no token is stored", async () => {
+    localStorage.removeItem("heyhank_auth_token");
+    await triggerProtectedFailureWithStatus(403);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const verifyCall = mockFetch.mock.calls.find(([url]) => url === "/api/auth/verify");
+    expect(verifyCall).toBeUndefined();
+    expect(localStorage.getItem("heyhank_auth_token")).toBeNull();
+  });
+});
+
+// ===========================================================================
 // relaunchSession
 // ===========================================================================
 describe("relaunchSession", () => {
