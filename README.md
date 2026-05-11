@@ -36,18 +36,26 @@ heyhank start
 
 ## Features
 
-- **Multi-Session Chat** — Run multiple Claude Code sessions simultaneously (Codex as a secondary backend)
-- **Skill Marketplace** — Browse and install Claude Code skills from curated GitHub sources straight into `~/.claude/skills/`
-- **Gemini Live Voice Assistant** — Hands-free voice control with tool calling
-- **Scheduled Agents** — Cron-based agent automation
-- **Media Generation** — Image (Imagen 4) and video (Veo 3.1) generation
-- **Social Media** — Multi-backend posting (Postiz, Buffer, Ayrshare)
-- **Email Integration** — Multi-account IMAP/SMTP email via UI and voice
-- **Telephony** — Voice calls via FreeSWITCH SIP integration
-- **Personal Assistant** — Todos, notes, and reminders managed by voice or UI
-- **Federation** — Connect multiple HeyHank instances across machines
-- **Tailscale Funnel** — Public HTTPS access without port forwarding
-- **PWA** — Installable on mobile and desktop
+| Feature | Required to use it |
+|---|---|
+| **Multi-Session Chat** — multiple Claude Code / Codex sessions in parallel | Bun + Claude Code CLI (or Codex CLI) — **default, no extra setup** |
+| **Skill Marketplace** — install Claude Code skills from curated GitHub sources | nothing extra |
+| **Personal Assistant** — todos, notes, reminders | nothing extra |
+| **Scheduled Agents** — cron-based agent automation | nothing extra |
+| **Hank-UI Chat** — provider-agnostic chat (Claude / Codex / Gemini / Ollama / OpenRouter) | API key for the provider you pick |
+| **Memory** — local semantic search over notes & conversations | nothing extra (uses local `vectra` + `transformers.js`) |
+| **PWA** — installable on mobile/desktop | nothing extra |
+| **Gemini Live Voice Assistant** — hands-free voice control with tool calling | `GEMINI_API_KEY` |
+| **Media Generation** — Imagen 4 images, Veo 3.1 videos | `GEMINI_API_KEY` with media access |
+| **Email Integration** — IMAP/SMTP via UI and voice | per-account IMAP/SMTP credentials, configured in the UI |
+| **Calendar** — read/write events via voice | Google Cloud project + service account (Calendar scope) |
+| **Voice Pipeline** — low-latency telephony (Google STT/TTS + LLM) | Google Cloud project + service account (Speech scope), Groq or other LLM key |
+| **Telephony** — voice calls via FreeSWITCH SIP | self-hosted FreeSWITCH (Docker compose in `freeswitch/`) + a SIP trunk provider |
+| **Social Media** — multi-backend posting | self-hosted [Postiz](https://github.com/gitroomhq/postiz-app) (recommended), or Buffer / Ayrshare account |
+| **Federation** — connect multiple HeyHank instances | a relay server reachable by all nodes (`HEYHANK_RELAY_URL` + `HEYHANK_RELAY_SECRET`) |
+| **Tailscale Funnel** — public HTTPS without port forwarding | a Tailscale account with Funnel enabled |
+
+See [`web/.env.example`](web/.env.example) for every supported environment variable, grouped by feature.
 
 ## CLI Commands
 
