@@ -1,12 +1,32 @@
-<!-- HeyHank Inbound Dialplan (public context) -->
+<!-- HeyHank Inbound Dialplan (public context) — HARDENED 2026-05-07 -->
 <!-- peoplefone sends inbound calls with format "43720271025" (country code, no +) -->
-<!-- Answers inbound calls and bridges audio to HeyHank via mod_audio_fork WebSocket. -->
-<!-- mod_audio_fork only registers the API command uuid_audio_fork, so we use the -->
-<!-- api_on_answer channel variable (not execute_on_answer, which only runs apps). -->
+<!-- Defense in depth: ACL on external profile is primary, this dialplan is secondary filter. -->
 <include>
+  <!-- Anonymous-Drop (CLIR / empty caller id) -->
+  <extension name="heyhank_drop_anonymous" continue="false">
+    <condition field="${caller_id_number}" expression="^(anonymous|unknown|restricted|)$">
+      <action application="log" data="WARNING [heyhank] reject anonymous caller from ${network_addr}"/>
+      <action application="respond" data="603 Decline"/>
+      <action application="hangup" data="CALL_REJECTED"/>
+    </condition>
+  </extension>
+
+  <!-- Caller-ID whitelist: only AT(43)/DE(49)/CH(41)/IT(39); accepts +, 00, or none -->
+  <extension name="heyhank_drop_foreign_callerid" continue="true">
+    <condition field="${caller_id_number}" expression="^(\+|00)?(43|49|41|39)\d{4,15}$">
+      <action application="set" data="heyhank_callerid_ok=true"/>
+    </condition>
+    <condition field="${caller_id_number}" expression=".+">
+      <action application="log" data="WARNING [heyhank] reject foreign callerid ${caller_id_number} from ${network_addr}"/>
+      <action application="respond" data="603 Decline"/>
+      <action application="hangup" data="CALL_REJECTED"/>
+    </condition>
+  </extension>
+
+  <!-- Inbound DID match. Default accepts any Austrian number (peoplefone may send with or without +). -->
+  <!-- For tighter security, restrict to your specific DID, e.g. expression="^(\+?43XXXXXXXXX)$" -->
   <extension name="heyhank_inbound">
-    <!-- Match Austrian number format from peoplefone (43XXXXXXXXX) -->
-    <condition field="destination_number" expression="^(43\d+)$">
+    <condition field="destination_number" expression="^(\+?43\d+)$">
       <action application="set" data="RECORD_STEREO=true"/>
       <action application="set" data="api_on_answer=uuid_audio_fork ${uuid} start ws://127.0.0.1:3100/ws/telephony/audio/${uuid} mono 8000 heyhank {} true true 8000"/>
       <action application="answer"/>
@@ -14,13 +34,12 @@
     </condition>
   </extension>
 
-  <extension name="heyhank_inbound_plus">
-    <!-- Match if it arrives with + prefix -->
-    <condition field="destination_number" expression="^(\+43\d+)$">
-      <action application="set" data="RECORD_STEREO=true"/>
-      <action application="set" data="api_on_answer=uuid_audio_fork ${uuid} start ws://127.0.0.1:3100/ws/telephony/audio/${uuid} mono 8000 heyhank {} true true 8000"/>
-      <action application="answer"/>
-      <action application="playback" data="silence_stream://-1"/>
+  <!-- Catch-all: any other destination is rejected -->
+  <extension name="heyhank_inbound_reject">
+    <condition field="destination_number" expression=".+">
+      <action application="log" data="WARNING [heyhank] reject unknown DID ${destination_number} from ${caller_id_number}@${network_addr}"/>
+      <action application="respond" data="404 Not Found"/>
+      <action application="hangup" data="NO_ROUTE_DESTINATION"/>
     </condition>
   </extension>
 </include>

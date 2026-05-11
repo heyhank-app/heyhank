@@ -1,8 +1,53 @@
-<!-- HeyHank Outbound Dialplan -->
-<!-- Routes outbound calls through the configured SIP gateway -->
+<!-- HeyHank Outbound Dialplan - HARDENED 2026-05-07 -->
+<!-- Routes outbound calls through the configured SIP gateway. -->
+<!-- Restricted to AT/DE/CH/IT. Premium-rate destinations are blocked. -->
 <include>
   <extension name="heyhank_outbound">
-    <!-- Austrian numbers (+43...) -->
+
+    <!-- Premium-Rate-Block (reject with 403) -->
+    <!-- AT premium: 0900 / 0820 / 0939 / 010 / 0118 / 09xx -->
+    <condition field="destination_number" expression="^\+43(900|820|939|10|118|9\d{2})\d*$" break="on-true">
+      <action application="log" data="WARNING [heyhank] reject AT premium ${destination_number}"/>
+      <action application="respond" data="403 Forbidden"/>
+      <action application="hangup" data="CALL_REJECTED"/>
+    </condition>
+
+    <!-- DE premium: 0900 / 0137 / 0180 / 0181 / 018x / 019x -->
+    <condition field="destination_number" expression="^\+49(900|137|180|181|18\d|19\d)\d*$" break="on-true">
+      <action application="log" data="WARNING [heyhank] reject DE premium ${destination_number}"/>
+      <action application="respond" data="403 Forbidden"/>
+      <action application="hangup" data="CALL_REJECTED"/>
+    </condition>
+
+    <!-- CH premium: 0900 / 0901 / 0905 / 0906 -->
+    <condition field="destination_number" expression="^\+41(90[0156])\d*$" break="on-true">
+      <action application="log" data="WARNING [heyhank] reject CH premium ${destination_number}"/>
+      <action application="respond" data="403 Forbidden"/>
+      <action application="hangup" data="CALL_REJECTED"/>
+    </condition>
+
+    <!-- IT premium: 89x / 144 / 155 / 199 -->
+    <condition field="destination_number" expression="^\+39(89\d|144|155|199)\d*$" break="on-true">
+      <action application="log" data="WARNING [heyhank] reject IT premium ${destination_number}"/>
+      <action application="respond" data="403 Forbidden"/>
+      <action application="hangup" data="CALL_REJECTED"/>
+    </condition>
+
+    <!-- Inmarsat / UPT (+882, +883) -->
+    <condition field="destination_number" expression="^\+88[23]\d*$" break="on-true">
+      <action application="log" data="WARNING [heyhank] reject Inmarsat/UPT ${destination_number}"/>
+      <action application="respond" data="403 Forbidden"/>
+      <action application="hangup" data="CALL_REJECTED"/>
+    </condition>
+
+    <!-- UIFN-Premium (+979) -->
+    <condition field="destination_number" expression="^\+979\d*$" break="on-true">
+      <action application="log" data="WARNING [heyhank] reject UIFN ${destination_number}"/>
+      <action application="respond" data="403 Forbidden"/>
+      <action application="hangup" data="CALL_REJECTED"/>
+    </condition>
+
+    <!-- Allowed destinations: AT/DE/CH/IT -->
     <condition field="destination_number" expression="^(\+43\d+)$">
       <action application="set" data="effective_caller_id_name=HeyHank"/>
       <action application="set" data="hangup_after_bridge=true"/>
@@ -10,7 +55,6 @@
       <action application="bridge" data="sofia/gateway/heyhank_peoplefone/$1"/>
     </condition>
 
-    <!-- German numbers (+49...) -->
     <condition field="destination_number" expression="^(\+49\d+)$">
       <action application="set" data="effective_caller_id_name=HeyHank"/>
       <action application="set" data="hangup_after_bridge=true"/>
@@ -18,12 +62,26 @@
       <action application="bridge" data="sofia/gateway/heyhank_peoplefone/$1"/>
     </condition>
 
-    <!-- International fallback (+...) -->
-    <condition field="destination_number" expression="^(\+\d+)$">
+    <condition field="destination_number" expression="^(\+41\d+)$">
       <action application="set" data="effective_caller_id_name=HeyHank"/>
       <action application="set" data="hangup_after_bridge=true"/>
       <action application="set" data="ignore_early_media=true"/>
       <action application="bridge" data="sofia/gateway/heyhank_peoplefone/$1"/>
     </condition>
+
+    <condition field="destination_number" expression="^(\+39\d+)$">
+      <action application="set" data="effective_caller_id_name=HeyHank"/>
+      <action application="set" data="hangup_after_bridge=true"/>
+      <action application="set" data="ignore_early_media=true"/>
+      <action application="bridge" data="sofia/gateway/heyhank_peoplefone/$1"/>
+    </condition>
+
+    <!-- Catch-all: anything else rejected -->
+    <condition field="destination_number" expression=".+" break="on-true">
+      <action application="log" data="WARNING [heyhank] reject foreign destination ${destination_number}"/>
+      <action application="respond" data="403 Forbidden"/>
+      <action application="hangup" data="CALL_REJECTED"/>
+    </condition>
+
   </extension>
 </include>
