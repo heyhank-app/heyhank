@@ -8,6 +8,7 @@ import { AudioRecorder } from "./audio-recorder.js";
 import { getSettings, saveCall } from "./telephony-store.js";
 import { getSettings as getMainSettings } from "../settings-manager.js";
 import { eslCommand, eslSubscribe } from "./esl-client.js";
+import { normalizePhoneE164, extractCountryCode } from "./phone-utils.js";
 import { DEFAULT_PORT_DEV, DEFAULT_PORT_PROD } from "../constants.js";
 import { randomUUID } from "node:crypto";
 import { createGeminiLiveEngine } from "../voice-pipeline/gemini-live-adapter.js";
@@ -257,7 +258,7 @@ export class CallManager {
 
     // Hangup-after-turn-complete logic
     let hangupScheduled = false;
-    if (engine.onTurnComplete !== undefined) {
+    if ("onTurnComplete" in engine) {
       engine.onTurnComplete = () => {
         const call = this.activeCalls.get(callId);
         if (call?.pendingHangup && !hangupScheduled) {
@@ -724,12 +725,15 @@ export class CallManager {
 
     console.log(`[telephony] Handling inbound call from ${callerNumber} (UUID: ${uuid})`);
 
-    // Look up contact by phone number
-    const contact = telSettings.contacts.find(c => {
-      const normalized = callerNumber.replace(/^\+/, "");
-      const contactNorm = c.phone.replace(/^\+/, "");
-      return normalized === contactNorm || callerNumber === c.phone;
-    }) || null;
+    // Look up contact by phone number — normalize to E.164 first so peoplefone-style
+    // national caller-IDs ("06508920611") match contacts stored as "+436508920611".
+    // Country code comes from explicit settings, else parsed from the first enabled trunk's callerId.
+    const firstTrunkCallerId = telSettings.trunks.find(t => t.enabled)?.callerId;
+    const defaultCountryCode = telSettings.defaultCountryCode || extractCountryCode(firstTrunkCallerId);
+    const normalizedCaller = normalizePhoneE164(callerNumber, defaultCountryCode);
+    const contact = telSettings.contacts.find(c =>
+      normalizePhoneE164(c.phone, defaultCountryCode) === normalizedCaller
+    ) || null;
 
     const voice = telSettings.defaultInboundVoice || telSettings.defaultVoice || "Kore";
     const prompt = contact?.script || telSettings.defaultInboundPrompt || "You are Hank, a helpful AI assistant answering the phone.";
@@ -778,7 +782,7 @@ export class CallManager {
     // Decide engine
     const pipelineSettings = getPipelineSettingsFrom(telSettings);
     const chosenEngine = resolveEngine(pipelineSettings);
-    const lookupContact = lookupContactForCall("inbound", callerNumber, contact, telSettings.contacts);
+    const lookupContact = lookupContactForCall("inbound", callerNumber, contact, telSettings.contacts, defaultCountryCode);
 
     let engine: VoiceEngineSession;
     if (chosenEngine === "pipeline") {
@@ -847,7 +851,7 @@ export class CallManager {
 
     // Hangup-after-turn-complete
     let hangupScheduled = false;
-    if (engine.onTurnComplete !== undefined) {
+    if ("onTurnComplete" in engine) {
       engine.onTurnComplete = () => {
         const call = this.activeCalls.get(uuid);
         if (call?.pendingHangup && !hangupScheduled) {
@@ -1059,6 +1063,16 @@ HANGING UP — FOLLOW THESE RULES STRICTLY:
   // Inject knowledge base for inbound calls
   if (knowledgeBase?.trim()) {
     prompt += `\n\nKNOWLEDGE BASE — Use this information to answer the caller's questions accurately:\n${knowledgeBase.trim()}`;
+    // KB-grounded inbound calls tend to make the LLM repeat the same overview
+    // ("X bietet … Webentwicklung, WordPress, E-Commerce …") in every turn.
+    // The rules below force tighter, non-repetitive answers.
+    prompt += `
+
+ANTWORT-STIL (verbindlich, gilt für jede Antwort):
+- Maximal 2 kurze Sätze. Niemals Listen oder Aufzählungen vorlesen.
+- Wiederhole NICHT, was du in vorherigen Turns schon gesagt hast — auch nicht in umformulierter Form. Beantworte nur das, was gerade gefragt wurde.
+- Knüpfe direkt an die letzte Aussage des Anrufers an. Stelle bei Bedarf EINE konkrete Rückfrage statt mehrere Optionen aufzuzählen.
+- Die Knowledge Base ist Hintergrund — nicht jeden Turn wiederkäuen. Liefere nur die für die aktuelle Frage relevante Information.`;
   }
 
   return prompt;

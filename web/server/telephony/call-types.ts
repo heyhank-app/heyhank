@@ -149,6 +149,11 @@ export interface TelephonySettings {
   defaultInboundPrompt?: string; // System prompt for answering calls
   defaultInboundVoice?: string; // Voice for inbound (default: same as defaultVoice)
   inboundKnowledgeBase?: string; // Business info, FAQs, etc. injected into every inbound call
+  /**
+   * Country-code digits (no `+`) used to convert national-format inbound caller-IDs
+   * to E.164 for contact lookup. If empty, the first enabled trunk's callerId is parsed.
+   */
+  defaultCountryCode?: string;
 }
 
 export const DEFAULT_TELEPHONY_SETTINGS: TelephonySettings = {
