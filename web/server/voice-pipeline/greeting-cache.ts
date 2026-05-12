@@ -10,6 +10,7 @@ import { join } from "node:path";
 import type { TelephonyContact } from "../telephony/call-types.js";
 import type { TTSConfig, VoicePipelineSettings } from "./types.js";
 import { getTTSProvider } from "./providers/index.js";
+import { normalizePhoneE164 } from "../telephony/phone-utils.js";
 
 const CACHE_DIR = join(homedir(), ".heyhank", "telephony", "greetings");
 
@@ -26,20 +27,40 @@ function cachePath(key: string, format: "pcm" | "mp3"): string {
   return join(CACHE_DIR, `${key}.${format}`);
 }
 
-/** Build the greeting text from contact + direction */
-export function buildGreetingText(direction: "inbound" | "outbound", contact: TelephonyContact | null): string {
+/** Options to customize the greeting text without changing every call site. */
+export interface GreetingTextOptions {
+  /** Operator name to mention (e.g. "Markus Stöger"). Empty → no operator clause. */
+  operatorName?: string;
+  /** Append AI + recording disclosure (EU AI Act Art. 50 + DSGVO Art. 13). Default: true. */
+  legalDisclosure?: boolean;
+}
+
+/** Build the greeting text from contact + direction. */
+export function buildGreetingText(
+  direction: "inbound" | "outbound",
+  contact: TelephonyContact | null,
+  options: GreetingTextOptions = {},
+): string {
+  const operator = options.operatorName?.trim();
+  const disclose = options.legalDisclosure !== false;
+  const ofOperator = operator ? ` von ${operator}` : "";
+  const aiLabel = disclose ? "der KI-Assistent" : "der Assistent";
+  const recordingClause = disclose
+    ? " Dieses Gespräch wird aufgezeichnet und mit künstlicher Intelligenz verarbeitet."
+    : "";
+
   if (direction === "outbound") {
     if (contact) {
-      return `Servus ${contact.name}! Hier ist Hank. Hast du kurz Zeit?`;
+      return `Servus ${contact.name}! Hier ist Hank, ${aiLabel}${ofOperator}.${recordingClause} Hast du kurz Zeit?`;
     }
-    return `Hallo, hier ist Hank.`;
+    return `Hallo, hier ist Hank, ${aiLabel}${ofOperator}.${recordingClause}`;
   }
   // inbound
   if (contact) {
-    return `Servus ${contact.name}! Schön dass du anrufst, was kann ich für dich tun?`;
+    return `Servus ${contact.name}! Hier ist Hank, ${aiLabel}${ofOperator}.${recordingClause} Was kann ich für dich tun?`;
   }
   // unknown caller
-  return `Hallo, hier ist Hank, der Assistent von Markus Stoeger. Wie kann ich dir helfen?`;
+  return `Hallo, hier ist Hank, ${aiLabel}${ofOperator}.${recordingClause} Wie kann ich dir helfen?`;
 }
 
 /** Build a cache key for the given parameters */
@@ -62,7 +83,10 @@ export async function getOrRenderGreeting(params: {
   overrideText?: string;
 }): Promise<{ pcm: Uint8Array; text: string; cached: boolean }> {
   ensureDir();
-  const text = params.overrideText || buildGreetingText(params.direction, params.contact);
+  const text = params.overrideText || buildGreetingText(params.direction, params.contact, {
+    operatorName: params.settings.operatorName,
+    legalDisclosure: params.settings.legalDisclosureInGreeting,
+  });
   const voice = params.settings.tts.voice;
   const key = buildKey({
     direction: params.direction,
@@ -135,13 +159,20 @@ export async function preRenderAllGreetings(
   return { rendered, cached, errors };
 }
 
-/** Find contact by phone number (E.164). Returns null if not found. */
-export function findContactByPhone(contacts: TelephonyContact[], phone: string): TelephonyContact | null {
+/**
+ * Find contact by phone number. Normalizes to E.164 first, so a caller-ID
+ * arriving as "06508920611" (national format) still matches a contact stored
+ * as "+436508920611". Pass the trunk's country-code digits (no `+`) as
+ * `defaultCountryCode` to enable national→E.164 conversion.
+ */
+export function findContactByPhone(
+  contacts: TelephonyContact[],
+  phone: string,
+  defaultCountryCode: string = "",
+): TelephonyContact | null {
   if (!phone) return null;
-  // Normalize: strip non-digits except leading +
-  const normalize = (n: string) => n.replace(/[^\d+]/g, "");
-  const target = normalize(phone);
-  return contacts.find((c) => normalize(c.phone) === target) || null;
+  const target = normalizePhoneE164(phone, defaultCountryCode);
+  return contacts.find((c) => normalizePhoneE164(c.phone, defaultCountryCode) === target) || null;
 }
 
 /**

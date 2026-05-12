@@ -61,6 +61,23 @@ ZUSÄTZLICHE ANWEISUNG (unbekannte Nummer):
 Falls der Anrufer seinen Namen nicht von selbst nennt, frag höflich nach: "Mit wem spreche ich denn?"`;
 }
 
+/**
+ * When a pre-rendered greeting is played server-side on call answer, the LLM
+ * doesn't realise it has already greeted. Combined with prompt phrasing like
+ * "Answer warmly" or "DEFAULT INBOUND CALL FLOW: 1. Answer warmly...", the LLM
+ * tends to greet again on its first turn — caller hears the welcome twice.
+ * This appendix tells the LLM exactly what was already said and to skip step 1.
+ */
+function augmentPromptForPreRenderedGreeting(basePrompt: string, greetingText: string): string {
+  if (!greetingText) return basePrompt;
+  return basePrompt + `
+
+WICHTIG — BEGRÜSSUNG WURDE BEREITS GESPROCHEN:
+Du hast soeben folgende Begrüssung gesagt (sie wurde bereits abgespielt, der Anrufer hat sie gehört):
+"${greetingText}"
+Wiederhole sie NICHT. Begrüsse den Anrufer nicht erneut. Reagiere stattdessen direkt und natürlich auf das, was der Anrufer als Nächstes sagt. Überspringe Schritt 1 ("Answer warmly" / "Greet the person") im Standard-Call-Flow — der ist bereits erledigt.`;
+}
+
 interface CreateEngineParams {
   callId: string;
   direction: "inbound" | "outbound";
@@ -100,10 +117,11 @@ export function lookupContactForCall(
   remoteNumber: string,
   knownContact: TelephonyContact | null,
   contacts: TelephonyContact[],
+  defaultCountryCode: string = "",
 ): TelephonyContact | null {
   if (knownContact) return knownContact;
   if (direction === "inbound") {
-    return findContactByPhone(contacts, remoteNumber);
+    return findContactByPhone(contacts, remoteNumber, defaultCountryCode);
   }
   return null;
 }
@@ -141,9 +159,14 @@ export async function createPipelineEngine(params: CreateEngineParams & {
   greetingPcm: Uint8Array | null;
 }): Promise<VoiceEngineSession> {
   // Augment inbound prompt for unknown callers
-  const finalPrompt = (params.direction === "inbound" && !params.contact)
+  let finalPrompt = (params.direction === "inbound" && !params.contact)
     ? augmentInboundPromptForUnknownCaller(params.systemPrompt)
     : params.systemPrompt;
+  // If we have a pre-rendered greeting, tell the LLM it was already played
+  // so the LLM doesn't greet again on its first turn (caller would hear it twice).
+  if (params.greetingPcm && params.greetingText) {
+    finalPrompt = augmentPromptForPreRenderedGreeting(finalPrompt, params.greetingText);
+  }
 
   // Wire callbacks: onAudio (patched by caller) + onTurnComplete (patched by call-manager)
   let onAudioCallback: (pcm: Uint8Array) => void = () => {};

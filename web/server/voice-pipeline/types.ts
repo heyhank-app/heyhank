@@ -176,6 +176,19 @@ export interface VoicePipelineSettings {
   };
   /** Pre-render greetings on contact create/update for instant playback */
   preRenderGreetings: boolean;
+  /**
+   * Operator displayed in the greeting (e.g. "Markus Stöger", "ACME GmbH").
+   * Empty → Hank introduces itself without naming an operator.
+   */
+  operatorName?: string;
+  /**
+   * Append AI + recording disclosure to the cached greeting.
+   * EU AI Act Art. 50 requires AI systems interacting with natural persons to
+   * disclose their AI nature; DSGVO Art. 13 requires informing callers about
+   * the recording. Defaults to true; only disable if you have an alternative
+   * disclosure path (e.g. an IVR announcement before the call connects).
+   */
+  legalDisclosureInGreeting?: boolean;
 }
 
 export const DEFAULT_VOICE_PIPELINE_SETTINGS: VoicePipelineSettings = {
@@ -186,6 +199,8 @@ export const DEFAULT_VOICE_PIPELINE_SETTINGS: VoicePipelineSettings = {
   tts: { provider: "google", voice: "de-DE-Chirp-HD-D" },
   llm: { provider: "groq" }, // Best for voice (low TTFT)
   preRenderGreetings: true,
+  operatorName: "",
+  legalDisclosureInGreeting: true,
 };
 
 // ─── Pipeline Session (per call) ──────────────────────────────────────────────
