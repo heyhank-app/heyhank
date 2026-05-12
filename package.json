@@ -1,6 +1,6 @@
 {
   "name": "heyhank-monorepo",
-  "version": "0.94.0",
+  "version": "0.2.0",
   "private": true,
   "description": "HeyHank monorepo (root). The published npm package lives in web/.",
   "scripts": {
