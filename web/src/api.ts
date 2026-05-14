@@ -1329,6 +1329,47 @@ export const api = {
     if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
     return res.json();
   },
+  deleteMedia: (filename: string) =>
+    del<{ ok: boolean }>(`/media/file/${encodeURIComponent(filename)}`),
+  bulkDeleteMedia: (filenames: string[]) =>
+    post<{ ok: boolean; deleted: number; errors: Array<{ filename: string; error: string }> }>(
+      "/media/bulk-delete",
+      { filenames },
+    ),
+
+  // ─── Reference Images ─────────────────────────────────────────────────
+  listReferences: () =>
+    get<{
+      categories: Array<{
+        name: string;
+        count: number;
+        files: Array<{ filename: string; url: string; path: string; size: number; uploadedAt: number }>;
+      }>;
+    }>("/references"),
+  createReferenceCategory: (name: string) =>
+    post<{ ok: boolean; created: boolean; name: string }>("/references/categories", { name }),
+  deleteReferenceCategory: (name: string) =>
+    del<{ ok: boolean }>(`/references/categories/${encodeURIComponent(name)}`),
+  uploadReference: async (
+    category: string,
+    file: File,
+  ): Promise<{ ok: boolean; category: string; file: { filename: string; url: string; size: number; uploadedAt: number } }> => {
+    const formData = new FormData();
+    formData.append("category", category);
+    formData.append("file", file);
+    const res = await fetch("/api/references/upload", {
+      method: "POST",
+      headers: { ...getAuthHeaders() },
+      body: formData,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Upload failed (${res.status}): ${text}`);
+    }
+    return res.json();
+  },
+  deleteReference: (category: string, filename: string) =>
+    del<{ ok: boolean }>(`/references/${encodeURIComponent(category)}/${encodeURIComponent(filename)}`),
 
   // ─── Federation ────────────────────────────────────────────────────
   getFederationIdentity: () =>

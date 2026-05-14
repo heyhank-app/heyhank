@@ -2,7 +2,7 @@
 // Image generation (Imagen) and Video generation (Veo) via Google AI APIs
 
 import type { Hono } from "hono";
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join, basename } from "node:path";
 import { HEYHANK_HOME } from "../paths.js";
 import { generateImage, generateVideo, pollVideoOperation, listMedia } from "../google-media.js";
@@ -113,6 +113,47 @@ export function registerMediaRoutes(api: Hono): void {
   /** List all generated media files */
   api.get("/media", (c) => {
     return c.json({ files: listMedia() });
+  });
+
+  /** Delete a single generated media file */
+  api.delete("/media/file/:filename", (c) => {
+    const filename = basename(c.req.param("filename"));
+    const filepath = join(MEDIA_DIR, filename);
+    if (!existsSync(filepath)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    try {
+      rmSync(filepath, { force: true });
+      return c.json({ ok: true });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  /** Delete multiple generated media files by filename */
+  api.post("/media/bulk-delete", async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { filenames?: unknown };
+    if (!Array.isArray(body.filenames)) {
+      return c.json({ error: "filenames array is required" }, 400);
+    }
+    const filenames = (body.filenames as unknown[]).filter(
+      (n): n is string => typeof n === "string" && n.length > 0,
+    );
+    let deleted = 0;
+    const errors: Array<{ filename: string; error: string }> = [];
+    for (const name of filenames) {
+      const safe = basename(name);
+      const filepath = join(MEDIA_DIR, safe);
+      if (!existsSync(filepath)) continue;
+      try {
+        rmSync(filepath, { force: true });
+        deleted += 1;
+      } catch (err: unknown) {
+        errors.push({ filename: safe, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return c.json({ ok: true, deleted, errors });
   });
 
   /** Serve a media file by filename */
