@@ -60,9 +60,11 @@ jobs:
         working-directory: web
         run: npm pack --dry-run
 
-      - name: Publish to npm (OIDC trusted publisher + provenance)
+      - name: Publish to npm (with provenance)
         working-directory: web
         run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   docker:
     needs: release-please
