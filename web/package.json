@@ -1,6 +1,6 @@
 {
   "name": "heyhank",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Self-hosted web UI for running Claude Code and Codex agents",
   "license": "MIT",

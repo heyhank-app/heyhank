@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.0](https://github.com/heyhank-app/heyhank/compare/heyhank-v0.2.0...heyhank-v0.3.0) (2026-05-14)
+
+
+### Features
+
+* **runs:** add per-row delete + bulk clear-by-status ([198fb82](https://github.com/heyhank-app/heyhank/commit/198fb8241e77623c5a1ca4083ecb1cedee0c3559))
+* **runs:** add Stop button + cancelExecution endpoint ([61d7777](https://github.com/heyhank-app/heyhank/commit/61d7777fa4ccc23c54a30ab2d0a87bb8976e1d9c))
+* **ui:** add Claude Opus 4.7 to model picker ([81df6c5](https://github.com/heyhank-app/heyhank/commit/81df6c50565bc47687f3e228731778312788e5df))
+
 ## [0.2.0](https://github.com/heyhank-app/heyhank/compare/heyhank-v0.1.0...heyhank-v0.2.0) (2026-05-12)
 
 
