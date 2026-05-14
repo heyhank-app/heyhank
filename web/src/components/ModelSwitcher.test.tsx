@@ -61,8 +61,9 @@ describe("ModelSwitcher", () => {
     render(<ModelSwitcher sessionId="s1" />);
     fireEvent.click(screen.getByLabelText("Switch model"));
 
-    // All three Claude models should appear as options
-    expect(screen.getByRole("option", { name: /Opus/ })).toBeInTheDocument();
+    // All Claude models should appear as options
+    expect(screen.getByRole("option", { name: /Opus 4\.6/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Opus 4\.7/ })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Sonnet/ })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Haiku/ })).toBeInTheDocument();
   });
@@ -71,7 +72,7 @@ describe("ModelSwitcher", () => {
     render(<ModelSwitcher sessionId="s1" />);
     fireEvent.click(screen.getByLabelText("Switch model"));
 
-    const opusOption = screen.getByRole("option", { name: /Opus/ });
+    const opusOption = screen.getByRole("option", { name: /Opus 4\.6/ });
     expect(opusOption).toHaveAttribute("aria-selected", "true");
 
     const sonnetOption = screen.getByRole("option", { name: /Sonnet/ });
@@ -102,7 +103,7 @@ describe("ModelSwitcher", () => {
   it("does not send when selecting the already-active model", () => {
     render(<ModelSwitcher sessionId="s1" />);
     fireEvent.click(screen.getByLabelText("Switch model"));
-    fireEvent.click(screen.getByRole("option", { name: /Opus/ }));
+    fireEvent.click(screen.getByRole("option", { name: /Opus 4\.6/ }));
 
     // Same model — no WS message, no store update
     expect(mockSendToSession).not.toHaveBeenCalled();
