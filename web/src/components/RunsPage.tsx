@@ -55,6 +55,7 @@ export function RunsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [agentFilter, setAgentFilter] = useState<string>("");
   const [selectedExec, setSelectedExec] = useState<AgentExecution | null>(null);
+  const [stoppingIds, setStoppingIds] = useState<Set<string>>(new Set());
 
   const fetchExecutions = useCallback(async () => {
     try {
@@ -91,6 +92,27 @@ export function RunsPage() {
     // Auto-refresh every 5 seconds
     const interval = setInterval(fetchExecutions, 5000);
     return () => clearInterval(interval);
+  }, [fetchExecutions]);
+
+  const stopExecution = useCallback(async (sessionId: string) => {
+    setStoppingIds((prev) => {
+      const next = new Set(prev);
+      next.add(sessionId);
+      return next;
+    });
+    try {
+      await api.cancelExecution(sessionId);
+      await fetchExecutions();
+      setSelectedExec((cur) => (cur?.sessionId === sessionId ? null : cur));
+    } catch (err) {
+      console.error("[runs] Failed to cancel execution:", err);
+    } finally {
+      setStoppingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(sessionId);
+        return next;
+      });
+    }
   }, [fetchExecutions]);
 
   const agentName = (agentId: string) => {
@@ -260,13 +282,25 @@ export function RunsPage() {
             <h3 className="text-sm font-semibold text-cc-fg">
               Execution Details
             </h3>
-            <button
-              onClick={() => setSelectedExec(null)}
-              className="text-cc-muted hover:text-cc-fg text-sm transition-colors"
-              aria-label="Close details"
-            >
-              Close
-            </button>
+            <div className="flex items-center gap-3">
+              {!selectedExec.completedAt && (
+                <button
+                  onClick={() => stopExecution(selectedExec.sessionId)}
+                  disabled={stoppingIds.has(selectedExec.sessionId)}
+                  className="text-xs px-3 py-1 rounded-md bg-cc-error/10 text-cc-error hover:bg-cc-error/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  aria-label="Stop execution"
+                >
+                  {stoppingIds.has(selectedExec.sessionId) ? "Stopping…" : "Stop"}
+                </button>
+              )}
+              <button
+                onClick={() => setSelectedExec(null)}
+                className="text-cc-muted hover:text-cc-fg text-sm transition-colors"
+                aria-label="Close details"
+              >
+                Close
+              </button>
+            </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>

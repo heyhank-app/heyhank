@@ -8,12 +8,14 @@ import type { AgentExecution } from "../api.js";
 const mockApi = {
   listExecutions: vi.fn(),
   listAgents: vi.fn(),
+  cancelExecution: vi.fn(),
 };
 
 vi.mock("../api.js", () => ({
   api: {
     listExecutions: (...args: unknown[]) => mockApi.listExecutions(...args),
     listAgents: (...args: unknown[]) => mockApi.listAgents(...args),
+    cancelExecution: (...args: unknown[]) => mockApi.cancelExecution(...args),
   },
 }));
 
@@ -59,6 +61,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockApi.listExecutions.mockResolvedValue({ executions: [], total: 0 });
   mockApi.listAgents.mockResolvedValue([]);
+  mockApi.cancelExecution.mockResolvedValue({ ok: true, wasLive: true });
 });
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -273,6 +276,95 @@ describe("RunsPage", () => {
 
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+
+  // Stop button: visible only for running executions (no completedAt).
+  // Calls api.cancelExecution and triggers a refresh so the row updates.
+  it("shows a Stop button in the detail panel for running executions", async () => {
+    const exec = makeExecution({ sessionId: "running-sess", completedAt: undefined });
+    mockApi.listExecutions.mockResolvedValue({ executions: [exec], total: 1 });
+    mockApi.listAgents.mockResolvedValue([makeAgent()]);
+
+    render(<RunsPage />);
+
+    await waitFor(() => {
+      const matches = screen.getAllByText("Test Agent");
+      expect(matches.length).toBeGreaterThanOrEqual(1);
+    });
+
+    const tableCell = screen.getAllByText("Test Agent").find(
+      (el) => el.closest("td") !== null,
+    );
+    fireEvent.click(tableCell!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Execution Details")).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText("Stop execution")).toBeInTheDocument();
+  });
+
+  // Completed executions should not expose the Stop button — only "Close".
+  it("hides the Stop button for completed executions", async () => {
+    const exec = makeExecution({
+      sessionId: "done-sess",
+      completedAt: Date.now(),
+      success: true,
+    });
+    mockApi.listExecutions.mockResolvedValue({ executions: [exec], total: 1 });
+    mockApi.listAgents.mockResolvedValue([makeAgent()]);
+
+    render(<RunsPage />);
+
+    await waitFor(() => {
+      const matches = screen.getAllByText("Test Agent");
+      expect(matches.length).toBeGreaterThanOrEqual(1);
+    });
+
+    const tableCell = screen.getAllByText("Test Agent").find(
+      (el) => el.closest("td") !== null,
+    );
+    fireEvent.click(tableCell!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Execution Details")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByLabelText("Stop execution")).not.toBeInTheDocument();
+  });
+
+  // Clicking Stop should call api.cancelExecution(sessionId) and close the panel
+  // because the re-fetch flips the selected row out of "running" status.
+  it("clicking Stop calls cancelExecution and closes the detail panel", async () => {
+    const exec = makeExecution({ sessionId: "stop-me", completedAt: undefined });
+    mockApi.listExecutions.mockResolvedValue({ executions: [exec], total: 1 });
+    mockApi.listAgents.mockResolvedValue([makeAgent()]);
+
+    render(<RunsPage />);
+
+    await waitFor(() => {
+      const matches = screen.getAllByText("Test Agent");
+      expect(matches.length).toBeGreaterThanOrEqual(1);
+    });
+
+    const tableCell = screen.getAllByText("Test Agent").find(
+      (el) => el.closest("td") !== null,
+    );
+    fireEvent.click(tableCell!);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Stop execution")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("Stop execution"));
+
+    await waitFor(() => {
+      expect(mockApi.cancelExecution).toHaveBeenCalledWith("stop-me");
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Execution Details")).not.toBeInTheDocument();
+    });
   });
 
   it("has an agent filter dropdown with aria-label", async () => {

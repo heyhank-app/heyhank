@@ -889,6 +889,65 @@ describe("AgentExecutor", () => {
   });
 
   // =========================================================================
+  // cancelExecution
+  // =========================================================================
+  describe("cancelExecution", () => {
+    // Cancelling a live in-memory execution: in-memory + on-disk records both
+    // get marked completed=false and the method returns true (wasLive).
+    it("marks an in-memory running execution as cancelled and returns true", async () => {
+      const agent = makeAgent({ id: "cancel-agent" });
+      mockAgentStore.getAgent.mockReturnValue(agent);
+
+      await executor.executeAgent("cancel-agent");
+
+      const result = executor.cancelExecution("session-123");
+
+      expect(result).toBe(true);
+      const executions = executor.getExecutions("cancel-agent");
+      expect(executions[0].completedAt).toBeGreaterThan(0);
+      expect(executions[0].success).toBe(false);
+      expect(executions[0].error).toBe("Stopped by user");
+      expect(mockExecutionStoreInstance.update).toHaveBeenCalledWith("session-123", expect.objectContaining({
+        success: false,
+        error: "Stopped by user",
+      }));
+    });
+
+    // Zombie path: no in-memory execution exists (server restart wiped the
+    // executor's memory, but the on-disk record still says "running"). We
+    // expect a direct on-disk update and a false return value (wasLive=false).
+    it("falls back to direct on-disk update for zombie sessions and returns false", () => {
+      const result = executor.cancelExecution("zombie-sid", "Bulk cleanup");
+
+      expect(result).toBe(false);
+      expect(mockExecutionStoreInstance.update).toHaveBeenCalledWith("zombie-sid", expect.objectContaining({
+        success: false,
+        error: "Bulk cleanup",
+      }));
+    });
+
+    // Already-completed executions should not be touched in-memory (we only
+    // update the in-memory record if it's still running). The fallback path
+    // is taken instead and we return false.
+    it("does not modify an already-completed execution in memory", async () => {
+      const agent = makeAgent({ id: "done-agent" });
+      mockAgentStore.getAgent.mockReturnValue(agent);
+
+      await executor.executeAgent("done-agent");
+      executor.handleSessionExited("session-123", 0); // mark it completed
+
+      mockExecutionStoreInstance.update.mockClear();
+
+      const result = executor.cancelExecution("session-123");
+
+      // No in-memory match (already completed) → fallback path → wasLive=false
+      expect(result).toBe(false);
+      const executions = executor.getExecutions("done-agent");
+      expect(executions[0].success).toBe(true); // still success from exit code 0
+    });
+  });
+
+  // =========================================================================
   // executeAgentManually
   // =========================================================================
   describe("executeAgentManually", () => {

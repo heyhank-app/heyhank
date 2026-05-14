@@ -56,6 +56,7 @@ function createMockExecutor() {
     executeAgent: vi.fn(() => Promise.resolve({ sessionId: "mock-session" })),
     getExecutions: vi.fn(() => []),
     listAllExecutions: vi.fn(() => ({ executions: [] as Record<string, unknown>[], total: 0 })),
+    cancelExecution: vi.fn(() => true),
   };
 }
 
@@ -714,6 +715,52 @@ describe("GET /api/executions", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json).toEqual({ executions: [], total: 0 });
+  });
+});
+
+// ─── POST /api/executions/:sessionId/cancel ─────────────────────────────────
+
+describe("POST /api/executions/:sessionId/cancel", () => {
+  // Verifies the cancel endpoint forwards the sessionId + reason to the
+  // executor's cancelExecution method and returns the wasLive boolean.
+  it("calls executor.cancelExecution with the sessionId and a default reason", async () => {
+    executor.cancelExecution.mockReturnValue(true);
+
+    const res = await app.request("/api/executions/sid-1/cancel", { method: "POST" });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, wasLive: true });
+    expect(executor.cancelExecution).toHaveBeenCalledWith("sid-1", "Stopped by user");
+  });
+
+  // Verifies that a custom reason from the request body is forwarded — used
+  // for cases like bulk zombie cleanup where the operator wants an audit trail.
+  it("forwards a custom reason from the request body", async () => {
+    executor.cancelExecution.mockReturnValue(false);
+
+    const res = await app.request("/api/executions/sid-zombie/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "Bulk zombie cleanup" }),
+    });
+
+    expect(res.status).toBe(200);
+    // wasLive=false: zombie cleanup (no live in-memory execution found)
+    expect(await res.json()).toEqual({ ok: true, wasLive: false });
+    expect(executor.cancelExecution).toHaveBeenCalledWith("sid-zombie", "Bulk zombie cleanup");
+  });
+
+  // If the executor isn't available (rare/degraded state), the route should
+  // surface 503 rather than silently no-op so the UI can show an error.
+  it("returns 503 when no executor is available", async () => {
+    const appNoExecutor = new Hono();
+    const apiNoExecutor = new Hono();
+    registerAgentRoutes(apiNoExecutor, undefined);
+    appNoExecutor.route("/api", apiNoExecutor);
+
+    const res = await appNoExecutor.request("/api/executions/sid-x/cancel", { method: "POST" });
+
+    expect(res.status).toBe(503);
   });
 });
 

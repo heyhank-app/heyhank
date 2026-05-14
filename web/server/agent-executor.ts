@@ -351,6 +351,36 @@ export class AgentExecutor {
     return this.executionStore.list(opts);
   }
 
+  /**
+   * Cancel a running execution. Marks the in-memory + persisted record as
+   * completed (success=false). Returns true if a matching in-memory execution
+   * was found and updated, false if only the on-disk record was touched (e.g.
+   * for zombie sessions whose CLI process is long gone).
+   */
+  cancelExecution(sessionId: string, reason = "Stopped by user"): boolean {
+    for (const [, execs] of this.executions) {
+      const exec = execs.find((e) => e.sessionId === sessionId && !e.completedAt);
+      if (exec) {
+        exec.completedAt = Date.now();
+        exec.success = false;
+        exec.error = exec.error || reason;
+        this.executionStore.update(sessionId, {
+          completedAt: exec.completedAt,
+          success: exec.success,
+          error: exec.error,
+        });
+        return true;
+      }
+    }
+    // Fallback: touch the on-disk record directly (zombie cleanup).
+    this.executionStore.update(sessionId, {
+      completedAt: Date.now(),
+      success: false,
+      error: reason,
+    });
+    return false;
+  }
+
   /** Handle session exit: mark the corresponding execution as completed. */
   handleSessionExited(sessionId: string, exitCode: number | null): void {
     for (const [, execs] of this.executions) {

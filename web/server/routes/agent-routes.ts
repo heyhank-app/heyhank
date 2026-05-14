@@ -197,6 +197,19 @@ export function registerAgentRoutes(
     return c.json(agentExecutor?.listAllExecutions({ agentId, triggerType, status, limit, offset }) ?? { executions: [], total: 0 });
   });
 
+  /**
+   * Cancel a running execution by sessionId. Works for both live runs and
+   * zombies (executions whose CLI process is gone but DB still says "running").
+   */
+  api.post("/executions/:sessionId/cancel", async (c) => {
+    const sessionId = c.req.param("sessionId");
+    const body = await c.req.json().catch(() => ({} as { reason?: string }));
+    const reason = typeof body?.reason === "string" && body.reason.trim() ? body.reason.trim() : "Stopped by user";
+    if (!agentExecutor) return c.json({ error: "Executor not available" }, 503);
+    const wasLive = agentExecutor.cancelExecution(sessionId, reason);
+    return c.json({ ok: true, wasLive });
+  });
+
   // ── Import / Export ────────────────────────────────────────────────────
 
   api.post("/agents/import", async (c) => {

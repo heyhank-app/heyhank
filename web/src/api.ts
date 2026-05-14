@@ -1181,6 +1181,12 @@ export const api = {
     return get<ExecutionListResult>(`/executions${qs ? `?${qs}` : ""}`);
   },
 
+  cancelExecution: (sessionId: string, reason?: string) =>
+    post<{ ok: boolean; wasLive: boolean }>(
+      `/executions/${encodeURIComponent(sessionId)}/cancel`,
+      reason ? { reason } : undefined,
+    ),
+
   // Skills
   listSkills: () =>
     get<{ slug: string; name: string; description: string; path: string }[]>("/skills"),
