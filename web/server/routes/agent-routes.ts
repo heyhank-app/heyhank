@@ -198,6 +198,35 @@ export function registerAgentRoutes(
   });
 
   /**
+   * Delete a single completed execution record by sessionId. Running
+   * executions must be cancelled first.
+   */
+  api.delete("/executions/:sessionId", (c) => {
+    const sessionId = c.req.param("sessionId");
+    if (!agentExecutor) return c.json({ error: "Executor not available" }, 503);
+    const removed = agentExecutor.deleteExecutions({ sessionIds: [sessionId] });
+    return c.json({ ok: true, removed });
+  });
+
+  /**
+   * Bulk delete executions. Body accepts either an explicit sessionIds list
+   * or a status filter ("success" | "error") to clear matching records.
+   */
+  api.post("/executions/bulk-delete", async (c) => {
+    if (!agentExecutor) return c.json({ error: "Executor not available" }, 503);
+    const body = (await c.req.json().catch(() => ({}))) as { sessionIds?: unknown; status?: unknown };
+    const status = body?.status === "success" || body?.status === "error" ? body.status : undefined;
+    const sessionIds = Array.isArray(body?.sessionIds)
+      ? (body.sessionIds as unknown[]).filter((s): s is string => typeof s === "string")
+      : undefined;
+    if (!status && (!sessionIds || sessionIds.length === 0)) {
+      return c.json({ error: "Provide either sessionIds or status" }, 400);
+    }
+    const removed = agentExecutor.deleteExecutions({ sessionIds, status });
+    return c.json({ ok: true, removed });
+  });
+
+  /**
    * Cancel a running execution by sessionId. Works for both live runs and
    * zombies (executions whose CLI process is gone but DB still says "running").
    */

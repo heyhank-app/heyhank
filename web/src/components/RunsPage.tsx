@@ -94,6 +94,29 @@ export function RunsPage() {
     return () => clearInterval(interval);
   }, [fetchExecutions]);
 
+  const deleteExecution = useCallback(async (sessionId: string) => {
+    if (!window.confirm("Delete this execution record?")) return;
+    try {
+      await api.deleteExecution(sessionId);
+      setSelectedExec((cur) => (cur?.sessionId === sessionId ? null : cur));
+      await fetchExecutions();
+    } catch (err) {
+      console.error("[runs] Failed to delete execution:", err);
+    }
+  }, [fetchExecutions]);
+
+  const bulkDeleteByStatus = useCallback(async (status: "success" | "error") => {
+    const verb = status === "error" ? "errored" : "successful";
+    if (!window.confirm(`Delete ALL ${verb} executions? This cannot be undone.`)) return;
+    try {
+      await api.bulkDeleteExecutions({ status });
+      setSelectedExec(null);
+      await fetchExecutions();
+    } catch (err) {
+      console.error("[runs] Failed to bulk-delete executions:", err);
+    }
+  }, [fetchExecutions]);
+
   const stopExecution = useCallback(async (sessionId: string) => {
     setStoppingIds((prev) => {
       const next = new Set(prev);
@@ -182,9 +205,20 @@ export function RunsPage() {
           ))}
         </div>
 
-        <span className="text-xs text-cc-muted ml-auto">
-          {total} total
-        </span>
+        <div className="ml-auto flex items-center gap-3">
+          <span className="text-xs text-cc-muted">
+            {total} total
+          </span>
+          {executions.some((e) => e.error) && (
+            <button
+              onClick={() => bulkDeleteByStatus("error")}
+              className="text-xs px-2.5 py-1 rounded-md bg-cc-error/10 text-cc-error hover:bg-cc-error/20 transition-colors"
+              aria-label="Delete all errored executions"
+            >
+              Clear errors
+            </button>
+          )}
+        </div>
         </div>
       </div>
 
@@ -213,6 +247,7 @@ export function RunsPage() {
                 <th className="px-4 py-2 font-medium">Started</th>
                 <th className="px-4 py-2 font-medium">Duration</th>
                 <th className="px-4 py-2 font-medium">Session</th>
+                <th className="px-2 py-2 font-medium sr-only">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-cc-border/50">
@@ -264,6 +299,23 @@ export function RunsPage() {
                         >
                           Open
                         </a>
+                      )}
+                    </td>
+                    <td className="px-2 py-3 text-right">
+                      {exec.completedAt && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteExecution(exec.sessionId);
+                          }}
+                          className="text-cc-muted hover:text-cc-error transition-colors p-1"
+                          aria-label={`Delete execution ${exec.sessionId}`}
+                          title="Delete"
+                        >
+                          <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                            <path d="M6.5 1a1 1 0 00-1 1V3H3a.5.5 0 000 1h.092l.806 9.673A2 2 0 005.89 15.5h4.22a2 2 0 001.991-1.827L12.908 4H13a.5.5 0 000-1h-2.5V2a1 1 0 00-1-1h-3zm0 1h3V3h-3V2zM5.107 13.595L4.31 4h7.38l-.797 9.595a1 1 0 01-.997.905H6.104a1 1 0 01-.997-.905z" />
+                          </svg>
+                        </button>
                       )}
                     </td>
                   </tr>

@@ -57,6 +57,7 @@ function createMockExecutor() {
     getExecutions: vi.fn(() => []),
     listAllExecutions: vi.fn(() => ({ executions: [] as Record<string, unknown>[], total: 0 })),
     cancelExecution: vi.fn(() => true),
+    deleteExecutions: vi.fn(() => 0),
   };
 }
 
@@ -761,6 +762,96 @@ describe("POST /api/executions/:sessionId/cancel", () => {
     const res = await appNoExecutor.request("/api/executions/sid-x/cancel", { method: "POST" });
 
     expect(res.status).toBe(503);
+  });
+});
+
+// ─── DELETE /api/executions/:sessionId ──────────────────────────────────────
+
+describe("DELETE /api/executions/:sessionId", () => {
+  // Verifies single-record delete forwards the sessionId to the executor.
+  it("calls deleteExecutions with the sessionId and returns removed count", async () => {
+    executor.deleteExecutions.mockReturnValue(1);
+
+    const res = await app.request("/api/executions/sid-1", { method: "DELETE" });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, removed: 1 });
+    expect(executor.deleteExecutions).toHaveBeenCalledWith({ sessionIds: ["sid-1"] });
+  });
+
+  it("returns 503 when no executor is available", async () => {
+    const appNoExecutor = new Hono();
+    const apiNoExecutor = new Hono();
+    registerAgentRoutes(apiNoExecutor, undefined);
+    appNoExecutor.route("/api", apiNoExecutor);
+
+    const res = await appNoExecutor.request("/api/executions/sid-x", { method: "DELETE" });
+
+    expect(res.status).toBe(503);
+  });
+});
+
+// ─── POST /api/executions/bulk-delete ───────────────────────────────────────
+
+describe("POST /api/executions/bulk-delete", () => {
+  // Status-based delete: clears all rows matching a given status filter.
+  it("deletes by status when status is provided", async () => {
+    executor.deleteExecutions.mockReturnValue(39);
+
+    const res = await app.request("/api/executions/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "error" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, removed: 39 });
+    expect(executor.deleteExecutions).toHaveBeenCalledWith({
+      sessionIds: undefined,
+      status: "error",
+    });
+  });
+
+  // Explicit sessionIds: callers can pass an arbitrary list.
+  it("deletes an explicit list of sessionIds", async () => {
+    executor.deleteExecutions.mockReturnValue(2);
+
+    const res = await app.request("/api/executions/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionIds: ["a", "b"] }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, removed: 2 });
+    expect(executor.deleteExecutions).toHaveBeenCalledWith({
+      sessionIds: ["a", "b"],
+      status: undefined,
+    });
+  });
+
+  // Reject empty/invalid bodies so we never accidentally delete everything.
+  it("returns 400 when neither status nor sessionIds is provided", async () => {
+    const res = await app.request("/api/executions/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(400);
+    expect(executor.deleteExecutions).not.toHaveBeenCalled();
+  });
+
+  // Invalid status values get coerced to undefined which then trips the
+  // validation above (defensive — prevents nonsense filters from leaking through).
+  it("rejects unknown status values as 400", async () => {
+    const res = await app.request("/api/executions/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "running" }),
+    });
+
+    expect(res.status).toBe(400);
   });
 });
 

@@ -9,6 +9,8 @@ const mockApi = {
   listExecutions: vi.fn(),
   listAgents: vi.fn(),
   cancelExecution: vi.fn(),
+  deleteExecution: vi.fn(),
+  bulkDeleteExecutions: vi.fn(),
 };
 
 vi.mock("../api.js", () => ({
@@ -16,6 +18,8 @@ vi.mock("../api.js", () => ({
     listExecutions: (...args: unknown[]) => mockApi.listExecutions(...args),
     listAgents: (...args: unknown[]) => mockApi.listAgents(...args),
     cancelExecution: (...args: unknown[]) => mockApi.cancelExecution(...args),
+    deleteExecution: (...args: unknown[]) => mockApi.deleteExecution(...args),
+    bulkDeleteExecutions: (...args: unknown[]) => mockApi.bulkDeleteExecutions(...args),
   },
 }));
 
@@ -62,6 +66,10 @@ beforeEach(() => {
   mockApi.listExecutions.mockResolvedValue({ executions: [], total: 0 });
   mockApi.listAgents.mockResolvedValue([]);
   mockApi.cancelExecution.mockResolvedValue({ ok: true, wasLive: true });
+  mockApi.deleteExecution.mockResolvedValue({ ok: true, removed: 1 });
+  mockApi.bulkDeleteExecutions.mockResolvedValue({ ok: true, removed: 0 });
+  // jsdom doesn't implement window.confirm — stub it to always accept.
+  vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -365,6 +373,88 @@ describe("RunsPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("Execution Details")).not.toBeInTheDocument();
     });
+  });
+
+  // Per-row trash button: visible only for completed executions (not running).
+  // Calls api.deleteExecution(sessionId) and triggers a refresh.
+  it("shows a delete button on completed rows and calls deleteExecution", async () => {
+    const exec = makeExecution({
+      sessionId: "to-delete",
+      completedAt: Date.now(),
+      error: "Bulk zombie cleanup",
+    });
+    mockApi.listExecutions.mockResolvedValue({ executions: [exec], total: 1 });
+    mockApi.listAgents.mockResolvedValue([makeAgent()]);
+
+    render(<RunsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Delete execution to-delete/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText(/Delete execution to-delete/));
+
+    await waitFor(() => {
+      expect(mockApi.deleteExecution).toHaveBeenCalledWith("to-delete");
+    });
+  });
+
+  // Delete button is hidden for running executions — only the Stop button applies.
+  it("hides the delete button for running executions", async () => {
+    const exec = makeExecution({ sessionId: "live-sess", completedAt: undefined });
+    mockApi.listExecutions.mockResolvedValue({ executions: [exec], total: 1 });
+    mockApi.listAgents.mockResolvedValue([makeAgent()]);
+
+    render(<RunsPage />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+    });
+
+    expect(screen.queryByLabelText(/Delete execution live-sess/)).not.toBeInTheDocument();
+  });
+
+  // "Clear errors" bulk button: only shows when there is at least one errored
+  // execution, and calls bulkDeleteExecutions({status: "error"}).
+  it("shows Clear errors button when an errored execution exists", async () => {
+    const exec = makeExecution({
+      sessionId: "err-sess",
+      completedAt: Date.now(),
+      error: "boom",
+    });
+    mockApi.listExecutions.mockResolvedValue({ executions: [exec], total: 1 });
+    mockApi.listAgents.mockResolvedValue([makeAgent()]);
+
+    render(<RunsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Delete all errored executions")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("Delete all errored executions"));
+
+    await waitFor(() => {
+      expect(mockApi.bulkDeleteExecutions).toHaveBeenCalledWith({ status: "error" });
+    });
+  });
+
+  // No errors → no bulk button.
+  it("hides Clear errors button when there are no errored executions", async () => {
+    const exec = makeExecution({
+      sessionId: "ok-sess",
+      completedAt: Date.now(),
+      success: true,
+    });
+    mockApi.listExecutions.mockResolvedValue({ executions: [exec], total: 1 });
+    mockApi.listAgents.mockResolvedValue([makeAgent()]);
+
+    render(<RunsPage />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+    });
+
+    expect(screen.queryByLabelText("Delete all errored executions")).not.toBeInTheDocument();
   });
 
   it("has an agent filter dropdown with aria-label", async () => {

@@ -1187,6 +1187,12 @@ export const api = {
       reason ? { reason } : undefined,
     ),
 
+  deleteExecution: (sessionId: string) =>
+    del<{ ok: boolean; removed: number }>(`/executions/${encodeURIComponent(sessionId)}`),
+
+  bulkDeleteExecutions: (opts: { sessionIds?: string[]; status?: "success" | "error" }) =>
+    post<{ ok: boolean; removed: number }>(`/executions/bulk-delete`, opts),
+
   // Skills
   listSkills: () =>
     get<{ slug: string; name: string; description: string; path: string }[]>("/skills"),

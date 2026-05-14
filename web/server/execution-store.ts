@@ -2,7 +2,7 @@
 // Persists AgentExecution records to disk as JSONL (one file per day).
 // Used by the Runs view to display execution history across server restarts.
 
-import { mkdirSync, appendFileSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, appendFileSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { AgentExecution } from "./agent-types.js";
@@ -70,6 +70,59 @@ export class ExecutionStore {
     } catch (err) {
       console.error("[execution-store] Failed to persist update:", err);
     }
+  }
+
+  /**
+   * Permanently delete executions by sessionId. Rewrites any daily JSONL file
+   * that contained matching records and removes them from the in-memory cache.
+   * Returns the number of records that were removed (counts cache hits — the
+   * on-disk file may contain extra historical lines for the same sessionId
+   * which are all stripped too).
+   */
+  deleteBySessionIds(sessionIds: string[]): number {
+    if (sessionIds.length === 0) return 0;
+    const toDelete = new Set(sessionIds);
+
+    // Rewrite each daily JSONL file, stripping any line whose sessionId matches.
+    try {
+      const files = readdirSync(this.dir)
+        .filter((f) => f.startsWith("executions-") && f.endsWith(".jsonl"));
+      for (const file of files) {
+        const filepath = join(this.dir, file);
+        const content = readFileSync(filepath, "utf-8");
+        const lines = content.split("\n").filter(Boolean);
+        const kept: string[] = [];
+        let touched = false;
+        for (const line of lines) {
+          try {
+            const exec = JSON.parse(line) as AgentExecution;
+            if (toDelete.has(exec.sessionId)) {
+              touched = true;
+              continue;
+            }
+          } catch {
+            // Keep malformed lines as-is rather than risk data loss.
+          }
+          kept.push(line);
+        }
+        if (touched) {
+          writeFileSync(filepath, kept.length ? kept.join("\n") + "\n" : "", "utf-8");
+        }
+      }
+    } catch (err) {
+      console.error("[execution-store] Failed to delete executions from disk:", err);
+    }
+
+    // Remove from in-memory cache and count.
+    let removed = 0;
+    this.recentCache = this.recentCache.filter((e) => {
+      if (toDelete.has(e.sessionId)) {
+        removed++;
+        return false;
+      }
+      return true;
+    });
+    return removed;
   }
 
   /** Query executions with pagination and filtering. */

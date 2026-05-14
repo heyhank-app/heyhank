@@ -381,6 +381,41 @@ export class AgentExecutor {
     return false;
   }
 
+  /**
+   * Permanently delete execution records (single or bulk). Filters by status
+   * if provided, or by an explicit list of sessionIds. Returns the count of
+   * removed records. Refuses to delete records that are still running.
+   */
+  deleteExecutions(opts: { sessionIds?: string[]; status?: "success" | "error" }): number {
+    let targets: string[] = [];
+
+    if (opts.sessionIds && opts.sessionIds.length > 0) {
+      // Filter out running ones — caller must cancel first.
+      const all = this.executionStore.list({ limit: 10000 }).executions;
+      const byId = new Map(all.map((e) => [e.sessionId, e] as const));
+      for (const sid of opts.sessionIds) {
+        const exec = byId.get(sid);
+        if (!exec || exec.completedAt) targets.push(sid);
+      }
+    } else if (opts.status) {
+      const matching = this.executionStore.list({ status: opts.status, limit: 10000 }).executions;
+      targets = matching.map((e) => e.sessionId);
+    } else {
+      return 0;
+    }
+
+    if (targets.length === 0) return 0;
+
+    // Also drop them from each agent's in-memory list so getExecutions stays consistent.
+    const targetSet = new Set(targets);
+    for (const [agentId, list] of this.executions) {
+      const next = list.filter((e) => !targetSet.has(e.sessionId));
+      if (next.length !== list.length) this.executions.set(agentId, next);
+    }
+
+    return this.executionStore.deleteBySessionIds(targets);
+  }
+
   /** Handle session exit: mark the corresponding execution as completed. */
   handleSessionExited(sessionId: string, exitCode: number | null): void {
     for (const [, execs] of this.executions) {

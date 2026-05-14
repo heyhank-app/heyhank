@@ -42,6 +42,7 @@ const mockExecutionStoreInstance = vi.hoisted(() => ({
   append: vi.fn(),
   update: vi.fn(),
   list: vi.fn().mockReturnValue({ executions: [], total: 0 }),
+  deleteBySessionIds: vi.fn().mockReturnValue(0),
 }));
 
 // Use a proper class so `new ExecutionStore()` works correctly.
@@ -50,6 +51,7 @@ const MockExecutionStoreClass = vi.hoisted(() => {
     append = mockExecutionStoreInstance.append;
     update = mockExecutionStoreInstance.update;
     list = mockExecutionStoreInstance.list;
+    deleteBySessionIds = mockExecutionStoreInstance.deleteBySessionIds;
   };
 });
 
@@ -885,6 +887,60 @@ describe("AgentExecutor", () => {
       expect(aaa!.success).toBe(true);
       // session-bbb should still be running (no completedAt)
       expect(bbb!.completedAt).toBeUndefined();
+    });
+  });
+
+  // =========================================================================
+  // deleteExecutions
+  // =========================================================================
+  describe("deleteExecutions", () => {
+    // Status-mode: forwards all matching sessionIds to the store's bulk delete.
+    it("deletes by status filter and drops from in-memory list", async () => {
+      const agent = makeAgent({ id: "del-agent" });
+      mockAgentStore.getAgent.mockReturnValue(agent);
+      await executor.executeAgent("del-agent");
+      executor.handleSessionExited("session-123", 1); // mark as error
+
+      mockExecutionStoreInstance.list.mockReturnValue({
+        executions: [{ sessionId: "session-123", completedAt: 1, error: "x" }],
+        total: 1,
+      });
+      mockExecutionStoreInstance.deleteBySessionIds.mockReturnValue(1);
+
+      const removed = executor.deleteExecutions({ status: "error" });
+
+      expect(removed).toBe(1);
+      expect(mockExecutionStoreInstance.deleteBySessionIds).toHaveBeenCalledWith(["session-123"]);
+      // In-memory list should no longer contain it.
+      expect(executor.getExecutions("del-agent")).toHaveLength(0);
+    });
+
+    // Refuses to delete a sessionId that's still running (no completedAt).
+    // Caller must cancel first.
+    it("skips running executions when given explicit sessionIds", async () => {
+      const agent = makeAgent({ id: "skip-agent" });
+      mockAgentStore.getAgent.mockReturnValue(agent);
+      await executor.executeAgent("skip-agent");
+
+      mockExecutionStoreInstance.list.mockReturnValue({
+        executions: [{ sessionId: "session-123", completedAt: undefined }],
+        total: 1,
+      });
+      mockExecutionStoreInstance.deleteBySessionIds.mockReturnValue(0);
+
+      const removed = executor.deleteExecutions({ sessionIds: ["session-123"] });
+
+      // Should not have attempted to delete the still-running session: target
+      // list is empty after filtering, so we short-circuit without hitting the store.
+      expect(removed).toBe(0);
+      expect(mockExecutionStoreInstance.deleteBySessionIds).not.toHaveBeenCalled();
+    });
+
+    // Sanity: empty opts is a no-op.
+    it("returns 0 when neither sessionIds nor status is provided", () => {
+      const removed = executor.deleteExecutions({});
+      expect(removed).toBe(0);
+      expect(mockExecutionStoreInstance.deleteBySessionIds).not.toHaveBeenCalled();
     });
   });
 
