@@ -13,7 +13,7 @@ import type { SessionStore } from "./session-store.js";
 import type { BackendType } from "./session-types.js";
 import type { RecorderManager } from "./recorder.js";
 import { CodexAdapter } from "./codex-adapter.js";
-import { resolveBinary, getEnrichedPath } from "./path-resolver.js";
+import { resolveBinary, getEnrichedPath, resolveBundledClaudeBinary } from "./path-resolver.js";
 import { containerManager } from "./container-manager.js";
 import { heyHankBus } from "./event-bus.js";
 import {
@@ -478,8 +478,10 @@ export class CliLauncher {
     const isContainerized = !!options.containerId;
 
     // For containerized sessions, the CLI binary lives inside the container.
-    // For host sessions, resolve the binary on the host.
-    let binary = options.claudeBinary || "claude";
+    // For host sessions, resolve the binary on the host. Prefer the pinned
+    // version bundled as a HeyHank dependency so that user-side global CLI
+    // upgrades (which started rejecting --sdk-url in 2.1.121) don't break us.
+    let binary = options.claudeBinary || (isContainerized ? null : resolveBundledClaudeBinary()) || "claude";
     if (!isContainerized) {
       const resolved = resolveBinary(binary);
       if (resolved) {

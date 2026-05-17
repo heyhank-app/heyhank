@@ -48,6 +48,7 @@
     "generate-token": "bun bin/generate-token.ts"
   },
   "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.119",
     "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-css": "^6.3.1",
     "@codemirror/lang-html": "^6.4.11",
@@ -110,5 +111,8 @@
     "vitest": "^4.0.18",
     "vitest-axe": "^0.1.0",
     "zustand": "^5.0.0"
-  }
+  },
+  "trustedDependencies": [
+    "@anthropic-ai/claude-code"
+  ]
 }

@@ -10,8 +10,11 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+
+const _require = createRequire(import.meta.url);
 
 /**
  * Capture the user's full interactive shell PATH by spawning a login shell.
@@ -183,4 +186,27 @@ export function resolveBinary(name: string): string | null {
  */
 export function getServicePath(): string {
   return getEnrichedPath();
+}
+
+/**
+ * Resolve the Claude Code CLI binary bundled as a HeyHank dependency.
+ *
+ * Why: Claude Code CLI >=2.1.121 rejects `--sdk-url ws://localhost:...` with
+ * "host is not an approved Anthropic endpoint". HeyHank's WebSocket subprocess
+ * bridge depends on that flag. Shipping a pinned, known-working CLI version as
+ * a regular npm dependency keeps HeyHank functional independent of whichever
+ * version the user has installed globally for their own terminal use.
+ * See upstream issue: https://github.com/The-Vibe-Company/companion/issues/655
+ *
+ * Returns null when the bundled package or its platform-specific native binary
+ * is missing (e.g. tests that don't run `bun install`, or `npm install --omit=optional`).
+ */
+export function resolveBundledClaudeBinary(): string | null {
+  try {
+    const pkgPath = _require.resolve("@anthropic-ai/claude-code/package.json");
+    const binPath = join(dirname(pkgPath), "bin", "claude.exe");
+    return existsSync(binPath) ? binPath : null;
+  } catch {
+    return null;
+  }
 }

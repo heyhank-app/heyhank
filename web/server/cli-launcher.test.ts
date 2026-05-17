@@ -8,10 +8,20 @@ import { tmpdir } from "node:os";
 // Mock randomUUID so session IDs are deterministic
 vi.mock("node:crypto", () => ({ randomUUID: () => "test-session-id" }));
 
-// Mock path-resolver for binary resolution
-const mockResolveBinary = vi.hoisted(() => vi.fn((_name: string): string | null => "/usr/bin/claude"));
+// Mock path-resolver for binary resolution. Matches real resolveBinary semantics:
+// absolute paths are returned as-is (mimicking existsSync), bare names resolve via PATH lookup.
+const mockResolveBinary = vi.hoisted(() => vi.fn((name: string): string | null => {
+  if (name.startsWith("/")) return name;
+  return "/usr/bin/claude";
+}));
 const mockGetEnrichedPath = vi.hoisted(() => vi.fn(() => "/usr/bin:/usr/local/bin"));
-vi.mock("./path-resolver.js", () => ({ resolveBinary: mockResolveBinary, getEnrichedPath: mockGetEnrichedPath }));
+// Default null so existing tests fall through to mockResolveBinary("claude") → /usr/bin/claude.
+const mockResolveBundledClaudeBinary = vi.hoisted(() => vi.fn((): string | null => null));
+vi.mock("./path-resolver.js", () => ({
+  resolveBinary: mockResolveBinary,
+  getEnrichedPath: mockGetEnrichedPath,
+  resolveBundledClaudeBinary: mockResolveBundledClaudeBinary,
+}));
 
 // Mock container-manager for container validation in relaunch
 const mockIsContainerAlive = vi.hoisted(() => vi.fn((): "running" | "stopped" | "missing" => "running"));
@@ -155,7 +165,11 @@ beforeEach(() => {
   launcher.setStore(store);
   mockSpawn.mockReturnValue(createMockProc());
   mockListen.mockImplementation(() => ({ stop: vi.fn() }));
-  mockResolveBinary.mockReturnValue("/usr/bin/claude");
+  mockResolveBinary.mockImplementation((name: string) => {
+    if (name.startsWith("/")) return name;
+    return "/usr/bin/claude";
+  });
+  mockResolveBundledClaudeBinary.mockReturnValue(null);
   mockGetContainerById.mockReturnValue(undefined);
 });
 
@@ -214,6 +228,29 @@ describe("launch", () => {
     const modelIdx = cmdAndArgs.indexOf("--model");
     expect(modelIdx).toBeGreaterThan(-1);
     expect(cmdAndArgs[modelIdx + 1]).toBe("claude-opus-4-20250514");
+  });
+
+  // Bundled CLI takes priority over PATH lookup so we don't break when the
+  // user's globally installed Claude Code CLI is on a version (>= 2.1.121)
+  // that rejects --sdk-url ws://localhost. See path-resolver.ts comment.
+  it("prefers the bundled Claude binary over PATH when available", () => {
+    const bundledPath = "/opt/agentplatform/web/node_modules/@anthropic-ai/claude-code/bin/claude.exe";
+    mockResolveBundledClaudeBinary.mockReturnValue(bundledPath);
+
+    launcher.launch({ cwd: "/tmp" });
+
+    const [cmdAndArgs] = mockSpawn.mock.calls[0];
+    expect(cmdAndArgs[0]).toBe(bundledPath);
+  });
+
+  // claudeBinary override (set per-agent or via env) wins even when the bundle is present.
+  it("honors options.claudeBinary override over bundled and PATH binaries", () => {
+    mockResolveBundledClaudeBinary.mockReturnValue("/should/not/be/used/claude.exe");
+
+    launcher.launch({ cwd: "/tmp", claudeBinary: "/custom/claude" });
+
+    const [cmdAndArgs] = mockSpawn.mock.calls[0];
+    expect(cmdAndArgs[0]).toBe("/custom/claude");
   });
 
   it("passes --permission-mode when provided", () => {
