@@ -93,6 +93,45 @@ export function registerContentRoutes(api: Hono): void {
     }
   });
 
+  /**
+   * Remix a library post into Markus's voice + business.
+   * Body: { sourcePostId, sourcePlatform, targetPlatform, url, businessAngle? }
+   *   - url: Markus's site, used to (re-)derive WebsiteIntelligence for tone/USPs/audience
+   * Returns: { piece: ContentPiece }
+   */
+  api.post("/content/remix", async (c) => {
+    try {
+      const body = await c.req.json();
+      const sourcePostId = (body.sourcePostId || "").trim();
+      const sourcePlatform = (body.sourcePlatform || "").trim();
+      const targetPlatform = (body.targetPlatform || sourcePlatform).trim();
+      const url = (body.url || "").trim();
+      const businessAngle = typeof body.businessAngle === "string" ? body.businessAngle.trim() : undefined;
+      if (!sourcePostId || !sourcePlatform || !targetPlatform || !url) {
+        return c.json({ error: "sourcePostId, sourcePlatform, targetPlatform, url are required" }, 400);
+      }
+      const { SOCIAL_PLATFORMS } = await import("../socialview/types.js");
+      if (!SOCIAL_PLATFORMS.includes(sourcePlatform as any)) {
+        return c.json({ error: `invalid sourcePlatform: ${sourcePlatform}` }, 400);
+      }
+      const { analyzeWebsite, remixPost } = await import("../content-intelligence/content-engine.js");
+      const intelligence = await analyzeWebsite(url);
+      const piece = await remixPost({
+        sourcePostId,
+        sourcePlatform: sourcePlatform as any,
+        targetPlatform,
+        intelligence,
+        businessAngle,
+      });
+      return c.json({ piece });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Remix failed";
+      // Source-not-found surfaces as 404 so the UI can show a friendly retry message.
+      if (msg.includes("not found")) return c.json({ error: msg }, 404);
+      return c.json({ error: msg }, 500);
+    }
+  });
+
   /** Generate a complete multi-week content plan */
   api.post("/content/plan", async (c) => {
     try {

@@ -5,7 +5,7 @@
 
 import { randomUUID } from "node:crypto";
 import { callInternalAI } from "../internal-ai.js";
-import { selectForFewShot } from "../socialview/library.js";
+import { selectForFewShot, getPost as getLibraryPost } from "../socialview/library.js";
 import { getProfile as getStyleProfile } from "../socialview/style-profiles.js";
 import type { SocialPlatform, StyleProfile } from "../socialview/types.js";
 import { SOCIAL_PLATFORMS } from "../socialview/types.js";
@@ -93,6 +93,15 @@ export interface ContentPiece {
   imageUrl?: string;
   scheduledFor?: string;
   status: "draft" | "review" | "approved" | "published";
+  /** When set, this piece was remixed from a library post — store the source for attribution + audit. */
+  remix?: {
+    sourcePostId: string;
+    sourcePlatform: string;
+    sourceAuthor: string;
+    sourceUrl: string;
+    /** The "business angle" the user supplied at remix time (free-text). */
+    businessAngle?: string;
+  };
 }
 
 export interface AdCreative {
@@ -1109,4 +1118,157 @@ export async function generateContentPlan(opts: {
     weeks,
     generatedAt: new Date().toISOString(),
   };
+}
+
+// ─── Remix from Library ─────────────────────────────────────────────────────
+// Takes a single role-model LibraryPost and generates a Markus-Voice variant
+// adapted to his business. This is the "klauen + ummodeln" pattern: keep the
+// hook structure, beat sequence, and CTA cadence; replace topic/voice/assets
+// with Markus's. The viral-short-director skill picks up the resulting
+// ContentPiece via the wizard endpoint (Task #5).
+
+export interface RemixOptions {
+  /** Library post to use as the source — must already exist in the library. */
+  sourcePostId: string;
+  /** Source post's platform (used to load the right library subdir). */
+  sourcePlatform: SocialPlatform;
+  /** Target platform for the remix output — often same as source, can differ for cross-post. */
+  targetPlatform: string;
+  /** Markus's business context — supplies USPs, audience, tone for the rewrite. */
+  intelligence: WebsiteIntelligence;
+  /**
+   * Free-text hint that tells the model HOW to reframe the source.
+   * Example: "frame around voltah2 instead of the original product".
+   * Optional — without it the model uses generic business-angle adaptation.
+   */
+  businessAngle?: string;
+}
+
+/**
+ * Generate a single ContentPiece that remixes a library post into Markus's
+ * voice and business angle. Preserves the source's hook pattern, structure,
+ * and CTA cadence but replaces every concrete reference with Markus's context.
+ *
+ * Throws when the source post isn't in the library (id typo, deleted).
+ * Throws on model output that can't be parsed as a ContentPiece — the caller
+ * (route) surfaces this as 500 with the raw model output for debugging.
+ */
+export async function remixPost(opts: RemixOptions): Promise<ContentPiece> {
+  const source = getLibraryPost(opts.sourcePlatform, opts.sourcePostId);
+  if (!source) {
+    throw new Error(`Library post ${opts.sourcePlatform}/${opts.sourcePostId} not found`);
+  }
+
+  const spec = getPlatform(opts.targetPlatform);
+  if (!spec) throw new Error(`Unknown target platform: ${opts.targetPlatform}`);
+
+  // Pull the source author's style profile if we've analyzed them. That gives
+  // the model an explicit voice fingerprint rather than relying on it to
+  // generalize from a single post.
+  let styleBlock = "";
+  const plat = normalizePlatform(opts.sourcePlatform);
+  if (plat) {
+    const profile = getStyleProfile(plat, source.author.handle);
+    if (profile) styleBlock = `\nSOURCE AUTHOR'S VOICE PROFILE (for reference only — do NOT copy it):\n${buildStyleProfileBlock(profile)}`;
+  }
+
+  // Build a compact source-post summary. Media descriptions are AI-generated
+  // already (vision.ts) — perfect for the model to grasp what the visual conveys.
+  const sourceSummary = [
+    `Platform: ${source.platform}`,
+    `Author: ${source.author.handle}${source.author.displayName ? ` (${source.author.displayName})` : ""}`,
+    source.author.followers ? `Followers: ${source.author.followers.toLocaleString()}` : "",
+    `Posted: ${source.postedAt ?? "unknown"}`,
+    `Engagement: ${source.engagement.likes ?? "?"} likes, ${source.engagement.comments ?? "?"} comments${source.engagement.shares ? `, ${source.engagement.shares} shares` : ""}`,
+    `Post type: ${source.postType}`,
+    "",
+    `HOOK (first line): ${source.hook || "(none captured)"}`,
+    `FULL TEXT:`,
+    source.text || "(empty)",
+    source.cta ? `\nORIGINAL CTA: ${source.cta}` : "",
+    source.hashtags.length ? `\nHASHTAGS USED: ${source.hashtags.join(", ")}` : "",
+    source.media.length ? `\nVISUAL: ${source.media.map((m) => `[${m.type}] ${m.description}`).join(" | ")}` : "",
+  ].filter(Boolean).join("\n");
+
+  const prompt = `You are remixing a viral social media post into MARKUS STOEGER'S voice and business angle.
+
+ORIGINAL VIRAL POST (the source — study its structure):
+=============================================================
+${sourceSummary}
+=============================================================
+
+TARGET BUSINESS CONTEXT:
+- Company: ${opts.intelligence.companyName}
+- Industry: ${opts.intelligence.industry}
+- Business Type: ${opts.intelligence.businessType}
+- Target Audience: ${opts.intelligence.targetAudience}
+- USPs: ${opts.intelligence.usp.join(", ")}
+- Tone: ${opts.intelligence.tone}
+- Language: ${opts.intelligence.language}
+${opts.businessAngle ? `\nBUSINESS ANGLE (how to reframe the source):\n${opts.businessAngle}` : ""}
+${styleBlock}
+
+REMIX RULES:
+1. PRESERVE the hook structure (pattern, rhythm, length). E.g. if source opens with a number-shock, your hook also opens with a number-shock — but a different number for Markus's context.
+2. PRESERVE the beat sequence and CTA cadence. The structural skeleton is what makes the post viral.
+3. REPLACE every concrete reference (product, tool, person, dollar amount, claim) with Markus's USPs, business, results.
+4. NEVER copy a sentence verbatim. Paraphrase even the strongest lines.
+5. Match Markus's tone (${opts.intelligence.tone}) and language (${opts.intelligence.language === "de" ? "German" : opts.intelligence.language === "fr" ? "French" : "English"}).
+6. Output ONE post (not a list).
+7. Hashtags must be relevant to Markus's industry, not the source's.
+8. Image prompt should describe a visual that ALIGNS with the remixed post — referencing Markus's setting/tools/products, not the source's.
+
+Return ONLY a single JSON object (no markdown fences, no explanation):
+{
+  "framework": "PAS|AIDA|BAB|StoryBrand",
+  "pillar": "name of the content pillar this aligns with",
+  "targetPain": "the customer pain this addresses",
+  "hook": "the opening hook line",
+  "headline": "post headline/title",
+  "body": "full post body",
+  "cta": "call to action",
+  "hashtags": ["tag1", "tag2"],
+  "imagePrompt": "detailed image prompt for Markus's version"
+}`;
+
+  const result = await callInternalAI({
+    systemPrompt: "You are an expert social media remix copywriter. You take a viral post's STRUCTURE and adapt it to a different business + voice without copying any text verbatim. Return ONLY valid JSON object, no markdown fences.",
+    userPrompt: prompt,
+    maxTokens: 2048,
+    temperature: 0.75,
+  });
+
+  let parsed: any;
+  try {
+    // Strip optional ```json fences the model sometimes emits despite instructions.
+    const cleaned = result.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new Error(`Remix model output was not valid JSON: ${result.text.slice(0, 200)}`);
+  }
+
+  const piece: ContentPiece = {
+    id: randomUUID(),
+    platform: opts.targetPlatform,
+    type: "social-post",
+    journeyStage: "attract",
+    framework: (parsed.framework as CopyFramework) || "PAS",
+    pillar: parsed.pillar || "Remix",
+    targetPain: parsed.targetPain || "",
+    hook: parsed.hook || "",
+    headline: parsed.headline || "",
+    body: parsed.body || "",
+    cta: parsed.cta || "",
+    hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : [],
+    imagePrompt: parsed.imagePrompt,
+    status: "draft",
+    remix: {
+      sourcePostId: source.id,
+      sourcePlatform: source.platform,
+      sourceAuthor: source.author.handle,
+      sourceUrl: source.url,
+      businessAngle: opts.businessAngle,
+    },
+  };
+  return piece;
 }
