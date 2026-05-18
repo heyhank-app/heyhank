@@ -132,6 +132,115 @@ export function registerContentRoutes(api: Hono): void {
     }
   });
 
+  /**
+   * Batch-remix: take N library posts + a single business angle/topic, run
+   * remixPost in parallel for each, and persist the results as drafts in the
+   * socialmedia store. Powers the weekly "Brief Run" wizard — the user
+   * picks 5-10 swipes in Latest Hits view, presses one button, and gets
+   * 5-10 ready-to-review drafts.
+   *
+   * Body: { posts: [{ id, platform }], url, targetPlatform?, businessAngle? }
+   * Returns: { drafts: [{ id, text, platforms }], errors: [{ sourcePostId, error }] }
+   */
+  api.post("/content/remix-batch", async (c) => {
+    try {
+      const body = await c.req.json();
+      const sourcePosts = Array.isArray(body.posts) ? body.posts : [];
+      const url = (body.url || "").trim();
+      const targetPlatform = (body.targetPlatform || "").trim();
+      const businessAngle = typeof body.businessAngle === "string" ? body.businessAngle.trim() : undefined;
+      if (sourcePosts.length === 0) return c.json({ error: "posts array is required" }, 400);
+      if (!url) return c.json({ error: "url is required" }, 400);
+      if (sourcePosts.length > 25) {
+        // Hard cap: a single batch call shouldn't fire 100 model invocations.
+        // 25 is enough for the 15-21 reels/week target with headroom.
+        return c.json({ error: "batch size capped at 25" }, 400);
+      }
+
+      const { SOCIAL_PLATFORMS } = await import("../socialview/types.js");
+      const { analyzeWebsite, remixPost } = await import("../content-intelligence/content-engine.js");
+      const { savePost } = await import("../socialmedia/store.js");
+
+      // Run analyzeWebsite once and pass intelligence to every remix —
+      // re-analyzing per item would be wasteful and slow.
+      const intelligence = await analyzeWebsite(url);
+
+      const results = await Promise.all(
+        sourcePosts.map(async (sp: { id: string; platform: string }) => {
+          try {
+            if (!sp.id || !SOCIAL_PLATFORMS.includes(sp.platform as any)) {
+              return { ok: false as const, sourcePostId: sp.id, error: "invalid id or platform" };
+            }
+            const piece = await remixPost({
+              sourcePostId: sp.id,
+              sourcePlatform: sp.platform as any,
+              targetPlatform: targetPlatform || sp.platform,
+              intelligence,
+              businessAngle,
+            });
+            return { ok: true as const, piece, sourcePostId: sp.id };
+          } catch (e) {
+            return {
+              ok: false as const,
+              sourcePostId: sp.id,
+              error: e instanceof Error ? e.message : "remix failed",
+            };
+          }
+        }),
+      );
+
+      // Persist successful pieces as drafts. We compose the text body from
+      // the ContentPiece fields the user actually reviews (hook → body → CTA
+      // → hashtags) so the draft renders sensibly without us inventing yet
+      // another canonical format.
+      const drafts: { id: string; text: string; platforms: string[]; remixFrom?: string }[] = [];
+      const errors: { sourcePostId: string; error: string }[] = [];
+      const now = new Date().toISOString();
+
+      for (const r of results) {
+        if (!r.ok) {
+          errors.push({ sourcePostId: r.sourcePostId, error: r.error });
+          continue;
+        }
+        const piece = r.piece;
+        const text = [piece.hook, piece.body, piece.cta, piece.hashtags.map((h: string) => `#${h}`).join(" ")]
+          .filter(Boolean)
+          .join("\n\n");
+        const post = {
+          id: piece.id,
+          text,
+          platforms: [piece.platform as any],
+          status: "draft" as const,
+          backendId: null,
+          mediaUrls: [],
+          createdAt: now,
+          updatedAt: now,
+          createdBy: "agent" as const,
+          // Stash remix attribution in backendData so it's visible in the
+          // drafts panel without polluting the SocialPost schema.
+          backendData: { remix: piece.remix },
+        };
+        savePost(post as any);
+        drafts.push({
+          id: post.id,
+          text,
+          platforms: post.platforms,
+          remixFrom: piece.remix?.sourceAuthor,
+        });
+      }
+
+      return c.json({
+        drafts,
+        errors,
+        attempted: sourcePosts.length,
+        succeeded: drafts.length,
+        failed: errors.length,
+      });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "batch remix failed" }, 500);
+    }
+  });
+
   /** Generate a complete multi-week content plan */
   api.post("/content/plan", async (c) => {
     try {

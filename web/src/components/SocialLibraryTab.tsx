@@ -74,6 +74,10 @@ export function SocialLibraryTab({ showMessage }: Props): React.ReactElement {
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState<Record<string, string>>({});
+  // Multi-select state for the batch-remix wizard. Only meaningful in
+  // role-model view — remixing your own posts doesn't make sense.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showWizard, setShowWizard] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -243,6 +247,29 @@ export function SocialLibraryTab({ showMessage }: Props): React.ReactElement {
         <span className="text-xs text-cc-muted ml-auto">{posts.length} posts</span>
       </div>
 
+      {/* Batch-remix action bar — appears when role-model posts are selected. */}
+      {filterSource === "role-model" && selectedIds.size > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-2 border border-cc-accent/40 bg-cc-accent/10 rounded-md px-3 py-2 text-xs"
+          role="region"
+          aria-label="Batch remix actions"
+        >
+          <span className="text-cc-fg">{selectedIds.size} selected</span>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="text-cc-muted hover:text-cc-fg"
+          >
+            Clear
+          </button>
+          <button
+            onClick={() => setShowWizard(true)}
+            className="ml-auto px-3 py-1 rounded-md bg-cc-accent text-white hover:bg-cc-accent/90"
+          >
+            Remix into drafts →
+          </button>
+        </div>
+      )}
+
       {loading && <div className="text-xs text-cc-muted">Loading…</div>}
       {!loading && posts.length === 0 && (
         <div className="text-xs text-cc-muted border border-dashed border-cc-border rounded-md p-6 text-center">
@@ -263,6 +290,23 @@ export function SocialLibraryTab({ showMessage }: Props): React.ReactElement {
               }`}
             >
               <div className="flex items-start gap-3">
+                {/* Selection checkbox — only meaningful for role-model posts */}
+                {post.source === "role-model" && (
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(post.id)}
+                    onChange={(e) => {
+                      setSelectedIds((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(post.id);
+                        else next.delete(post.id);
+                        return next;
+                      });
+                    }}
+                    aria-label={`Select post by ${post.author.handle}`}
+                    className="mt-1 shrink-0"
+                  />
+                )}
                 {post.media[0]?.remoteUrl && (
                   <img
                     src={post.media[0].remoteUrl}
@@ -375,6 +419,171 @@ export function SocialLibraryTab({ showMessage }: Props): React.ReactElement {
             </div>
           );
         })}
+      </div>
+
+      {/* Batch remix wizard modal */}
+      {showWizard && (
+        <RemixWizard
+          selectedPosts={posts.filter((p) => selectedIds.has(p.id)).map((p) => ({ id: p.id, platform: p.platform, handle: p.author.handle }))}
+          onClose={() => setShowWizard(false)}
+          onSuccess={(count) => {
+            setShowWizard(false);
+            setSelectedIds(new Set());
+            showMessage(`${count} drafts created — see Drafts tab`);
+          }}
+          onError={(msg) => showMessage(msg, true)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── RemixWizard ─────────────────────────────────────────────────────────────
+// Captures the topic/angle + target platform, then POSTs to /content/remix-batch.
+// Surfaces success / per-item failures inline. Kept in this file because it's
+// tightly coupled to the library selection state.
+function RemixWizard({
+  selectedPosts,
+  onClose,
+  onSuccess,
+  onError,
+}: {
+  selectedPosts: Array<{ id: string; platform: Platform; handle: string }>;
+  onClose: () => void;
+  onSuccess: (count: number) => void;
+  onError: (msg: string) => void;
+}) {
+  const [url, setUrl] = useState("");
+  const [businessAngle, setBusinessAngle] = useState("");
+  const [targetPlatform, setTargetPlatform] = useState<"keep" | Platform>("keep");
+  const [busy, setBusy] = useState(false);
+  const [errors, setErrors] = useState<Array<{ sourcePostId: string; error: string }>>([]);
+
+  async function run() {
+    if (!url.trim()) {
+      onError("Website URL is required (used to derive your business context)");
+      return;
+    }
+    setBusy(true);
+    setErrors([]);
+    try {
+      const body = {
+        posts: selectedPosts.map((p) => ({ id: p.id, platform: p.platform })),
+        url: url.trim(),
+        businessAngle: businessAngle.trim() || undefined,
+        targetPlatform: targetPlatform === "keep" ? undefined : targetPlatform,
+      };
+      const token = typeof window !== "undefined" ? localStorage.getItem("heyhank_auth_token") : null;
+      const res = await fetch("/api/content/remix-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(errBody.error || `${res.status}`);
+      }
+      const result = (await res.json()) as {
+        succeeded: number;
+        failed: number;
+        errors: Array<{ sourcePostId: string; error: string }>;
+      };
+      if (result.failed > 0) setErrors(result.errors);
+      if (result.succeeded > 0) onSuccess(result.succeeded);
+      else onError(`All ${result.failed} remixes failed`);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Batch remix failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Remix selected posts into drafts"
+    >
+      <div className="bg-cc-card border border-cc-border rounded-xl w-full max-w-lg p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-cc-fg">Remix {selectedPosts.length} posts into drafts</h3>
+          <button onClick={onClose} className="text-cc-muted hover:text-cc-fg text-lg" aria-label="Close">&times;</button>
+        </div>
+
+        <div className="text-[11px] text-cc-muted">
+          Sources: {selectedPosts.slice(0, 5).map((p) => `@${p.handle}`).join(", ")}
+          {selectedPosts.length > 5 ? ` + ${selectedPosts.length - 5} more` : ""}
+        </div>
+
+        <label className="block">
+          <span className="text-xs text-cc-fg">Your website URL</span>
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://markusstoeger.com"
+            className="mt-1 w-full text-xs px-2 py-1 rounded-md bg-cc-bg border border-cc-border text-cc-fg"
+            required
+          />
+          <span className="text-[10px] text-cc-muted">Used to derive your USPs, audience, tone for the rewrite.</span>
+        </label>
+
+        <label className="block">
+          <span className="text-xs text-cc-fg">Business angle (optional)</span>
+          <textarea
+            value={businessAngle}
+            onChange={(e) => setBusinessAngle(e.target.value)}
+            placeholder="e.g. frame around voltah2 / Claude Code speedruns / vibe coding"
+            rows={2}
+            className="mt-1 w-full text-xs px-2 py-1 rounded-md bg-cc-bg border border-cc-border text-cc-fg"
+          />
+          <span className="text-[10px] text-cc-muted">How to reframe the source posts — leave blank for generic adaptation.</span>
+        </label>
+
+        <label className="block">
+          <span className="text-xs text-cc-fg">Target platform</span>
+          <select
+            value={targetPlatform}
+            onChange={(e) => setTargetPlatform(e.target.value as typeof targetPlatform)}
+            className="mt-1 w-full text-xs px-2 py-1 rounded-md bg-cc-bg border border-cc-border text-cc-fg"
+          >
+            <option value="keep">Keep source platform for each</option>
+            <option value="instagram">Instagram</option>
+            <option value="tiktok">TikTok</option>
+            <option value="facebook">Facebook</option>
+            <option value="linkedin">LinkedIn</option>
+            <option value="twitter">X (Twitter)</option>
+          </select>
+        </label>
+
+        {errors.length > 0 && (
+          <div className="text-[11px] text-red-400 border border-red-500/30 rounded-md p-2 space-y-1 max-h-32 overflow-auto">
+            <div className="font-medium">{errors.length} failed:</div>
+            {errors.map((e, i) => (
+              <div key={i} className="opacity-80">
+                {e.sourcePostId.slice(0, 8)}: {e.error}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs rounded-md bg-cc-surface border border-cc-border text-cc-fg hover:bg-cc-bg"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => void run()}
+            disabled={busy || !url.trim()}
+            className="px-3 py-1.5 text-xs rounded-md bg-cc-accent text-white hover:bg-cc-accent/90 disabled:opacity-50"
+          >
+            {busy ? `Remixing ${selectedPosts.length}…` : `Generate ${selectedPosts.length} drafts`}
+          </button>
+        </div>
       </div>
     </div>
   );
