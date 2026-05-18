@@ -93,6 +93,57 @@ export interface LibraryQuery {
 }
 
 /**
+ * A creator (other than Markus) whose posts we want to track regularly.
+ * The auto-crawler iterates over enabled entries, navigates to the creator's
+ * profile, and extracts recent posts as `source: "role-model"` into the library.
+ *
+ * Storage: single JSON file at ~/.heyhank/socialview/watch-list.json
+ * (dataset is small — flat array, no per-platform sharding needed).
+ */
+export interface WatchListEntry {
+  id: string;
+  platform: SocialPlatform;
+  /** Handle without leading "@" or URL — e.g. "rileybrown.ai", not "@rileybrown.ai". */
+  handle: string;
+  /** Optional human-readable label shown in UI. Defaults to `handle` if empty. */
+  displayName?: string;
+  /** Why we follow this creator — for our own future reference, never sent to the model. */
+  notes?: string;
+  /** When false, the auto-crawler skips this entry (pause without delete). */
+  enabled: boolean;
+  /** ISO timestamp when the entry was created. */
+  createdAt: string;
+  /** ISO timestamp of last successful or attempted crawl. Null if never crawled. */
+  lastCrawledAt: string | null;
+  /** Outcome of the most recent crawl attempt. */
+  lastCrawlStatus: "ok" | "error" | "never";
+  /** Free-text error message from the last failed crawl, if any. */
+  lastCrawlMessage?: string;
+  /** Number of posts extracted in the most recent crawl. */
+  lastCrawlPostsExtracted?: number;
+}
+
+/**
+ * Build the public profile URL for a creator on a given platform. The crawler
+ * navigates here before invoking the standard post extractor.
+ *
+ * Returns null when the platform's URL scheme depends on extra info we don't
+ * have (e.g. LinkedIn distinguishes /in/<handle> vs /company/<handle> — callers
+ * should fall back to `WatchListEntry.profileUrlOverride` when provided, or
+ * surface the ambiguity to the user).
+ */
+export function buildProfileUrl(platform: SocialPlatform, handle: string): string {
+  const h = handle.replace(/^@/, "").trim();
+  switch (platform) {
+    case "instagram": return `https://www.instagram.com/${h}/`;
+    case "twitter":   return `https://x.com/${h}`;
+    case "linkedin":  return `https://www.linkedin.com/in/${h}/`;
+    case "facebook":  return `https://www.facebook.com/${h}/`;
+    case "tiktok":    return `https://www.tiktok.com/@${h}`;
+  }
+}
+
+/**
  * Distilled writing-style profile derived from all library posts of a single
  * handle. Used as an "instruction block" in the content-generation prompt so
  * the agent writes in the role-model's voice without us having to ship 5+ raw

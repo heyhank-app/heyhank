@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "../api.js";
 import { SocialViewTab } from "./SocialViewTab.js";
 import { SocialLibraryTab } from "./SocialLibraryTab.js";
+import { SocialWatchListTab } from "./SocialWatchListTab.js";
 import { PersonasTab } from "./PersonasTab.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -51,7 +52,7 @@ const PLATFORM_ICONS: Record<string, string> = {
   threads: "@",
 };
 
-type TabId = "posts" | "drafts" | "calendar" | "view" | "library" | "personas" | "analytics" | "settings";
+type TabId = "posts" | "drafts" | "calendar" | "view" | "library" | "watchlist" | "personas" | "analytics" | "settings";
 
 /**
  * Defensive normalization: a regression in the agent flow saved drafts with
@@ -111,7 +112,7 @@ export function SocialMediaPage({ embedded }: { embedded?: boolean }) {
   const initialTab = (() => {
     const hash = window.location.hash;
     const match = hash.match(/#\/socialmedia\/(\w+)/);
-    if (match && ["posts", "drafts", "calendar", "view", "library", "personas", "analytics", "settings"].includes(match[1])) {
+    if (match && ["posts", "drafts", "calendar", "view", "library", "watchlist", "personas", "analytics", "settings"].includes(match[1])) {
       return match[1] as TabId;
     }
     return "posts";
@@ -147,6 +148,7 @@ export function SocialMediaPage({ embedded }: { embedded?: boolean }) {
     { id: "calendar", label: "Calendar" },
     { id: "view", label: "View" },
     { id: "library", label: "Library" },
+    { id: "watchlist", label: "Watch List" },
     { id: "personas", label: "Personas" },
     { id: "analytics", label: "Analytics" },
     { id: "settings", label: "Settings" },
@@ -206,6 +208,7 @@ export function SocialMediaPage({ embedded }: { embedded?: boolean }) {
         {activeTab === "calendar" && <CalendarTab refreshKey={refreshKey} showMessage={showMessage} onEdit={openComposer} onRefresh={refresh} />}
         {activeTab === "view" && <SocialViewTab showMessage={showMessage} />}
         {activeTab === "library" && <SocialLibraryTab showMessage={showMessage} />}
+        {activeTab === "watchlist" && <SocialWatchListTab showMessage={showMessage} />}
         {activeTab === "personas" && <PersonasTab showMessage={showMessage} />}
         {activeTab === "analytics" && <AnalyticsTab showMessage={showMessage} />}
         {activeTab === "settings" && <SettingsTab showMessage={showMessage} onSwitchTab={setActiveTab} />}

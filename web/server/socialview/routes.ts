@@ -7,6 +7,7 @@ import * as browser from "./browser-manager.js";
 import * as vnc from "./vnc-manager.js";
 import * as library from "./library.js";
 import * as styleProfiles from "./style-profiles.js";
+import * as watchList from "./watch-list.js";
 import { analyzeHandleStyle } from "./style-analyzer.js";
 import { extractCurrentPage } from "./extractors.js";
 import { SOCIAL_PLATFORMS, type SocialPlatform } from "./types.js";
@@ -365,6 +366,71 @@ export function registerSocialViewRoutes(api: Hono): void {
     const platform = parsePlatform(c.req.param("platform"));
     if (!platform) return c.json({ error: "invalid platform" }, 400);
     const ok = styleProfiles.deleteProfile(platform, c.req.param("handle"));
+    if (!ok) return c.json({ error: "not found" }, 404);
+    return c.json({ ok: true });
+  });
+
+  // ─── Watch List ─────────────────────────────────────────────────────
+  // Creators (other than Markus) whose posts the auto-crawler harvests
+  // regularly into the role-model library. UI lives at the same SocialMediaPage.
+
+  /** List watch-list entries with optional platform / enabledOnly filters. */
+  api.get("/socialview/watch-list", (c) => {
+    const params = c.req.query();
+    const platform = params.platform ? parsePlatform(params.platform) : null;
+    if (params.platform && !platform) return c.json({ error: "invalid platform" }, 400);
+    const enabledOnly = params.enabledOnly === "true" || params.enabled === "true";
+    const entries = watchList.list({ platform: platform ?? undefined, enabledOnly });
+    return c.json({ entries });
+  });
+
+  /** Add a creator to the watch-list. Rejects duplicates per (platform, handle). */
+  api.post("/socialview/watch-list", async (c) => {
+    try {
+      const body = await c.req.json();
+      const platform = parsePlatform(body.platform);
+      if (!platform) return c.json({ error: "invalid platform" }, 400);
+      if (typeof body.handle !== "string") return c.json({ error: "handle is required" }, 400);
+      const result = watchList.create({
+        platform,
+        handle: body.handle,
+        displayName: typeof body.displayName === "string" ? body.displayName : undefined,
+        notes: typeof body.notes === "string" ? body.notes : undefined,
+        enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
+      });
+      if (!result.ok) return c.json({ error: result.error }, result.code as 400 | 409);
+      return c.json({ ok: true, entry: result.entry }, 201);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "invalid body" }, 400);
+    }
+  });
+
+  /** Partial update — typically used to pause (enabled=false) or edit notes/displayName. */
+  api.patch("/socialview/watch-list/:id", async (c) => {
+    try {
+      const body = await c.req.json();
+      // Whitelist user-editable fields. Crawl-status fields are written only by
+      // the crawler internally — accepting them from the API would let the
+      // client fabricate a "last crawled" timestamp.
+      const patch: watchList.UpdatePatch = {};
+      if (typeof body.displayName === "string" || body.displayName === null) {
+        patch.displayName = body.displayName ?? undefined;
+      }
+      if (typeof body.notes === "string" || body.notes === null) {
+        patch.notes = body.notes ?? undefined;
+      }
+      if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+      const updated = watchList.update(c.req.param("id"), patch);
+      if (!updated) return c.json({ error: "not found" }, 404);
+      return c.json({ ok: true, entry: updated });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "invalid body" }, 400);
+    }
+  });
+
+  /** Remove a creator from the watch-list. */
+  api.delete("/socialview/watch-list/:id", (c) => {
+    const ok = watchList.remove(c.req.param("id"));
     if (!ok) return c.json({ error: "not found" }, 404);
     return c.json({ ok: true });
   });
