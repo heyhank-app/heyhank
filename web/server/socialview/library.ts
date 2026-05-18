@@ -76,9 +76,36 @@ export function listPosts(q: LibraryQuery = {}): LibraryPost[] {
     }
   }
 
-  out.sort((a, b) => (b.extractedAt > a.extractedAt ? 1 : -1));
+  const sortBy = q.sortBy ?? "extracted";
+  out.sort((a, b) => compareForSort(a, b, sortBy));
   if (q.limit && out.length > q.limit) return out.slice(0, q.limit);
   return out;
+}
+
+function compareForSort(a: LibraryPost, b: LibraryPost, sortBy: NonNullable<LibraryQuery["sortBy"]>): number {
+  if (sortBy === "posted") {
+    // postedAt is ISO-8601 — string compare is correct ordering. Nulls
+    // (postedAt missing) sink to the bottom so the surfaced "latest" feed
+    // doesn't get polluted by undated posts.
+    const ap = a.postedAt ?? "";
+    const bp = b.postedAt ?? "";
+    if (ap && bp) return bp > ap ? 1 : -1;
+    if (ap) return -1;
+    if (bp) return 1;
+    return 0;
+  }
+  if (sortBy === "engagement") {
+    // Likes is the most consistent signal across platforms; fall back to
+    // engagementRate when likes are missing, then to extractedAt as a tiebreak.
+    const al = a.engagement.likes ?? -1;
+    const bl = b.engagement.likes ?? -1;
+    if (al !== bl) return bl - al;
+    const ar = a.engagementRate ?? -1;
+    const br = b.engagementRate ?? -1;
+    if (ar !== br) return br - ar;
+    return b.extractedAt > a.extractedAt ? 1 : -1;
+  }
+  return b.extractedAt > a.extractedAt ? 1 : -1;
 }
 
 function matchesQuery(post: LibraryPost, q: LibraryQuery): boolean {
@@ -87,9 +114,18 @@ function matchesQuery(post: LibraryPost, q: LibraryQuery): boolean {
   if (typeof q.minEngagementRate === "number") {
     if ((post.engagementRate ?? 0) < q.minEngagementRate) return false;
   }
+  if (typeof q.minLikes === "number") {
+    if ((post.engagement.likes ?? 0) < q.minLikes) return false;
+  }
   if (q.tags && q.tags.length > 0) {
     const tagset = new Set(post.tags);
     for (const t of q.tags) if (!tagset.has(t)) return false;
+  }
+  if (typeof q.postedWithinDays === "number" && q.postedWithinDays > 0) {
+    if (!post.postedAt) return false;
+    const ageMs = Date.now() - new Date(post.postedAt).getTime();
+    if (ageMs > q.postedWithinDays * 24 * 60 * 60 * 1000) return false;
+    // Negative age (clock skew, future-dated post) — keep, treat as fresh.
   }
   return true;
 }

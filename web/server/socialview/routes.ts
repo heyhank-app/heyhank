@@ -262,6 +262,11 @@ export function registerSocialViewRoutes(api: Hono): void {
     const source = params.source === "own" || params.source === "role-model" ? params.source : undefined;
     const goldOnly = params.goldOnly === "true" || params.gold === "true";
     const minEngagementRate = params.minEngagement ? Number(params.minEngagement) : undefined;
+    const minLikes = params.minLikes ? Number(params.minLikes) : undefined;
+    const postedWithinDays = params.postedWithinDays ? Number(params.postedWithinDays) : undefined;
+    const sortBy = params.sortBy === "posted" || params.sortBy === "engagement" || params.sortBy === "extracted"
+      ? params.sortBy
+      : undefined;
     const tags = params.tags ? params.tags.split(",").map((t) => t.trim()).filter(Boolean) : undefined;
     const limit = params.limit ? Number(params.limit) : undefined;
     const posts = library.listPosts({
@@ -269,6 +274,9 @@ export function registerSocialViewRoutes(api: Hono): void {
       source,
       goldOnly,
       minEngagementRate,
+      minLikes,
+      postedWithinDays,
+      sortBy,
       tags,
       limit,
     });

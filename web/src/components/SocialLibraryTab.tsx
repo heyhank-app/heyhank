@@ -60,11 +60,17 @@ interface Props {
   showMessage: (text: string, isError?: boolean) => void;
 }
 
+type SortBy = "extracted" | "posted" | "engagement";
+type TimeWindow = "all" | "1" | "7" | "30";
+
 export function SocialLibraryTab({ showMessage }: Props): React.ReactElement {
   const [posts, setPosts] = useState<LibraryPost[]>([]);
   const [filterPlatform, setFilterPlatform] = useState<"all" | Platform>("all");
   const [filterSource, setFilterSource] = useState<"all" | "own" | "role-model">("all");
   const [goldOnly, setGoldOnly] = useState(false);
+  const [sortBy, setSortBy] = useState<SortBy>("extracted");
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>("all");
+  const [minLikes, setMinLikes] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState<Record<string, string>>({});
@@ -76,6 +82,12 @@ export function SocialLibraryTab({ showMessage }: Props): React.ReactElement {
       if (filterPlatform !== "all") qs.set("platform", filterPlatform);
       if (filterSource !== "all") qs.set("source", filterSource);
       if (goldOnly) qs.set("goldOnly", "true");
+      if (sortBy !== "extracted") qs.set("sortBy", sortBy);
+      if (timeWindow !== "all") qs.set("postedWithinDays", timeWindow);
+      const minLikesNum = Number(minLikes);
+      if (minLikes && Number.isFinite(minLikesNum) && minLikesNum > 0) {
+        qs.set("minLikes", String(Math.floor(minLikesNum)));
+      }
       const data = await apiGet<{ posts: LibraryPost[] }>(`/api/socialview/library?${qs}`);
       setPosts(data.posts);
     } catch (e) {
@@ -83,7 +95,16 @@ export function SocialLibraryTab({ showMessage }: Props): React.ReactElement {
     } finally {
       setLoading(false);
     }
-  }, [filterPlatform, filterSource, goldOnly, showMessage]);
+  }, [filterPlatform, filterSource, goldOnly, sortBy, timeWindow, minLikes, showMessage]);
+
+  // "Latest Hits" preset — flips three filters at once for the typical
+  // "show me what's hot from creators I follow in the last week" view.
+  function applyLatestHitsPreset() {
+    setFilterSource("role-model");
+    setSortBy("posted");
+    setTimeWindow("7");
+    setGoldOnly(false);
+  }
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -133,12 +154,27 @@ export function SocialLibraryTab({ showMessage }: Props): React.ReactElement {
 
   return (
     <div className="space-y-3">
+      {/* Latest Hits preset — one click for the "what's hot from creators I follow last week" view */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <button
+          onClick={applyLatestHitsPreset}
+          className="text-xs px-3 py-1 rounded-md bg-cc-accent/10 border border-cc-accent/30 text-cc-accent hover:bg-cc-accent/20"
+          title="Show role-model posts from the last 7 days, sorted by publish date"
+        >
+          ★ Latest Hits
+        </button>
+        <span className="text-[11px] text-cc-muted">
+          source=role-model · sortBy=posted · last 7 days
+        </span>
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap gap-2 items-center">
         <select
           value={filterPlatform}
           onChange={(e) => setFilterPlatform(e.target.value as typeof filterPlatform)}
           className="text-xs px-2 py-1 rounded-md bg-cc-bg border border-cc-border text-cc-fg"
+          aria-label="Filter by platform"
         >
           <option value="all">All platforms</option>
           <option value="instagram">Instagram</option>
@@ -151,11 +187,45 @@ export function SocialLibraryTab({ showMessage }: Props): React.ReactElement {
           value={filterSource}
           onChange={(e) => setFilterSource(e.target.value as typeof filterSource)}
           className="text-xs px-2 py-1 rounded-md bg-cc-bg border border-cc-border text-cc-fg"
+          aria-label="Filter by source"
         >
           <option value="all">All sources</option>
           <option value="own">Own</option>
           <option value="role-model">Role Model</option>
         </select>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as SortBy)}
+          className="text-xs px-2 py-1 rounded-md bg-cc-bg border border-cc-border text-cc-fg"
+          aria-label="Sort by"
+        >
+          <option value="extracted">Newest extracted</option>
+          <option value="posted">Newest posted</option>
+          <option value="engagement">Highest engagement</option>
+        </select>
+        <select
+          value={timeWindow}
+          onChange={(e) => setTimeWindow(e.target.value as TimeWindow)}
+          className="text-xs px-2 py-1 rounded-md bg-cc-bg border border-cc-border text-cc-fg"
+          aria-label="Posted within"
+        >
+          <option value="all">All time</option>
+          <option value="1">Last 24h</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+        </select>
+        <label className="flex items-center gap-1 text-xs text-cc-fg" title="Hide posts below this like count">
+          Min likes
+          <input
+            type="number"
+            min="0"
+            value={minLikes}
+            onChange={(e) => setMinLikes(e.target.value)}
+            placeholder="0"
+            className="text-xs px-2 py-1 rounded-md bg-cc-bg border border-cc-border text-cc-fg w-16"
+            aria-label="Minimum likes"
+          />
+        </label>
         <label className="flex items-center gap-1 text-xs text-cc-fg">
           <input
             type="checkbox"

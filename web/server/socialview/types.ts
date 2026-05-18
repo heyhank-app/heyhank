@@ -88,7 +88,21 @@ export interface LibraryQuery {
   source?: "own" | "role-model";
   goldOnly?: boolean;
   minEngagementRate?: number;
+  /** Minimum like count threshold — independent of engagementRate which needs follower data. */
+  minLikes?: number;
   tags?: string[];
+  /**
+   * If set, only return posts published within the last N days. Counted from
+   * `postedAt`; posts without a `postedAt` are dropped from time-filtered results.
+   */
+  postedWithinDays?: number;
+  /**
+   * Sort order for the result. Default `extracted` matches the legacy behaviour.
+   *   - `extracted`: newest scraped first — best when triaging recent crawls
+   *   - `posted`:    newest published first — best for "Latest Hits" view
+   *   - `engagement`: highest engagement first (likes desc, nulls last)
+   */
+  sortBy?: "extracted" | "posted" | "engagement";
   limit?: number;
 }
 
