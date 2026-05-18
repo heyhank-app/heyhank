@@ -8,6 +8,7 @@ import * as vnc from "./vnc-manager.js";
 import * as library from "./library.js";
 import * as styleProfiles from "./style-profiles.js";
 import * as watchList from "./watch-list.js";
+import * as autoCrawler from "./auto-crawler.js";
 import { analyzeHandleStyle } from "./style-analyzer.js";
 import { extractCurrentPage } from "./extractors.js";
 import { SOCIAL_PLATFORMS, type SocialPlatform } from "./types.js";
@@ -433,5 +434,39 @@ export function registerSocialViewRoutes(api: Hono): void {
     const ok = watchList.remove(c.req.param("id"));
     if (!ok) return c.json({ error: "not found" }, 404);
     return c.json({ ok: true });
+  });
+
+  /**
+   * Manually trigger a full crawl across all enabled watch-list entries.
+   * Used for testing the pipeline or kicking it off ahead of the nightly run.
+   * Returns the summary so the UI can show how many posts were extracted.
+   */
+  api.post("/socialview/watch-list/crawl-now", async (c) => {
+    const summary = await autoCrawler.crawlOnce();
+    return c.json(summary);
+  });
+
+  /**
+   * Manually trigger a crawl for a single watch-list entry. Useful when
+   * adding a new creator and wanting to populate the library immediately.
+   */
+  api.post("/socialview/watch-list/:id/crawl-now", async (c) => {
+    const entry = watchList.get(c.req.param("id"));
+    if (!entry) return c.json({ error: "not found" }, 404);
+    if (!browser.hasProfile(entry.platform)) {
+      return c.json({ error: `${entry.platform} has no login profile — open SocialView and log in once` }, 412);
+    }
+    // Boot the browser if it's not running so the user doesn't have to do
+    // that manually for the manual-trigger path.
+    const status = browser.getStatus(entry.platform);
+    if (!status.running) {
+      try {
+        await browser.startPlatform(entry.platform);
+      } catch (e) {
+        return c.json({ error: `failed to start browser: ${e instanceof Error ? e.message : "unknown"}` }, 500);
+      }
+    }
+    const result = await autoCrawler.crawlEntry(entry);
+    return c.json(result);
   });
 }

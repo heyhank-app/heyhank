@@ -28,6 +28,7 @@ import { CronScheduler } from "./cron-scheduler.js";
 import { AgentExecutor } from "./agent-executor.js";
 import { SessionOrchestrator } from "./session-orchestrator.js";
 import { migrateCronJobsToAgents } from "./agent-cron-migrator.js";
+import { seedDefaultAgents } from "./agent-store.js";
 import { migrateAnthropicApiKeyToProvider } from "./anthropic-provider-migration.js";
 import { authenticateManagedWebSocket } from "./ws-auth.js";
 import { NoVncProxy } from "./novnc-proxy.js";
@@ -432,6 +433,7 @@ cronScheduler.startAll();
 // ── Agent system ────────────────────────────────────────────────────────────
 migrateCronJobsToAgents();
 migrateAnthropicApiKeyToProvider();
+seedDefaultAgents();
 agentExecutor.startAll();
 
 // ── Agent Platform extensions ──────────────────────────────────────────────
@@ -454,6 +456,13 @@ startPeriodicCheck();
 
 // ── Reminder scheduler ──────────────────────────────────────────────────────
 startReminderScheduler();
+
+// ── SocialView watch-list auto-crawler ──────────────────────────────────────
+// Nightly cron that visits each enabled watch-list entry and fills the
+// role-model library. Set HEYHANK_SOCIALVIEW_CRAWL_DISABLE=1 to skip in dev.
+if (process.env.HEYHANK_SOCIALVIEW_CRAWL_DISABLE !== "1") {
+  void import("./socialview/auto-crawler.js").then((m) => m.startAutoCrawler());
+}
 
 // ── Telephony inbound listener ──────────────────────────────────────────────
 // Subscribes to FreeSWITCH ESL CHANNEL_CREATE events and bootstraps inbound calls.

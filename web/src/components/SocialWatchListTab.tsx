@@ -73,6 +73,8 @@ export function SocialWatchListTab({ showMessage }: Props): React.ReactElement {
   const [newDisplayName, setNewDisplayName] = useState("");
   const [newNotes, setNewNotes] = useState("");
   const [adding, setAdding] = useState(false);
+  const [crawling, setCrawling] = useState(false);
+  const [crawlingEntryId, setCrawlingEntryId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -121,6 +123,48 @@ export function SocialWatchListTab({ showMessage }: Props): React.ReactElement {
       await refresh();
     } catch (err) {
       showMessage(err instanceof Error ? err.message : "Toggle failed", true);
+    }
+  }
+
+  async function handleCrawlAll() {
+    setCrawling(true);
+    try {
+      const summary = await apiSend<{ succeeded: number; failed: number; skipped: number; postsExtracted: number; totalEntries: number }>(
+        "/api/socialview/watch-list/crawl-now",
+        "POST",
+      );
+      if (summary.totalEntries === 0) {
+        showMessage("No enabled creators to crawl");
+      } else {
+        showMessage(
+          `Crawled ${summary.succeeded}/${summary.totalEntries} • ${summary.postsExtracted} posts • ${summary.failed} failed • ${summary.skipped} skipped`,
+        );
+      }
+      await refresh();
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : "Crawl failed", true);
+    } finally {
+      setCrawling(false);
+    }
+  }
+
+  async function handleCrawlOne(entry: WatchListEntry) {
+    setCrawlingEntryId(entry.id);
+    try {
+      const result = await apiSend<{ ok: boolean; postsExtracted: number; error?: string }>(
+        `/api/socialview/watch-list/${entry.id}/crawl-now`,
+        "POST",
+      );
+      if (result.ok) {
+        showMessage(`Crawled ${entry.handle}: ${result.postsExtracted} posts`);
+      } else {
+        showMessage(`Crawl failed for ${entry.handle}: ${result.error || "unknown error"}`, true);
+      }
+      await refresh();
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : "Crawl failed", true);
+    } finally {
+      setCrawlingEntryId(null);
     }
   }
 
@@ -221,6 +265,14 @@ export function SocialWatchListTab({ showMessage }: Props): React.ReactElement {
         >
           Refresh
         </button>
+        <button
+          onClick={() => void handleCrawlAll()}
+          disabled={crawling}
+          className="text-xs px-3 py-1 rounded-md bg-cc-accent text-white hover:bg-cc-accent/90 disabled:opacity-50"
+          title="Crawl every enabled creator now instead of waiting for the nightly cron"
+        >
+          {crawling ? "Crawling…" : "Crawl now"}
+        </button>
         <span className="text-xs text-cc-muted ml-auto">{entries.length} creators</span>
       </div>
 
@@ -284,6 +336,15 @@ export function SocialWatchListTab({ showMessage }: Props): React.ReactElement {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => void handleCrawlOne(entry)}
+                  disabled={crawlingEntryId === entry.id || !entry.enabled}
+                  className="text-xs px-2 py-1 rounded-md bg-cc-bg border border-cc-border text-cc-fg hover:bg-cc-surface disabled:opacity-40"
+                  aria-label={`Crawl ${entry.handle} now`}
+                  title={entry.enabled ? "Crawl this creator now" : "Resume the entry to enable crawling"}
+                >
+                  {crawlingEntryId === entry.id ? "…" : "Crawl"}
+                </button>
                 <button
                   onClick={() => void toggleEnabled(entry)}
                   className="text-xs px-2 py-1 rounded-md bg-cc-bg border border-cc-border text-cc-fg hover:bg-cc-surface"

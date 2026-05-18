@@ -9,19 +9,35 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Hono } from "hono";
 
-// browser-manager + vnc-manager pull in playwright at import time; mocking
-// keeps the test fast and prevents the playwright runtime from interfering
-// with vitest. Only the watch-list endpoints we test here are exercised.
+// browser-manager + vnc-manager + extractors pull in playwright at import
+// time; mocking keeps the test fast and prevents the playwright runtime from
+// interfering with vitest. Per-test we override individual mocks (e.g.
+// hasProfile=false) to drive route branches like 412 "platform not logged in".
+const mockHasProfile = vi.hoisted(() => vi.fn(() => true));
+const mockGetStatus = vi.hoisted(() => vi.fn(() => ({
+  platform: "instagram" as const,
+  running: true,
+  loggedIn: true,
+  currentUrl: "https://www.instagram.com/",
+  startedAt: Date.now(),
+})));
+const mockGetPage = vi.hoisted(() => vi.fn(() => ({ url: () => "https://www.instagram.com/" })));
+const mockGotoUrl = vi.hoisted(() => vi.fn(async () => undefined));
+const mockStartPlatform = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock("./browser-manager.js", () => ({
-  getPage: vi.fn(() => null),
+  getPage: mockGetPage,
   getAllStatus: vi.fn(() => ({})),
-  startBrowser: vi.fn(),
-  stopBrowser: vi.fn(),
-  navigateTo: vi.fn(),
-  getStatus: vi.fn(() => ({ platform: "instagram", running: false, loggedIn: null, currentUrl: null, startedAt: null })),
+  startPlatform: mockStartPlatform,
+  stopPlatform: vi.fn(),
+  gotoUrl: mockGotoUrl,
+  hasProfile: mockHasProfile,
+  getStatus: mockGetStatus,
 }));
 vi.mock("./vnc-manager.js", () => ({
   getVncStatus: vi.fn(async () => ({ running: false })),
+}));
+vi.mock("./extractors.js", () => ({
+  extractCurrentPage: vi.fn(async () => ({ posts: [], errors: [] })),
 }));
 
 let tempHome: string;
@@ -159,6 +175,43 @@ describe("PATCH /api/socialview/watch-list/:id", () => {
       body: JSON.stringify({ enabled: false }),
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /api/socialview/watch-list/crawl-now", () => {
+  // Smoke test — the route should return the auto-crawler summary shape
+  // even when no creators are watched yet. Confirms the route is wired
+  // and doesn't throw on empty input.
+  it("returns a summary even when watch-list is empty", async () => {
+    const res = await app.request("/api/socialview/watch-list/crawl-now", { method: "POST" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { totalEntries: number; attempted: number };
+    expect(body.totalEntries).toBe(0);
+    expect(body.attempted).toBe(0);
+  });
+});
+
+describe("POST /api/socialview/watch-list/:id/crawl-now", () => {
+  it("returns 404 for unknown id", async () => {
+    const res = await app.request("/api/socialview/watch-list/missing/crawl-now", { method: "POST" });
+    expect(res.status).toBe(404);
+  });
+
+  // 412 ("precondition failed") is what we surface when the user hasn't
+  // logged into the platform via noVNC yet — the manual crawl can't proceed.
+  it("returns 412 when platform has no login profile", async () => {
+    mockHasProfile.mockReturnValueOnce(false);
+    const createRes = await app.request("/api/socialview/watch-list", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ platform: "instagram", handle: "user_a" }),
+    });
+    const { entry } = (await createRes.json()) as { entry: { id: string } };
+
+    const res = await app.request(`/api/socialview/watch-list/${entry.id}/crawl-now`, { method: "POST" });
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/login profile/i);
   });
 });
 

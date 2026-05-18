@@ -213,6 +213,47 @@ describe("SocialWatchListTab — toggle + delete", () => {
   });
 });
 
+describe("SocialWatchListTab — manual crawl", () => {
+  // "Crawl now" global button POSTs to the orchestration route and surfaces the summary.
+  it("triggers crawl-now and shows summary in message", async () => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes("/crawl-now") && init?.method === "POST") {
+        return new Response(JSON.stringify({
+          totalEntries: 1, attempted: 1, succeeded: 1, failed: 0, skipped: 0, postsExtracted: 3,
+          startedAt: "x", finishedAt: "y", platforms: {},
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ entries: [entry()] }), { status: 200 });
+    });
+    const showMessage = vi.fn();
+    render(<SocialWatchListTab showMessage={showMessage} />);
+    await waitFor(() => expect(screen.getByText("rileybrown.ai")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /^crawl now$/i }));
+    await waitFor(() => {
+      expect(showMessage).toHaveBeenCalledWith(expect.stringContaining("Crawled 1/1"));
+    });
+  });
+
+  // Per-entry "Crawl" button hits the single-entry route.
+  it("triggers per-entry crawl-now and reports posts extracted", async () => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.match(/\/watch-list\/[^/]+\/crawl-now/) && init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true, postsExtracted: 5 }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ entries: [entry()] }), { status: 200 });
+    });
+    const showMessage = vi.fn();
+    render(<SocialWatchListTab showMessage={showMessage} />);
+    await waitFor(() => expect(screen.getByText("rileybrown.ai")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /crawl rileybrown.ai now/i }));
+    await waitFor(() => {
+      expect(showMessage).toHaveBeenCalledWith(expect.stringContaining("5 posts"));
+    });
+  });
+});
+
 describe("SocialWatchListTab — filters", () => {
   it("passes platform filter as query param", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ entries: [] }), { status: 200 }));
