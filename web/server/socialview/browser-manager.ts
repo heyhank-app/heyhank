@@ -95,6 +95,120 @@ export async function stopPlatform(platform: SocialPlatform): Promise<void> {
   }
 }
 
+export interface NormalizedCookie {
+  name: string;
+  value: string;
+  domain?: string;
+  url?: string;
+  path?: string;
+  expires?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: "Strict" | "Lax" | "None";
+}
+
+/**
+ * Normalize the cookie-array shapes emitted by different browser extensions
+ * (Cookie-Editor, EditThisCookie, Get-cookies.txt-as-JSON) into the canonical
+ * Playwright shape. Pure function — testable without spinning up Playwright.
+ *
+ * Returns { normalized, rejected, errors }. Invalid entries are skipped rather
+ * than throwing so the user gets all the working cookies even if 1-2 are
+ * malformed.
+ */
+export function normalizeCookies(input: unknown): {
+  normalized: NormalizedCookie[];
+  rejected: number;
+  errors: string[];
+} {
+  if (!Array.isArray(input)) {
+    return { normalized: [], rejected: 0, errors: ["cookies payload is not an array"] };
+  }
+  const normalized: NormalizedCookie[] = [];
+  const errors: string[] = [];
+  for (const raw of input as Array<Record<string, unknown>>) {
+    if (!raw || typeof raw !== "object") {
+      errors.push("entry is not an object");
+      continue;
+    }
+    const name = typeof raw.name === "string" ? raw.name : null;
+    const value = typeof raw.value === "string" ? raw.value : null;
+    if (!name || value === null) {
+      errors.push(`missing name/value: ${JSON.stringify(raw).slice(0, 80)}`);
+      continue;
+    }
+    const domain = typeof raw.domain === "string" ? raw.domain : undefined;
+    const url = typeof raw.url === "string" ? raw.url : undefined;
+    if (!domain && !url) {
+      errors.push(`cookie "${name}" has neither domain nor url`);
+      continue;
+    }
+    const path = typeof raw.path === "string" ? raw.path : "/";
+    // Different extensions use different keys for the expiration timestamp.
+    let expires: number | undefined;
+    const expCandidate = (raw.expires ?? raw.expirationDate ?? raw.expiry) as unknown;
+    if (typeof expCandidate === "number" && expCandidate > 0) {
+      expires = Math.floor(expCandidate);
+    }
+    let sameSite: "Strict" | "Lax" | "None" | undefined;
+    if (typeof raw.sameSite === "string") {
+      const s = raw.sameSite.toLowerCase();
+      if (s === "strict") sameSite = "Strict";
+      else if (s === "lax") sameSite = "Lax";
+      else if (s === "none" || s === "no_restriction") sameSite = "None";
+    }
+    normalized.push({
+      name,
+      value,
+      domain,
+      url,
+      path,
+      expires,
+      httpOnly: !!raw.httpOnly,
+      secure: !!raw.secure,
+      sameSite,
+    });
+  }
+  return { normalized, rejected: (input as unknown[]).length - normalized.length, errors };
+}
+
+/**
+ * Apply a batch of cookies to the platform's persistent context. Used by the
+ * cookie-import flow: user logs in on their normal browser (where IG doesn't
+ * shadow-ban them), exports cookies via a browser extension, and hands them
+ * over. Playwright then has a "real" session and doesn't have to attempt the
+ * login flow at all — IG sees an already-authenticated user.
+ *
+ * Auto-starts the platform if not running yet so the user can paste cookies
+ * before they've manually clicked "Start". Cookies persist to disk via the
+ * userDataDir, so subsequent crawls reuse them.
+ */
+export async function applyCookies(
+  platform: SocialPlatform,
+  cookies: unknown,
+): Promise<{ imported: number; rejected: number; errors: string[] }> {
+  const { normalized, rejected, errors } = normalizeCookies(cookies);
+  if (normalized.length === 0) {
+    return { imported: 0, rejected, errors };
+  }
+  // Boot the browser if needed — caller doesn't have to startPlatform first.
+  let s = sessions.get(platform);
+  if (!s || s.page.isClosed()) {
+    await startPlatform(platform);
+    s = sessions.get(platform);
+    if (!s) throw new Error("Failed to start browser for cookie import");
+  }
+  try {
+    await s.context.addCookies(normalized as Parameters<typeof s.context.addCookies>[0]);
+  } catch (e) {
+    throw new Error(`Playwright rejected cookies: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  // Reload so the freshly-applied cookies take effect on the visible noVNC
+  // view too (otherwise the user sees a logged-out page despite the import).
+  await s.page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
+  return { imported: normalized.length, rejected, errors };
+}
+
 export async function gotoUrl(platform: SocialPlatform, url: string): Promise<SocialViewStatus> {
   const s = sessions.get(platform);
   if (!s) throw new Error(`Platform ${platform} not running`);

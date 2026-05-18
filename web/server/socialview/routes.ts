@@ -53,6 +53,28 @@ export function registerSocialViewRoutes(api: Hono): void {
   });
 
   /** Navigate an already-running browser to a URL (e.g. a profile page). */
+  /**
+   * Import cookies exported from the user's normal browser (where they're
+   * already logged in and not shadow-banned). Bypasses platform login flows
+   * entirely — Playwright shows up to the platform as an authenticated user.
+   *
+   * Body: { cookies: [...] } in either Playwright-native shape or the JSON
+   * shape emitted by Cookie-Editor / EditThisCookie browser extensions. The
+   * browser-manager normalizer handles both.
+   */
+  api.post("/socialview/:platform/import-cookies", async (c) => {
+    const platform = parsePlatform(c.req.param("platform"));
+    if (!platform) return c.json({ error: "invalid platform" }, 400);
+    try {
+      const body = await c.req.json();
+      const cookies = body.cookies ?? body; // accept bare array too
+      const result = await browser.applyCookies(platform, cookies);
+      return c.json({ ok: true, ...result });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "import failed" }, 400);
+    }
+  });
+
   api.post("/socialview/:platform/goto", async (c) => {
     const platform = parsePlatform(c.req.param("platform"));
     if (!platform) return c.json({ error: "invalid platform" }, 400);

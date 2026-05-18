@@ -61,7 +61,9 @@ interface Props {
 export function SocialViewTab({ showMessage }: Props): React.ReactElement {
   const [status, setStatus] = useState<SocialViewStatusResponse | null>(null);
   const [selected, setSelected] = useState<Platform | null>(null);
-  const [loading, setLoading] = useState<Platform | "refresh" | "extract" | null>(null);
+  const [loading, setLoading] = useState<Platform | "refresh" | "extract" | "cookies" | null>(null);
+  const [cookieImportPlatform, setCookieImportPlatform] = useState<Platform | null>(null);
+  const [cookieJson, setCookieJson] = useState("");
   const [gotoUrl, setGotoUrl] = useState("");
   const [extractSource, setExtractSource] = useState<"own" | "role-model">("role-model");
   const [extractLogs, setExtractLogs] = useState<string[]>([]);
@@ -104,6 +106,39 @@ export function SocialViewTab({ showMessage }: Props): React.ReactElement {
       await refresh();
     } catch (e) {
       showMessage(e instanceof Error ? e.message : "Stop failed", true);
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  // Cookie-import flow: user pastes JSON exported from Cookie-Editor or
+  // EditThisCookie. Backend normalizes shape and applies via Playwright's
+  // context.addCookies. Useful when the platform (Instagram esp.) shadow-
+  // bans server datacenter IPs so login on the noVNC browser is impossible.
+  async function handleImportCookies() {
+    if (!cookieImportPlatform || !cookieJson.trim()) return;
+    setLoading("cookies");
+    try {
+      const parsed = JSON.parse(cookieJson);
+      const result = await apiPost<{ imported: number; rejected: number; errors: string[] }>(
+        `/api/socialview/${cookieImportPlatform}/import-cookies`,
+        { cookies: parsed },
+      );
+      if (result.imported > 0) {
+        showMessage(`Imported ${result.imported} cookies into ${PLATFORM_LABELS[cookieImportPlatform]} — page reloaded.`);
+        setCookieJson("");
+        setCookieImportPlatform(null);
+      } else {
+        showMessage(`No cookies imported — check JSON format. ${result.rejected} rejected.`, true);
+      }
+      await refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Import failed";
+      // Detect the most common user error and surface a clearer hint.
+      const hint = msg.includes("JSON")
+        ? "Looks like the pasted text isn't valid JSON. Use Cookie-Editor → Export as JSON."
+        : msg;
+      showMessage(hint, true);
     } finally {
       setLoading(null);
     }
@@ -252,6 +287,13 @@ export function SocialViewTab({ showMessage }: Props): React.ReactElement {
                   )}
                 </div>
                 <div className="flex gap-1">
+                  <button
+                    onClick={() => setCookieImportPlatform(p.platform)}
+                    className="text-xs px-2 py-1 rounded bg-cc-surface border border-cc-border text-cc-fg hover:bg-cc-bg"
+                    title="Paste cookies exported from your normal browser to bypass login"
+                  >
+                    Import cookies
+                  </button>
                   {!p.running ? (
                     <button
                       onClick={() => handleStart(p.platform)}
@@ -375,6 +417,75 @@ export function SocialViewTab({ showMessage }: Props): React.ReactElement {
           </div>
         )}
       </div>
+
+      {/* Cookie import modal */}
+      {cookieImportPlatform && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setCookieImportPlatform(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Import cookies for ${PLATFORM_LABELS[cookieImportPlatform]}`}
+        >
+          <div
+            className="bg-cc-card border border-cc-border rounded-xl w-full max-w-2xl p-4 space-y-3 max-h-[90vh] overflow-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-cc-fg">
+                Import {PLATFORM_LABELS[cookieImportPlatform]} cookies
+              </h3>
+              <button
+                onClick={() => { setCookieImportPlatform(null); setCookieJson(""); }}
+                className="text-cc-muted hover:text-cc-fg text-lg"
+                aria-label="Close"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="text-[11px] text-cc-muted space-y-1 border border-cc-border rounded-md p-2 bg-cc-bg/40">
+              <div><strong className="text-cc-fg">How to:</strong></div>
+              <div>1. Install the <a href="https://cookie-editor.com/" target="_blank" rel="noreferrer noopener" className="text-cc-accent hover:underline">Cookie-Editor</a> browser extension.</div>
+              <div>2. In your normal browser, go to {PLATFORM_LABELS[cookieImportPlatform].toLowerCase()}.com (where you're logged in).</div>
+              <div>3. Click the Cookie-Editor icon → <strong className="text-cc-fg">Export</strong> → <strong className="text-cc-fg">Export as JSON</strong>.</div>
+              <div>4. Paste the JSON below and click Import.</div>
+            </div>
+
+            <label className="block">
+              <span className="text-xs text-cc-fg">Cookie JSON</span>
+              <textarea
+                value={cookieJson}
+                onChange={(e) => setCookieJson(e.target.value)}
+                placeholder='[{"name":"sessionid","value":"...","domain":".instagram.com",...}, ...]'
+                rows={10}
+                className="mt-1 w-full text-[11px] font-mono px-2 py-1 rounded-md bg-cc-bg border border-cc-border text-cc-fg"
+                autoFocus
+              />
+              <span className="text-[10px] text-cc-muted">
+                Cookies are stored in the platform's persistent browser profile on the server.
+                Anyone with server access can read them — same as logging in via noVNC.
+              </span>
+            </label>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setCookieImportPlatform(null); setCookieJson(""); }}
+                className="px-3 py-1.5 text-xs rounded-md bg-cc-surface border border-cc-border text-cc-fg hover:bg-cc-bg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleImportCookies}
+                disabled={loading === "cookies" || !cookieJson.trim()}
+                className="px-3 py-1.5 text-xs rounded-md bg-cc-accent text-white hover:bg-cc-accent/90 disabled:opacity-50"
+              >
+                {loading === "cookies" ? "Importing…" : "Import"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
