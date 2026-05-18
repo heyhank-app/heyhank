@@ -158,14 +158,23 @@ export function SocialMediaPage({ embedded }: { embedded?: boolean }) {
     <div className="h-full overflow-y-auto bg-cc-bg">
       <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10 pb-safe space-y-4">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <h1 className="text-lg font-semibold text-cc-fg">Social Media</h1>
-          <button
-            onClick={() => openComposer()}
-            className="px-3 py-1.5 text-xs font-medium rounded-md bg-cc-accent text-white hover:bg-cc-accent/90 transition-colors"
-          >
-            + New Post
-          </button>
+          <div className="flex items-center gap-2">
+            <CrawlNowHeaderButton showMessage={showMessage} />
+            <button
+              onClick={() => setActiveTab("watchlist")}
+              className="px-3 py-1.5 text-xs font-medium rounded-md bg-cc-surface border border-cc-border text-cc-fg hover:bg-cc-bg transition-colors"
+            >
+              Watch List
+            </button>
+            <button
+              onClick={() => openComposer()}
+              className="px-3 py-1.5 text-xs font-medium rounded-md bg-cc-accent text-white hover:bg-cc-accent/90 transition-colors"
+            >
+              + New Post
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -2291,5 +2300,57 @@ function MediaPickerModal({ open, onClose, onSelect }: {
         )}
       </div>
     </div>
+  );
+}
+
+// ─── CrawlNowHeaderButton ───────────────────────────────────────────────────
+// Header-row shortcut that fires the watch-list auto-crawler from any tab.
+// The full per-creator UI lives in SocialWatchListTab — this just kicks off
+// the orchestration route and surfaces the summary inline.
+function CrawlNowHeaderButton({ showMessage }: { showMessage: (text: string, isError?: boolean) => void }) {
+  const [busy, setBusy] = useState(false);
+
+  async function run() {
+    setBusy(true);
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("heyhank_auth_token") : null;
+      const res = await fetch("/api/socialview/watch-list/crawl-now", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(errBody.error || `${res.status}`);
+      }
+      const summary = (await res.json()) as {
+        totalEntries: number;
+        succeeded: number;
+        failed: number;
+        skipped: number;
+        postsExtracted: number;
+      };
+      if (summary.totalEntries === 0) {
+        showMessage("No enabled creators on the watch list yet. Add some first.", true);
+      } else {
+        showMessage(
+          `Crawl: ${summary.succeeded}/${summary.totalEntries} ok · ${summary.postsExtracted} posts · ${summary.failed} failed · ${summary.skipped} skipped`,
+        );
+      }
+    } catch (e) {
+      showMessage(e instanceof Error ? e.message : "Crawl failed", true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      onClick={() => void run()}
+      disabled={busy}
+      className="px-3 py-1.5 text-xs font-medium rounded-md bg-cc-surface border border-cc-border text-cc-fg hover:bg-cc-bg disabled:opacity-50 transition-colors"
+      title="Crawl every enabled watch-list creator right now"
+    >
+      {busy ? "Crawling…" : "Crawl now"}
+    </button>
   );
 }
