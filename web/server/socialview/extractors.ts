@@ -212,7 +212,30 @@ async function extractInstagramSinglePost(opts: ExtractOptions): Promise<Extract
 
       const imgs = Array.from(container.querySelectorAll("img")) as HTMLImageElement[];
       const mediaUrls = imgs
-        .filter((img) => img.naturalWidth > 200 || img.width > 200)
+        .filter((img) => {
+          // Profile pictures: live inside <header> and inside an anchor that
+          // points back to the user's profile (e.g., href="/adam.hafner/").
+          // Both checks because IG renders the profile pic twice — once in
+          // the post header (inside <header>) and once on the recommendation
+          // rail (no header but still wrapped in a profile-link anchor).
+          if (img.closest("header")) return false;
+          const parentAnchor = img.closest("a[href]") as HTMLAnchorElement | null;
+          if (parentAnchor) {
+            const href = parentAnchor.getAttribute("href") || "";
+            // Profile pic anchors look like "/handle/" — they DON'T contain /p/ or /reel/.
+            // Post media anchors that wrap the photo always point to /p/<id>/ or /reel/<id>/.
+            if (/^\/[^/]+\/?$/.test(href) && !/\/(p|reel)\//.test(href)) return false;
+          }
+          // Alt text — IG sets it explicitly for profile pics in multiple languages.
+          const alt = img.alt || "";
+          if (/profile picture|Profilbild|profilbild/i.test(alt)) return false;
+          // Size threshold: IG renders profile pics at 32-150 displayed (≤320
+          // natural after Retina), while post media is usually ≥480 natural.
+          // Bumping the floor from 200 → 400 excludes the largest profile-pic
+          // variant without dropping any real post media.
+          if (img.naturalWidth > 0 && img.naturalWidth < 400) return false;
+          return true;
+        })
         .map((img) => img.src)
         .filter((src) => src.startsWith("http"));
 
