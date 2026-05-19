@@ -88,6 +88,53 @@ export function registerSocialViewRoutes(api: Hono): void {
     }
   });
 
+  /**
+   * One-shot DOM diagnostic — what selectors / structure does the current
+   * page expose? Used to refine extractors when platforms ship DOM changes.
+   * Returns counts of common selectors + the first few characters of likely
+   * content nodes. NOT meant for routine use.
+   */
+  api.get("/socialview/:platform/inspect-dom", async (c) => {
+    const platform = parsePlatform(c.req.param("platform"));
+    if (!platform) return c.json({ error: "invalid platform" }, 400);
+    const page = browser.getPage(platform);
+    if (!page) return c.json({ error: `${platform} not running` }, 400);
+    const data = await page.evaluate(() => {
+      function count(sel: string): number {
+        try { return document.querySelectorAll(sel).length; } catch { return -1; }
+      }
+      function first(sel: string): string {
+        const el = document.querySelector(sel) as HTMLElement | null;
+        return el ? (el.innerText || el.textContent || "").trim().slice(0, 200) : "";
+      }
+      const main = document.querySelector("main");
+      const dialog = document.querySelector("[role='dialog']");
+      const videos = Array.from(document.querySelectorAll("video"));
+      const imgs = Array.from(document.querySelectorAll("img")).filter((i) => i.naturalWidth > 200);
+      return {
+        url: location.href,
+        title: document.title,
+        counts: {
+          article: count("article"),
+          main: count("main"),
+          dialog: count("[role='dialog']"),
+          h1: count("h1"),
+          h2: count("h2"),
+          video: count("video"),
+          imgLarge: imgs.length,
+        },
+        previews: {
+          mainText: main ? (main as HTMLElement).innerText.slice(0, 300) : "",
+          dialogText: dialog ? (dialog as HTMLElement).innerText.slice(0, 300) : "",
+          h1Text: first("h1"),
+        },
+        firstVideo: videos[0]?.src || null,
+        firstImg: imgs[0]?.src || null,
+      };
+    });
+    return c.json(data);
+  });
+
   /** Per-platform status. */
   api.get("/socialview/:platform/status", (c) => {
     const platform = parsePlatform(c.req.param("platform"));

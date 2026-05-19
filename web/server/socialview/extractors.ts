@@ -86,64 +86,172 @@ async function extractInstagramSinglePost(opts: ExtractOptions): Promise<Extract
   const { page, source, onLog } = opts;
   try {
     onLog?.("Waiting for post content to render…");
-    // Instagram's post pages wrap the article in <article role="presentation">.
-    await page.waitForSelector("article", { timeout: 10_000 }).catch(() => {});
+    // 2026 IG dropped the <article> wrapper on reel/post detail pages — the
+    // post lives directly inside <main>. We wait for ANY of the markers a
+    // real post page exposes: media element (video or large img) or the new
+    // [role='dialog'] wrapper used on modal opens.
+    await page
+      .waitForSelector("main video, main img[srcset], [role='dialog'] video, [role='dialog'] img[srcset], article", {
+        timeout: 12_000,
+      })
+      .catch(() => {});
 
     const data = await page.evaluate(() => {
-      const article = document.querySelector("article");
-      if (!article) return null;
+      // Prefer dialog (modal post overlay), then article (legacy), then main.
+      const container =
+        (document.querySelector("[role='dialog']") as HTMLElement | null) ||
+        (document.querySelector("article") as HTMLElement | null) ||
+        (document.querySelector("main") as HTMLElement | null);
+      if (!container) return null;
 
-      // Author handle: usually the first <a href="/xyz/"> inside header.
-      let handle = "";
-      const headerLink = article.querySelector("header a[href^='/']") as HTMLAnchorElement | null;
-      if (headerLink) {
-        handle = headerLink.getAttribute("href")?.replace(/^\//, "").replace(/\/$/, "") || "";
+      // Author handle: extracted from URL path is more reliable than DOM —
+      // IG sometimes renders different first link depending on viewport.
+      const m = location.pathname.match(/^\/([^/]+)\/(p|reel)\/([^/]+)/);
+      const handle = m?.[1] ?? "";
+      const urlPostType = m?.[2] === "reel" ? "reel" : "image";
+
+      // 2026 IG caption-extraction strategy: parse the container's plain text
+      // for the pattern "{handle}{Verified?}{timestamp}{caption}{UI marker}".
+      // The handle is repeated — the FIRST occurrence is in the header, the
+      // SECOND right before the caption. After the caption comes a UI marker
+      // like "See translation" or "For you" that bounds the end.
+      //
+      // Why text-pattern instead of DOM selectors: IG ships DOM changes weekly
+      // but the user-visible text flow stays stable (handle → time → caption
+      // → translation toggle → comments).
+      const fullText = (container.textContent || "").replace(/ /g, " ");
+      let caption = "";
+      if (handle) {
+        const firstIdx = fullText.indexOf(handle);
+        const secondIdx = firstIdx >= 0 ? fullText.indexOf(handle, firstIdx + handle.length) : -1;
+        if (secondIdx >= 0) {
+          let after = fullText.slice(secondIdx + handle.length);
+          // Strip "Verified", "Verifiziert" badge marker if present right after handle.
+          after = after.replace(/^\s*(Verified|Verifiziert|✓)/i, "");
+          // Strip leading timestamp like " 4w" / " 3d" / " 2h" / " 5 Wo" / " 4 Std".
+          after = after.replace(/^\s*•?\s*\d+\s*(?:w|d|h|m|s|Wo|Std|Min)\.?/i, "");
+          // Cut at the next UI marker — those mark end of caption start of
+          // either translation toggle, recommendation rail, or comments.
+          const cutMarkers = [
+            /See translation/i,
+            /Übersetzung anzeigen/i,
+            /Übersetzung/i,
+            /For you/i,
+            /Für dich/i,
+            /Down chevron/i,
+            /\b\d+\s*likes?\b/i,
+            /\bGefällt\s+\d+/i,
+            /\bComment\b/i,
+            /\bKommentar\b/i,
+            /\bReply\b/i,
+          ];
+          for (const re of cutMarkers) {
+            const m = after.match(re);
+            if (m && typeof m.index === "number") {
+              after = after.slice(0, m.index);
+              break;
+            }
+          }
+          caption = after.trim();
+        }
       }
 
-      // Post text: the caption often lives in <h1> or a <span> in the second part of the article.
-      let text = "";
-      const h1 = article.querySelector("h1");
-      if (h1) text = h1.textContent?.trim() || "";
-      if (!text) {
-        // Fallback: longest <span> with line breaks
-        const spans = Array.from(article.querySelectorAll("span"));
-        const rich = spans
-          .map((s) => s.textContent?.trim() || "")
-          .filter((t) => t.length > 30)
-          .sort((a, b) => b.length - a.length);
-        if (rich[0]) text = rich[0];
+      // Fallback: if pattern-matching didn't find a caption (unusual layout,
+      // no handle in URL), fall back to longest leaf-text block heuristic.
+      if (!caption || caption.length < 4) {
+        const SKIP_EXACT = new Set([
+          "Follow", "Following", "Original audio", "See translation",
+          "For you", "Übersetzung anzeigen", "Original-Audio", "Für dich",
+          "Folgen", "Folge ich",
+        ]);
+        const SKIP_PATTERNS = [
+          /^\d+\s*[wdhms]$/i,
+          /^\d+\s+(likes?|Gefällt|comments?)/i,
+          /^View all/i,
+        ];
+        const spans = Array.from(container.querySelectorAll("h1, span, p"));
+        let best = "";
+        for (const el of spans) {
+          const t = (el.textContent || "").trim();
+          if (t.length < 8 || t.length > 1500) continue;
+          if (SKIP_EXACT.has(t)) continue;
+          if (SKIP_PATTERNS.some((re) => re.test(t))) continue;
+          // Leaf only — wrappers with element children give us the whole subtree.
+          if ((el as HTMLElement).querySelectorAll("span, p, h1, button, a").length > 1) continue;
+          if (t.length > best.length) best = t;
+        }
+        if (best) caption = best;
       }
 
-      // Media: all <img> with src starting https:, filter out tiny profile pics
-      const imgs = Array.from(article.querySelectorAll("img")) as HTMLImageElement[];
+      // Media
+      const videos = Array.from(container.querySelectorAll("video")) as HTMLVideoElement[];
+      const videoUrls = videos
+        .map((v) => v.src || v.currentSrc || v.poster)
+        .filter((u) => !!u && (u.startsWith("http") || u.startsWith("blob:")))
+        // Drop blob: URLs since we can't fetch those — but keep poster as fallback below
+        .filter((u) => u.startsWith("http"));
+      const videoPosters = videos.map((v) => v.poster).filter((p) => !!p && p.startsWith("http"));
+
+      const imgs = Array.from(container.querySelectorAll("img")) as HTMLImageElement[];
       const mediaUrls = imgs
         .filter((img) => img.naturalWidth > 200 || img.width > 200)
         .map((img) => img.src)
         .filter((src) => src.startsWith("http"));
 
-      // Video sources (reels)
-      const videos = Array.from(article.querySelectorAll("video")) as HTMLVideoElement[];
-      const videoUrls = videos
-        .map((v) => v.src || v.currentSrc)
-        .filter((u) => !!u && u.startsWith("http"));
+      // Engagement: IG shows the post total in two places — sometimes as
+      // "X likes" (legacy) and on the new reel summary row as a compact
+      // "Like<digits>" (no space). Comments also show "1 like" / "X likes"
+      // each. We collect ALL numeric matches and pick the maximum — the
+      // post's total is virtually always larger than any single comment's.
+      let likes: number | null = null;
+      {
+        const text = container.textContent || "";
+        const candidates: number[] = [];
+        // Pattern 1: "Like<digits>" / "Gefällt<digits>" — the compact reel-summary row.
+        for (const m of text.matchAll(/(?:Like|Gefällt mir|Gefällt das)\s*([\d.,]+)/gi)) {
+          const n = Number(m[1].replace(/[.,]/g, ""));
+          if (Number.isFinite(n) && n > 0) candidates.push(n);
+        }
+        // Pattern 2: "<digits> likes" / "<digits> Gefällt" — legacy / comment-row.
+        for (const m of text.matchAll(/([\d.,]+)\s*(?:likes?|Gefällt mir|Gefällt das|Mal)\b/gi)) {
+          const n = Number(m[1].replace(/[.,]/g, ""));
+          if (Number.isFinite(n) && n > 0) candidates.push(n);
+        }
+        if (candidates.length > 0) likes = Math.max(...candidates);
+      }
 
-      // Post type heuristic
-      let postType = "image";
-      if (videoUrls.length > 0) postType = "reel";
-      if (mediaUrls.length > 1) postType = "carousel";
+      // Post type heuristic — URL is authoritative for reel-vs-post; for
+      // /p/ links we still need to distinguish carousel from single image.
+      let postType = urlPostType;
+      if (videoUrls.length > 0 || videoPosters.length > 0) postType = "reel";
+      if (postType === "image" && mediaUrls.length > 1) postType = "carousel";
+
+      // IG often renders a "suggested posts" rail below the actual post, all
+      // as <img> tags inside <main>. Without scoping to the post container
+      // we'd save 8+ unrelated thumbnails per extraction. Heuristic: reels and
+      // single-image posts have at most 1 primary media; carousels can have
+      // up to 10. Anything beyond that is the suggestion rail.
+      let primaryImages = mediaUrls;
+      if (postType === "reel" || postType === "image") {
+        primaryImages = mediaUrls.slice(0, 1);
+      } else if (postType === "carousel") {
+        primaryImages = mediaUrls.slice(0, 10);
+      }
 
       return {
         handle,
-        text,
-        mediaUrls,
+        text: caption,
+        mediaUrls: primaryImages,
         videoUrls,
+        videoPosters: videoPosters.slice(0, 1),
         postType,
+        likes,
         url: window.location.href,
       };
     });
 
-    if (!data) {
-      return { posts: [], errors: ["Could not find post <article> on page"] };
+    if (!data || !data.handle) {
+      return { posts: [], errors: ["Could not parse Instagram post — DOM may have changed; try Inspect-DOM endpoint"] };
     }
 
     // Extract hashtags + mentions from text.
@@ -152,11 +260,17 @@ async function extractInstagramSinglePost(opts: ExtractOptions): Promise<Extract
     const cta = detectCta(data.text);
     const hook = extractHook(data.text);
 
-    // Claude Vision for the first image only (cheap, fast; the rest can be done on-demand).
+    // For Reels (video posts), the <video src> is a blob: URL we can't fetch.
+    // Fall back to the poster image which is a stable CDN URL — gives Claude
+    // Vision something to describe and gives the UI a thumbnail.
+    const previewImageUrls = data.mediaUrls.length > 0 ? data.mediaUrls : data.videoPosters;
+
+    // Claude Vision for the first preview image (cheap, fast; the rest can
+    // be done on-demand later if needed).
     let visionDescription = "";
-    if (data.mediaUrls.length > 0) {
+    if (previewImageUrls.length > 0) {
       onLog?.("Requesting Claude Vision description…");
-      visionDescription = await describeImageByUrl(data.mediaUrls[0]);
+      visionDescription = await describeImageByUrl(previewImageUrls[0]);
     }
 
     const id = `ig-${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -173,7 +287,7 @@ async function extractInstagramSinglePost(opts: ExtractOptions): Promise<Extract
       hashtags,
       mentions,
       media: [
-        ...data.mediaUrls.map((remoteUrl, i) => ({
+        ...previewImageUrls.map((remoteUrl, i) => ({
           type: "image" as const,
           localPath: null,
           remoteUrl,
@@ -186,7 +300,13 @@ async function extractInstagramSinglePost(opts: ExtractOptions): Promise<Extract
           description: "",
         })),
       ],
-      engagement: { likes: null, comments: null, shares: null, views: null, saves: null },
+      engagement: {
+        likes: data.likes,
+        comments: null,
+        shares: null,
+        views: null,
+        saves: null,
+      },
       engagementRate: null,
       postType: data.postType as LibraryPost["postType"],
       postedAt: null,
