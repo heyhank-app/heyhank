@@ -96,6 +96,24 @@ async function extractInstagramSinglePost(opts: ExtractOptions): Promise<Extract
       })
       .catch(() => {});
 
+    // Early detection: if IG has switched us to the logged-out view after
+    // detecting rapid sequential navigations, the page shows "Sign up for
+    // Instagram" as the headline call-to-action. Bail with a clear signal
+    // so the profile-loop caller can stop hammering and surface "session
+    // invalidated, re-import cookies".
+    const loggedOutMarker = await page
+      .evaluate(() => {
+        const t = document.body?.innerText || "";
+        return /Sign up for Instagram|Auf Instagram registrieren|Anmelden bei Instagram|Log in to Instagram/i.test(t.slice(0, 1500));
+      })
+      .catch(() => false);
+    if (loggedOutMarker) {
+      return {
+        posts: [],
+        errors: ["LOGGED_OUT: Instagram is serving the public/anonymous view — re-import cookies or wait 30+ min before next crawl"],
+      };
+    }
+
     const data = await page.evaluate(() => {
       // Prefer dialog (modal post overlay), then article (legacy), then main.
       const container =
@@ -356,6 +374,7 @@ async function extractInstagramProfile(
     onLog?.(`Found ${links.length} posts on profile — extracting…`);
 
     let idx = 0;
+    let consecutiveLoggedOut = 0;
     for (const href of links) {
       idx++;
       try {
@@ -365,10 +384,32 @@ async function extractInstagramProfile(
         const single = await extractInstagramSinglePost(opts);
         posts.push(...single.posts);
         errors.push(...single.errors);
+        // If IG is serving the logged-out view, abort the rest of the crawl
+        // — hammering through 10 more dead URLs just makes the rate-limit
+        // worse and gives the user 10 useless library entries.
+        const wasLoggedOut = single.errors.some((e) => e.startsWith("LOGGED_OUT:"));
+        if (wasLoggedOut) {
+          consecutiveLoggedOut++;
+          if (consecutiveLoggedOut >= 2) {
+            onLog?.(`${idx}/${links.length}: ✗ Instagram logged us out — aborting crawl. Re-import fresh cookies.`);
+            errors.push(`Crawl aborted at ${idx}/${links.length}: Instagram session lost. Re-import cookies and try again with longer delays.`);
+            break;
+          }
+        } else {
+          consecutiveLoggedOut = 0;
+        }
         if (single.posts.length > 0) {
           onLog?.(`${idx}/${links.length}: ✓ saved "${(single.posts[0].text || "").slice(0, 60)}"`);
         } else {
           onLog?.(`${idx}/${links.length}: ✗ no post extracted`);
+        }
+        // Polite delay between post visits — sequential rapid-fire goto()s
+        // are the #1 trigger for Instagram's anti-automation gate. 6-12s
+        // random jitter mimics a human swiping through posts. Skip the
+        // delay after the last item.
+        if (idx < links.length) {
+          const delayMs = 6_000 + Math.floor(Math.random() * 6_000);
+          await page.waitForTimeout(delayMs);
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
