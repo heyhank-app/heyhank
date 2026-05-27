@@ -30,6 +30,8 @@ import { registerSystemRoutes } from "./routes/system-routes.js";
 import { registerPlatformRoutes } from "./routes/platform-routes.js";
 import { registerLLMRoutes } from "./routes/llm-routes.js";
 import { registerMediaRoutes } from "./routes/media-routes.js";
+import { registerFalVideoRoutes } from "./routes/fal-video-routes.js";
+import { registerUploadRoutes } from "./routes/upload-routes.js";
 import { registerReferenceRoutes } from "./routes/reference-routes.js";
 import { isRecordingHubEnabled } from "./recording-hub/hub-config.js";
 import { registerHubRoutes } from "./recording-hub/hub-routes.js";
@@ -1396,6 +1398,8 @@ export function createRoutes(
 
   registerLLMRoutes(api);
   registerMediaRoutes(api);
+  registerFalVideoRoutes(api);
+  registerUploadRoutes(api);
   registerReferenceRoutes(api);
 
   // ─── Recording Hub (hidden feature: HEYHANK_RECORDING_HUB=1) ──────

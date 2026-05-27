@@ -1,7 +1,7 @@
 // ─── Google Media APIs ───────────────────────────────────────────────────────
 // Image generation (Imagen 4 + Gemini) and Video generation (Veo) via Google AI APIs
 
-import { mkdirSync, writeFileSync, readdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { HEYHANK_HOME } from "./paths.js";
 import { getSettings } from "./settings-manager.js";
@@ -327,15 +327,23 @@ export async function pollVideoOperation(
   };
 }
 
-/** List generated media files. */
-export function listMedia(): Array<{ filename: string; path: string }> {
+/** List generated media files, newest first (mtime descending). */
+export function listMedia(): Array<{ filename: string; path: string; mtime: number }> {
   mkdirSync(MEDIA_DIR, { recursive: true });
   try {
     const files = readdirSync(MEDIA_DIR) as string[];
-    return files.map((f: string) => ({
-      filename: f,
-      path: join(MEDIA_DIR, f),
-    }));
+    return files
+      .map((f: string) => {
+        const path = join(MEDIA_DIR, f);
+        let mtime = 0;
+        try {
+          mtime = statSync(path).mtimeMs;
+        } catch {
+          // file vanished between readdir and stat — skip mtime
+        }
+        return { filename: f, path, mtime };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
   } catch {
     return [];
   }

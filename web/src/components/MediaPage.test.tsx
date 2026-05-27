@@ -253,6 +253,31 @@ describe("References tab", () => {
   });
 });
 
+// ─── Video tile rendering ────────────────────────────────────────────────────
+
+describe("Generated tab — video rendering", () => {
+  // Files ending in .mp4 / .webm / .mov / .mkv must render as <video> with
+  // controls, instead of <img>. This is what makes Seedance/Veo outputs play
+  // inline in the MediaPage grid.
+  it("renders a <video> tile for mp4 files", async () => {
+    mockApi.listMedia.mockResolvedValue({
+      files: [
+        { filename: "vid_seedance_1.mp4", path: "/v1" },
+        { filename: "logo.png", path: "/l" },
+      ],
+    });
+    const { container } = render(<MediaPage />);
+    await waitFor(() =>
+      expect(screen.getByText("vid_seedance_1.mp4")).toBeInTheDocument(),
+    );
+    const videos = container.querySelectorAll("video");
+    expect(videos.length).toBe(1);
+    expect(videos[0]?.getAttribute("aria-label")).toBe("vid_seedance_1.mp4");
+    // The image file still renders as <img>
+    expect(screen.getByAltText("logo.png").tagName).toBe("IMG");
+  });
+});
+
 // ─── Accessibility ───────────────────────────────────────────────────────────
 
 describe("MediaPage accessibility", () => {

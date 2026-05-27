@@ -10,6 +10,7 @@ Element.prototype.scrollIntoView = vi.fn();
 const mockSendToSession = vi.fn();
 const mockListPrompts = vi.fn();
 const mockCreatePrompt = vi.fn();
+const mockUploadSessionFiles = vi.fn();
 
 // Build a controllable mock store state
 let mockStoreState: Record<string, unknown> = {};
@@ -30,6 +31,7 @@ vi.mock("../api.js", () => ({
     gitPull: vi.fn().mockResolvedValue({ success: true, output: "", git_ahead: 0, git_behind: 0 }),
     listPrompts: (...args: unknown[]) => mockListPrompts(...args),
     createPrompt: (...args: unknown[]) => mockCreatePrompt(...args),
+    uploadSessionFiles: (...args: unknown[]) => mockUploadSessionFiles(...args),
   },
 }));
 
@@ -881,5 +883,150 @@ describe("Composer image attachment", () => {
     // Remove the image
     fireEvent.click(screen.getByLabelText("Remove image"));
     expect(screen.queryByAltText("test.png")).toBeFalsy();
+  });
+});
+
+// ─── File attachment (videos, pdfs, audio, …) ───────────────────────────────
+
+describe("Composer file attachment", () => {
+  // The paperclip button must exist as a distinct affordance separate from
+  // the image "+" button so users can attach non-image files (videos, pdfs,
+  // audio) that the agent then reads via absolute path.
+  it("renders a paperclip button to attach files", () => {
+    render(<Composer sessionId="s1" />);
+    expect(screen.getByLabelText("Attach file")).toBeTruthy();
+  });
+
+  // Selecting a video file uploads it via api.uploadSessionFiles and renders
+  // a chip showing the original filename + size, so the user has visible
+  // confirmation that the file is staged for the next send.
+  it("uploads a selected video and shows it as a chip", async () => {
+    mockUploadSessionFiles.mockResolvedValue({
+      ok: true,
+      files: [{
+        name: "clip.mp4",
+        path: "/abs/path/clip.mp4",
+        size: 12345,
+        mimeType: "video/mp4",
+      }],
+      errors: [],
+      maxBytes: 500 * 1024 * 1024,
+    });
+    const { container } = render(<Composer sessionId="s1" />);
+    const inputs = container.querySelectorAll('input[type="file"]');
+    // Two file inputs exist: the first is for images, the second for files.
+    const attachInput = inputs[1] as HTMLInputElement;
+
+    const file = new File(["video-bytes"], "clip.mp4", { type: "video/mp4" });
+    Object.defineProperty(attachInput, "files", { value: [file], writable: false });
+    fireEvent.change(attachInput);
+
+    await waitFor(() => {
+      expect(mockUploadSessionFiles).toHaveBeenCalledWith("s1", [file]);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("clip.mp4")).toBeTruthy();
+    });
+  });
+
+  // When the user sends a message after attaching files, the message body
+  // must include an "Attached files:" block listing the absolute paths so
+  // the agent can read / process them via `bash`, `read`, etc.
+  it("appends absolute paths to the message when sending with attachments", async () => {
+    mockUploadSessionFiles.mockResolvedValue({
+      ok: true,
+      files: [{
+        name: "clip.mp4",
+        path: "/uploads/s1/clip.mp4",
+        size: 100,
+        mimeType: "video/mp4",
+      }],
+      errors: [],
+      maxBytes: 500 * 1024 * 1024,
+    });
+    const { container } = render(<Composer sessionId="s1" />);
+    const attachInput = (container.querySelectorAll('input[type="file"]')[1]) as HTMLInputElement;
+    const file = new File(["bytes"], "clip.mp4", { type: "video/mp4" });
+    Object.defineProperty(attachInput, "files", { value: [file], writable: false });
+    fireEvent.change(attachInput);
+    await waitFor(() => expect(screen.getByText("clip.mp4")).toBeTruthy());
+
+    const textarea = container.querySelector("textarea")!;
+    fireEvent.change(textarea, { target: { value: "describe this video" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
+
+    expect(mockSendToSession).toHaveBeenCalledWith(
+      "s1",
+      expect.objectContaining({
+        type: "user_message",
+        content: "describe this video\n\nAttached files:\n- /uploads/s1/clip.mp4",
+      }),
+    );
+  });
+
+  // After a successful send the staged attachments must be cleared so the
+  // user does not accidentally re-attach them to the next, unrelated message.
+  it("clears attachments after a successful send", async () => {
+    mockUploadSessionFiles.mockResolvedValue({
+      ok: true,
+      files: [{ name: "a.pdf", path: "/p/a.pdf", size: 1, mimeType: "application/pdf" }],
+      errors: [],
+      maxBytes: 500 * 1024 * 1024,
+    });
+    const { container } = render(<Composer sessionId="s1" />);
+    const attachInput = (container.querySelectorAll('input[type="file"]')[1]) as HTMLInputElement;
+    Object.defineProperty(attachInput, "files", {
+      value: [new File(["x"], "a.pdf", { type: "application/pdf" })],
+      writable: false,
+    });
+    fireEvent.change(attachInput);
+    await waitFor(() => expect(screen.getByText("a.pdf")).toBeTruthy());
+
+    const textarea = container.querySelector("textarea")!;
+    fireEvent.change(textarea, { target: { value: "go" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
+
+    await waitFor(() => {
+      expect(screen.queryByText("a.pdf")).toBeFalsy();
+    });
+  });
+
+  // The remove (X) button next to a chip must drop just that attachment.
+  it("removing a single attachment chip drops it from the staged list", async () => {
+    mockUploadSessionFiles.mockResolvedValue({
+      ok: true,
+      files: [{ name: "doc.pdf", path: "/p/doc.pdf", size: 1, mimeType: "application/pdf" }],
+      errors: [],
+      maxBytes: 500 * 1024 * 1024,
+    });
+    const { container } = render(<Composer sessionId="s1" />);
+    const attachInput = (container.querySelectorAll('input[type="file"]')[1]) as HTMLInputElement;
+    Object.defineProperty(attachInput, "files", {
+      value: [new File(["x"], "doc.pdf", { type: "application/pdf" })],
+      writable: false,
+    });
+    fireEvent.change(attachInput);
+    await waitFor(() => expect(screen.getByText("doc.pdf")).toBeTruthy());
+
+    fireEvent.click(screen.getByLabelText("Remove doc.pdf"));
+    expect(screen.queryByText("doc.pdf")).toBeFalsy();
+  });
+
+  // If the upload helper rejects (network failure, server error) the error
+  // message must surface to the user so they can retry instead of seeing a
+  // silently empty composer.
+  it("shows an error message when the upload fails", async () => {
+    mockUploadSessionFiles.mockRejectedValue(new Error("Upload failed (413): too big"));
+    const { container } = render(<Composer sessionId="s1" />);
+    const attachInput = (container.querySelectorAll('input[type="file"]')[1]) as HTMLInputElement;
+    Object.defineProperty(attachInput, "files", {
+      value: [new File(["x"], "huge.mp4", { type: "video/mp4" })],
+      writable: false,
+    });
+    fireEvent.change(attachInput);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toMatch(/Upload failed/);
+    });
   });
 });

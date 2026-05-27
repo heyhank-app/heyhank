@@ -4,6 +4,7 @@ import { api } from "../api.js";
 interface MediaFile {
   filename: string;
   path: string;
+  mtime: number;
 }
 
 interface ReferenceFile {
@@ -20,6 +21,13 @@ interface ReferenceCategory {
 }
 
 type Tab = "generated" | "references";
+
+const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "mkv"]);
+
+function isVideo(filename: string): boolean {
+  const ext = filename.split(".").pop()?.toLowerCase();
+  return !!ext && VIDEO_EXTS.has(ext);
+}
 
 export function MediaPage({ embedded: _embedded }: { embedded?: boolean }) {
   const [tab, setTab] = useState<Tab>("generated");
@@ -43,7 +51,8 @@ export function MediaPage({ embedded: _embedded }: { embedded?: boolean }) {
           </TabButton>
         </div>
 
-        {tab === "generated" ? <GeneratedTab /> : <ReferencesTab />}
+        {tab === "generated" && <GeneratedTab />}
+        {tab === "references" && <ReferencesTab />}
       </div>
     </div>
   );
@@ -79,11 +88,14 @@ function TabButton({
 
 // ─── Generated Tab ───────────────────────────────────────────────────────────
 
+const PAGE_SIZE = 10;
+
 function GeneratedTab() {
   const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -168,7 +180,9 @@ function GeneratedTab() {
     <div>
       <div className="flex items-center justify-between mb-3">
         <p className="text-xs text-cc-muted">
-          {mediaFiles.length} file{mediaFiles.length === 1 ? "" : "s"}
+          {visibleCount < mediaFiles.length
+            ? `${Math.min(visibleCount, mediaFiles.length)} of ${mediaFiles.length} files`
+            : `${mediaFiles.length} file${mediaFiles.length === 1 ? "" : "s"}`}
           {selected.size > 0 ? ` · ${selected.size} selected` : ""}
         </p>
         <div className="flex gap-2">
@@ -205,7 +219,7 @@ function GeneratedTab() {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-        {mediaFiles.map((file) => {
+        {mediaFiles.slice(0, visibleCount).map((file) => {
           const isSelected = selected.has(file.filename);
           return (
             <div
@@ -239,12 +253,24 @@ function GeneratedTab() {
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                <img
-                  src={`/api/media/file/${encodeURIComponent(file.filename)}`}
-                  alt={file.filename}
-                  className="w-full aspect-square object-cover"
-                  loading="lazy"
-                />
+                {isVideo(file.filename) ? (
+                  <video
+                    src={`/api/media/file/${encodeURIComponent(file.filename)}`}
+                    aria-label={file.filename}
+                    className="w-full aspect-square object-cover bg-black"
+                    controls
+                    muted
+                    playsInline
+                    preload="metadata"
+                  />
+                ) : (
+                  <img
+                    src={`/api/media/file/${encodeURIComponent(file.filename)}`}
+                    alt={file.filename}
+                    className="w-full aspect-square object-cover"
+                    loading="lazy"
+                  />
+                )}
               </a>
               <div className="px-2.5 py-2">
                 <p className="text-[11px] text-cc-muted truncate">{file.filename}</p>
@@ -253,6 +279,18 @@ function GeneratedTab() {
           );
         })}
       </div>
+
+      {visibleCount < mediaFiles.length && (
+        <div className="mt-6 flex justify-center">
+          <button
+            type="button"
+            onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+            className="text-xs px-4 py-2 rounded border border-cc-border text-cc-muted hover:text-cc-fg hover:border-cc-primary/40 transition-colors"
+          >
+            Weitere laden ({mediaFiles.length - visibleCount} remaining)
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -482,3 +520,4 @@ function ReferencesTab() {
     </div>
   );
 }
+

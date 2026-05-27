@@ -4,8 +4,36 @@
 import type { Hono } from "hono";
 import { readFileSync, existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join, basename } from "node:path";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { HEYHANK_HOME } from "../paths.js";
+import { getToken } from "../auth-manager.js";
 import { generateImage, generateVideo, pollVideoOperation, listMedia } from "../google-media.js";
+
+/**
+ * HMAC-sign a media file URL so external services (e.g. Buffer, Postiz CDN) can
+ * fetch it without going through the normal auth header/cookie flow. The
+ * server's auth token is used as the HMAC secret — re-generating the auth
+ * token invalidates all outstanding signed URLs. Signature format:
+ *   HMAC-SHA256(filename + ":" + expiresAt, authToken) → hex
+ */
+export function signMediaUrl(filename: string, ttlSeconds: number): { signature: string; expiresAt: number } {
+  const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const secret = getToken();
+  const sig = createHmac("sha256", secret).update(`${filename}:${expiresAt}`).digest("hex");
+  return { signature: sig, expiresAt };
+}
+
+function verifyMediaSignature(filename: string, expiresAt: number, signature: string): boolean {
+  if (!Number.isFinite(expiresAt) || expiresAt < Math.floor(Date.now() / 1000)) return false;
+  const secret = getToken();
+  const expected = createHmac("sha256", secret).update(`${filename}:${expiresAt}`).digest("hex");
+  if (signature.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(signature, "hex"), Buffer.from(expected, "hex"));
+  } catch {
+    return false;
+  }
+}
 
 const MEDIA_DIR = join(HEYHANK_HOME, "media");
 
@@ -156,13 +184,42 @@ export function registerMediaRoutes(api: Hono): void {
     return c.json({ ok: true, deleted, errors });
   });
 
-  /** Serve a media file by filename */
+  /** Serve a media file by filename (auth-protected by middleware) */
   api.get("/media/file/:filename", (c) => {
     const filename = basename(c.req.param("filename"));
     const filepath = join(MEDIA_DIR, filename);
     if (!existsSync(filepath)) {
       return c.json({ error: "Not found" }, 404);
     }
+    const ext = filename.split(".").pop()?.toLowerCase() || "";
+    const mime = MIME_TYPES[ext] || "application/octet-stream";
+    const data = readFileSync(filepath);
+    return new Response(data, {
+      headers: {
+        "Content-Type": mime,
+        "Cache-Control": "public, max-age=86400",
+      },
+    });
+  });
+
+  /**
+   * Serve a media file via HMAC-signed URL, bypassing the auth middleware.
+   * Used by external services (Buffer, Postiz CDN) that need to fetch HeyHank
+   * media but cannot send the auth header. Marked public via the
+   * `/media/signed/*` allow-list in the auth middleware.
+   */
+  api.get("/media/signed/:expires/:signature/:filename", (c) => {
+    const filename = basename(c.req.param("filename"));
+    const expiresAt = Number(c.req.param("expires"));
+    const signature = c.req.param("signature");
+
+    if (!verifyMediaSignature(filename, expiresAt, signature)) {
+      return c.json({ error: "invalid or expired signature" }, 403);
+    }
+
+    const filepath = join(MEDIA_DIR, filename);
+    if (!existsSync(filepath)) return c.json({ error: "Not found" }, 404);
+
     const ext = filename.split(".").pop()?.toLowerCase() || "";
     const mime = MIME_TYPES[ext] || "application/octet-stream";
     const data = readFileSync(filepath);

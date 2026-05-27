@@ -10,6 +10,22 @@ import { useMentionMenu } from "../utils/use-mention-menu.js";
 
 import { readFileAsBase64, type ImageAttachment } from "../utils/image.js";
 
+/** Staged non-image file (video, pdf, audio, …) attached to the next message. */
+interface FileAttachment {
+  name: string;
+  path: string;
+  size: number;
+  mimeType: string;
+}
+
+/** Compact human-readable byte size, e.g. 12 KB, 3.4 MB, 1.2 GB. */
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 /** Stable reference to avoid infinite re-renders in Zustand selectors. */
 const emptyStringArray: string[] = [];
 
@@ -21,6 +37,9 @@ interface CommandItem {
 export function Composer({ sessionId }: { sessionId: string }) {
   const [text, setText] = useState("");
   const [images, setImages] = useState<ImageAttachment[]>([]);
+  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
+  const [attachUploading, setAttachUploading] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
   const [savePromptOpen, setSavePromptOpen] = useState(false);
@@ -30,6 +49,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const [caretPos, setCaretPos] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const pendingSelectionRef = useRef<number | null>(null);
   const cliConnected = useStore((s) => s.cliConnected);
@@ -137,9 +157,16 @@ export function Composer({ sessionId }: { sessionId: string }) {
     if (!msg || !isConnected) return;
     const clientMsgId = createClientMessageId();
 
+    // Append absolute paths of any staged file attachments so the agent
+    // can `read`/`bash` them directly. Images continue to flow inline as
+    // Claude image content blocks (see `images` below).
+    const finalMsg = attachments.length > 0
+      ? `${msg}\n\nAttached files:\n${attachments.map((a) => `- ${a.path}`).join("\n")}`
+      : msg;
+
     sendToSession(sessionId, {
       type: "user_message",
-      content: msg,
+      content: finalMsg,
       session_id: sessionId,
       images: images.length > 0 ? images.map((img) => ({ media_type: img.mediaType, data: img.base64 })) : undefined,
       client_msg_id: clientMsgId,
@@ -148,13 +175,15 @@ export function Composer({ sessionId }: { sessionId: string }) {
     useStore.getState().appendMessage(sessionId, {
       id: clientMsgId,
       role: "user",
-      content: msg,
+      content: finalMsg,
       images: images.length > 0 ? images.map((img) => ({ media_type: img.mediaType, data: img.base64 })) : undefined,
       timestamp: Date.now(),
     });
 
     setText("");
     setImages([]);
+    setAttachments([]);
+    setAttachError(null);
     setSlashMenuOpen(false);
     mention.setMentionMenuOpen(false);
 
@@ -274,6 +303,35 @@ export function Composer({ sessionId }: { sessionId: string }) {
     setImages((prev) => prev.filter((_, i) => i !== index));
   }
 
+  /**
+   * Upload any non-image files the user attached. Images are still handled
+   * by the inline base64 flow above (Claude vision). Everything else is
+   * staged under `~/.heyhank/uploads/<sessionId>/` on the server and the
+   * resolved absolute paths are appended to the next message.
+   */
+  async function handleAttachSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setAttachUploading(true);
+    setAttachError(null);
+    try {
+      const res = await api.uploadSessionFiles(sessionId, Array.from(files));
+      setAttachments((prev) => [...prev, ...res.files]);
+      if (res.errors && res.errors.length > 0) {
+        setAttachError(res.errors.map((er) => `${er.name}: ${er.error}`).join("; "));
+      }
+    } catch (err) {
+      setAttachError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setAttachUploading(false);
+      e.target.value = "";
+    }
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function handlePaste(e: React.ClipboardEvent) {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -379,6 +437,57 @@ export function Composer({ sessionId }: { sessionId: string }) {
           className="hidden"
           aria-label="Attach images"
         />
+
+        {/* Hidden generic-attachment file input (videos, pdfs, audio, …) */}
+        <input
+          ref={attachInputRef}
+          type="file"
+          multiple
+          onChange={handleAttachSelect}
+          className="hidden"
+          aria-label="Attach files"
+        />
+
+        {/* File-attachment chips */}
+        {(attachments.length > 0 || attachUploading || attachError) && (
+          <div className="flex flex-col gap-1 mb-2 px-3 sm:px-0">
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {attachments.map((att, i) => (
+                  <div
+                    key={`${att.path}-${i}`}
+                    className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-cc-hover border border-cc-border text-[12px] text-cc-fg max-w-full"
+                    title={att.path}
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5 text-cc-muted shrink-0">
+                      <path d="M9.5 2.25H4.5A1.25 1.25 0 003.25 3.5v9a1.25 1.25 0 001.25 1.25h7a1.25 1.25 0 001.25-1.25V5.5l-3.25-3.25z" strokeLinejoin="round" />
+                      <path d="M9.5 2.25V5.5h3.25" strokeLinejoin="round" />
+                    </svg>
+                    <span className="truncate max-w-[180px]">{att.name}</span>
+                    <span className="text-cc-muted shrink-0">{formatBytes(att.size)}</span>
+                    <button
+                      onClick={() => removeAttachment(i)}
+                      aria-label={`Remove ${att.name}`}
+                      className="ml-0.5 text-cc-muted hover:text-cc-error transition-colors cursor-pointer shrink-0"
+                    >
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                        <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {attachUploading && (
+              <div className="text-[11px] text-cc-muted" role="status" aria-live="polite">
+                Uploading…
+              </div>
+            )}
+            {attachError && (
+              <div className="text-[11px] text-cc-error" role="alert">{attachError}</div>
+            )}
+          </div>
+        )}
 
         {/* Prompt suggestion chips */}
         {promptSuggestions.length > 0 && (
@@ -677,6 +786,23 @@ export function Composer({ sessionId }: { sessionId: string }) {
             >
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
                 <path d="M8 3v10M3 8h10" strokeLinecap="round" />
+              </svg>
+            </button>
+
+            {/* Paperclip button (file/video upload) */}
+            <button
+              onClick={() => attachInputRef.current?.click()}
+              disabled={!isConnected || attachUploading}
+              className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
+                isConnected && !attachUploading
+                  ? "text-cc-muted hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
+                  : "text-cc-muted opacity-30 cursor-not-allowed"
+              }`}
+              title="Attach file (video, audio, pdf, …)"
+              aria-label="Attach file"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                <path d="M11.5 7.5l-4.25 4.25a2.25 2.25 0 01-3.18-3.18L8.32 4.32a1.5 1.5 0 012.12 2.12L6.18 10.7a.75.75 0 11-1.06-1.06l3.94-3.94" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
 
