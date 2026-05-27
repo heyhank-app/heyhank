@@ -5,8 +5,42 @@
 
 import type { SocialMediaAdapter } from "../adapter.js";
 import type { SocialProfile, CreatePostInput, PostAnalytics, AccountAnalytics, SocialComment, SocialPlatform } from "../types.js";
+import { getSettings as getAppSettings } from "../../settings-manager.js";
+import { signMediaUrl } from "../../routes/media-routes.js";
 
 const API_URL = "https://api.buffer.com";
+
+// Signed URLs valid for 7 days — covers immediate publishes plus Buffer's
+// scheduled-post window. The signature uses the HMAC of (filename, expiresAt)
+// with the HeyHank auth token as the secret.
+const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 7;
+
+/**
+ * Buffer fetches asset URLs server-side and must reach them without our auth
+ * header. For local HeyHank media files (`/api/media/file/<filename>`) we
+ * generate a signed URL (`/api/media/signed/<expires>/<sig>/<filename>`) that
+ * bypasses the auth middleware. Already-absolute URLs are passed through.
+ */
+function toAbsoluteMediaUrl(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+
+  const publicUrl = getAppSettings().publicUrl?.replace(/\/+$/, "") ?? "";
+  if (!publicUrl) {
+    throw new Error(`Cannot resolve "${url}" to absolute URL: publicUrl is not set in HeyHank settings`);
+  }
+
+  // Match `/api/media/file/<filename>` (with or without the `/api` prefix —
+  // both forms appear in the codebase depending on whether the URL was built
+  // before or after the API path mount).
+  const localMatch = url.match(/^\/?(?:api\/)?media\/file\/([^/?#]+)$/);
+  if (localMatch) {
+    const filename = localMatch[1];
+    const { signature, expiresAt } = signMediaUrl(filename, SIGNED_URL_TTL_SECONDS);
+    return `${publicUrl}/api/media/signed/${expiresAt}/${signature}/${encodeURIComponent(filename)}`;
+  }
+
+  return url.startsWith("/") ? `${publicUrl}${url}` : `${publicUrl}/${url}`;
+}
 
 const SERVICE_TO_PLATFORM: Record<string, SocialPlatform> = {
   twitter: "twitter",
@@ -92,7 +126,7 @@ export class BufferAdapter implements SocialMediaAdapter {
     try {
       const orgId = await this.getOrgId();
       const data = await this.gql<{ channels: Array<{ id: string; name: string; displayName: string; service: string; avatar: string | null }> }>(`
-        query GetChannels($orgId: String!) {
+        query GetChannels($orgId: OrganizationId!) {
           channels(input: { organizationId: $orgId }) {
             id
             name
@@ -143,8 +177,17 @@ export class BufferAdapter implements SocialMediaAdapter {
         }
 
         if (input.mediaUrls?.length) {
-          const images = input.mediaUrls.map((url) => `{ url: ${JSON.stringify(url)} }`).join(", ");
-          inputFields += `, assets: { images: [${images}] }`;
+          // Buffer GraphQL schema: assets is [AssetInput!]! where each
+          // AssetInput has exactly one of image/video/document/link. For now we
+          // only handle image assets (TikTok Photo Mode + IG single-image).
+          const assets = input.mediaUrls
+            .filter((u) => u)
+            .map((url) => `{ image: { url: ${JSON.stringify(toAbsoluteMediaUrl(url))} } }`)
+            .join(", ");
+          inputFields += `, assets: [${assets}]`;
+        } else {
+          // assets is non-null on the schema even when empty
+          inputFields += `, assets: []`;
         }
 
         const query = `
@@ -196,7 +239,7 @@ export class BufferAdapter implements SocialMediaAdapter {
       // Fetch sent and scheduled posts
       const [sentData, scheduledData] = await Promise.all([
         this.gql<{ posts: { edges: Array<{ node: { id: string; text: string; createdAt: string; dueAt?: string; channelId: string; status: string } }> } }>(`
-          query GetSentPosts($orgId: String!, $first: Int) {
+          query GetSentPosts($orgId: OrganizationId!, $first: Int) {
             posts(first: $first, input: {
               organizationId: $orgId,
               sort: [{ field: dueAt, direction: desc }],
@@ -209,7 +252,7 @@ export class BufferAdapter implements SocialMediaAdapter {
           }
         `, { orgId, first: limit }),
         this.gql<{ posts: { edges: Array<{ node: { id: string; text: string; createdAt: string; dueAt?: string; channelId: string; status: string } }> } }>(`
-          query GetScheduledPosts($orgId: String!, $first: Int) {
+          query GetScheduledPosts($orgId: OrganizationId!, $first: Int) {
             posts(first: $first, input: {
               organizationId: $orgId,
               sort: [{ field: dueAt, direction: asc }],

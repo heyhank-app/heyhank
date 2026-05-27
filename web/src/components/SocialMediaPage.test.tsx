@@ -20,6 +20,8 @@ const { mockApi } = vi.hoisted(() => ({
     updateSocialPost: vi.fn(),
     createSocialPost: vi.fn(),
     getSocialSettings: vi.fn(),
+    updateSocialSettings: vi.fn(),
+    testSocialConnection: vi.fn(),
     getSocialBrowserStatus: vi.fn(),
     getSocialProfiles: vi.fn(),
     getSocialPostComments: vi.fn(),
@@ -282,5 +284,202 @@ describe("SocialMediaPage — DraftsTab bulk-select", () => {
       },
     });
     expect(results).toHaveNoViolations();
+  });
+});
+
+// ─── FormatBadge integration ───────────────────────────────────────────────
+//
+// FormatBadge appears in PostCard for Carousel/Story/Reel drafts. Plain "post"
+// or undefined format must NOT show a badge (avoid clutter on the default case).
+// When media count >= 2 on a carousel/story, the badge shows "· N" so the user
+// can spot half-finished drafts at a glance.
+
+describe("SocialMediaPage — FormatBadge in DraftsTab", () => {
+  // FormatBadge has a rounded-full pill styled with inline-flex. We scope
+  // querying to that exact element so we don't collide with tab labels or
+  // aria-labels that happen to contain "Carousel"/"Story"/"Reel".
+  function getBadge(label: string): HTMLElement {
+    const all = document.querySelectorAll<HTMLElement>("span.inline-flex.rounded-full");
+    const match = Array.from(all).find((el) => (el.textContent ?? "").includes(label));
+    if (!match) throw new Error(`FormatBadge with label "${label}" not found`);
+    return match;
+  }
+
+  it("renders 'Carousel · 5' for a carousel draft with 5 media items", async () => {
+    await renderDraftsTab([
+      makeDraft({
+        id: "carousel-draft",
+        text: "Carousel example",
+        platforms: ["instagram"],
+        ...({ format: "carousel", mediaUrls: ["a", "b", "c", "d", "e"] } as any),
+      }),
+    ]);
+    const badge = getBadge("Carousel");
+    expect(badge).toBeInTheDocument();
+    expect(badge.textContent).toMatch(/· 5/);
+  });
+
+  it("renders 'Story' badge without count for a single-frame story", async () => {
+    await renderDraftsTab([
+      makeDraft({
+        id: "story-draft",
+        text: "Story example",
+        platforms: ["instagram"],
+        ...({ format: "story", mediaUrls: ["a"] } as any),
+      }),
+    ]);
+    const badge = getBadge("Story");
+    expect(badge).toBeInTheDocument();
+    // Single media: no "· N" suffix.
+    expect(badge.textContent ?? "").not.toMatch(/· 1/);
+  });
+
+  it("renders 'Reel' badge for a reel draft", async () => {
+    await renderDraftsTab([
+      makeDraft({
+        id: "reel-draft",
+        text: "Reel example",
+        platforms: ["instagram"],
+        ...({ format: "reel", mediaUrls: ["video.mp4"] } as any),
+      }),
+    ]);
+    const badge = getBadge("Reel");
+    expect(badge).toBeInTheDocument();
+  });
+
+  it("does NOT render FormatBadge for plain 'post' or undefined format", async () => {
+    await renderDraftsTab([
+      makeDraft({ id: "plain-1", text: "Plain post one" }),
+      makeDraft({
+        id: "plain-2",
+        text: "Plain post two",
+        ...({ format: "post" } as any),
+      }),
+    ]);
+    // No badge pill should contain Carousel/Story/Reel label text.
+    const pills = document.querySelectorAll<HTMLElement>("span.inline-flex.rounded-full");
+    const formatPills = Array.from(pills).filter((el) => {
+      const t = (el.textContent ?? "").trim();
+      return /Carousel|Story|Reel/.test(t);
+    });
+    expect(formatPills).toHaveLength(0);
+  });
+});
+
+// ─── SettingsTab — Multi-Backend Routing ─────────────────────────────────────
+//
+// These tests verify the Settings tab supports configuring Postiz + Buffer in
+// parallel (not "one backend at a time") and the Platform Routing block appears
+// only when both keys are populated. Added 2026-05-22 alongside the multi-
+// backend refactor in server/socialmedia/manager.ts.
+
+async function renderSettingsTab(initialSettings: Record<string, unknown> = {}) {
+  mockApi.getSocialSettings.mockResolvedValue(initialSettings);
+  mockApi.getSocialBrowserStatus.mockResolvedValue({ platforms: [] });
+  mockApi.updateSocialSettings.mockResolvedValue({ ok: true });
+  window.location.hash = "#/socialmedia/settings";
+  const result = render(<SocialMediaPage />);
+  // Wait until the initial getSocialSettings response has propagated into the
+  // form by asserting the always-rendered Primary Backend heading is visible.
+  await waitFor(() => expect(screen.getByText("Primary Backend")).toBeInTheDocument());
+  return result;
+}
+
+describe("SocialMediaPage — SettingsTab multi-backend", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApi.listSocialPosts.mockResolvedValue({ posts: [] });
+  });
+
+  it("renders BOTH Postiz and Buffer configuration cards independently", async () => {
+    await renderSettingsTab({});
+    // Both backend cards are visible at the same time — the old UI showed
+    // only the one matching the selected primary backend.
+    expect(screen.getByText("Postiz Configuration")).toBeInTheDocument();
+    expect(screen.getByText("Buffer Configuration")).toBeInTheDocument();
+  });
+
+  it("loads existing platformBackends mapping into the routing selects", async () => {
+    await renderSettingsTab({
+      backend: "postiz",
+      backends: {
+        postiz: { url: "https://postiz.example.com", apiKey: "postiz-key-1234" },
+        buffer: { apiKey: "buffer-key-1234" },
+      },
+      platformBackends: { tiktok: "buffer" },
+    });
+    // Platform Routing block only renders when both backends are configured.
+    expect(await screen.findByText("Platform Routing")).toBeInTheDocument();
+    const tiktokSelect = screen.getByLabelText("Backend for tiktok") as HTMLSelectElement;
+    expect(tiktokSelect.value).toBe("buffer");
+    // Instagram has no override → still "Primary" (empty string).
+    const igSelect = screen.getByLabelText("Backend for instagram") as HTMLSelectElement;
+    expect(igSelect.value).toBe("");
+  });
+
+  it("does NOT show Platform Routing when only one backend has a key", async () => {
+    await renderSettingsTab({
+      backend: "postiz",
+      backends: { postiz: { url: "", apiKey: "postiz-key-only" } },
+    });
+    expect(screen.queryByText("Platform Routing")).not.toBeInTheDocument();
+  });
+
+  it("saving sends both backend configs + the platformBackends map", async () => {
+    await renderSettingsTab({
+      backend: "postiz",
+      backends: {
+        postiz: { url: "", apiKey: "postiz-key" },
+        buffer: { apiKey: "buffer-key" },
+      },
+      platformBackends: { tiktok: "buffer" },
+    });
+
+    // Trigger save via the "Save" button (not Test Connection).
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+
+    await waitFor(() => expect(mockApi.updateSocialSettings).toHaveBeenCalledTimes(1));
+    const payload = mockApi.updateSocialSettings.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.backend).toBe("postiz");
+    expect(payload.backends).toMatchObject({
+      postiz: expect.objectContaining({ apiKey: "postiz-key" }),
+      buffer: expect.objectContaining({ apiKey: "buffer-key" }),
+    });
+    expect(payload.platformBackends).toEqual({ tiktok: "buffer" });
+  });
+
+  it("dropping a platform back to Primary removes it from the saved map", async () => {
+    await renderSettingsTab({
+      backend: "postiz",
+      backends: {
+        postiz: { url: "", apiKey: "postiz-key" },
+        buffer: { apiKey: "buffer-key" },
+      },
+      platformBackends: { tiktok: "buffer" },
+    });
+
+    // Switch TikTok back to "Primary" (empty value).
+    const tiktokSelect = screen.getByLabelText("Backend for tiktok") as HTMLSelectElement;
+    fireEvent.change(tiktokSelect, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+
+    await waitFor(() => expect(mockApi.updateSocialSettings).toHaveBeenCalledTimes(1));
+    const payload = mockApi.updateSocialSettings.mock.calls[0][0] as Record<string, unknown>;
+    // saveSettings filters out empty-string entries so "tiktok" should NOT
+    // appear in the persisted map at all.
+    expect(payload.platformBackends).toEqual({});
+  });
+
+  it("Test Connection button is disabled until a primary backend is selected", async () => {
+    // Setup with both keys but NO primary backend chosen — Test Connection
+    // requires a primary because it uses the primary adapter.
+    await renderSettingsTab({
+      backends: {
+        postiz: { url: "", apiKey: "postiz-key" },
+        buffer: { apiKey: "buffer-key" },
+      },
+    });
+    const testBtn = screen.getByRole("button", { name: /Test Connection/ });
+    expect(testBtn).toBeDisabled();
   });
 });

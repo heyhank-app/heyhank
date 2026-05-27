@@ -111,6 +111,8 @@ export function registerSocialMediaRoutes(api: Hono): void {
         firstComment: body.firstComment,
         videoUrl: body.videoUrl,
         thumbnailUrl: body.thumbnailUrl,
+        format: body.format,
+        initialBackendData: body.backendData,
       });
       if (body.createdBy && result) (result as any).createdBy = body.createdBy;
       return c.json(result, 201);

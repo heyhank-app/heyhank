@@ -403,20 +403,29 @@ export class PostizAdapter implements SocialMediaAdapter {
         };
       }
 
-      // Platform-specific default settings required by Postiz.
-      // These mirror the validation rules Postiz applies per integration:
-      //  - Instagram/Facebook: post_type ("post" | "story")
-      //  - X (Twitter): who_can_reply_post ("everyone" | "following" | "mentionedUsers" | "subscribers" | "verified")
+      // Per-platform default settings required by Postiz.
+      // Postiz Instagram provider (see gitroomhq/postiz-app instagram.provider.ts):
+      //   - settings.post_type ∈ {"post", "story"}
+      //   - For "story" + multiple media, Postiz publishes each item as a SEPARATE
+      //     story — so we just pass all frames in mediaUrls; no splitting here.
+      //   - Videos are auto-routed to media_type=REELS (post_type=post) or
+      //     STORIES (post_type=story). "reel" therefore = post_type "post" with
+      //     a video upload — Postiz handles the media_type switch.
+      // Facebook is photo/video-auto, no first-class story flag in the public API,
+      // so we treat "story" as feed post on FB (best effort; would need provider
+      // patch upstream to support FB Stories explicitly).
+      const igPostType = input.format === "story" ? "story" : "post";
       const SETTINGS_DEFAULTS: Record<string, Record<string, unknown>> = {
-        instagram: { post_type: "post" },
-        facebook: { post_type: "post" },
+        instagram: { post_type: igPostType },
+        facebook: { post_type: "post" }, // FB Story not exposed in Postiz public API yet
         x: { who_can_reply_post: "everyone" },
       };
 
-      // Build post payload per Postiz API.
-      // Postiz treats `value` as a thread — a second entry becomes the
-      // first comment on IG/Facebook or a thread reply on X/Threads/LinkedIn.
-      const firstCommentText = input.firstComment?.trim();
+      // Stories don't have first-comments (no comment thread on a 24h Story),
+      // so suppress firstComment when format=story to avoid a confusing post-2.
+      // For post / carousel / reel, the second value entry becomes the IG/FB
+      // first comment or a thread reply on X/Threads/LinkedIn.
+      const firstCommentText = input.format === "story" ? "" : (input.firstComment?.trim() ?? "");
       const valueEntries: Array<{ content: string; image: Array<{ id: string; path: string }> }> = [
         { content: input.text, image: mediaItems },
       ];

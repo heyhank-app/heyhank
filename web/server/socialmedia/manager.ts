@@ -13,12 +13,15 @@ import type {
   SocialProfile,
   ListPostsOpts,
   SocialPlatform,
+  SocialBackendId,
 } from "./types.js";
 import * as store from "./store.js";
 import { BrowserAdapter } from "./adapters/browser-adapter.js";
+import { autoCreateRulesForPost } from "./auto-rule-hook.js";
 
-let cachedAdapter: SocialMediaAdapter | null = null;
-let cachedBackendKey: string | null = null;
+// Per-backend adapter cache. Keyed by `${backendId}:${apiKey}:${url}` so a
+// settings change for one backend doesn't invalidate the others.
+const adapterCache = new Map<string, SocialMediaAdapter>();
 
 // Singleton BrowserAdapter — only one persistent Playwright session per platform,
 // so there's no per-config variation to cache.
@@ -29,9 +32,26 @@ function getBrowserAdapter(): BrowserAdapter {
   return browserAdapterSingleton;
 }
 
-/** Platforms routed through the browser (rather than the primary backend). */
+/** Platforms routed through the browser (rather than any API backend). */
 function browserPlatformsFrom(settings: SocialMediaSettings): SocialPlatform[] {
   return settings.browserPlatforms ?? [];
+}
+
+/**
+ * Resolve which backend (or browser group) a given platform should be posted
+ * through. Precedence: browserPlatforms > platformBackends override > primary
+ * `backend`. Returns `null` only when there is no primary configured and the
+ * platform has no override.
+ */
+function resolvePlatformBackend(
+  platform: SocialPlatform,
+  settings: SocialMediaSettings,
+): "browser" | { backendId: string } | null {
+  if (browserPlatformsFrom(settings).includes(platform)) return "browser";
+  const override = settings.platformBackends?.[platform];
+  if (override) return { backendId: override };
+  if (settings.backend) return { backendId: settings.backend };
+  return null;
 }
 
 /**
@@ -53,26 +73,32 @@ function coercePlatforms(input: unknown): SocialPlatform[] {
   return out;
 }
 
-export async function getAdapter(settings?: SocialMediaSettings): Promise<SocialMediaAdapter> {
+/**
+ * Get the adapter for a specific backend ID. If `backendId` is omitted, falls
+ * back to the primary backend in settings. Caches per backend so secondary
+ * routes (e.g. Buffer for TikTok) coexist with the primary (e.g. Postiz).
+ */
+export async function getAdapter(
+  settings?: SocialMediaSettings,
+  backendId?: SocialBackendId,
+): Promise<SocialMediaAdapter> {
   const s = settings ?? store.getSettings();
-  if (!s.backend) {
+  const id = backendId ?? s.backend;
+  if (!id) {
     throw new Error("No social media backend configured");
   }
 
-  const config = s.backends[s.backend];
+  const config = s.backends[id];
   if (!config) {
-    throw new Error(`No configuration found for backend: ${s.backend}`);
+    throw new Error(`No configuration found for backend: ${id}`);
   }
 
-  // Cache adapter if same backend + config
-  const key = `${s.backend}:${config.apiKey}:${config.url ?? ""}`;
-  if (cachedAdapter && cachedBackendKey === key) {
-    return cachedAdapter;
-  }
+  const key = `${id}:${config.apiKey}:${config.url ?? ""}`;
+  const cached = adapterCache.get(key);
+  if (cached) return cached;
 
   let adapter: SocialMediaAdapter;
-
-  switch (s.backend) {
+  switch (id) {
     case "postiz": {
       const { PostizAdapter } = await import("./adapters/postiz-adapter.js");
       adapter = new PostizAdapter({ url: config.url ?? "", apiKey: config.apiKey });
@@ -84,11 +110,10 @@ export async function getAdapter(settings?: SocialMediaSettings): Promise<Social
       break;
     }
     default:
-      throw new Error(`Unknown social media backend: ${s.backend}`);
+      throw new Error(`Unknown social media backend: ${id}`);
   }
 
-  cachedAdapter = adapter;
-  cachedBackendKey = key;
+  adapterCache.set(key, adapter);
   return adapter;
 }
 
@@ -102,8 +127,34 @@ export async function testConnection(): Promise<{ ok: boolean; error?: string; d
 }
 
 export async function getProfiles(): Promise<SocialProfile[]> {
-  const adapter = await getAdapter();
-  return adapter.getProfiles();
+  // Collect profiles from every configured backend so platforms routed via
+  // secondary backends (e.g. TikTok via Buffer) appear alongside primary ones.
+  const settings = store.getSettings();
+  const backendIds = new Set<SocialBackendId>();
+  if (settings.backend) backendIds.add(settings.backend);
+  for (const override of Object.values(settings.platformBackends ?? {})) {
+    if (override) backendIds.add(override);
+  }
+
+  const seen = new Set<string>();
+  const merged: SocialProfile[] = [];
+  for (const id of backendIds) {
+    try {
+      const adapter = await getAdapter(settings, id);
+      const profiles = await adapter.getProfiles();
+      for (const p of profiles) {
+        // Dedupe by (platform, id) so the same channel doesn't appear twice if
+        // somehow returned by two backends.
+        const k = `${p.platform}:${p.id}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        merged.push(p);
+      }
+    } catch (err: any) {
+      console.error(`[socialmedia] getProfiles failed for backend ${id}:`, err?.message ?? err);
+    }
+  }
+  return merged;
 }
 
 export async function createPost(input: CreatePostInput): Promise<SocialPost> {
@@ -119,6 +170,7 @@ export async function createPost(input: CreatePostInput): Promise<SocialPost> {
     platforms: input.platforms,
     scheduledAt: input.scheduledAt ?? null,
     mediaUrls: input.mediaUrls ?? [],
+    format: input.format,
     status: "draft",
     backendId: settings.backend,
     backendPostId: null,
@@ -133,17 +185,30 @@ export async function createPost(input: CreatePostInput): Promise<SocialPost> {
   // If isDraft, save locally and return without calling backend
   if (input.isDraft) {
     post.backendId = null;
+    if (input.initialBackendData !== undefined) {
+      post.backendData = input.initialBackendData;
+    }
     store.savePost(post);
     return post;
   }
 
-  // ── Partition platforms between Browser and primary backend ────────────────
-  const browserSet = new Set(browserPlatformsFrom(settings));
-  const browserPlatforms = input.platforms.filter((p) => browserSet.has(p));
-  const primaryPlatforms = input.platforms.filter((p) => !browserSet.has(p));
+  // ── Partition platforms by resolved backend (browser / backendId) ──────────
+  // Each platform routes to either the browser adapter or a specific API
+  // backend, determined by `browserPlatforms` + `platformBackends` overrides +
+  // the primary `backend`.
+  const groups = new Map<string, SocialPlatform[]>();
+  for (const p of input.platforms) {
+    const target = resolvePlatformBackend(p, settings);
+    if (!target) continue;
+    const key = target === "browser" ? "browser" : target.backendId;
+    const arr = groups.get(key) ?? [];
+    arr.push(p);
+    groups.set(key, arr);
+  }
 
   type GroupResult = {
-    group: "browser" | "primary";
+    group: string; // "browser" or a SocialBackendId
+    platforms: SocialPlatform[];
     ok: boolean;
     id: string | null;
     status: string;
@@ -152,102 +217,105 @@ export async function createPost(input: CreatePostInput): Promise<SocialPost> {
   };
   const groupResults: GroupResult[] = [];
 
-  // Primary backend group
-  if (primaryPlatforms.length > 0) {
-    try {
-      const adapter = await getAdapter(settings);
-      const result = await adapter.createPost({ ...input, platforms: primaryPlatforms });
-      const ok = result.status === "published" || result.status === "scheduled";
-      groupResults.push({
-        group: "primary",
-        ok,
-        id: result.id,
-        status: result.status,
-        backendData: result.backendData,
-      });
-    } catch (err: any) {
-      groupResults.push({
-        group: "primary",
-        ok: false,
-        id: null,
-        status: "failed",
-        error: err?.message ?? "primary backend failed",
-      });
-    }
-  }
-
-  // Browser group (X / TikTok)
-  if (browserPlatforms.length > 0) {
-    try {
-      const adapter = getBrowserAdapter();
-      adapter.setTargetPlatforms(browserPlatforms);
-      const result = await adapter.createPost({ ...input, platforms: browserPlatforms });
-      const ok = result.status === "published" || result.status === "partial";
-      groupResults.push({
-        group: "browser",
-        ok,
-        id: result.id,
-        status: result.status,
-        backendData: result.backendData,
-      });
-    } catch (err: any) {
-      groupResults.push({
-        group: "browser",
-        ok: false,
-        id: null,
-        status: "failed",
-        error: err?.message ?? "browser adapter failed",
-      });
+  for (const [groupKey, platforms] of groups) {
+    if (groupKey === "browser") {
+      try {
+        const adapter = getBrowserAdapter();
+        adapter.setTargetPlatforms(platforms);
+        const result = await adapter.createPost({ ...input, platforms });
+        const ok = result.status === "published" || result.status === "partial";
+        groupResults.push({
+          group: "browser",
+          platforms,
+          ok,
+          id: result.id,
+          status: result.status,
+          backendData: result.backendData,
+        });
+      } catch (err: any) {
+        groupResults.push({
+          group: "browser",
+          platforms,
+          ok: false,
+          id: null,
+          status: "failed",
+          error: err?.message ?? "browser adapter failed",
+        });
+      }
+    } else {
+      try {
+        const adapter = await getAdapter(settings, groupKey as SocialBackendId);
+        const result = await adapter.createPost({ ...input, platforms });
+        const ok = result.status === "published" || result.status === "scheduled";
+        groupResults.push({
+          group: groupKey,
+          platforms,
+          ok,
+          id: result.id,
+          status: result.status,
+          backendData: result.backendData,
+        });
+      } catch (err: any) {
+        groupResults.push({
+          group: groupKey,
+          platforms,
+          ok: false,
+          id: null,
+          status: "failed",
+          error: err?.message ?? `backend ${groupKey} failed`,
+        });
+      }
     }
   }
 
   // ── Merge group results into a single SocialPost ───────────────────────────
   const anyOk = groupResults.some((g) => g.ok);
   const anyFail = groupResults.some((g) => !g.ok);
-  // A primary-group result of "partial" also indicates a mixed outcome.
-  const primaryGroupPartial = groupResults.find((g) => g.group === "primary")?.status === "partial";
-  const browserGroupPartial = groupResults.find((g) => g.group === "browser")?.status === "partial";
+  const anyPartial = groupResults.some((g) => g.status === "partial");
 
   let finalStatus: SocialPost["status"];
   if (groupResults.length === 0) {
     finalStatus = "failed";
-  } else if (anyOk && (anyFail || primaryGroupPartial || browserGroupPartial)) {
+  } else if (anyOk && (anyFail || anyPartial)) {
     finalStatus = "partial";
   } else if (anyOk) {
-    // Could be "scheduled" if the primary group was scheduled and there was no browser group.
-    const only = groupResults[0];
-    finalStatus = (only?.status === "scheduled" ? "scheduled" : "published");
+    // All ok → "scheduled" only if every group is scheduled.
+    finalStatus = groupResults.every((g) => g.status === "scheduled") ? "scheduled" : "published";
   } else {
     finalStatus = "failed";
   }
 
-  // Build a structured backendPostId-ish payload in backendData; keep the flat
-  // string field for backwards-compat (first available ID).
-  const primaryRes = groupResults.find((g) => g.group === "primary");
-  const browserRes = groupResults.find((g) => g.group === "browser");
-  post.backendPostId = primaryRes?.id ?? browserRes?.id ?? null;
-  post.backendData = {
-    postiz: primaryRes
-      ? {
-          status: primaryRes.status,
-          id: primaryRes.id,
-          data: primaryRes.backendData,
-          error: primaryRes.error,
-        }
-      : undefined,
-    browser: browserRes
-      ? {
-          status: browserRes.status,
-          id: browserRes.id,
-          data: browserRes.backendData,
-          error: browserRes.error,
-        }
-      : undefined,
-  };
+  // Flatten group results into backendData keyed by group ID. Keep the
+  // top-level backendPostId set to the first available ID for backwards-compat.
+  post.backendPostId = groupResults.find((g) => g.id)?.id ?? null;
+  const backendData: Record<string, unknown> = {};
+  for (const g of groupResults) {
+    backendData[g.group] = {
+      platforms: g.platforms,
+      status: g.status,
+      id: g.id,
+      data: g.backendData,
+      error: g.error,
+    };
+  }
+  post.backendData = backendData;
   post.status = finalStatus;
 
   post.updatedAt = new Date().toISOString();
   store.savePost(post);
+
+  // Best-effort Auto-DM rule creation. Fires only when the post has reached a
+  // backend (status published/scheduled/partial, backendData carries the
+  // platform's post-id). Errors are non-fatal — the publish succeeded either
+  // way, we just couldn't auto-wire the funnel.
+  if (post.status !== "failed") {
+    try {
+      autoCreateRulesForPost(post);
+    } catch (err) {
+      console.error(`[socialmedia] auto-rule hook failed for ${post.id}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
   return post;
 }
 
@@ -382,6 +450,7 @@ export async function createDraft(input: CreatePostInput & { createdBy?: "user" 
     platforms,
     scheduledAt: input.scheduledAt ?? null,
     mediaUrls: input.mediaUrls ?? [],
+    format: input.format,
     status: "draft",
     backendId: null,
     backendPostId: null,
@@ -422,25 +491,32 @@ export async function publishDraft(id: string): Promise<SocialPost> {
   if (!post) throw new Error("Post not found");
   if (post.status !== "draft") throw new Error("Post is not a draft");
 
+  // Re-run createPost with isDraft=false to reuse the same per-platform routing
+  // logic. Wipe the draft from disk so createPost can save the published copy
+  // under the same ID (createPost generates a new id via randomUUID, so we set
+  // it back after).
   const settings = store.getSettings();
-  try {
-    const adapter = await getAdapter(settings);
-    const result = await adapter.createPost({
-      text: post.text,
-      platforms: post.platforms,
-      scheduledAt: post.scheduledAt,
-      mediaUrls: post.mediaUrls,
-    });
-    post.backendId = settings.backend;
-    post.backendPostId = result.id;
-    post.status = result.status as SocialPost["status"];
-    post.backendData = result.backendData;
-  } catch (err: any) {
-    post.status = "failed";
-    post.backendData = { error: err?.message };
-  }
+  const published = await createPost({
+    text: post.text,
+    platforms: post.platforms,
+    scheduledAt: post.scheduledAt,
+    mediaUrls: post.mediaUrls,
+    format: post.format,
+    firstComment: post.firstComment,
+    title: post.title,
+    videoUrl: post.videoUrl,
+    thumbnailUrl: post.thumbnailUrl,
+    isDraft: false,
+  });
 
-  post.updatedAt = new Date().toISOString();
-  store.savePost(post);
-  return post;
+  // Preserve the original draft ID + creation timestamp so the UI can keep
+  // tracking the same record across the draft→published transition.
+  store.deleteLocalPost(published.id);
+  published.id = post.id;
+  published.createdAt = post.createdAt;
+  // The createPost call captures backendId per group via backendData; keep the
+  // primary backend on the flat field for any caller that still reads it.
+  published.backendId = settings.backend;
+  store.savePost(published);
+  return published;
 }
