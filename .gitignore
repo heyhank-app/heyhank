@@ -37,3 +37,20 @@ web/test-results/
 /Download*.png
 /Download*.jpg
 /screenshot.png
+
+# Large session artifacts — clone-references for viral-short-director, FB
+# downloads, App Review screencast source, content guides. None of these
+# belong in git history — they're either bulky binaries or 1-time inputs.
+/*.mp4
+/*.docx
+/AQPH*.mp4
+/Facebook*.mp4
+/markus-*.mp4
+/social-media-content.skill
+/viral-short-director.zip
+/viral-short-director/
+# Throwaway probe scripts used to reverse-engineer hooksgenerator.ai +
+# ctagenerator.ai during the IG Wizard build. Kept locally for reference,
+# but they shell out to playwright and aren't part of the product.
+web/probe-*.mjs
+web/screencast-runner.mjs
