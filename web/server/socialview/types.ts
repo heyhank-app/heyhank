@@ -129,8 +129,9 @@ export interface WatchListEntry {
   createdAt: string;
   /** ISO timestamp of last successful or attempted crawl. Null if never crawled. */
   lastCrawledAt: string | null;
-  /** Outcome of the most recent crawl attempt. */
-  lastCrawlStatus: "ok" | "error" | "never";
+  /** Outcome of the most recent crawl attempt. `skipped` means the auto-
+   *  crawler intentionally bypassed this entry (e.g. TikTok bulk-blocked). */
+  lastCrawlStatus: "ok" | "error" | "never" | "skipped";
   /** Free-text error message from the last failed crawl, if any. */
   lastCrawlMessage?: string;
   /** Number of posts extracted in the most recent crawl. */

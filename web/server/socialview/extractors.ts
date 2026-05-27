@@ -78,7 +78,375 @@ export async function extractCurrentPage(opts: ExtractOptions): Promise<ExtractR
     return { posts: [], errors: [`Facebook URL not recognized for extraction: ${url}`] };
   }
 
+  if (opts.platform === "tiktok") {
+    // Single video permalink: /@<handle>/video/<numeric_id>
+    if (/tiktok\.com\/@[^/]+\/video\/\d+/.test(url)) {
+      opts.onLog?.("Detected: TikTok single video");
+      return await extractTikTokSinglePost(opts);
+    }
+    // Single photo-mode post: /@<handle>/photo/<id>
+    if (/tiktok\.com\/@[^/]+\/photo\/\d+/.test(url)) {
+      opts.onLog?.("Detected: TikTok single photo post");
+      return await extractTikTokSinglePost(opts);
+    }
+    // Profile pages: /@<handle>(/)
+    if (/tiktok\.com\/@[^/?#]+\/?$/.test(url)) {
+      opts.onLog?.("Detected: TikTok profile (up to 25 videos)");
+      return await extractTikTokProfile(opts, 25);
+    }
+    return { posts: [], errors: [`TikTok URL not recognized for extraction: ${url}`] };
+  }
+
   return { posts: [], errors: [`Extractor not yet implemented for platform: ${opts.platform}`] };
+}
+
+// ─── TikTok ─────────────────────────────────────────────────────────────────
+// TikTok ships its complete page state as a JSON blob inside
+// `<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__">…</script>` on every page.
+// Parsing that blob is dramatically more resilient than CSS-selector scraping
+// because TikTok rotates classname hashes constantly while the JSON schema
+// changes slowly. The profile-page blob also contains the full first batch of
+// videos with stats/desc/cover so we can extract N posts WITHOUT visiting each
+// /@<handle>/video/<id> permalink — saves time AND rate-limit budget vs the
+// IG/FB per-post-visit pattern.
+
+interface TikTokAuthor {
+  uniqueId?: string;
+  nickname?: string;
+  signature?: string;
+  verified?: boolean;
+}
+
+// TikTok ships stats in two parallel schemas — `stats` (legacy, numbers) and
+// `statsV2` (current, strings). Both can be present at the same time. We
+// accept either via `string | number` and coerce via `parseStatCount`.
+interface TikTokStats {
+  diggCount?: number | string;
+  commentCount?: number | string;
+  shareCount?: number | string;
+  playCount?: number | string;
+  collectCount?: number | string;
+}
+
+function parseStatCount(v: number | string | undefined): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+interface TikTokTextExtra {
+  hashtagName?: string;
+  userUniqueId?: string;
+}
+
+interface TikTokItem {
+  id: string;
+  desc: string;
+  createTime?: number;
+  author?: TikTokAuthor;
+  stats?: TikTokStats;
+  statsV2?: TikTokStats;
+  textExtra?: TikTokTextExtra[];
+  video?: { cover?: string; dynamicCover?: string; playAddr?: string };
+  imagePost?: { images?: Array<{ imageURL?: { urlList?: string[] } }> };
+}
+
+/**
+ * Read `__UNIVERSAL_DATA_FOR_REHYDRATION__` JSON from the current page. Returns
+ * null when TikTok serves a logged-out/captcha shell (no hydration script) or
+ * when JSON parsing fails.
+ */
+async function readTikTokHydration(page: Page): Promise<Record<string, unknown> | null> {
+  try {
+    const raw = await page.evaluate(() => {
+      const el = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__");
+      return el?.textContent ?? null;
+    });
+    if (!raw) return null;
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** Detect TikTok's login wall / captcha gate so we abort cleanly. */
+async function detectTikTokLoggedOut(page: Page): Promise<boolean> {
+  return await page
+    .evaluate(() => {
+      const t = (document.body?.innerText || "").slice(0, 2000);
+      return /Log in to TikTok|Anmelden bei TikTok|Verify to continue|Bitte verifiziere/i.test(t);
+    })
+    .catch(() => false);
+}
+
+function hashtagsFromTextExtra(extras: TikTokTextExtra[] | undefined): string[] {
+  if (!extras) return [];
+  return extras
+    .map((e) => e.hashtagName)
+    .filter((h): h is string => typeof h === "string" && h.length > 0)
+    .map((h) => `#${h}`);
+}
+
+function mentionsFromTextExtra(extras: TikTokTextExtra[] | undefined): string[] {
+  if (!extras) return [];
+  return extras
+    .map((e) => e.userUniqueId)
+    .filter((u): u is string => typeof u === "string" && u.length > 0)
+    .map((u) => `@${u}`);
+}
+
+/** Map a TikTok itemStruct (from hydration JSON) into a LibraryPost. */
+async function tiktokItemToLibraryPost(
+  item: TikTokItem,
+  platform: SocialPlatform,
+  source: "own" | "role-model",
+  onLog?: (msg: string) => void,
+): Promise<LibraryPost> {
+  const handle = item.author?.uniqueId ?? "unknown";
+  const stats = item.statsV2 ?? item.stats ?? {};
+  const isPhoto = !!item.imagePost?.images?.length;
+  const text = item.desc ?? "";
+  const postedAt = item.createTime ? new Date(item.createTime * 1000).toISOString() : null;
+  const url = `https://www.tiktok.com/@${handle}/${isPhoto ? "photo" : "video"}/${item.id}`;
+
+  // Media: prefer hi-res cover. Photo posts can have multiple images.
+  const media: LibraryPost["media"] = [];
+  if (isPhoto && item.imagePost?.images) {
+    for (const img of item.imagePost.images) {
+      const remoteUrl = img.imageURL?.urlList?.[0] ?? null;
+      if (remoteUrl) media.push({ type: "image", localPath: null, remoteUrl, description: "" });
+    }
+  } else {
+    const cover = item.video?.cover ?? item.video?.dynamicCover ?? null;
+    if (cover) media.push({ type: "video", localPath: null, remoteUrl: cover, description: "" });
+  }
+
+  // Engagement — statsV2 ships values as strings ("540"), legacy stats ships
+  // them as numbers (540). parseStatCount normalises both.
+  const likes = parseStatCount(stats.diggCount);
+  const comments = parseStatCount(stats.commentCount);
+  const shares = parseStatCount(stats.shareCount);
+  const views = parseStatCount(stats.playCount);
+  const saves = parseStatCount(stats.collectCount);
+
+  // Engagement rate vs author followers — TikTok doesn't ship follower count in
+  // the per-item struct, so we leave it null and let the auto-crawler/library
+  // backfill from the profile-level fetch if needed.
+  const engagementRate = null;
+
+  onLog?.(`  parsed: "${text.slice(0, 60)}" likes=${likes ?? "?"} views=${views ?? "?"}`);
+
+  return {
+    id: randomUUID(),
+    platform,
+    source,
+    url,
+    author: {
+      handle,
+      displayName: item.author?.nickname,
+      verified: item.author?.verified,
+    },
+    text,
+    hook: extractHook(text),
+    cta: detectCta(text),
+    hashtags: hashtagsFromTextExtra(item.textExtra),
+    mentions: mentionsFromTextExtra(item.textExtra),
+    media,
+    engagement: { likes, comments, shares, views, saves },
+    engagementRate,
+    postType: isPhoto ? "image" : "reel",
+    postedAt,
+    tags: [],
+    isGold: false,
+    extractedAt: new Date().toISOString(),
+    notes: "",
+  };
+}
+
+/** Extract a single TikTok video or photo post at /@handle/video/id or /@handle/photo/id. */
+async function extractTikTokSinglePost(opts: ExtractOptions): Promise<ExtractResult> {
+  const { page, source, platform, onLog } = opts;
+
+  try {
+    await page
+      .waitForSelector('script#__UNIVERSAL_DATA_FOR_REHYDRATION__, [data-e2e="browse-video-desc"]', {
+        timeout: 12_000,
+      })
+      .catch(() => {});
+
+    if (await detectTikTokLoggedOut(page)) {
+      return { posts: [], errors: ["LOGGED_OUT: TikTok is showing a login wall — re-import cookies"] };
+    }
+
+    const hydration = await readTikTokHydration(page);
+    if (!hydration) {
+      return { posts: [], errors: ["No hydration JSON found — TikTok may be serving a captcha or empty shell"] };
+    }
+
+    const scope = (hydration as { __DEFAULT_SCOPE__?: Record<string, unknown> }).__DEFAULT_SCOPE__;
+    const videoDetail = (scope?.["webapp.video-detail"] ?? {}) as { itemInfo?: { itemStruct?: TikTokItem } };
+    const item = videoDetail?.itemInfo?.itemStruct;
+    if (!item?.id) {
+      return { posts: [], errors: ["Hydration JSON did not contain itemInfo.itemStruct — page schema may have changed"] };
+    }
+
+    const post = await tiktokItemToLibraryPost(item, platform, source, onLog);
+    return { posts: [post], errors: [] };
+  } catch (e) {
+    return { posts: [], errors: [`TikTok single-post extraction failed: ${e instanceof Error ? e.message : String(e)}`] };
+  }
+}
+
+/**
+ * Extract up to `maxPosts` videos from a TikTok profile page (/@<handle>).
+ *
+ * TikTok shipped video lists in `webapp.video-list.itemList` of the SSR
+ * hydration until late 2025. As of 2026-05 the profile-page SSR ships only the
+ * user header (`webapp.user-detail`) and the video grid is rendered client-side
+ * from an XHR. We therefore fall back to scraping video-permalink URLs from
+ * the rendered DOM, then visiting each permalink to read the per-video
+ * hydration (which DOES still ship `webapp.video-detail.itemInfo.itemStruct`).
+ */
+async function extractTikTokProfile(opts: ExtractOptions, maxPosts: number): Promise<ExtractResult> {
+  const { page, source, platform, onLog } = opts;
+  const errors: string[] = [];
+
+  try {
+    await page
+      .waitForSelector('script#__UNIVERSAL_DATA_FOR_REHYDRATION__, [data-e2e="user-post-item-list"], [data-e2e="user-post-item"]', {
+        timeout: 12_000,
+      })
+      .catch(() => {});
+
+    if (await detectTikTokLoggedOut(page)) {
+      return { posts: [], errors: ["LOGGED_OUT: TikTok is showing a login wall — re-import cookies"] };
+    }
+
+    // ── Path 1: hydration JSON with embedded video-list ─────────────────────
+    // Still works for some logged-out or geo-specific renders. Kept first
+    // because when it's present it's the cheapest extraction path (no per-
+    // permalink visits, no rate-limit risk).
+    const hydration = await readTikTokHydration(page);
+    if (hydration) {
+      const scope = (hydration as { __DEFAULT_SCOPE__?: Record<string, unknown> }).__DEFAULT_SCOPE__;
+      const videoList = (scope?.["webapp.video-list"] ?? {}) as { itemList?: TikTokItem[] };
+      const hydrationItems = videoList?.itemList ?? [];
+      if (hydrationItems.length > 0) {
+        const slice = hydrationItems.slice(0, maxPosts);
+        onLog?.(`Profile hydration shipped ${hydrationItems.length} videos — taking first ${slice.length}`);
+        const posts: LibraryPost[] = [];
+        for (const item of slice) {
+          try {
+            posts.push(await tiktokItemToLibraryPost(item, platform, source, onLog));
+          } catch (e) {
+            errors.push(`Failed on item ${item.id}: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+        return { posts, errors };
+      }
+    }
+
+    // ── Path 2: DOM scrape video-grid URLs + visit each permalink ───────────
+    onLog?.("Profile hydration has no video-list — falling back to DOM grid scrape + permalink visits");
+
+    // Determine the handle we just navigated to. We use it both to (a) close
+    // any notification dropdown TikTok auto-pops after login by re-clicking
+    // the profile-page body, and (b) filter anchors so we don't accidentally
+    // pull links from the notification panel (which shows Markus's OWN
+    // videos — they show up as /@<his-numeric-uid>/video/... and would
+    // crawl the wrong account).
+    const handleMatch = page.url().match(/tiktok\.com\/@([^/?#]+)/);
+    const targetHandle = handleMatch?.[1] ?? "";
+
+    // Dismiss notification/login overlays by pressing Escape and scrolling
+    // to the top. TikTok auto-opens the notifications panel on first visit
+    // after a logged-in session bootstraps.
+    await page.keyboard.press("Escape").catch(() => {});
+    await page.waitForTimeout(300);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(500);
+
+    // Trigger lazy-load by scrolling. TikTok loads ~20 items per scroll.
+    for (let i = 0; i < 4; i++) {
+      await page.evaluate(() => window.scrollBy(0, 1500));
+      await page.waitForTimeout(800);
+    }
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(400);
+
+    const videoHrefs = await page.evaluate(
+      ({ max, handle }: { max: number; handle: string }) => {
+        const anchors = Array.from(document.querySelectorAll("a")) as HTMLAnchorElement[];
+        const hrefs = anchors
+          .map((a) => a.getAttribute("href") || "")
+          .filter((h) => /\/@[^/]+\/(video|photo)\/\d+/.test(h))
+          // Only keep links whose @handle segment matches the profile we
+          // navigated to. This drops notification-panel links that point at
+          // the logged-in user's own videos.
+          .filter((h) => {
+            const m = h.match(/\/@([^/]+)\//);
+            return m && handle && m[1].toLowerCase() === handle.toLowerCase();
+          });
+        return Array.from(new Set(hrefs)).slice(0, max);
+      },
+      { max: maxPosts, handle: targetHandle },
+    );
+
+    onLog?.(`Found ${videoHrefs.length} video permalinks for @${targetHandle} — visiting each`);
+
+    const posts: LibraryPost[] = [];
+    let idx = 0;
+    let consecutiveLoggedOut = 0;
+    for (const href of videoHrefs) {
+      idx++;
+      try {
+        const absoluteUrl = new URL(href, "https://www.tiktok.com").toString();
+        onLog?.(`${idx}/${videoHrefs.length}: ${absoluteUrl}`);
+        await page.goto(absoluteUrl, { waitUntil: "domcontentloaded" });
+        const single = await extractTikTokSinglePost(opts);
+        posts.push(...single.posts);
+        errors.push(...single.errors);
+
+        // Abort if TikTok logs us out — re-import cookies needed.
+        const wasLoggedOut = single.errors.some((e) => e.startsWith("LOGGED_OUT:"));
+        if (wasLoggedOut) {
+          consecutiveLoggedOut++;
+          if (consecutiveLoggedOut >= 2) {
+            onLog?.(`Aborting crawl after 2 consecutive logged-out hits — re-import cookies`);
+            errors.push(`Crawl aborted at ${idx}/${videoHrefs.length}: TikTok session lost.`);
+            break;
+          }
+        } else {
+          consecutiveLoggedOut = 0;
+        }
+
+        if (single.posts.length > 0) {
+          onLog?.(`${idx}/${videoHrefs.length}: ✓ "${(single.posts[0].text || "").slice(0, 60)}"`);
+        } else {
+          onLog?.(`${idx}/${videoHrefs.length}: ✗ no post extracted`);
+        }
+
+        // Polite delay — same anti-rate-limit pacing as IG. 6-12s random
+        // jitter mimics a human scrolling videos.
+        if (idx < videoHrefs.length) {
+          const delayMs = 6_000 + Math.floor(Math.random() * 6_000);
+          await page.waitForTimeout(delayMs);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        errors.push(`Failed on ${href}: ${msg}`);
+        onLog?.(`${idx}/${videoHrefs.length}: ✗ ${msg}`);
+      }
+    }
+
+    return { posts, errors };
+  } catch (e) {
+    errors.push(`Profile scan failed: ${e instanceof Error ? e.message : String(e)}`);
+    return { posts: [], errors };
+  }
 }
 
 /** Extract the single post currently open at /p/<shortcode>/ or /reel/<shortcode>/ */

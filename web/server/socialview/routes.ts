@@ -94,6 +94,237 @@ export function registerSocialViewRoutes(api: Hono): void {
    * Returns counts of common selectors + the first few characters of likely
    * content nodes. NOT meant for routine use.
    */
+  /**
+   * Dump TikTok hydration-script content so we can inspect schema changes
+   * when the extractor returns 0 posts. Returns the first 4 KB of the
+   * `__UNIVERSAL_DATA_FOR_REHYDRATION__` script tag (or null if missing) plus
+   * the top-level keys of __DEFAULT_SCOPE__ so we can see what slots TikTok is
+   * actually shipping.
+   */
+  /** Dump itemStruct from current page (for stats-schema discovery). */
+  api.get("/socialview/tiktok/inspect-item", async (c) => {
+    const page = browser.getPage("tiktok");
+    if (!page) return c.json({ error: "tiktok not running" }, 400);
+    const data = await page.evaluate(() => {
+      const el = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__");
+      if (!el?.textContent) return { error: "no hydration" };
+      try {
+        const parsed = JSON.parse(el.textContent) as { __DEFAULT_SCOPE__?: Record<string, unknown> };
+        const scope = parsed.__DEFAULT_SCOPE__ ?? {};
+        const videoDetail = scope["webapp.video-detail"] as { itemInfo?: { itemStruct?: Record<string, unknown> } } | undefined;
+        const item = videoDetail?.itemInfo?.itemStruct ?? null;
+        if (!item) return { error: "no itemStruct" };
+        return {
+          topLevelKeys: Object.keys(item),
+          stats: item.stats,
+          statsV2: item.statsV2,
+        };
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+    });
+    return c.json(data);
+  });
+
+  /**
+   * Call TikTok's internal `/api/post/item_list/` from inside the page so the
+   * webmssdk auto-signs the request. Returns the raw response so we can see
+   * whether the API is reachable from this Playwright session at all.
+   */
+  api.get("/socialview/tiktok/fetch-items/:secUid", async (c) => {
+    const page = browser.getPage("tiktok");
+    if (!page) return c.json({ error: "tiktok not running" }, 400);
+    const secUid = c.req.param("secUid");
+    const data = await page.evaluate(async (sid: string) => {
+      try {
+        const url =
+          "/api/post/item_list/" +
+          `?aid=1988&app_language=en&app_name=tiktok_web&channel=tiktok_web` +
+          `&count=20&cursor=0` +
+          `&device_platform=web_pc&secUid=${encodeURIComponent(sid)}`;
+        const res = await fetch(url, { credentials: "include" });
+        const text = await res.text();
+        return { status: res.status, contentType: res.headers.get("content-type"), bodyPreview: text.slice(0, 400), bodyLength: text.length };
+      } catch (e: unknown) {
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+    }, secUid);
+    return c.json(data);
+  });
+
+  /** Dump all anchor hrefs visible on the current TikTok page (debug). */
+  api.get("/socialview/tiktok/inspect-anchors", async (c) => {
+    const page = browser.getPage("tiktok");
+    if (!page) return c.json({ error: "tiktok not running" }, 400);
+    const data = await page.evaluate(() => {
+      const anchors = Array.from(document.querySelectorAll("a")) as HTMLAnchorElement[];
+      const hrefs = anchors.map((a) => a.getAttribute("href") || "").filter(Boolean);
+      const videoHrefs = hrefs.filter((h) => /\/@[^/]+\/(video|photo)\/\d+/.test(h));
+      const e2eItems = Array.from(document.querySelectorAll('[data-e2e="user-post-item"]')).length;
+      const e2eList = Array.from(document.querySelectorAll('[data-e2e="user-post-item-list"]')).length;
+      return {
+        url: location.href,
+        totalAnchors: anchors.length,
+        videoMatchingAnchors: videoHrefs.length,
+        e2eUserPostItems: e2eItems,
+        e2eUserPostItemList: e2eList,
+        firstVideoHrefs: videoHrefs.slice(0, 3),
+        firstAnyHrefs: hrefs.slice(0, 10),
+      };
+    });
+    return c.json(data);
+  });
+
+  /** Inspect the actual video tile HTML inside the grid container. */
+  api.get("/socialview/tiktok/inspect-tiles", async (c) => {
+    const page = browser.getPage("tiktok");
+    if (!page) return c.json({ error: "tiktok not running" }, 400);
+    const data = await page.evaluate(() => {
+      // Find the VIDEO grid by large-thumbnail-image heuristic. Video tiles
+      // are typically 280x500 ish; suggested-user avatars are 100x100, so we
+      // filter on min dimensions to skip the sidebar.
+      const imgs = (Array.from(document.querySelectorAll("img")) as HTMLImageElement[])
+        .filter((i) => i.naturalWidth >= 200 && i.naturalHeight >= 200);
+      const candidateGrids = new Map<HTMLElement, number>();
+      for (const img of imgs) {
+        let el: HTMLElement | null = img.parentElement;
+        for (let depth = 0; depth < 8 && el; depth++) {
+          const sibs = el.parentElement?.children ?? [];
+          if (sibs.length >= 5) {
+            candidateGrids.set(el.parentElement!, (candidateGrids.get(el.parentElement!) ?? 0) + 1);
+            break;
+          }
+          el = el.parentElement;
+        }
+      }
+      const sorted = Array.from(candidateGrids.entries()).sort((a, b) => b[1] - a[1]);
+      const top = sorted[0];
+      if (!top) {
+        return { error: "no video grid candidate found", imgCount: imgs.length, candidateCount: candidateGrids.size };
+      }
+      const grid = top[0] as HTMLElement;
+      const childCount = grid.children.length;
+      const samples: Array<{ idx: number; tag: string; html: string }> = [];
+      // Skip child 0 (often a virtualization spacer) and dump children 1-3.
+      for (let i = 1; i < Math.min(4, childCount); i++) {
+        const c = grid.children[i] as HTMLElement;
+        samples.push({ idx: i, tag: c.tagName, html: (c.outerHTML ?? "").slice(0, 1500) });
+      }
+      return {
+        childCount,
+        imgCount: imgs.length,
+        gridClass: grid.className?.slice(0, 100),
+        gridParentClass: grid.parentElement?.className?.slice(0, 100),
+        samples,
+      };
+    });
+    return c.json(data);
+  });
+
+  /** Full HTML/DOM dump (4 KB extract per area) for selector-discovery. */
+  api.get("/socialview/tiktok/inspect-full", async (c) => {
+    const page = browser.getPage("tiktok");
+    if (!page) return c.json({ error: "tiktok not running" }, 400);
+    const data = await page.evaluate(() => {
+      const root = document.body;
+      // Look for any element that visually looks like a video tile (has an
+      // image > 100px wide and the parent has multiple siblings of similar
+      // structure → grid).
+      const imgs = Array.from(document.querySelectorAll("img")) as HTMLImageElement[];
+      const candidateGrids = new Map<HTMLElement, number>();
+      for (const img of imgs) {
+        if (img.naturalWidth < 100) continue;
+        // Walk up 4 ancestors looking for a container that has 5+ image-bearing children.
+        let el: HTMLElement | null = img.parentElement;
+        for (let depth = 0; depth < 5 && el; depth++) {
+          const sibs = el.parentElement?.children ?? [];
+          if (sibs.length >= 5) {
+            candidateGrids.set(el.parentElement!, (candidateGrids.get(el.parentElement!) ?? 0) + 1);
+            break;
+          }
+          el = el.parentElement;
+        }
+      }
+      const grids = Array.from(candidateGrids.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([el, count]) => ({
+          count,
+          tag: el.tagName,
+          className: (el.className || "").slice(0, 200),
+          dataset: JSON.stringify(Object.fromEntries(Object.entries((el as HTMLElement).dataset))),
+          firstChildHTML: (el.firstElementChild?.outerHTML ?? "").slice(0, 500),
+        }));
+      // Also find any href with the profile's numeric user ID
+      const match = location.href.match(/\/@([^/?#]+)/);
+      const handle = match?.[1] ?? "";
+      const matchHandle = `/@${handle}/`;
+      const handleHrefs = Array.from(document.querySelectorAll("a"))
+        .map((a) => a.getAttribute("href") || "")
+        .filter((h) => h.startsWith(matchHandle))
+        .slice(0, 10);
+      return {
+        url: location.href,
+        handle,
+        bodySize: root?.innerHTML.length ?? 0,
+        candidateGrids: grids,
+        handleVideoHrefs: handleHrefs,
+      };
+    });
+    return c.json(data);
+  });
+
+  api.get("/socialview/tiktok/inspect-hydration", async (c) => {
+    const page = browser.getPage("tiktok");
+    if (!page) return c.json({ error: "tiktok not running" }, 400);
+    const data = await page.evaluate(() => {
+      const el = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__");
+      const raw = el?.textContent ?? null;
+      let scopeKeys: string[] = [];
+      let videoListItemCount: number | null = null;
+      let userDetailKeys: string[] = [];
+      let sample: string | null = null;
+      let userMeta: Record<string, unknown> = {};
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as Record<string, unknown>;
+          const scope = (parsed as { __DEFAULT_SCOPE__?: Record<string, unknown> }).__DEFAULT_SCOPE__ ?? {};
+          scopeKeys = Object.keys(scope);
+          const videoList = scope["webapp.video-list"] as { itemList?: unknown[] } | undefined;
+          videoListItemCount = Array.isArray(videoList?.itemList) ? videoList!.itemList!.length : null;
+          const userDetail = scope["webapp.user-detail"] as { userInfo?: { user?: Record<string, unknown>; stats?: Record<string, unknown> }; statusCode?: number; statusMsg?: string } | undefined;
+          if (userDetail) {
+            userDetailKeys = Object.keys(userDetail);
+            const u = userDetail.userInfo?.user;
+            userMeta = {
+              statusCode: userDetail.statusCode,
+              statusMsg: userDetail.statusMsg,
+              uniqueId: u?.uniqueId,
+              secUid: typeof u?.secUid === "string" ? u.secUid : null,
+              privateAccount: u?.privateAccount,
+              verified: u?.verified,
+              stats: userDetail.userInfo?.stats,
+            };
+          }
+        } catch {
+          sample = raw.slice(0, 200);
+        }
+      }
+      return {
+        url: location.href,
+        title: document.title,
+        scriptPresent: !!el,
+        scriptLength: raw?.length ?? 0,
+        scopeKeys,
+        videoListItemCount,
+        userDetailKeys,
+        userMeta,
+        sampleOnParseFail: sample,
+      };
+    });
+    return c.json(data);
+  });
+
   api.get("/socialview/:platform/inspect-dom", async (c) => {
     const platform = parsePlatform(c.req.param("platform"));
     if (!platform) return c.json({ error: "invalid platform" }, 400);
@@ -244,6 +475,51 @@ export function registerSocialViewRoutes(api: Hono): void {
   });
 
   // ─── Extraction ─────────────────────────────────────────────────────
+  /**
+   * Navigate the platform's browser to `url`, then extract whatever post(s)
+   * the resulting page renders. Wraps the existing `goto` + `extract` flow
+   * into a single round-trip — primarily for TikTok where bulk profile crawl
+   * is blocked by anti-bot and users must extract one video URL at a time
+   * from the UI.
+   *
+   * Body: { url: string, source?: "own" | "role-model", waitMs?: number }
+   */
+  api.post("/socialview/:platform/extract-url", async (c) => {
+    const platform = parsePlatform(c.req.param("platform"));
+    if (!platform) return c.json({ error: "invalid platform" }, 400);
+    try {
+      const body = (await c.req.json().catch(() => ({}))) as {
+        url?: string;
+        source?: "own" | "role-model";
+        waitMs?: number;
+      };
+      if (typeof body.url !== "string" || !/^https?:\/\//.test(body.url)) {
+        return c.json({ error: "url is required and must be http(s)" }, 400);
+      }
+      const source = body.source === "own" ? "own" : "role-model";
+      const waitMs = Math.min(Math.max(body.waitMs ?? 4_000, 0), 30_000);
+
+      const page = browser.getPage(platform);
+      if (!page) return c.json({ error: "platform not running — click Start first" }, 400);
+
+      await browser.gotoUrl(platform, body.url);
+      // Let client-side hydration settle. 4s is enough for TikTok video-detail
+      // and IG single-post pages in practice; capped at 30s for safety.
+      if (waitMs > 0) await page.waitForTimeout(waitMs);
+
+      const result = await extractCurrentPage({ platform, page, source });
+      for (const post of result.posts) library.savePost(post);
+      return c.json({
+        ok: true,
+        extracted: result.posts.length,
+        postIds: result.posts.map((p) => p.id),
+        errors: result.errors,
+      });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "extract-url failed" }, 500);
+    }
+  });
+
   /** Extract the post(s) currently visible on the platform's browser page.
    *  If the page is a profile, extracts the first N posts linked from it. */
   api.post("/socialview/:platform/extract", async (c) => {

@@ -80,6 +80,26 @@ export async function crawlOnce(): Promise<CrawlSummary> {
 
       summary.platforms[platform] = { skipped: false, entries: entries.length, postsExtracted: 0 };
 
+      // Skip TikTok globally — TikTok's anti-bot blocks bulk profile-grid
+      // crawl in Playwright (SSR ships no video-list, /api/post/item_list
+      // returns 200 with empty body). Verified 2026-05-23. TikTok watch-list
+      // entries are kept as user-curated "creators to monitor manually" —
+      // the user extracts individual video URLs via the View tab's
+      // /extract-url flow instead.
+      if (platform === "tiktok") {
+        summary.platforms[platform].skipped = true;
+        summary.platforms[platform].reason = "tiktok-bulk-blocked: profile-grid hidden from Playwright; use Single-URL Extract in View tab";
+        for (const entry of entries) {
+          watchList.update(entry.id, {
+            lastCrawledAt: new Date().toISOString(),
+            lastCrawlStatus: "skipped",
+            lastCrawlMessage: "TikTok bulk-crawl blocked by anti-bot — extract individual URLs via View tab",
+          });
+          summary.skipped++;
+        }
+        continue;
+      }
+
       // Skip platforms the user has never logged into — browser would launch
       // straight to a login wall and extraction would yield nothing useful.
       if (!browser.hasProfile(platform)) {

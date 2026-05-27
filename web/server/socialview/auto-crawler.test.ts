@@ -159,6 +159,31 @@ describe("crawlOnce — skip conditions", () => {
     expect(entry?.lastCrawlMessage).toMatch(/login profile/);
   });
 
+  // TikTok is bulk-blocked by anti-bot (verified 2026-05-23) — the auto-
+  // crawler must NOT visit TikTok profile pages because the extraction yields
+  // nothing useful and clutters the watch-list with false-"ok" entries. The
+  // skip stamps lastCrawlStatus="skipped" so the UI can show a clear hint
+  // pointing the user toward the single-URL Extract flow in the View tab.
+  it("skips all TikTok entries with reason tiktok-bulk-blocked", async () => {
+    const a = watchListCreate({ platform: "tiktok", handle: "creator_a" });
+    const b = watchListCreate({ platform: "tiktok", handle: "creator_b" });
+    if (!a.ok || !b.ok) throw new Error("setup failed");
+
+    const summary = await crawlOnce();
+
+    expect(summary.skipped).toBe(2);
+    expect(summary.platforms.tiktok.skipped).toBe(true);
+    expect(summary.platforms.tiktok.reason).toMatch(/tiktok-bulk-blocked/);
+    // Browser must NOT be touched for TikTok — we never even check for a
+    // login profile because the failure mode is anti-bot, not auth.
+    expect(mockHasProfile).not.toHaveBeenCalledWith("tiktok");
+    expect(mockStartPlatform).not.toHaveBeenCalledWith("tiktok");
+
+    const entryA = watchListGet(a.entry.id);
+    expect(entryA?.lastCrawlStatus).toBe("skipped");
+    expect(entryA?.lastCrawlMessage).toMatch(/extract individual URLs via View tab/);
+  });
+
   // If the browser fails to start (e.g. Playwright crash), all entries on
   // that platform are skipped with a clear error message.
   it("skips platform when browser startup fails", async () => {

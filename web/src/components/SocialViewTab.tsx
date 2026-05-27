@@ -159,6 +159,40 @@ export function SocialViewTab({ showMessage }: Props): React.ReactElement {
     }
   }
 
+  /**
+   * One-shot navigate + extract for a pasted URL. Primary use case is TikTok
+   * where bulk profile crawl is blocked by anti-bot — the user pastes one
+   * video URL and the backend navigates + extracts + saves in a single call.
+   */
+  async function handleGotoAndExtract() {
+    if (!selected || !gotoUrl.trim()) return;
+    setLoading("extract");
+    setExtractLogs([`→ Navigate + Extract: ${gotoUrl}`]);
+    const append = (line: string) => setExtractLogs((prev) => [...prev, line]);
+    try {
+      const data = await apiPost<{ ok: boolean; extracted: number; postIds: string[]; errors: string[] }>(
+        `/api/socialview/${selected}/extract-url`,
+        { url: gotoUrl.trim(), source: extractSource },
+      );
+      const n = data.extracted ?? 0;
+      append(`✓ Extracted ${n} post${n === 1 ? "" : "s"}`);
+      if (data.errors?.length) for (const err of data.errors) append(`  • ${err}`);
+      if (n > 0) {
+        showMessage(`Extracted ${n} post${n === 1 ? "" : "s"} to Library`);
+        setGotoUrl("");
+      } else {
+        showMessage(`No posts extracted (${data.errors?.[0] ?? "page may be empty or blocked"})`, true);
+      }
+      await refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Extract failed";
+      append(`✗ ${msg}`);
+      showMessage(msg, true);
+    } finally {
+      setLoading(null);
+    }
+  }
+
   async function handleExtract() {
     if (!selected) return;
     const selectedStatus = platforms.find((p) => p.platform === selected);
@@ -348,10 +382,26 @@ export function SocialViewTab({ showMessage }: Props): React.ReactElement {
               onClick={handleGoto}
               disabled={!gotoUrl.trim() || loading === selected}
               className="text-xs px-3 py-1.5 rounded-md bg-cc-accent text-white hover:bg-cc-accent/90 disabled:opacity-50"
+              title="Navigate the browser to this URL (without extracting)"
             >
               Go
             </button>
+            <button
+              onClick={handleGotoAndExtract}
+              disabled={!gotoUrl.trim() || loading === "extract"}
+              className="text-xs px-3 py-1.5 rounded-md bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30 disabled:opacity-50"
+              title="Navigate + extract + save to Library in one click — best for TikTok single-video URLs"
+            >
+              {loading === "extract" ? "Extracting…" : "Go + Extract"}
+            </button>
           </div>
+
+          {selected === "tiktok" && (
+            <div className="text-[11px] text-cc-muted bg-cc-bg border border-cc-border rounded-md p-2">
+              <strong className="text-cc-fg">TikTok-Tipp:</strong> Bulk-Profile-Crawl ist von TikTok geblockt.
+              Paste eine einzelne Video-URL (z.B. <code className="font-mono text-cc-fg">https://www.tiktok.com/@handle/video/1234</code>) und klick <strong>Go + Extract</strong>.
+            </div>
+          )}
 
           {/* Current URL prominently shown so user confirms the right page is open */}
           <div className="border border-cc-border rounded-md bg-cc-bg p-2 text-[11px]">
