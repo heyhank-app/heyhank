@@ -5,7 +5,8 @@ import {
   unlinkSync,
   existsSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { HEYHANK_HOME } from "./paths.js";
 import { atomicWriteFileSync } from "./fs-utils.js";
 import { randomBytes } from "node:crypto";
@@ -168,6 +169,45 @@ export function deleteAgent(id: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Seed default agents from `web/server/seed-agents/*.json` if they don't yet
+ * exist in `~/.heyhank/agents/`. Idempotent — never overwrites a user-edited
+ * agent. Called once on server boot.
+ */
+export function seedDefaultAgents(): number {
+  ensureDir();
+  const here = dirname(fileURLToPath(import.meta.url));
+  const seedDir = join(here, "seed-agents");
+  if (!existsSync(seedDir)) return 0;
+
+  let seeded = 0;
+  let seedFiles: string[];
+  try {
+    seedFiles = readdirSync(seedDir).filter((f) => f.endsWith(".json"));
+  } catch {
+    return 0;
+  }
+
+  for (const file of seedFiles) {
+    try {
+      const raw = readFileSync(join(seedDir, file), "utf-8");
+      const parsed = JSON.parse(raw) as AgentConfigCreateInput;
+      if (!parsed?.name) continue;
+      const id = slugify(parsed.name);
+      if (!id) continue;
+      if (existsSync(filePath(id))) continue; // user-edited copy wins
+      createAgent(parsed);
+      seeded += 1;
+    } catch (err) {
+      console.warn(`[agent-store] Failed to seed agent from ${file}:`, err);
+    }
+  }
+  if (seeded > 0) {
+    console.log(`[agent-store] Seeded ${seeded} default agent(s)`);
+  }
+  return seeded;
 }
 
 /** Generate a new webhook secret for an agent */

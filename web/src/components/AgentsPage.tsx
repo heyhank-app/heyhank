@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { api, type AgentInfo, type AgentExport } from "../api.js";
 import { useStore } from "../store.js";
 import { PublicUrlBanner } from "./PublicUrlBanner.js";
-import type { Route } from "../utils/routing.js";
+import { navigateToSession, type Route } from "../utils/routing.js";
 import { AgentIcon } from "./AgentIcon.js";
 import { AgentCard, getWebhookUrl } from "./AgentCard.js";
 import { AgentEditor, type AgentFormData, EMPTY_FORM } from "./AgentEditor.js";
@@ -198,10 +198,13 @@ export function AgentsPage({ route }: Props) {
 
   async function handleRun(agent: AgentInfo, input?: string) {
     try {
-      await api.runAgent(agent.id, input);
+      const res = await api.runAgent(agent.id, input);
       setRunInputAgent(null);
       setRunInput("");
       await loadAgents();
+      if (res.sessionId) {
+        navigateToSession(res.sessionId);
+      }
     } catch {
       // ignore
     }

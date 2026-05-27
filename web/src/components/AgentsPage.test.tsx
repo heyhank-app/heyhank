@@ -336,7 +336,7 @@ describe("AgentsPage", () => {
     // immediately calls the API without showing an input modal.
     const agent = makeAgent({ id: "a1", name: "Quick Agent", prompt: "Do the thing" });
     mockApi.listAgents.mockResolvedValue([agent]);
-    mockApi.runAgent.mockResolvedValue({ ok: true, message: "started" });
+    mockApi.runAgent.mockResolvedValue({ ok: true, message: "started", sessionId: null });
     render(<AgentsPage route={defaultRoute} />);
 
     await screen.findByText("Quick Agent");
@@ -344,6 +344,31 @@ describe("AgentsPage", () => {
 
     await waitFor(() => {
       expect(mockApi.runAgent).toHaveBeenCalledWith("a1", undefined);
+    });
+  });
+
+  it("clicking Run navigates to the new session when runAgent returns a sessionId", async () => {
+    // When the backend creates a session for the agent run, the UI should
+    // hand the user off to that session view via the hash router so the
+    // CLI/streaming output is immediately visible. Without this nav step,
+    // users see "CLI disconnected" on the agents page and have no way to
+    // observe the live run.
+    const agent = makeAgent({ id: "a1", name: "Nav Agent", prompt: "Do the thing" });
+    mockApi.listAgents.mockResolvedValue([agent]);
+    mockApi.runAgent.mockResolvedValue({
+      ok: true,
+      message: "Agent triggered",
+      sessionId: "sess-xyz",
+      agentName: "Nav Agent",
+    });
+    window.location.hash = "#/agents";
+    render(<AgentsPage route={defaultRoute} />);
+
+    await screen.findByText("Nav Agent");
+    fireEvent.click(screen.getByText("Run"));
+
+    await waitFor(() => {
+      expect(window.location.hash).toBe("#/session/sess-xyz");
     });
   });
 
@@ -1094,7 +1119,7 @@ describe("AgentsPage", () => {
       prompt: "Process: {{input}}",
     });
     mockApi.listAgents.mockResolvedValue([agent]);
-    mockApi.runAgent.mockResolvedValue({ ok: true, message: "started" });
+    mockApi.runAgent.mockResolvedValue({ ok: true, message: "started", sessionId: null });
 
     render(<AgentsPage route={defaultRoute} />);
     await screen.findByText("Input Runner");
@@ -2000,8 +2025,9 @@ describe("AgentsPage", () => {
 
     // Mock the clipboard API
     const writeTextMock = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, {
-      clipboard: { writeText: writeTextMock },
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: writeTextMock },
+      configurable: true,
     });
 
     render(<AgentsPage route={defaultRoute} />);
@@ -2223,8 +2249,9 @@ describe("AgentsPage", () => {
 
     // Mock the clipboard API to capture the copied URL
     const writeTextMock = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, {
-      clipboard: { writeText: writeTextMock },
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: writeTextMock },
+      configurable: true,
     });
 
     render(<AgentsPage route={defaultRoute} />);
@@ -2260,8 +2287,9 @@ describe("AgentsPage", () => {
 
     // Mock the clipboard API
     const writeTextMock = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, {
-      clipboard: { writeText: writeTextMock },
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: writeTextMock },
+      configurable: true,
     });
 
     render(<AgentsPage route={defaultRoute} />);

@@ -267,6 +267,18 @@ export class WsBridge {
     return this.sessions.get(sessionId);
   }
 
+  /** Timestamp of the most recent persisted message in this session's history,
+   *  or null if no history yet. Used by agent-timeout for activity-based idle
+   *  detection (kills agent sessions that completed and now sit idle waiting
+   *  for a user-message that will never come). */
+  getLastActivityTs(sessionId: string): number | null {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.messageHistory.length === 0) return null;
+    const last = session.messageHistory[session.messageHistory.length - 1];
+    const ts = (last as { timestamp?: number }).timestamp;
+    return typeof ts === "number" ? ts : null;
+  }
+
   getAllSessions(): SessionState[] {
     return Array.from(this.sessions.values()).map((s) => s.state);
   }

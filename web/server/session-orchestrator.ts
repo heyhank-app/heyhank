@@ -21,6 +21,7 @@ import { metricsCollector } from "./metrics-collector.js";
 import { log } from "./logger.js";
 import { authEvents, attemptRefresh } from "./claude-auth-monitor.js";
 import { deleteClaudeSessionTranscript } from "./claude-session-discovery.js";
+import { removeSessionUploads } from "./session-uploads.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -666,6 +667,17 @@ export class SessionOrchestrator {
     this.autoRelaunchCounts.delete(sessionId);
     this.relaunchExhaustedNotified.delete(sessionId);
     this.relaunchingSet.delete(sessionId);
+
+    // Clean up any user-uploaded files staged for this session under
+    // ~/.heyhank/uploads/<sessionId>/. Idempotent: no-op if dir is missing.
+    try {
+      removeSessionUploads(sessionId);
+    } catch (err) {
+      log.warn("session-orchestrator", "failed to remove session uploads", {
+        sessionId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     // Delete the Claude Code transcript file so the session does not reappear
     // in the "Branch from session" picker via discoverClaudeSessions.

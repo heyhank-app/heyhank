@@ -1,7 +1,7 @@
 import { Cron } from "croner";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import type { AgentConfig, AgentExecution } from "./agent-types.js";
 import type { CliLauncher, SdkSessionInfo } from "./cli-launcher.js";
 import type { WsBridge } from "./ws-bridge.js";
@@ -174,6 +174,10 @@ export class AgentExecutor {
       let cwd = opts?.cwdOverride || agent.cwd;
       if (cwd === "temp" || !cwd) {
         cwd = mkdtempSync(join(tmpdir(), `heyhank-agent-${agent.id}-`));
+      } else if (cwd === "~") {
+        cwd = homedir();
+      } else if (cwd.startsWith("~/")) {
+        cwd = join(homedir(), cwd.slice(2));
       }
 
       // Launch the session via CliLauncher.

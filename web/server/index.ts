@@ -464,6 +464,17 @@ if (process.env.HEYHANK_SOCIALVIEW_CRAWL_DISABLE !== "1") {
   void import("./socialview/auto-crawler.js").then((m) => m.startAutoCrawler());
 }
 
+// ── Facebook Page comments poller (Auto-DM workaround) ──────────────────────
+// Originally intended as a workaround for Meta's webhook silence in Dev Mode.
+// VERIFIED 2026-05-25: Meta gates BOTH webhook delivery AND /feed-comment
+// reading behind the same Advanced Access permission (pages_read_engagement).
+// Polling does NOT help — same wall. Disabled until either App Review goes
+// through or a Playwright-based comment scraper is built.
+// Set HEYHANK_FB_POLL_ENABLE=1 to opt back in after Review is approved.
+if (process.env.HEYHANK_FB_POLL_ENABLE === "1") {
+  void import("./automation/poll-fb-comments.js").then((m) => m.startFbCommentPoller());
+}
+
 // ── Telephony inbound listener ──────────────────────────────────────────────
 // Subscribes to FreeSWITCH ESL CHANNEL_CREATE events and bootstraps inbound calls.
 // No-op if `inboundEnabled` is false in telephony settings.
