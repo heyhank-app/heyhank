@@ -1670,6 +1670,17 @@ function AnalyticsTab({ showMessage }: { showMessage: (text: string, isError?: b
 
 // ─── Settings Tab ───────────────────────────────────────────────────────────
 
+// Platforms that can be re-routed to a non-primary backend via platformBackends.
+// Order matches the typical priority for posting workflows.
+const ROUTABLE_PLATFORMS = [
+  "instagram",
+  "facebook",
+  "linkedin",
+  "tiktok",
+  "twitter",
+  "threads",
+];
+
 function SettingsTab({ showMessage, onSwitchTab }: { showMessage: (text: string, isError?: boolean) => void; onSwitchTab?: (tab: TabId) => void }) {
   const [backend, setBackend] = useState("");
   const [postizMode, setPostizMode] = useState<"hosted" | "selfhosted">("hosted");
@@ -1681,6 +1692,9 @@ function SettingsTab({ showMessage, onSwitchTab }: { showMessage: (text: string,
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [requireApproval, setRequireApproval] = useState(false);
+  // Per-platform routing override: maps a platform to a backend ID (overrides
+  // the primary `backend`). `""` means "use primary".
+  const [platformBackends, setPlatformBackends] = useState<Record<string, string>>({});
   // Browser-backed platform toggles (X/TikTok posted via persistent Playwright
   // instead of Postiz). Persisted as settings.browserPlatforms on the backend.
   const [browserPlatforms, setBrowserPlatforms] = useState<string[]>([]);
@@ -1708,6 +1722,9 @@ function SettingsTab({ showMessage, onSwitchTab }: { showMessage: (text: string,
       if (s.backends?.buffer) setBufferKey(s.backends.buffer.apiKey || "");
       if (s.requireApproval) setRequireApproval(true);
       if (Array.isArray(s.browserPlatforms)) setBrowserPlatforms(s.browserPlatforms);
+      if (s.platformBackends && typeof s.platformBackends === "object") {
+        setPlatformBackends(s.platformBackends);
+      }
     }).catch(() => {});
     loadBrowserStatus();
   }, [loadBrowserStatus]);
@@ -1733,15 +1750,28 @@ function SettingsTab({ showMessage, onSwitchTab }: { showMessage: (text: string,
   }
 
   async function saveSettings() {
+    // Save BOTH backend configs whenever their keys are set — multi-backend
+    // routing (e.g. TikTok via Buffer while Postiz is primary) requires both
+    // to be persisted, not just the primary.
     const backends: Record<string, unknown> = {};
-    if (backend === "postiz") backends.postiz = { url: postizMode === "selfhosted" ? postizUrl : "", apiKey: postizKey };
-    if (backend === "buffer") backends.buffer = { apiKey: bufferKey };
+    if (postizKey.trim()) {
+      backends.postiz = { url: postizMode === "selfhosted" ? postizUrl : "", apiKey: postizKey };
+    }
+    if (bufferKey.trim()) {
+      backends.buffer = { apiKey: bufferKey };
+    }
+    // Drop empty-string entries from platformBackends — `""` means "use primary".
+    const cleanRouting: Record<string, string> = {};
+    for (const [platform, backendId] of Object.entries(platformBackends)) {
+      if (backendId) cleanRouting[platform] = backendId;
+    }
     await api.updateSocialSettings({
       backend: backend || null,
       backends,
       defaultPlatforms: [],
       requireApproval,
       browserPlatforms,
+      platformBackends: cleanRouting,
     });
     setSavedBackend(backend);
   }
@@ -1784,10 +1814,10 @@ function SettingsTab({ showMessage, onSwitchTab }: { showMessage: (text: string,
 
   return (
     <div className="space-y-5">
-      {/* Backend Selection */}
+      {/* Primary Backend Selection */}
       <div>
-        <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-1">Backend</label>
-        <p className="text-[9px] text-cc-muted mb-2">One active backend at a time. Switching will replace the current configuration.</p>
+        <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-1">Primary Backend</label>
+        <p className="text-[9px] text-cc-muted mb-2">Used for any platform without a specific routing override below.</p>
         <div className="grid grid-cols-3 gap-2">
           {backendOptions.map((opt) => (
             <button
@@ -1798,10 +1828,11 @@ function SettingsTab({ showMessage, onSwitchTab }: { showMessage: (text: string,
                   ? "border-cc-accent bg-cc-accent/10"
                   : "border-cc-border bg-cc-card hover:border-cc-accent/30"
               }`}
+              aria-label={`Set ${opt.label} as primary backend`}
             >
               <div className="text-xs font-medium text-cc-fg flex items-center gap-1.5">
                 {opt.label}
-                {savedBackend === opt.id && <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 font-medium">Active</span>}
+                {savedBackend === opt.id && <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 font-medium">Primary</span>}
               </div>
               <div className="text-[9px] text-cc-muted mt-0.5">{opt.desc}</div>
             </button>
@@ -1809,9 +1840,17 @@ function SettingsTab({ showMessage, onSwitchTab }: { showMessage: (text: string,
         </div>
       </div>
 
-      {/* Backend-specific fields */}
-      {backend === "postiz" && (
-        <div className="space-y-3">
+      {/* Backend Configuration — both visible so secondary backends (e.g.
+          Buffer for TikTok only) can be set up alongside the primary. */}
+      <div className="space-y-4">
+        {/* Postiz */}
+        <div className="rounded-xl border border-cc-border bg-cc-card p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-medium text-cc-fg">Postiz Configuration</div>
+            {postizKey.trim() && (
+              <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-cc-accent/20 text-cc-accent font-medium">Configured</span>
+            )}
+          </div>
           <div>
             <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-1.5">Hosting</label>
             <div className="grid grid-cols-2 gap-2">
@@ -1822,6 +1861,7 @@ function SettingsTab({ showMessage, onSwitchTab }: { showMessage: (text: string,
                     ? "border-cc-accent bg-cc-accent/10"
                     : "border-cc-border bg-cc-card hover:border-cc-accent/30"
                 }`}
+                aria-label="Postiz hosted mode"
               >
                 <div className="text-xs font-medium text-cc-fg">Standard</div>
                 <div className="text-[9px] text-cc-muted mt-0.5">api.postiz.com</div>
@@ -1833,6 +1873,7 @@ function SettingsTab({ showMessage, onSwitchTab }: { showMessage: (text: string,
                     ? "border-cc-accent bg-cc-accent/10"
                     : "border-cc-border bg-cc-card hover:border-cc-accent/30"
                 }`}
+                aria-label="Postiz self-hosted mode"
               >
                 <div className="text-xs font-medium text-cc-fg">Self-hosted</div>
                 <div className="text-[9px] text-cc-muted mt-0.5">Custom URL</div>
@@ -1844,18 +1885,56 @@ function SettingsTab({ showMessage, onSwitchTab }: { showMessage: (text: string,
           )}
           <InputField label="API Key" value={postizKey} onChange={setPostizKey} placeholder="Settings → Developers → Public API" password />
         </div>
-      )}
-      {backend === "buffer" && (
-        <InputField label="Buffer API Key" value={bufferKey} onChange={setBufferKey} placeholder="Access Token from publish.buffer.com/settings/api" password />
+
+        {/* Buffer */}
+        <div className="rounded-xl border border-cc-border bg-cc-card p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-medium text-cc-fg">Buffer Configuration</div>
+            {bufferKey.trim() && (
+              <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-cc-accent/20 text-cc-accent font-medium">Configured</span>
+            )}
+          </div>
+          <InputField label="Buffer API Key" value={bufferKey} onChange={setBufferKey} placeholder="Access Token from publish.buffer.com/developers" password />
+          <p className="text-[9px] text-cc-muted">
+            Buffer is the easiest way to post to TikTok from HeyHank (Postiz cannot publish to TikTok). Free plan supports 3 channels.
+          </p>
+        </div>
+      </div>
+
+      {/* Platform Routing — only meaningful when 2+ backends are configured */}
+      {postizKey.trim() && bufferKey.trim() && (
+        <div className="space-y-2">
+          <label className="text-[10px] text-cc-muted uppercase tracking-wider block">Platform Routing</label>
+          <p className="text-[9px] text-cc-muted mb-1">Override the primary backend per platform. Leave as "Primary" to use the default above.</p>
+          <div className="grid grid-cols-2 gap-2">
+            {ROUTABLE_PLATFORMS.map((platform) => (
+              <label key={platform} className="flex items-center gap-2 p-2 rounded-lg border border-cc-border/50 bg-cc-card">
+                <span className="text-[10px] font-medium text-cc-fg capitalize flex-1">{platform}</span>
+                <select
+                  value={platformBackends[platform] ?? ""}
+                  onChange={(e) =>
+                    setPlatformBackends((prev) => ({ ...prev, [platform]: e.target.value }))
+                  }
+                  aria-label={`Backend for ${platform}`}
+                  className="bg-cc-bg border border-cc-border rounded px-2 py-1 text-[10px] text-cc-fg focus:border-cc-accent focus:outline-none"
+                >
+                  <option value="">Primary</option>
+                  <option value="postiz">Postiz</option>
+                  <option value="buffer">Buffer</option>
+                </select>
+              </label>
+            ))}
+          </div>
+        </div>
       )}
 
-      {/* Actions */}
-      {backend && (
+      {/* Actions — enabled whenever any backend has a key set */}
+      {(backend || postizKey.trim() || bufferKey.trim()) && (
         <div className="flex gap-2">
           <button onClick={handleSave} disabled={saving} className="px-4 py-2 text-xs font-medium rounded-md bg-cc-accent text-white hover:bg-cc-accent/90 disabled:opacity-50 transition-colors">
             {saving ? "Saving..." : "Save"}
           </button>
-          <button onClick={handleTestConnection} disabled={testing} className="px-4 py-2 text-xs font-medium rounded-md text-cc-muted hover:text-cc-fg border border-cc-border hover:border-cc-accent/30 disabled:opacity-50 transition-colors">
+          <button onClick={handleTestConnection} disabled={testing || !backend} className="px-4 py-2 text-xs font-medium rounded-md text-cc-muted hover:text-cc-fg border border-cc-border hover:border-cc-accent/30 disabled:opacity-50 transition-colors" title={!backend ? "Select a primary backend first" : undefined}>
             {testing ? "Testing..." : "Test Connection"}
           </button>
         </div>
@@ -2271,6 +2350,27 @@ function PlatformBadge({ platform }: { platform: string }) {
     <span className="inline-flex items-center gap-0.5 text-[9px] font-medium text-cc-accent/80 border border-cc-accent/20 bg-cc-accent/5 rounded-full px-1.5 py-0.5">
       <span className="text-[8px]">{PLATFORM_ICONS[platform] || ""}</span>
       {platform}
+    </span>
+  );
+}
+
+const FORMAT_STYLES: Record<string, { label: string; cls: string; icon: string }> = {
+  carousel: { label: "Carousel", cls: "text-blue-400 border-blue-500/30 bg-blue-500/10", icon: "▦" },
+  story: { label: "Story", cls: "text-fuchsia-400 border-fuchsia-500/30 bg-fuchsia-500/10", icon: "◯" },
+  reel: { label: "Reel", cls: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10", icon: "▶" },
+};
+
+function FormatBadge({ format, mediaCount }: { format: string; mediaCount: number }) {
+  const cfg = FORMAT_STYLES[format];
+  if (!cfg) return null;
+  // For carousels/stories, show how many slides/frames are attached — helps the
+  // user spot a draft that's missing slides before publishing.
+  const showCount = (format === "carousel" || format === "story") && mediaCount > 1;
+  return (
+    <span className={`inline-flex items-center gap-1 text-[9px] font-semibold rounded-full px-1.5 py-0.5 border ${cfg.cls}`}>
+      <span aria-hidden="true">{cfg.icon}</span>
+      {cfg.label}
+      {showCount && <span className="opacity-75">· {mediaCount}</span>}
     </span>
   );
 }
