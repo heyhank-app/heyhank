@@ -39,6 +39,9 @@ import { registerFederationRoutes } from "./routes/federation-routes.js";
 import { registerTelephonyRoutes } from "./routes/telephony-routes.js";
 import { registerSocialMediaRoutes } from "./routes/socialmedia-routes.js";
 import { registerSocialViewRoutes } from "./socialview/routes.js";
+import { registerMetaWebhookRoutes, setMetaSender } from "./automation/meta-webhook-routes.js";
+import { registerAutomationRoutes } from "./automation/automation-routes.js";
+import { sendPrivateReply } from "./automation/meta-send.js";
 import { registerAssistantRoutes } from "./routes/assistant-routes.js";
 import { registerEmailRoutes } from "./routes/email-routes.js";
 import { registerProviderRoutes } from "./routes/provider-routes.js";
@@ -186,6 +189,39 @@ export function createRoutes(
   api.use("/*", async (c, next) => {
     // Skip auth for the verify endpoint (handled above)
     if (c.req.path === "/auth/verify") {
+      return next();
+    }
+
+    // Skip auth for signed media URLs — the HMAC signature in the path is
+    // the auth (validated by the route handler itself). Used by external
+    // services like Buffer that can't send Authorization headers.
+    // Check both with and without the /api prefix because Hono's `c.req.path`
+    // depends on whether the request was rewritten by an upstream proxy.
+    if (
+      c.req.path.startsWith("/media/signed/") ||
+      c.req.path.startsWith("/api/media/signed/")
+    ) {
+      return next();
+    }
+
+    // Skip auth for Meta webhooks — Meta cannot send our HeyHank auth token.
+    // The POST endpoint instead verifies X-Hub-Signature-256 with the App
+    // Secret; the GET endpoint matches `hub.verify_token` against our
+    // configured webhookVerify. Both checks run inside the route handler.
+    if (
+      c.req.path.startsWith("/webhooks/meta") ||
+      c.req.path.startsWith("/api/webhooks/meta")
+    ) {
+      return next();
+    }
+
+    // Skip auth for the Meta OAuth callback + the deauthorize / data-deletion
+    // hooks (GDPR endpoints). Users + Meta servers reach all three without our
+    // HeyHank session; the handlers validate Meta-side payloads themselves.
+    if (
+      c.req.path.startsWith("/auth/meta/") ||
+      c.req.path.startsWith("/api/auth/meta/")
+    ) {
       return next();
     }
 
@@ -1354,6 +1390,12 @@ export function createRoutes(
   registerTelephonyRoutes(api);
   registerSocialMediaRoutes(api);
   registerSocialViewRoutes(api);
+  registerMetaWebhookRoutes(api);
+  registerAutomationRoutes(api);
+  // Wire the production Meta Send API into the webhook dispatcher so matched
+  // comments actually fire DMs (the dispatcher itself is unit-testable
+  // without this wiring by passing a mock sender to setMetaSender()).
+  setMetaSender(sendPrivateReply);
   registerAssistantRoutes(api);
   registerEmailRoutes(api);
   registerProviderRoutes(api);
