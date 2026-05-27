@@ -4,6 +4,9 @@ import { SocialViewTab } from "./SocialViewTab.js";
 import { SocialLibraryTab } from "./SocialLibraryTab.js";
 import { SocialWatchListTab } from "./SocialWatchListTab.js";
 import { PersonasTab } from "./PersonasTab.js";
+import { AutoDmTab } from "./AutoDmTab.js";
+import { IgWizardTab } from "./IgWizardTab.js";
+import { ImageLightbox } from "./ImageLightbox.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -52,7 +55,7 @@ const PLATFORM_ICONS: Record<string, string> = {
   threads: "@",
 };
 
-type TabId = "posts" | "drafts" | "calendar" | "view" | "library" | "watchlist" | "personas" | "analytics" | "settings";
+type TabId = "posts" | "drafts" | "calendar" | "view" | "library" | "watchlist" | "personas" | "autodm" | "wizard" | "analytics" | "settings";
 
 /**
  * Defensive normalization: a regression in the agent flow saved drafts with
@@ -150,6 +153,8 @@ export function SocialMediaPage({ embedded }: { embedded?: boolean }) {
     { id: "library", label: "Library" },
     { id: "watchlist", label: "Watch List" },
     { id: "personas", label: "Personas" },
+    { id: "autodm", label: "Auto-DM" },
+    { id: "wizard", label: "IG Wizard" },
     { id: "analytics", label: "Analytics" },
     { id: "settings", label: "Settings" },
   ];
@@ -219,6 +224,8 @@ export function SocialMediaPage({ embedded }: { embedded?: boolean }) {
         {activeTab === "library" && <SocialLibraryTab showMessage={showMessage} />}
         {activeTab === "watchlist" && <SocialWatchListTab showMessage={showMessage} />}
         {activeTab === "personas" && <PersonasTab showMessage={showMessage} />}
+        {activeTab === "autodm" && <AutoDmTab showMessage={showMessage} />}
+        {activeTab === "wizard" && <IgWizardTab showMessage={showMessage} />}
         {activeTab === "analytics" && <AnalyticsTab showMessage={showMessage} />}
         {activeTab === "settings" && <SettingsTab showMessage={showMessage} onSwitchTab={setActiveTab} />}
       </div>

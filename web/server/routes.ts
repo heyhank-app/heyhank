@@ -47,6 +47,7 @@ import { registerContentRoutes } from "./routes/content-routes.js";
 import { registerCeoDocumentRoutes } from "./routes/ceo-routes.js";
 import { registerCeoNewsTimeRoutes } from "./routes/ceo-news-time-routes.js";
 import { registerCeoFinanceKpiRoutes } from "./routes/ceo-finance-kpi-routes.js";
+import { registerIgWizardRoutes } from "./routes/ig-wizard-routes.js";
 import { nodeManager } from "./federation/node-manager.js";
 import { discoverClaudeSessions } from "./claude-session-discovery.js";
 import { getClaudeSessionHistoryPage } from "./claude-session-history.js";
@@ -1361,6 +1362,7 @@ export function createRoutes(
   registerCeoDocumentRoutes(api);
   registerCeoNewsTimeRoutes(api);
   registerCeoFinanceKpiRoutes(api);
+  registerIgWizardRoutes(api);
 
   // ─── Gemini → Session bridge ───────────────────────────────────────
   // Allows Gemini voice chat tool calls to send messages to active sessions

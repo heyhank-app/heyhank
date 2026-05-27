@@ -64,6 +64,7 @@
     "@codemirror/view": "6.39.15",
     "@google-cloud/speech": "^7.3.0",
     "@huggingface/transformers": "^4.0.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@uiw/react-codemirror": "4.25.4",
     "axe-core": "^4.11.1",
     "croner": "^10.0.1",

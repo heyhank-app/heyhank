@@ -1161,7 +1161,10 @@ export const api = {
   deleteAgent: (id: string) => del(`/agents/${encodeURIComponent(id)}`),
   toggleAgent: (id: string) => post<AgentInfo>(`/agents/${encodeURIComponent(id)}/toggle`),
   runAgent: (id: string, input?: string) =>
-    post<{ ok: boolean; message: string }>(`/agents/${encodeURIComponent(id)}/run`, { input }),
+    post<{ ok: boolean; message: string; sessionId: string | null; agentName?: string }>(
+      `/agents/${encodeURIComponent(id)}/run`,
+      { input },
+    ),
   getAgentExecutions: (id: string) =>
     get<AgentExecution[]>(`/agents/${encodeURIComponent(id)}/executions`),
   importAgent: (data: AgentExport) => post<AgentInfo>("/agents/import", data),
@@ -1319,7 +1322,7 @@ export const api = {
   pollVideoStatus: (operationName: string) =>
     get<{ operationName: string; status: string; videoPath?: string }>(`/media/video-status/${operationName}`),
   listMedia: () =>
-    get<{ files: Array<{ filename: string; path: string }> }>("/media"),
+    get<{ files: Array<{ filename: string; path: string; mtime: number }> }>("/media"),
   uploadMedia: async (base64: string, mimeType: string, filename?: string): Promise<{ ok: boolean; filename: string; url: string }> => {
     const res = await fetch("/api/media/upload", {
       method: "POST",
@@ -1336,6 +1339,32 @@ export const api = {
       "/media/bulk-delete",
       { filenames },
     ),
+
+  // ─── Session File Uploads (non-image attachments) ─────────────────────
+  // Stages one or more files under ~/.heyhank/uploads/<sessionId>/ and
+  // returns absolute paths so the agent can read them directly.
+  uploadSessionFiles: async (
+    sessionId: string,
+    files: File[],
+  ): Promise<{
+    ok: boolean;
+    files: Array<{ name: string; path: string; size: number; mimeType: string }>;
+    errors: Array<{ name: string; error: string }>;
+    maxBytes: number;
+  }> => {
+    const formData = new FormData();
+    for (const f of files) formData.append("file", f);
+    const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/upload`, {
+      method: "POST",
+      headers: { ...getAuthHeaders() },
+      body: formData,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Upload failed (${res.status}): ${text}`);
+    }
+    return res.json();
+  },
 
   // ─── Reference Images ─────────────────────────────────────────────────
   listReferences: () =>
@@ -1759,4 +1788,61 @@ export const kpiApi = {
     del<{ success: boolean }>(`/assistant/kpis/${encodeURIComponent(id)}`),
   categories: () =>
     get<{ categories: string[] }>("/assistant/kpis/categories"),
+};
+
+// ─── IG Wizard (Claude-driven hooks + CTAs) ──────────────────────────────────
+
+/** A complete lead package — see server/ig-wizard.ts LeadPackage for full docs. */
+export interface IgWizardLeadPackage {
+  cta: string;
+  trigger: string;
+  dmTemplate: string;
+}
+
+export interface IgWizardCtas {
+  engagement: string[];
+  leads: IgWizardLeadPackage[];
+  growth: string[];
+}
+
+export interface IgWizardResult {
+  hooks: string[];
+  ctas: IgWizardCtas;
+  niche: string;
+  language: string;
+  model: string;
+}
+
+export const igWizardApi = {
+  generate: (niche: string, language: "en" | "de" = "en") =>
+    post<IgWizardResult>("/ig-wizard/generate", { niche, language }),
+};
+
+// ─── Auto-DM rules (used by IG Wizard Create-Rule button) ────────────────────
+
+export interface AutoDmRuleCreateInput {
+  platform: "instagram" | "facebook";
+  keyword: string;
+  dmTemplate: string;
+  postId?: string | null;
+  enabled?: boolean;
+  notes?: string;
+}
+
+export interface AutoDmRule {
+  id: string;
+  platform: "instagram" | "facebook";
+  keyword: string;
+  dmTemplate: string;
+  enabled: boolean;
+  sentCount: number;
+  createdAt: string;
+  updatedAt: string;
+  postId?: string | null;
+  notes?: string;
+}
+
+export const autoDmRulesApi = {
+  create: (input: AutoDmRuleCreateInput) =>
+    post<{ ok: boolean; rule: AutoDmRule }>("/automation/rules", input),
 };
