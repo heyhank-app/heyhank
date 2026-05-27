@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.4.0](https://github.com/heyhank-app/heyhank/compare/heyhank-v0.3.0...heyhank-v0.4.0) (2026-05-27)
+
+
+### Features
+
+* **automation:** Meta Auto-DM pipeline (IG + FB comment-triggered DMs) ([eafd80f](https://github.com/heyhank-app/heyhank/commit/eafd80f23ad67858e1f676fc72f801a15c794071))
+* **content:** batch-remix wizard for weekly brief runs ([0f271db](https://github.com/heyhank-app/heyhank/commit/0f271db4d356b66651c10cf76d576045de4bb985))
+* **content:** remix library posts into Markus-Voice variants ([a44cae7](https://github.com/heyhank-app/heyhank/commit/a44cae7fd876d5e0547f85b91e1f7d5667b7418d))
+* **ig-wizard:** Claude-driven hooks + CTAs with Auto-DM integration ([cdf42fd](https://github.com/heyhank-app/heyhank/commit/cdf42fd01be4225aad30a2cb02bf753bcda0766d))
+* **media:** add reference images + multi-select delete for generated media ([5577d2a](https://github.com/heyhank-app/heyhank/commit/5577d2a0774200440190be58742bf648e2d1f71f))
+* **media:** video pipeline (uploads, fal.ai, brand themes, TTS, compose) ([fcee52c](https://github.com/heyhank-app/heyhank/commit/fcee52c4031672342de7d8cd5bb6ecd5a0260533))
+* **socialmedia:** add header Watch List + Crawl now buttons ([05161bc](https://github.com/heyhank-app/heyhank/commit/05161bc71b288de0ae8748358415affdf618016d))
+* **socialmedia:** Analytics tab + Settings tab polish + PlatformBadge ([8f8fdef](https://github.com/heyhank-app/heyhank/commit/8f8fdefdd78fbdb9485b178768cbd4c79b4f5b2f))
+* **socialmedia:** ImageLightbox + PostCard media support ([7e79aa9](https://github.com/heyhank-app/heyhank/commit/7e79aa92c27fd939d831e35dbed86cb7f9d0a67f))
+* **socialmedia:** SocialPostFormat type + Postiz/Buffer format routing + auto-rule hook integration ([fe9656b](https://github.com/heyhank-app/heyhank/commit/fe9656bc017a012752cf3a3b262922a915d6326f))
+* **socialview:** add creator watch-list (storage + routes + UI tab) ([339d20d](https://github.com/heyhank-app/heyhank/commit/339d20d6174339cec036619dcd841c7297bf0e4a))
+* **socialview:** auto-crawl watch-list nightly (+ manual triggers) ([a88e7b0](https://github.com/heyhank-app/heyhank/commit/a88e7b0d026e058e6c1537531a6f32fc03429d39))
+* **socialview:** cookie import bypasses platform shadow-bans ([b9a3678](https://github.com/heyhank-app/heyhank/commit/b9a3678022de416579c119f7940982fea9eb0578))
+* **socialview:** Latest Hits filters — sort, time window, minLikes ([0dfb468](https://github.com/heyhank-app/heyhank/commit/0dfb468886cd4c97954d5dc570aad3d04791a2b8))
+* **socialview:** TikTok extractor + auto-crawler + view-tab tests ([c74c88b](https://github.com/heyhank-app/heyhank/commit/c74c88b7c6105fb93a74508608078f381571a63b))
+* **uploads:** per-session file upload routes ([ff167e9](https://github.com/heyhank-app/heyhank/commit/ff167e9d79db5804d146f220262420befb0856f6))
+
+
+### Bug Fixes
+
+* **agent-timeout:** disable time-based kill for video-director ([aa550b0](https://github.com/heyhank-app/heyhank/commit/aa550b0f88174f1fa60df6662f4ba8e46ff4d417))
+* **cli:** bundle pinned Claude Code CLI 2.1.119 to bypass --sdk-url allowlist ([cb10cc3](https://github.com/heyhank-app/heyhank/commit/cb10cc357db9e6396e023a5b0db76a34141ef4a8))
+* **socialview:** exclude profile pictures from extracted post media ([8fe501b](https://github.com/heyhank-app/heyhank/commit/8fe501b48438689d3e438b1272a0539a663ee70a))
+* **socialview:** pace Instagram profile crawls, detect logged-out state ([8c5eb1d](https://github.com/heyhank-app/heyhank/commit/8c5eb1dbe79c33882a9c4e7d4a235f141c9138c2))
+* **socialview:** rewrite Instagram extractor for 2026 DOM ([65fcafe](https://github.com/heyhank-app/heyhank/commit/65fcafe55e25367afc2ddea1726af743373724dc))
+
+
+### Code Refactoring
+
+* **agents:** activity-based idle timeout + auto-navigate to session on run ([78e5442](https://github.com/heyhank-app/heyhank/commit/78e544299a995c7bf4eaf9b4589cb254ea2c8395))
+
 ## [0.3.0](https://github.com/heyhank-app/heyhank/compare/heyhank-v0.2.0...heyhank-v0.3.0) (2026-05-14)
 
 
