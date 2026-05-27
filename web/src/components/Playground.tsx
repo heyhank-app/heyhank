@@ -40,6 +40,7 @@ import { SessionCreationProgress } from "./SessionCreationProgress.js";
 import { SessionLaunchOverlay } from "./SessionLaunchOverlay.js";
 import { PlaygroundUpdateOverlay } from "./UpdateOverlay.js";
 import { PlaygroundDockerUpdateDialog } from "./DockerUpdateDialog.js";
+import { ImageLightbox } from "./ImageLightbox.js";
 import { SessionItem } from "./SessionItem.js";
 import type { CreationProgressEvent } from "../types.js";
 import type { SessionItem as SessionItemType } from "../utils/project-grouping.js";
@@ -2647,7 +2648,73 @@ export function Playground() {
             </Card>
           </div>
         </Section>
+
+        <Section title="ImageLightbox" description="Fullscreen image viewer used on PostCard. Click a thumbnail to open. Arrow keys navigate, Escape closes.">
+          <PlaygroundLightboxDemo />
+        </Section>
+
+        <Section title="FormatBadge" description="Distinguishes Carousel, Story and Reel drafts at a glance. Shown next to the status + platforms pills on PostCard. Carousel/Story include a slide/frame count suffix when > 1.">
+          <div className="flex flex-wrap gap-2 items-center">
+            <PlaygroundFormatBadge format="carousel" mediaCount={5} />
+            <PlaygroundFormatBadge format="carousel" mediaCount={1} />
+            <PlaygroundFormatBadge format="story" mediaCount={4} />
+            <PlaygroundFormatBadge format="story" mediaCount={1} />
+            <PlaygroundFormatBadge format="reel" mediaCount={1} />
+          </div>
+        </Section>
       </div>
+    </div>
+  );
+}
+
+// Mirror of the FormatBadge defined inside SocialMediaPage. Kept in sync
+// manually — if either side changes, update the other too. We don't export
+// the SocialMediaPage version to avoid leaking PostCard-internal helpers.
+function PlaygroundFormatBadge({ format, mediaCount }: { format: "carousel" | "story" | "reel"; mediaCount: number }) {
+  const CFG = {
+    carousel: { label: "Carousel", cls: "text-blue-400 border-blue-500/30 bg-blue-500/10", icon: "▦" },
+    story: { label: "Story", cls: "text-fuchsia-400 border-fuchsia-500/30 bg-fuchsia-500/10", icon: "◯" },
+    reel: { label: "Reel", cls: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10", icon: "▶" },
+  }[format];
+  const showCount = (format === "carousel" || format === "story") && mediaCount > 1;
+  return (
+    <span className={`inline-flex items-center gap-1 text-[9px] font-semibold rounded-full px-1.5 py-0.5 border ${CFG.cls}`}>
+      <span aria-hidden="true">{CFG.icon}</span>
+      {CFG.label}
+      {showCount && <span className="opacity-75">· {mediaCount}</span>}
+    </span>
+  );
+}
+
+function PlaygroundLightboxDemo() {
+  const [open, setOpen] = useState<number | null>(null);
+  // Use small placeholder data-URIs so the demo works offline.
+  const placeholder = (label: string, color: string) =>
+    `data:image/svg+xml;utf8,${encodeURIComponent(
+      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 600'><rect width='400' height='600' fill='${color}'/><text x='200' y='310' font-family='sans-serif' font-size='40' fill='white' text-anchor='middle'>${label}</text></svg>`,
+    )}`;
+  const urls = [
+    placeholder("Slide 1", "%23222"),
+    placeholder("Slide 2", "%23334155"),
+    placeholder("Slide 3", "%23475569"),
+  ];
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        {urls.map((u, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => setOpen(i)}
+            className="rounded-lg border border-cc-border/30 overflow-hidden focus:outline-none focus:ring-2 focus:ring-cc-accent"
+          >
+            <img src={u} alt={`Demo image ${i + 1}`} className="h-24 object-cover block" />
+          </button>
+        ))}
+      </div>
+      {open !== null && (
+        <ImageLightbox urls={urls} startIndex={open} onClose={() => setOpen(null)} />
+      )}
     </div>
   );
 }

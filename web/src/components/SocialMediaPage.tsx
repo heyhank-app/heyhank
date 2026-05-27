@@ -22,6 +22,7 @@ interface SocialPost {
   videoUrl?: string;
   thumbnailUrl?: string;
   mediaUrls?: string[];
+  format?: "post" | "carousel" | "story" | "reel";
   createdBy?: "user" | "gemini" | "agent";
 }
 
@@ -1021,9 +1022,16 @@ function PostCard({ post, selected, onToggleSelect, onEdit, onDelete, onArchive,
 }) {
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<SocialComment[]>([]);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const isDraft = post.status === "draft";
   const isArchived = post.status === "archived";
   const mediaList = post.mediaUrls || [];
+  // Combined gallery: thumbnail (if any) first, then media attachments —
+  // matches the order the user sees in the inline preview strip.
+  const lightboxUrls = [
+    ...(post.thumbnailUrl ? [post.thumbnailUrl] : []),
+    ...mediaList,
+  ];
 
   async function toggleComments() {
     if (showComments) { setShowComments(false); return; }
@@ -1073,16 +1081,42 @@ function PostCard({ post, selected, onToggleSelect, onEdit, onDelete, onArchive,
         {/* Text */}
         <p className="text-sm text-cc-fg whitespace-pre-wrap break-words leading-relaxed">{post.text}</p>
 
-        {/* Media Preview */}
-        {(post.thumbnailUrl || mediaList.length > 0) && (
+        {/* Media Preview — thumbnails open a fullscreen lightbox on click */}
+        {lightboxUrls.length > 0 && (
           <div className="flex gap-2 overflow-x-auto">
             {post.thumbnailUrl && (
-              <img src={post.thumbnailUrl} alt="Thumbnail" className="h-24 rounded-lg border border-cc-border/30 object-cover" />
+              <button
+                type="button"
+                onClick={() => setLightboxIndex(0)}
+                aria-label="Open thumbnail in viewer"
+                className="rounded-lg border border-cc-border/30 overflow-hidden focus:outline-none focus:ring-2 focus:ring-cc-accent hover:opacity-90 transition-opacity"
+              >
+                <img src={post.thumbnailUrl} alt="Thumbnail" className="h-24 object-cover block" />
+              </button>
             )}
-            {mediaList.map((url, i) => (
-              <img key={i} src={url} alt={`Media ${i + 1}`} className="h-24 rounded-lg border border-cc-border/30 object-cover" />
-            ))}
+            {mediaList.map((url, i) => {
+              const idx = (post.thumbnailUrl ? 1 : 0) + i;
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setLightboxIndex(idx)}
+                  aria-label={`Open media ${i + 1} in viewer`}
+                  className="rounded-lg border border-cc-border/30 overflow-hidden focus:outline-none focus:ring-2 focus:ring-cc-accent hover:opacity-90 transition-opacity"
+                >
+                  <img src={url} alt={`Media ${i + 1}`} className="h-24 object-cover block" />
+                </button>
+              );
+            })}
           </div>
+        )}
+
+        {lightboxIndex !== null && (
+          <ImageLightbox
+            urls={lightboxUrls}
+            startIndex={lightboxIndex}
+            onClose={() => setLightboxIndex(null)}
+          />
         )}
 
         {/* Video */}
@@ -1103,6 +1137,7 @@ function PostCard({ post, selected, onToggleSelect, onEdit, onDelete, onArchive,
         {/* Badges */}
         <div className="flex flex-wrap items-center gap-1.5">
           <StatusBadge status={post.status} />
+          {post.format && post.format !== "post" && <FormatBadge format={post.format} mediaCount={mediaList.length} />}
           {post.createdBy && <CreatedByBadge by={post.createdBy} />}
           {post.platforms.map((p) => (
             <PlatformBadge key={p} platform={p} />
