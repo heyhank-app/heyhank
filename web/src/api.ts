@@ -1813,9 +1813,31 @@ export interface IgWizardResult {
   model: string;
 }
 
+export interface IgCaptionResult {
+  hook: string;
+  body: string;
+  cta: string;
+  hashtags: string[];
+  /** hook + body + cta + hashtags, joined and ready to paste. */
+  caption: string;
+  language: string;
+  model: string;
+}
+
+export interface IgCaptionInput {
+  topic: string;
+  language?: "en" | "de";
+  /** Optional pre-picked hook to anchor the caption to. */
+  hook?: string;
+  /** Optional pre-picked lead CTA to anchor the caption to. */
+  cta?: string;
+}
+
 export const igWizardApi = {
   generate: (niche: string, language: "en" | "de" = "en") =>
     post<IgWizardResult>("/ig-wizard/generate", { niche, language }),
+  caption: (input: IgCaptionInput) =>
+    post<IgCaptionResult>("/ig-wizard/caption", { language: "en", ...input }),
 };
 
 // ─── Auto-DM rules (used by IG Wizard Create-Rule button) ────────────────────

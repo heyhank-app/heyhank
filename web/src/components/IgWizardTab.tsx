@@ -10,7 +10,13 @@
 // caption → comment → auto-DM, no manual setup.
 
 import { useState, useCallback, useMemo } from "react";
-import { igWizardApi, autoDmRulesApi, type IgWizardResult, type IgWizardLeadPackage } from "../api.js";
+import {
+  igWizardApi,
+  autoDmRulesApi,
+  type IgWizardResult,
+  type IgWizardLeadPackage,
+  type IgCaptionResult,
+} from "../api.js";
 
 interface Props {
   showMessage: (text: string, isError?: boolean) => void;
@@ -97,6 +103,44 @@ export function IgWizardTab({ showMessage }: Props) {
   // the same trigger flips to disabled with a "Created" badge.
   const [createdRuleTriggers, setCreatedRuleTriggers] = useState<Set<string>>(new Set());
   const [creatingRuleTrigger, setCreatingRuleTrigger] = useState<string | null>(null);
+
+  // ── Caption Composer state ──────────────────────────────────────────────────
+  // Assembles a full ready-to-post caption from the niche (+ an optional hook /
+  // CTA the user picked from the lists above) via /api/ig-wizard/caption.
+  const [composerHook, setComposerHook] = useState("");
+  const [composerCta, setComposerCta] = useState("");
+  const [caption, setCaption] = useState<IgCaptionResult | null>(null);
+  const [composing, setComposing] = useState(false);
+
+  const handleCompose = useCallback(async () => {
+    setComposing(true);
+    setCaption(null);
+    try {
+      const res = await igWizardApi.caption({
+        topic: niche.trim(),
+        language,
+        hook: composerHook.trim() || undefined,
+        cta: composerCta.trim() || undefined,
+      });
+      setCaption(res);
+      showMessage("Caption composed — copy + paste into Instagram.");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showMessage(`Compose failed: ${msg}`, true);
+    } finally {
+      setComposing(false);
+    }
+  }, [niche, language, composerHook, composerCta, showMessage]);
+
+  const useHookInComposer = useCallback((hook: string) => {
+    setComposerHook(hook);
+    showMessage("Hook added to the Caption Composer below.");
+  }, [showMessage]);
+
+  const useCtaInComposer = useCallback((cta: string) => {
+    setComposerCta(cta);
+    showMessage("CTA added to the Caption Composer below.");
+  }, [showMessage]);
 
   const handleCreateRule = useCallback(
     async (lead: IgWizardLeadPackage) => {
@@ -260,13 +304,13 @@ export function IgWizardTab({ showMessage }: Props) {
               }}
             >
               {result.hooks.map((hook, idx) => (
-                <li key={idx}>
+                <li key={idx} style={{ display: "flex", gap: 6 }}>
                   <button
                     type="button"
                     onClick={() => handleCopy(hook, "hook")}
                     aria-label={`Copy hook: ${hook}`}
                     style={{
-                      width: "100%",
+                      flex: 1,
                       textAlign: "left",
                       padding: "8px 12px",
                       background: "var(--card-bg, #f8f8f8)",
@@ -278,6 +322,24 @@ export function IgWizardTab({ showMessage }: Props) {
                   >
                     <span style={{ color: "var(--text-muted, #888)", marginRight: 8 }}>{idx + 1}.</span>
                     {hook}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => useHookInComposer(hook)}
+                    aria-label={`Use hook in caption composer: ${hook}`}
+                    title="Use in Caption Composer"
+                    style={{
+                      flex: "0 0 auto",
+                      padding: "8px 10px",
+                      background: "transparent",
+                      border: "1px solid var(--border, #ddd)",
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      fontSize: 13,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    ✍️ Use
                   </button>
                 </li>
               ))}
@@ -339,6 +401,7 @@ export function IgWizardTab({ showMessage }: Props) {
                         creating={creatingRuleTrigger === lead.trigger}
                         onCopy={() => handleCopy(lead.cta, "CTA")}
                         onCreateRule={() => handleCreateRule(lead)}
+                        onUseInComposer={() => useCtaInComposer(lead.cta)}
                       />
                     </li>
                   ))}
@@ -371,6 +434,110 @@ export function IgWizardTab({ showMessage }: Props) {
               )}
             </div>
           </section>
+
+          <section aria-labelledby="ig-wizard-composer-heading" style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--border, #ddd)" }}>
+            <h3 id="ig-wizard-composer-heading" style={{ marginTop: 0 }}>📝 Caption Composer</h3>
+            <p style={{ margin: "0 0 12px 0", color: "var(--text-muted, #888)", fontSize: 13 }}>
+              Turn a hook + CTA into a complete, ready-to-post caption (hook · value lines · CTA · hashtags).
+              Hit <strong>✍️ Use</strong> on any hook or lead CTA above to drop it in, or leave blank to let Claude pick.
+            </p>
+
+            <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+              <div>
+                <label htmlFor="composer-hook" style={{ display: "block", fontSize: 12, color: "var(--text-muted, #888)", marginBottom: 2 }}>
+                  Hook (optional)
+                </label>
+                <input
+                  id="composer-hook"
+                  type="text"
+                  value={composerHook}
+                  onChange={(e) => setComposerHook(e.target.value)}
+                  placeholder="Leave blank to let Claude pick the strongest hook"
+                  style={{ width: "100%", padding: "8px 10px", boxSizing: "border-box" }}
+                  disabled={composing}
+                />
+              </div>
+              <div>
+                <label htmlFor="composer-cta" style={{ display: "block", fontSize: 12, color: "var(--text-muted, #888)", marginBottom: 2 }}>
+                  Lead CTA (optional)
+                </label>
+                <input
+                  id="composer-cta"
+                  type="text"
+                  value={composerCta}
+                  onChange={(e) => setComposerCta(e.target.value)}
+                  placeholder="e.g. Comment GUIDE for my free AI workflow ⚡"
+                  style={{ width: "100%", padding: "8px 10px", boxSizing: "border-box" }}
+                  disabled={composing}
+                />
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleCompose}
+              disabled={composing}
+              aria-label="Compose full caption"
+              style={{
+                padding: "8px 16px",
+                background: composing ? "var(--btn-disabled, #ccc)" : "var(--btn-primary, #0066cc)",
+                color: "white",
+                border: "none",
+                borderRadius: 4,
+                cursor: composing ? "wait" : "pointer",
+                fontWeight: 500,
+              }}
+            >
+              {composing ? "Composing…" : "Compose Caption"}
+            </button>
+
+            {caption && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>Your caption</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(caption.caption, "caption")}
+                    aria-label="Copy full caption"
+                    style={{
+                      padding: "5px 12px",
+                      background: "var(--btn-primary, #0066cc)",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      fontSize: 13,
+                    }}
+                  >
+                    📋 Copy caption
+                  </button>
+                </div>
+                <textarea
+                  readOnly
+                  aria-label="Composed caption"
+                  value={caption.caption}
+                  rows={Math.min(16, caption.caption.split("\n").length + 2)}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "10px 12px",
+                    fontSize: 14,
+                    lineHeight: 1.5,
+                    fontFamily: "inherit",
+                    background: "var(--card-bg, #f8f8f8)",
+                    border: "1px solid var(--border, #ddd)",
+                    borderRadius: 4,
+                    resize: "vertical",
+                  }}
+                />
+                {caption.hashtags.length > 0 && (
+                  <p style={{ margin: "6px 0 0 0", fontSize: 12, color: "var(--text-muted, #888)" }}>
+                    {caption.hashtags.length} hashtags · {caption.language.toUpperCase()}
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
         </>
       )}
     </div>
@@ -386,6 +553,7 @@ interface LeadCtaCardProps {
   creating: boolean;
   onCopy: () => void;
   onCreateRule: () => void;
+  onUseInComposer: () => void;
 }
 
 /**
@@ -394,7 +562,7 @@ interface LeadCtaCardProps {
  * wires the package into the Auto-DM tab in one click. Disabled + checkmark
  * once the rule has been created in this session.
  */
-function LeadCtaCard({ index, lead, ruleCreated, creating, onCopy, onCreateRule }: LeadCtaCardProps) {
+function LeadCtaCard({ index, lead, ruleCreated, creating, onCopy, onCreateRule, onUseInComposer }: LeadCtaCardProps) {
   const canCreate = Boolean(lead.trigger && lead.dmTemplate);
   return (
     <article
@@ -463,6 +631,23 @@ function LeadCtaCard({ index, lead, ruleCreated, creating, onCopy, onCreateRule 
         </div>
       )}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 2 }}>
+        <button
+          type="button"
+          onClick={onUseInComposer}
+          aria-label={`Use this CTA in the caption composer: ${lead.cta}`}
+          title="Use in Caption Composer"
+          style={{
+            fontSize: 12,
+            padding: "4px 10px",
+            background: "transparent",
+            color: "var(--text, #333)",
+            border: "1px solid var(--border, #ddd)",
+            borderRadius: 4,
+            cursor: "pointer",
+          }}
+        >
+          ✍️ Use
+        </button>
         {ruleCreated ? (
           <span
             role="status"

@@ -20,8 +20,12 @@ const axeRules = {
 // rule creation. Tests override the resolved/rejected value per scenario.
 const mockGenerate = vi.fn();
 const mockCreateRule = vi.fn();
+const mockCaption = vi.fn();
 vi.mock("../api.js", () => ({
-  igWizardApi: { generate: (...args: unknown[]) => mockGenerate(...args) },
+  igWizardApi: {
+    generate: (...args: unknown[]) => mockGenerate(...args),
+    caption: (...args: unknown[]) => mockCaption(...args),
+  },
   autoDmRulesApi: { create: (...args: unknown[]) => mockCreateRule(...args) },
 }));
 
@@ -52,9 +56,23 @@ function sampleResult(overrides: Partial<{ language: string; niche: string }> = 
   };
 }
 
+function sampleCaption(overrides: Record<string, unknown> = {}) {
+  return {
+    hook: "AI wrote this in 3 minutes",
+    body: "Here's the workflow.\n\nNo fluff.",
+    cta: "Comment BUILD for the template",
+    hashtags: ["ai", "automation"],
+    caption: "AI wrote this in 3 minutes\n\nHere's the workflow.\n\nNo fluff.\n\nComment BUILD for the template\n\n#ai #automation",
+    language: "en",
+    model: "internal-ai",
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   mockGenerate.mockReset();
   mockCreateRule.mockReset();
+  mockCaption.mockReset();
   // jsdom doesn't ship a clipboard impl by default. Provide one.
   Object.assign(navigator, {
     clipboard: {
@@ -340,5 +358,59 @@ describe("IgWizardTab — Create Auto-DM Rule flow", () => {
     const btn = screen.getByRole("button", { name: /Create Auto-DM rule for trigger GUIDE/i });
     expect(btn).toBeDisabled();
     resolveCreate({ ok: true, rule: { id: "r1", platform: "instagram", keyword: "GUIDE", dmTemplate: "x", enabled: true, sentCount: 0, createdAt: "", updatedAt: "" } });
+  });
+});
+
+// ─── Caption Composer ──────────────────────────────────────────────────────────
+
+describe("IgWizardTab — Caption Composer", () => {
+  async function generateFirst() {
+    mockGenerate.mockResolvedValueOnce(sampleResult());
+    render(<IgWizardTab showMessage={() => {}} />);
+    fireEvent.change(screen.getByLabelText(/^Niche$/), { target: { value: "AI tools" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Generate/i }));
+    await waitFor(() => expect(screen.getByText("📝 Caption Composer")).toBeInTheDocument());
+  }
+
+  it("composes a caption from the niche and renders it in a copyable box", async () => {
+    await generateFirst();
+    mockCaption.mockResolvedValueOnce(sampleCaption());
+
+    fireEvent.click(screen.getByRole("button", { name: /Compose full caption/i }));
+
+    await waitFor(() => expect(screen.getByLabelText(/Composed caption/i)).toBeInTheDocument());
+    const box = screen.getByLabelText(/Composed caption/i) as HTMLTextAreaElement;
+    expect(box.value).toContain("AI wrote this in 3 minutes");
+    expect(box.value).toContain("#ai #automation");
+    // The compose call received the niche as topic.
+    expect(mockCaption).toHaveBeenCalledWith(expect.objectContaining({ topic: "AI tools" }));
+  });
+
+  it("'✍️ Use' on a hook fills the composer Hook field", async () => {
+    await generateFirst();
+    // Each hook row has a "Use" button; click the first.
+    const useButtons = screen.getAllByRole("button", { name: /Use hook in caption composer/i });
+    fireEvent.click(useButtons[0]);
+    const hookField = screen.getByLabelText(/Hook \(optional\)/i) as HTMLInputElement;
+    expect(hookField.value).toBe("Hook 1");
+  });
+
+  it("'✍️ Use' on a lead CTA fills the composer CTA field", async () => {
+    await generateFirst();
+    const useCtaButtons = screen.getAllByRole("button", { name: /Use this CTA in the caption composer/i });
+    fireEvent.click(useCtaButtons[0]);
+    const ctaField = screen.getByLabelText(/Lead CTA \(optional\)/i) as HTMLInputElement;
+    expect(ctaField.value).toBe("Comment GUIDE to get my free PDF");
+  });
+
+  it("passes a manually entered hook + CTA to the compose call", async () => {
+    await generateFirst();
+    mockCaption.mockResolvedValueOnce(sampleCaption());
+    fireEvent.change(screen.getByLabelText(/Hook \(optional\)/i), { target: { value: "My hook" } });
+    fireEvent.change(screen.getByLabelText(/Lead CTA \(optional\)/i), { target: { value: "My CTA" } });
+    fireEvent.click(screen.getByRole("button", { name: /Compose full caption/i }));
+    await waitFor(() =>
+      expect(mockCaption).toHaveBeenCalledWith(expect.objectContaining({ hook: "My hook", cta: "My CTA" })),
+    );
   });
 });

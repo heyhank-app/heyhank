@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { generateIgWizard, normalizeLanguage, normalizeNiche } from "./ig-wizard.js";
+import {
+  generateIgWizard,
+  generateCaption,
+  normalizeLanguage,
+  normalizeNiche,
+  normalizeTopic,
+  normalizeOptionalLine,
+  normalizeHashtags,
+  assembleCaption,
+} from "./ig-wizard.js";
 
 // Mock the AI provider for predictable tests.
 let mockReturn = { text: "", ok: true, error: undefined as string | undefined };
@@ -97,5 +106,105 @@ describe("generateIgWizard", () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.result.niche).toBe("(empty)");
+  });
+});
+
+// ─── Caption Composer ──────────────────────────────────────────────────────────
+
+describe("normalizeHashtags", () => {
+  it("strips leading #, dedupes case-insensitively, drops blanks", () => {
+    expect(normalizeHashtags(["#AI", "ai", " build ", "", "#Build"])).toEqual(["AI", "build"]);
+  });
+  it("returns [] for non-arrays", () => {
+    expect(normalizeHashtags("nope")).toEqual([]);
+    expect(normalizeHashtags(undefined)).toEqual([]);
+  });
+  it("caps at 15 tags", () => {
+    const many = Array.from({ length: 30 }, (_, i) => `tag${i}`);
+    expect(normalizeHashtags(many)).toHaveLength(15);
+  });
+});
+
+describe("assembleCaption", () => {
+  it("joins hook + body + cta + #hashtags with blank lines", () => {
+    const out = assembleCaption({
+      hook: "Stop scrolling",
+      body: "Line one\n\nLine two",
+      cta: "Comment GUIDE",
+      hashtags: ["ai", "build"],
+    });
+    expect(out).toBe("Stop scrolling\n\nLine one\n\nLine two\n\nComment GUIDE\n\n#ai #build");
+  });
+  it("omits empty parts cleanly", () => {
+    const out = assembleCaption({ hook: "Hook only", body: "", cta: "", hashtags: [] });
+    expect(out).toBe("Hook only");
+  });
+});
+
+describe("normalizeTopic / normalizeOptionalLine", () => {
+  it("normalizeTopic trims + caps at 300", () => {
+    expect(normalizeTopic("  hi  ")).toBe("hi");
+    expect(normalizeTopic("x".repeat(500)).length).toBe(300);
+    expect(normalizeTopic(42)).toBe("");
+  });
+  it("normalizeOptionalLine returns undefined for blank/non-string", () => {
+    expect(normalizeOptionalLine("  ")).toBeUndefined();
+    expect(normalizeOptionalLine(undefined)).toBeUndefined();
+    expect(normalizeOptionalLine("a hook")).toBe("a hook");
+  });
+});
+
+describe("generateCaption", () => {
+  const captionPayload = JSON.stringify({
+    hook: "AI wrote this in 3 minutes",
+    body: "Here's the exact workflow.\n\nNo fluff.",
+    cta: "Comment BUILD for the template",
+    hashtags: ["#ai", "automation", "ai"], // dupe + # to exercise normalization
+  });
+
+  beforeEach(() => {
+    mockReturn = { text: captionPayload, ok: true, error: undefined };
+    mockHasProvider = true;
+  });
+
+  it("returns a fully assembled caption on success", async () => {
+    const res = await generateCaption({ topic: "AI workflows", language: "en" });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.result.hook).toBe("AI wrote this in 3 minutes");
+    expect(res.result.hashtags).toEqual(["ai", "automation"]); // normalized + deduped
+    // The assembled caption contains all parts.
+    expect(res.result.caption).toContain("AI wrote this in 3 minutes");
+    expect(res.result.caption).toContain("#ai #automation");
+  });
+
+  it("honours a user-supplied hook + CTA verbatim over the model's", async () => {
+    const res = await generateCaption({
+      topic: "AI",
+      language: "en",
+      hook: "MY EXACT HOOK",
+      cta: "MY EXACT CTA",
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.result.hook).toBe("MY EXACT HOOK");
+    expect(res.result.cta).toBe("MY EXACT CTA");
+    expect(res.result.caption.startsWith("MY EXACT HOOK")).toBe(true);
+  });
+
+  it("returns 503 when no AI provider is configured", async () => {
+    mockHasProvider = false;
+    const res = await generateCaption({ topic: "AI", language: "en" });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.status).toBe(503);
+  });
+
+  it("returns 502 when the model returns junk", async () => {
+    mockReturn = { text: "Sorry, I can't.", ok: true, error: undefined };
+    const res = await generateCaption({ topic: "AI", language: "en" });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.status).toBe(502);
   });
 });

@@ -39,6 +39,35 @@ export interface IgWizardResult {
 
 export type IgWizardLanguage = "en" | "de";
 
+// ─── Caption Composer types ────────────────────────────────────────────────────
+
+/**
+ * A complete, ready-to-post Instagram caption assembled from a topic (+ an
+ * optional pre-picked hook / CTA). The four parts are returned separately so
+ * the UI can show structure, plus a pre-joined `caption` string for one-click
+ * copy-paste.
+ */
+export interface CaptionResult {
+  hook: string;
+  body: string;
+  cta: string;
+  hashtags: string[];
+  /** hook + body + cta + hashtags, joined and ready to paste. */
+  caption: string;
+  language: string;
+  model: string;
+}
+
+export interface CaptionGenerateOk {
+  ok: true;
+  result: CaptionResult;
+}
+export interface CaptionGenerateErr {
+  ok: false;
+  error: string;
+  status: 400 | 502 | 503;
+}
+
 export interface IgWizardGenerateResult {
   ok: true;
   result: IgWizardResult;
@@ -236,6 +265,163 @@ export async function generateIgWizard(
       ctas: parsed.ctas,
       niche: niche || "(empty)",
       language,
+      model: "internal-ai",
+    },
+  };
+}
+
+// ─── Caption Composer ──────────────────────────────────────────────────────────
+
+const CAPTION_SYSTEM_PROMPT = `You are a social-media copywriter who writes complete, ready-to-post Instagram captions that build an email list — not one-shot reach.
+
+Write ONE caption for the given topic with these parts:
+  - "hook": one scroll-stopping opening line (under 90 chars). If the user supplied a hook, use it VERBATIM as the hook.
+  - "body": 2-4 short lines of concrete, specific value. Each line is its own short paragraph. No fluff, no filler, no hype. Give real substance a reader can act on.
+  - "cta": one clear call-to-action that drives a comment-triggered DM funnel. If the user supplied a CTA, use it VERBATIM. Otherwise write a "Comment KEYWORD for X" style line with one ALL-CAPS trigger word.
+  - "hashtags": 8-12 relevant hashtags as an array of strings WITHOUT the # symbol, mixing broad + niche tags.
+
+Voice rules (critical):
+  - Confident but never arrogant. NEVER write self-congratulatory proof sentences like "My proof: X" or "I'm living proof". Show, don't boast.
+  - Specific over generic. Concrete numbers, tools, steps — not vague promises.
+  - 1 emoji max per line, used for emphasis, not decoration.
+  - Match the requested language ("en" or "de"). For "de" write fluent native German, not a literal translation.
+  - Never use "as an AI", never refuse.
+
+Return ONLY valid JSON in this exact shape, no markdown fences, no commentary:
+{ "hook": "...", "body": "line one\\n\\nline two", "cta": "Comment WORD for ...", "hashtags": ["tag1", "tag2", ...] }`;
+
+function buildCaptionUserPrompt(input: {
+  topic: string;
+  language: IgWizardLanguage;
+  hook?: string;
+  cta?: string;
+}): string {
+  const lines = [
+    `Topic: ${input.topic || "AI tools for solo creators"}`,
+    `Language: ${input.language}`,
+  ];
+  if (input.hook && input.hook.trim()) lines.push(`Use this exact hook: ${input.hook.trim()}`);
+  if (input.cta && input.cta.trim()) lines.push(`Use this exact CTA: ${input.cta.trim()}`);
+  return lines.join("\n");
+}
+
+interface ParsedCaption {
+  hook?: unknown;
+  body?: unknown;
+  cta?: unknown;
+  hashtags?: unknown;
+}
+
+/** Normalise hashtags: strip leading #, drop blanks, dedupe, cap at 15. */
+export function normalizeHashtags(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of raw) {
+    if (typeof t !== "string") continue;
+    const clean = t.trim().replace(/^#+/, "").trim();
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+    if (out.length >= 15) break;
+  }
+  return out;
+}
+
+/** Join the structured parts into a copy-paste-ready caption string. */
+export function assembleCaption(parts: { hook: string; body: string; cta: string; hashtags: string[] }): string {
+  const blocks: string[] = [];
+  if (parts.hook.trim()) blocks.push(parts.hook.trim());
+  if (parts.body.trim()) blocks.push(parts.body.trim());
+  if (parts.cta.trim()) blocks.push(parts.cta.trim());
+  if (parts.hashtags.length) blocks.push(parts.hashtags.map((h) => `#${h}`).join(" "));
+  return blocks.join("\n\n");
+}
+
+function parseCaption(raw: string): { hook: string; body: string; cta: string; hashtags: string[] } | null {
+  const block = extractJsonBlock(raw);
+  let parsed: ParsedCaption;
+  try {
+    parsed = JSON.parse(block) as ParsedCaption;
+  } catch {
+    return null;
+  }
+  const hook = typeof parsed.hook === "string" ? parsed.hook.trim() : "";
+  const body = typeof parsed.body === "string" ? parsed.body.trim() : "";
+  const cta = typeof parsed.cta === "string" ? parsed.cta.trim() : "";
+  const hashtags = normalizeHashtags(parsed.hashtags);
+  // Need at least a hook or body to be a usable caption.
+  if (!hook && !body) return null;
+  return { hook, body, cta, hashtags };
+}
+
+export function normalizeTopic(raw: unknown): string {
+  return typeof raw === "string" ? raw.trim().slice(0, 300) : "";
+}
+
+export function normalizeOptionalLine(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const t = raw.trim().slice(0, 300);
+  return t.length > 0 ? t : undefined;
+}
+
+/**
+ * Generate a complete, ready-to-post caption for a topic. Optionally anchored
+ * to a pre-picked hook + CTA (e.g. the user's choices from the wizard's hook /
+ * lead lists) so the caption stays consistent with the funnel they're building.
+ */
+export async function generateCaption(input: {
+  topic: string;
+  language: IgWizardLanguage;
+  hook?: string;
+  cta?: string;
+}): Promise<CaptionGenerateOk | CaptionGenerateErr> {
+  if (!hasInternalAI()) {
+    return {
+      ok: false,
+      status: 503,
+      error: "No internal AI provider is configured. Add an Anthropic or OpenAI-compatible provider in Settings.",
+    };
+  }
+
+  const ai = await callInternalAI({
+    systemPrompt: CAPTION_SYSTEM_PROMPT,
+    userPrompt: buildCaptionUserPrompt(input),
+    maxTokens: 1500,
+    temperature: 0.8,
+    timeoutMs: 60_000,
+  });
+
+  if (!ai.ok) {
+    return { ok: false, status: 502, error: ai.error || "AI call failed" };
+  }
+
+  const parsed = parseCaption(ai.text);
+  if (!parsed) {
+    return {
+      ok: false,
+      status: 502,
+      error: "AI returned invalid caption JSON. Try again — the model occasionally adds prose around the JSON block.",
+    };
+  }
+
+  // If the user supplied a hook/cta, honour it verbatim regardless of what the
+  // model echoed back (it usually obeys, but this guarantees consistency).
+  const hook = input.hook?.trim() || parsed.hook;
+  const cta = input.cta?.trim() || parsed.cta;
+  const caption = assembleCaption({ hook, body: parsed.body, cta, hashtags: parsed.hashtags });
+
+  return {
+    ok: true,
+    result: {
+      hook,
+      body: parsed.body,
+      cta,
+      hashtags: parsed.hashtags,
+      caption,
+      language: input.language,
       model: "internal-ai",
     },
   };

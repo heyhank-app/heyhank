@@ -185,3 +185,67 @@ describe("POST /ig-wizard/generate", () => {
     expect(json.niche).toBe("(empty)");
   });
 });
+
+describe("POST /ig-wizard/caption", () => {
+  let app: Hono;
+
+  function captionPayload(): string {
+    return JSON.stringify({
+      hook: "AI wrote this in 3 minutes",
+      body: "Here's the workflow.\n\nNo fluff.",
+      cta: "Comment BUILD for the template",
+      hashtags: ["ai", "automation", "#ai"],
+    });
+  }
+
+  beforeEach(() => {
+    app = new Hono();
+    registerIgWizardRoutes(app);
+    mockReturn = { text: captionPayload(), ok: true, error: undefined };
+    mockHasProvider = true;
+  });
+
+  it("returns 200 with a fully assembled caption", async () => {
+    const res = await app.request("/ig-wizard/caption", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "AI workflows", language: "en" }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.hook).toBe("AI wrote this in 3 minutes");
+    expect(json.hashtags).toEqual(["ai", "automation"]); // deduped + #-stripped
+    expect(json.caption).toContain("#ai #automation");
+  });
+
+  it("uses a supplied hook + CTA verbatim", async () => {
+    const res = await app.request("/ig-wizard/caption", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "AI", hook: "Custom hook", cta: "Custom CTA" }),
+    });
+    const json = await res.json();
+    expect(json.hook).toBe("Custom hook");
+    expect(json.cta).toBe("Custom CTA");
+  });
+
+  it("returns 503 when no AI provider is configured", async () => {
+    mockHasProvider = false;
+    const res = await app.request("/ig-wizard/caption", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "x" }),
+    });
+    expect(res.status).toBe(503);
+  });
+
+  it("returns 502 when the model returns junk", async () => {
+    mockReturn = { text: "no json here", ok: true, error: undefined };
+    const res = await app.request("/ig-wizard/caption", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "x" }),
+    });
+    expect(res.status).toBe(502);
+  });
+});
