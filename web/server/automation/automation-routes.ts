@@ -226,6 +226,7 @@ export function registerAutomationRoutes(api: Hono): void {
         dmTemplate: body.dmTemplate,
         postId: typeof body.postId === "string" ? body.postId : null,
         targetUrl: typeof body.targetUrl === "string" ? body.targetUrl.trim() : null,
+        publicReply: typeof body.publicReply === "string" ? body.publicReply : null,
         enabled: typeof body.enabled === "boolean" ? body.enabled : true,
         notes: typeof body.notes === "string" ? body.notes : undefined,
       });
@@ -247,6 +248,9 @@ export function registerAutomationRoutes(api: Hono): void {
       if (typeof body.postId === "string" || body.postId === null) patch.postId = body.postId;
       if (typeof body.targetUrl === "string" || body.targetUrl === null) {
         patch.targetUrl = typeof body.targetUrl === "string" ? body.targetUrl.trim() : null;
+      }
+      if (typeof body.publicReply === "string" || body.publicReply === null) {
+        patch.publicReply = typeof body.publicReply === "string" ? body.publicReply : null;
       }
       const rule = updateRule(c.req.param("id"), patch as Parameters<typeof updateRule>[1]);
       if (!rule) return c.json({ error: "not found" }, 404);

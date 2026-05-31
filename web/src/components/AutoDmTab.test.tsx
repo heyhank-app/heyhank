@@ -373,6 +373,39 @@ describe("AutoDmTab — tracking link", () => {
   });
 });
 
+// ─── Public reply combo (publicReply on AutoDmRule) ──────────────────────────
+
+describe("AutoDmTab — public reply combo", () => {
+  it("submits publicReply alongside the DM fields", async () => {
+    let postedBody: Record<string, unknown> | null = null;
+    setFetchHandler("POST", "/api/automation/rules", (_url, init) => {
+      postedBody = init?.body ? JSON.parse(String(init.body)) : null;
+      return { status: 201, body: { ok: true, rule: makeRule() } };
+    });
+
+    render(<AutoDmTab showMessage={() => {}} />);
+    await waitFor(() => expect(screen.getByText(/Noch keine Rules/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Add new Auto-DM rule/ }));
+
+    fireEvent.change(screen.getByLabelText(/Keyword/), { target: { value: "GUIDE" } });
+    fireEvent.change(screen.getByLabelText(/DM Template/), { target: { value: "Sent!" } });
+    fireEvent.change(screen.getByLabelText(/Public Reply/), { target: { value: "Just sent it 📩" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create Rule/ }));
+
+    await waitFor(() => expect(postedBody).not.toBeNull());
+    expect(postedBody).toMatchObject({ keyword: "GUIDE", publicReply: "Just sent it 📩" });
+  });
+
+  it("shows a '💬 reply' badge + reply count on a rule card with publicReply", async () => {
+    setFetchHandler("GET", "/api/automation/rules", () => ({
+      body: { rules: [makeRule({ publicReply: "Sent 📩", publicReplyCount: 3 })] },
+    }));
+    render(<AutoDmTab showMessage={() => {}} />);
+    await waitFor(() => expect(screen.getByText(/reply/)).toBeInTheDocument());
+    expect(screen.getByText(/3 public replies/)).toBeInTheDocument();
+  });
+});
+
 describe("AutoDmTab — a11y", () => {
   it("passes axe accessibility checks on initial render", async () => {
     const { container } = render(<AutoDmTab showMessage={() => {}} />);

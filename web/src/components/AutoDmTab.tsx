@@ -17,8 +17,10 @@ interface AutoDmRule {
   keyword: string;
   dmTemplate: string;
   targetUrl?: string | null;
+  publicReply?: string | null;
   enabled: boolean;
   sentCount: number;
+  publicReplyCount?: number;
   sentTo: Array<{ postId: string; commenterId: string; sentAt: string }>;
   createdAt: string;
   updatedAt: string;
@@ -484,10 +486,21 @@ function RuleCard({
                 🔗 tracked
               </span>
             )}
+            {rule.publicReply && (
+              <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-300" title={rule.publicReply}>
+                💬 reply
+              </span>
+            )}
           </div>
           <p className="text-xs text-cc-fg/80 line-clamp-2">{rule.dmTemplate}</p>
           <div className="flex items-center gap-3 mt-1 text-[10px] text-cc-muted">
             <span>Sent {rule.sentCount}× to {rule.sentTo.length} unique users</span>
+            {rule.publicReplyCount ? (
+              <>
+                <span>•</span>
+                <span>{rule.publicReplyCount} public replies</span>
+              </>
+            ) : null}
             <span>•</span>
             <span>Updated {new Date(rule.updatedAt).toLocaleString()}</span>
           </div>
@@ -538,6 +551,7 @@ function RuleForm({
   const [keyword, setKeyword] = useState(rule?.keyword ?? "");
   const [dmTemplate, setDmTemplate] = useState(rule?.dmTemplate ?? "");
   const [targetUrl, setTargetUrl] = useState(rule?.targetUrl ?? "");
+  const [publicReply, setPublicReply] = useState(rule?.publicReply ?? "");
   const [postId, setPostId] = useState(rule?.postId ?? "");
   const [notes, setNotes] = useState(rule?.notes ?? "");
   const [saving, setSaving] = useState(false);
@@ -557,6 +571,7 @@ function RuleForm({
         keyword: keyword.trim(),
         dmTemplate,
         targetUrl: targetUrl.trim() || null,
+        publicReply: publicReply.trim() || null,
         postId: postId.trim() || null,
         notes: notes.trim() || undefined,
       };
@@ -664,6 +679,21 @@ function RuleForm({
               ) : (
                 <>Each DM mints a unique <code className="text-cc-accent">markusstoeger.com/go/…</code> link so clicks attribute to the commenter.</>
               )}
+            </p>
+          </div>
+
+          <div>
+            <label htmlFor="rule-publicreply" className="text-[10px] text-cc-muted uppercase tracking-wider block mb-1">Public Reply (optional, posted after the DM)</label>
+            <input
+              id="rule-publicreply"
+              type="text"
+              value={publicReply}
+              onChange={(e) => setPublicReply(e.target.value)}
+              placeholder="e.g. Just sent it 📩 check your DMs!"
+              className="w-full text-xs px-2 py-1.5 rounded-md bg-cc-bg border border-cc-border text-cc-fg focus:border-cc-accent focus:outline-none"
+            />
+            <p className="text-[10px] text-cc-muted mt-0.5">
+              A visible reply in the comment thread, posted only after the DM succeeds — boosts engagement + shows you respond. Needs the comment-management permission (IG <code className="text-cc-accent">instagram_manage_comments</code> / FB <code className="text-cc-accent">pages_manage_engagement</code>).
             </p>
           </div>
 

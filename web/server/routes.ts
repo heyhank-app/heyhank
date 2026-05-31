@@ -39,10 +39,10 @@ import { registerFederationRoutes } from "./routes/federation-routes.js";
 import { registerTelephonyRoutes } from "./routes/telephony-routes.js";
 import { registerSocialMediaRoutes } from "./routes/socialmedia-routes.js";
 import { registerSocialViewRoutes } from "./socialview/routes.js";
-import { registerMetaWebhookRoutes, setMetaSender } from "./automation/meta-webhook-routes.js";
+import { registerMetaWebhookRoutes, setMetaSender, setMetaReplySender } from "./automation/meta-webhook-routes.js";
 import { registerAutomationRoutes } from "./automation/automation-routes.js";
 import { registerGoRoutes } from "./automation/go-routes.js";
-import { sendPrivateReply } from "./automation/meta-send.js";
+import { sendPrivateReply, sendCommentReply } from "./automation/meta-send.js";
 import { registerAssistantRoutes } from "./routes/assistant-routes.js";
 import { registerEmailRoutes } from "./routes/email-routes.js";
 import { registerProviderRoutes } from "./routes/provider-routes.js";
@@ -1408,6 +1408,7 @@ export function createRoutes(
   // comments actually fire DMs (the dispatcher itself is unit-testable
   // without this wiring by passing a mock sender to setMetaSender()).
   setMetaSender(sendPrivateReply);
+  setMetaReplySender(sendCommentReply);
   registerAssistantRoutes(api);
   registerEmailRoutes(api);
   registerProviderRoutes(api);

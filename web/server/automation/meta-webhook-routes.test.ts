@@ -38,6 +38,7 @@ beforeEach(async () => {
 afterEach(() => {
   rmSync(tempHome, { recursive: true, force: true });
   routes.setMetaSender(null);
+  routes.setMetaReplySender(null);
 });
 
 function makeEvent(overrides: Partial<CommentEvent> = {}): CommentEvent {
@@ -146,5 +147,93 @@ describe("processCommentEvent — tracking-link personalization", () => {
     const result = await routes.processCommentEvent(makeEvent({ text: "unrelated" }));
     expect(result.matched).toBe(false);
     expect(result.sent).toBe(false);
+  });
+});
+
+describe("processCommentEvent — public reply combo", () => {
+  it("posts a public reply after a successful DM when publicReply is set", async () => {
+    rules.createRule({
+      platform: "instagram",
+      keyword: "GUIDE",
+      dmTemplate: "Sent you a DM!",
+      publicReply: "Just sent it 📩",
+    });
+
+    routes.setMetaSender(async () => ({ ok: true, messageId: "mid-1" }));
+    let repliedWith = "";
+    routes.setMetaReplySender(async ({ replyText, event }) => {
+      repliedWith = replyText;
+      // The reply targets the original comment.
+      expect(event.commentId).toBe("comment-1");
+      return { ok: true, replyId: "rid-1" };
+    });
+
+    const result = await routes.processCommentEvent(makeEvent());
+    expect(result.sent).toBe(true);
+    expect(result.replied).toBe(true);
+    expect(repliedWith).toBe("Just sent it 📩");
+
+    // The audit counter bumped on the rule.
+    const rule = rules.listRules()[0];
+    expect(rule.publicReplyCount).toBe(1);
+  });
+
+  it("does NOT post a reply when the DM send fails", async () => {
+    rules.createRule({
+      platform: "instagram",
+      keyword: "GUIDE",
+      dmTemplate: "Sent!",
+      publicReply: "Just sent it 📩",
+    });
+
+    routes.setMetaSender(async () => ({ ok: false, error: "window expired" }));
+    let replyCalled = false;
+    routes.setMetaReplySender(async () => {
+      replyCalled = true;
+      return { ok: true };
+    });
+
+    const result = await routes.processCommentEvent(makeEvent());
+    expect(result.sent).toBe(false);
+    expect(replyCalled).toBe(false);
+    expect(rules.listRules()[0].publicReplyCount).toBe(0);
+  });
+
+  it("DM still succeeds + replied:false when the reply API fails (best-effort)", async () => {
+    rules.createRule({
+      platform: "instagram",
+      keyword: "GUIDE",
+      dmTemplate: "Sent!",
+      publicReply: "Just sent it 📩",
+    });
+
+    routes.setMetaSender(async () => ({ ok: true, messageId: "mid-1" }));
+    routes.setMetaReplySender(async () => ({ ok: false, error: "instagram_manage_comments not granted" }));
+
+    const result = await routes.processCommentEvent(makeEvent());
+    expect(result.sent).toBe(true);
+    expect(result.replied).toBe(false);
+    expect(rules.listRules()[0].publicReplyCount).toBe(0); // not counted on failure
+  });
+
+  it("does not attempt a reply when publicReply is empty", async () => {
+    rules.createRule({
+      platform: "instagram",
+      keyword: "GUIDE",
+      dmTemplate: "Sent!",
+      // no publicReply
+    });
+
+    routes.setMetaSender(async () => ({ ok: true }));
+    let replyCalled = false;
+    routes.setMetaReplySender(async () => {
+      replyCalled = true;
+      return { ok: true };
+    });
+
+    const result = await routes.processCommentEvent(makeEvent());
+    expect(result.sent).toBe(true);
+    expect(result.replied).toBe(false);
+    expect(replyCalled).toBe(false);
   });
 });

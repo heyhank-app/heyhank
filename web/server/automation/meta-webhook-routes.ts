@@ -18,7 +18,7 @@ import type { Hono } from "hono";
 import { getMetaSecrets, exchangeOAuthCode, exchangeFbOAuthCode } from "./meta-secrets.js";
 import { getSettings as getAppSettings } from "../settings-manager.js";
 import { verifyMetaSignature, extractCommentEvents, type CommentEvent } from "./meta-webhook.js";
-import { findMatchingRule, recordSend } from "./auto-dm-rules.js";
+import { findMatchingRule, recordSend, recordReply } from "./auto-dm-rules.js";
 import { reserveCode, commitLink, trackingLinkBase, LINK_PLACEHOLDER } from "./conversion-tracker.js";
 
 /**
@@ -34,17 +34,29 @@ export type MetaSenderFn = (
   args: { event: CommentEvent; dmTemplate: string },
 ) => Promise<{ ok: boolean; messageId?: string; error?: string }>;
 
+export type MetaReplySenderFn = (
+  args: { event: CommentEvent; replyText: string },
+) => Promise<{ ok: boolean; replyId?: string; error?: string }>;
+
 let _sender: MetaSenderFn | null = null;
+let _replySender: MetaReplySenderFn | null = null;
 
 /** Wire the real Send API for production. Tests call this with a mock. */
 export function setMetaSender(fn: MetaSenderFn | null): void {
   _sender = fn;
 }
 
+/** Wire the real comment-reply API for production. Tests call this with a mock. */
+export function setMetaReplySender(fn: MetaReplySenderFn | null): void {
+  _replySender = fn;
+}
+
 export async function processCommentEvent(event: CommentEvent): Promise<{
   matched: boolean;
   ruleId?: string;
   sent: boolean;
+  /** Whether a public comment-reply was posted (combo engagement boost). */
+  replied?: boolean;
   error?: string;
 }> {
   const rule = findMatchingRule(event);
@@ -77,7 +89,27 @@ export async function processCommentEvent(event: CommentEvent): Promise<{
         messageId: result.messageId,
       });
     }
-    return { matched: true, ruleId: rule.id, sent: true };
+
+    // Combo engagement boost: post a public reply in the comment thread AFTER
+    // a successful DM. Gated on DM success (above) + best-effort — a reply
+    // failure (e.g. the instagram_manage_comments scope isn't approved yet)
+    // never undoes the DM; we just log it and report replied:false.
+    let replied = false;
+    if (rule.publicReply && rule.publicReply.trim() && _replySender) {
+      try {
+        const reply = await _replySender({ event, replyText: rule.publicReply });
+        if (reply.ok) {
+          recordReply(rule.id);
+          replied = true;
+        } else {
+          console.log(`[meta-webhook] public reply failed rule=${rule.id} error=${reply.error}`);
+        }
+      } catch (e) {
+        console.log(`[meta-webhook] public reply threw rule=${rule.id} error=${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    return { matched: true, ruleId: rule.id, sent: true, replied };
   } catch (e) {
     return { matched: true, ruleId: rule.id, sent: false, error: e instanceof Error ? e.message : String(e) };
   }

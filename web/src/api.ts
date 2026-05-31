@@ -1826,6 +1826,8 @@ export interface AutoDmRuleCreateInput {
   dmTemplate: string;
   /** Destination for the {{link}} tracking placeholder (usually a Substack post). */
   targetUrl?: string | null;
+  /** Optional public comment-reply posted after a successful DM (engagement boost). */
+  publicReply?: string | null;
   postId?: string | null;
   enabled?: boolean;
   notes?: string;
@@ -1837,8 +1839,10 @@ export interface AutoDmRule {
   keyword: string;
   dmTemplate: string;
   targetUrl?: string | null;
+  publicReply?: string | null;
   enabled: boolean;
   sentCount: number;
+  publicReplyCount?: number;
   createdAt: string;
   updatedAt: string;
   postId?: string | null;
