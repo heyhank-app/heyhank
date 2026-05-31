@@ -21,13 +21,30 @@ const axeRules = {
 const mockGenerate = vi.fn();
 const mockCreateRule = vi.fn();
 const mockCaption = vi.fn();
+const mockPlan = vi.fn();
 vi.mock("../api.js", () => ({
   igWizardApi: {
     generate: (...args: unknown[]) => mockGenerate(...args),
     caption: (...args: unknown[]) => mockCaption(...args),
+    plan: (...args: unknown[]) => mockPlan(...args),
   },
   autoDmRulesApi: { create: (...args: unknown[]) => mockCreateRule(...args) },
 }));
+
+function samplePlan(overrides: Record<string, unknown> = {}) {
+  return {
+    topic: "AI tools",
+    language: "en",
+    model: "internal-ai",
+    briefs: Array.from({ length: 30 }, (_, i) => ({
+      day: i + 1,
+      angle: `Angle ${i + 1}`,
+      hook: `Plan hook ${i + 1}`,
+      ctaType: (i % 3 === 0 ? "lead" : i % 3 === 1 ? "engagement" : "growth") as "lead" | "engagement" | "growth",
+    })),
+    ...overrides,
+  };
+}
 
 function sampleResult(overrides: Partial<{ language: string; niche: string }> = {}) {
   return {
@@ -73,6 +90,7 @@ beforeEach(() => {
   mockGenerate.mockReset();
   mockCreateRule.mockReset();
   mockCaption.mockReset();
+  mockPlan.mockReset();
   // jsdom doesn't ship a clipboard impl by default. Provide one.
   Object.assign(navigator, {
     clipboard: {
@@ -412,5 +430,50 @@ describe("IgWizardTab — Caption Composer", () => {
     await waitFor(() =>
       expect(mockCaption).toHaveBeenCalledWith(expect.objectContaining({ hook: "My hook", cta: "My CTA" })),
     );
+  });
+});
+
+// ─── 30-Day Plan mode ────────────────────────────────────────────────────────
+
+describe("IgWizardTab — 30-Day Plan mode", () => {
+  it("switches to plan mode and generates 30 briefs", async () => {
+    render(<IgWizardTab showMessage={() => {}} />);
+    fireEvent.click(screen.getByRole("tab", { name: /30-Day Plan/i }));
+    mockPlan.mockResolvedValueOnce(samplePlan());
+
+    fireEvent.change(screen.getByLabelText(/^Topic$/), { target: { value: "AI tools" } });
+    fireEvent.click(screen.getByRole("button", { name: /Generate 30-day plan/i }));
+
+    await waitFor(() => expect(screen.getByText(/30-Day Plan/)).toBeInTheDocument());
+    // All 30 days rendered.
+    expect(screen.getByText("Plan hook 1")).toBeInTheDocument();
+    expect(screen.getByText("Plan hook 30")).toBeInTheDocument();
+    expect(mockPlan).toHaveBeenCalledWith(expect.objectContaining({ topic: "AI tools" }));
+  });
+
+  it("'Compose' on a day loads its hook into the composer + switches to Single Post", async () => {
+    render(<IgWizardTab showMessage={() => {}} />);
+    fireEvent.click(screen.getByRole("tab", { name: /30-Day Plan/i }));
+    mockPlan.mockResolvedValueOnce(samplePlan());
+    fireEvent.change(screen.getByLabelText(/^Topic$/), { target: { value: "AI tools" } });
+    fireEvent.click(screen.getByRole("button", { name: /Generate 30-day plan/i }));
+    await waitFor(() => expect(screen.getByText("Plan hook 1")).toBeInTheDocument());
+
+    // Compose day 1. Anchor the regex so it doesn't also match "day 10".."day 19".
+    fireEvent.click(screen.getByRole("button", { name: /Compose caption for day 1$/i }));
+
+    // We're now in Single Post mode with the composer seeded with the hook.
+    await waitFor(() => expect(screen.getByText("📝 Caption Composer")).toBeInTheDocument());
+    const hookField = screen.getByLabelText(/Hook \(optional\)/i) as HTMLInputElement;
+    expect(hookField.value).toBe("Plan hook 1");
+    // The plan topic carried into the niche so the caption is about the same thing.
+    const nicheField = screen.getByLabelText(/^Niche$/) as HTMLInputElement;
+    expect(nicheField.value).toBe("AI tools");
+  });
+
+  it("shows the plan empty-state guidance before generating", async () => {
+    render(<IgWizardTab showMessage={() => {}} />);
+    fireEvent.click(screen.getByRole("tab", { name: /30-Day Plan/i }));
+    expect(screen.getByText(/One topic → 30 distinct post ideas/)).toBeInTheDocument();
   });
 });

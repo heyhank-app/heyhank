@@ -1833,11 +1833,35 @@ export interface IgCaptionInput {
   cta?: string;
 }
 
+export type IgPlanCtaType = "lead" | "engagement" | "growth";
+
+export interface IgPlanBrief {
+  day: number;
+  angle: string;
+  hook: string;
+  ctaType: IgPlanCtaType;
+}
+
+export interface IgPlanResult {
+  topic: string;
+  language: string;
+  briefs: IgPlanBrief[];
+  model: string;
+}
+
+export interface IgPlanInput {
+  topic: string;
+  language?: "en" | "de";
+  days?: number;
+}
+
 export const igWizardApi = {
   generate: (niche: string, language: "en" | "de" = "en") =>
     post<IgWizardResult>("/ig-wizard/generate", { niche, language }),
   caption: (input: IgCaptionInput) =>
     post<IgCaptionResult>("/ig-wizard/caption", { language: "en", ...input }),
+  plan: (input: IgPlanInput) =>
+    post<IgPlanResult>("/ig-wizard/plan", { language: "en", days: 30, ...input }),
 };
 
 // ─── Auto-DM rules (used by IG Wizard Create-Rule button) ────────────────────

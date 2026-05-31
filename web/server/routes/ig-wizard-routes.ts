@@ -6,10 +6,12 @@ import type { Hono } from "hono";
 import {
   generateIgWizard,
   generateCaption,
+  generatePlan,
   normalizeLanguage,
   normalizeNiche,
   normalizeTopic,
   normalizeOptionalLine,
+  normalizePlanDays,
 } from "../ig-wizard.js";
 
 export function registerIgWizardRoutes(api: Hono): void {
@@ -37,6 +39,23 @@ export function registerIgWizardRoutes(api: Hono): void {
       language: normalizeLanguage(body.language),
       hook: normalizeOptionalLine(body.hook),
       cta: normalizeOptionalLine(body.cta),
+    });
+    if (!res.ok) return c.json({ error: res.error }, res.status);
+    return c.json(res.result);
+  });
+
+  // Generate a multi-day content plan (light briefs) from one topic. Each brief
+  // expands into a full caption via /ig-wizard/caption.
+  api.post("/ig-wizard/plan", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      topic?: unknown;
+      language?: unknown;
+      days?: unknown;
+    };
+    const res = await generatePlan({
+      topic: normalizeTopic(body.topic),
+      language: normalizeLanguage(body.language),
+      days: normalizePlanDays(body.days),
     });
     if (!res.ok) return c.json({ error: res.error }, res.status);
     return c.json(res.result);

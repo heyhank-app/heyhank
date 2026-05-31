@@ -68,6 +68,38 @@ export interface CaptionGenerateErr {
   status: 400 | 502 | 503;
 }
 
+// ─── 30-Day Plan types ──────────────────────────────────────────────────────────
+
+export type PlanCtaType = "lead" | "engagement" | "growth";
+
+/** One day's post idea — a light brief. Expand into a full caption via the composer. */
+export interface PlanBrief {
+  day: number;
+  /** The specific lens/concept for this day, one concrete sentence. */
+  angle: string;
+  /** A scroll-stopping hook line for this post. */
+  hook: string;
+  /** Which CTA category fits this post. */
+  ctaType: PlanCtaType;
+}
+
+export interface PlanResult {
+  topic: string;
+  language: string;
+  briefs: PlanBrief[];
+  model: string;
+}
+
+export interface PlanGenerateOk {
+  ok: true;
+  result: PlanResult;
+}
+export interface PlanGenerateErr {
+  ok: false;
+  error: string;
+  status: 400 | 502 | 503;
+}
+
 export interface IgWizardGenerateResult {
   ok: true;
   result: IgWizardResult;
@@ -422,6 +454,123 @@ export async function generateCaption(input: {
       hashtags: parsed.hashtags,
       caption,
       language: input.language,
+      model: "internal-ai",
+    },
+  };
+}
+
+// ─── 30-Day Plan ────────────────────────────────────────────────────────────────
+
+const PLAN_SYSTEM_PROMPT = `You are a social-media strategist who turns ONE topic into a month of Instagram content that builds an email list.
+
+Generate a {{DAYS}}-day content plan for the given topic. Each day is a DISTINCT angle — a different lens on the same topic so the feed never feels repetitive. Rotate through frames like: educational how-to, personal story, contrarian take, behind-the-scenes, myth-bust, listicle, case study / result, common-mistake, tool spotlight, beginner question, advanced tip, comparison, prediction, quick win.
+
+For each day return:
+  - "day": the day number (1..{{DAYS}})
+  - "angle": one concrete sentence describing that day's specific post idea (not generic — name the actual takeaway)
+  - "hook": a scroll-stopping opening line, under 90 characters
+  - "ctaType": one of "lead", "engagement", "growth" — which CTA fits this post best
+
+Distribution of ctaType across the {{DAYS}} days: roughly 30% "lead" (the email-list/DM-funnel days), 40% "engagement", 30% "growth". Don't make every day a lead-magnet — that burns the audience.
+
+Rules:
+  - Each angle + hook must be genuinely different from the others. No near-duplicates.
+  - Match the requested language ("en" or "de"). For "de" write fluent native German.
+  - 1 emoji max per hook. Never use "as an AI", never refuse.
+
+Return ONLY valid JSON, no markdown fences, no commentary:
+{ "briefs": [ { "day": 1, "angle": "...", "hook": "...", "ctaType": "lead" }, ... {{DAYS}} items ] }`;
+
+interface ParsedPlan {
+  briefs?: unknown;
+}
+
+function normalizeCtaType(raw: unknown): PlanCtaType {
+  if (raw === "lead" || raw === "engagement" || raw === "growth") return raw;
+  return "engagement";
+}
+
+function parsePlan(raw: string, days: number): PlanBrief[] | null {
+  const block = extractJsonBlock(raw);
+  let parsed: ParsedPlan;
+  try {
+    parsed = JSON.parse(block) as ParsedPlan;
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed.briefs)) return null;
+  const briefs: PlanBrief[] = [];
+  for (const item of parsed.briefs) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const angle = typeof o.angle === "string" ? o.angle.trim() : "";
+    const hook = typeof o.hook === "string" ? o.hook.trim() : "";
+    if (!angle && !hook) continue;
+    briefs.push({
+      // Re-number sequentially so a missing/garbled day field never leaves holes.
+      day: briefs.length + 1,
+      angle,
+      hook,
+      ctaType: normalizeCtaType(o.ctaType),
+    });
+    if (briefs.length >= days) break;
+  }
+  return briefs.length > 0 ? briefs : null;
+}
+
+/** Clamp the requested day count to a sane 1..30 range. */
+export function normalizePlanDays(raw: unknown): number {
+  const n = typeof raw === "number" ? raw : typeof raw === "string" ? parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(n)) return 30;
+  return Math.max(1, Math.min(30, Math.round(n)));
+}
+
+/**
+ * Generate a multi-day Instagram content plan from one topic. Each day is a
+ * light brief (angle + hook + ctaType) — expand any of them into a full caption
+ * via generateCaption / the Caption Composer.
+ */
+export async function generatePlan(input: {
+  topic: string;
+  language: IgWizardLanguage;
+  days: number;
+}): Promise<PlanGenerateOk | PlanGenerateErr> {
+  if (!hasInternalAI()) {
+    return {
+      ok: false,
+      status: 503,
+      error: "No internal AI provider is configured. Add an Anthropic or OpenAI-compatible provider in Settings.",
+    };
+  }
+
+  const days = normalizePlanDays(input.days);
+  const ai = await callInternalAI({
+    systemPrompt: PLAN_SYSTEM_PROMPT.replace(/\{\{DAYS\}\}/g, String(days)),
+    userPrompt: `Topic: ${input.topic || "AI tools for solo creators"}\nLanguage: ${input.language}\nDays: ${days}`,
+    maxTokens: 4000,
+    temperature: 0.9,
+    timeoutMs: 90_000,
+  });
+
+  if (!ai.ok) {
+    return { ok: false, status: 502, error: ai.error || "AI call failed" };
+  }
+
+  const briefs = parsePlan(ai.text, days);
+  if (!briefs) {
+    return {
+      ok: false,
+      status: 502,
+      error: "AI returned an invalid plan. Try again — the model occasionally adds prose around the JSON block.",
+    };
+  }
+
+  return {
+    ok: true,
+    result: {
+      topic: input.topic || "(empty)",
+      language: input.language,
+      briefs,
       model: "internal-ai",
     },
   };

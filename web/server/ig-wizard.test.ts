@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   generateIgWizard,
   generateCaption,
+  generatePlan,
   normalizeLanguage,
   normalizeNiche,
   normalizeTopic,
   normalizeOptionalLine,
   normalizeHashtags,
   assembleCaption,
+  normalizePlanDays,
 } from "./ig-wizard.js";
 
 // Mock the AI provider for predictable tests.
@@ -203,6 +205,92 @@ describe("generateCaption", () => {
   it("returns 502 when the model returns junk", async () => {
     mockReturn = { text: "Sorry, I can't.", ok: true, error: undefined };
     const res = await generateCaption({ topic: "AI", language: "en" });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.status).toBe(502);
+  });
+});
+
+// ─── 30-Day Plan ────────────────────────────────────────────────────────────────
+
+describe("normalizePlanDays", () => {
+  it("defaults to 30 for non-numbers", () => {
+    expect(normalizePlanDays(undefined)).toBe(30);
+    expect(normalizePlanDays("abc")).toBe(30);
+  });
+  it("clamps to 1..30", () => {
+    expect(normalizePlanDays(0)).toBe(1);
+    expect(normalizePlanDays(100)).toBe(30);
+    expect(normalizePlanDays(7)).toBe(7);
+    expect(normalizePlanDays("14")).toBe(14);
+  });
+});
+
+describe("generatePlan", () => {
+  function planPayload(n: number): string {
+    return JSON.stringify({
+      briefs: Array.from({ length: n }, (_, i) => ({
+        day: i + 1,
+        angle: `Angle ${i + 1}`,
+        hook: `Hook ${i + 1}`,
+        ctaType: i % 3 === 0 ? "lead" : i % 3 === 1 ? "engagement" : "growth",
+      })),
+    });
+  }
+
+  beforeEach(() => {
+    mockReturn = { text: planPayload(30), ok: true, error: undefined };
+    mockHasProvider = true;
+  });
+
+  it("returns 30 sequentially-numbered briefs on success", async () => {
+    const res = await generatePlan({ topic: "AI tools", language: "en", days: 30 });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.result.briefs).toHaveLength(30);
+    expect(res.result.briefs[0].day).toBe(1);
+    expect(res.result.briefs[29].day).toBe(30);
+    expect(res.result.topic).toBe("AI tools");
+  });
+
+  it("re-numbers days sequentially even if the model skips/garbles day fields", async () => {
+    mockReturn = {
+      text: JSON.stringify({
+        briefs: [
+          { day: 5, angle: "a", hook: "h1", ctaType: "lead" },
+          { day: 99, angle: "b", hook: "h2", ctaType: "bogus" },
+        ],
+      }),
+      ok: true,
+      error: undefined,
+    };
+    const res = await generatePlan({ topic: "x", language: "en", days: 30 });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.result.briefs.map((b) => b.day)).toEqual([1, 2]);
+    // Unknown ctaType falls back to "engagement".
+    expect(res.result.briefs[1].ctaType).toBe("engagement");
+  });
+
+  it("caps the briefs at the requested day count", async () => {
+    mockReturn = { text: planPayload(30), ok: true, error: undefined };
+    const res = await generatePlan({ topic: "x", language: "en", days: 7 });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.result.briefs).toHaveLength(7);
+  });
+
+  it("returns 503 when no AI provider is configured", async () => {
+    mockHasProvider = false;
+    const res = await generatePlan({ topic: "x", language: "en", days: 30 });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.status).toBe(503);
+  });
+
+  it("returns 502 when the model returns junk", async () => {
+    mockReturn = { text: "not a plan", ok: true, error: undefined };
+    const res = await generatePlan({ topic: "x", language: "en", days: 30 });
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.status).toBe(502);

@@ -249,3 +249,58 @@ describe("POST /ig-wizard/caption", () => {
     expect(res.status).toBe(502);
   });
 });
+
+describe("POST /ig-wizard/plan", () => {
+  let app: Hono;
+
+  function planPayload(n: number): string {
+    return JSON.stringify({
+      briefs: Array.from({ length: n }, (_, i) => ({
+        day: i + 1,
+        angle: `Angle ${i + 1}`,
+        hook: `Hook ${i + 1}`,
+        ctaType: "engagement",
+      })),
+    });
+  }
+
+  beforeEach(() => {
+    app = new Hono();
+    registerIgWizardRoutes(app);
+    mockReturn = { text: planPayload(30), ok: true, error: undefined };
+    mockHasProvider = true;
+  });
+
+  it("returns 200 with 30 briefs", async () => {
+    const res = await app.request("/ig-wizard/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "AI tools", language: "en", days: 30 }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.briefs).toHaveLength(30);
+    expect(json.topic).toBe("AI tools");
+  });
+
+  it("clamps days to the 1..30 range", async () => {
+    mockReturn = { text: planPayload(30), ok: true, error: undefined };
+    const res = await app.request("/ig-wizard/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "x", days: 500 }),
+    });
+    const json = await res.json();
+    expect(json.briefs.length).toBeLessThanOrEqual(30);
+  });
+
+  it("returns 503 when no AI provider is configured", async () => {
+    mockHasProvider = false;
+    const res = await app.request("/ig-wizard/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "x" }),
+    });
+    expect(res.status).toBe(503);
+  });
+});
