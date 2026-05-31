@@ -439,45 +439,90 @@ describe("IgWizardTab — Caption Composer", () => {
 // ─── 30-Day Plan mode ────────────────────────────────────────────────────────
 
 describe("IgWizardTab — 30-Day Plan mode", () => {
-  it("switches to plan mode and generates 30 briefs", async () => {
+  async function generatePlan() {
     render(<IgWizardTab showMessage={() => {}} />);
     fireEvent.click(screen.getByRole("tab", { name: /30-Day Plan/i }));
     mockPlan.mockResolvedValueOnce(samplePlan());
-
     fireEvent.change(screen.getByLabelText(/^Topic$/), { target: { value: "AI tools" } });
     fireEvent.click(screen.getByRole("button", { name: /Generate 30-day plan/i }));
+    // Hooks now render in editable inputs (one per day).
+    await waitFor(() => expect(screen.getByLabelText(/Hook for day 1$/i)).toBeInTheDocument());
+  }
 
-    await waitFor(() => expect(screen.getByText(/30-Day Plan/)).toBeInTheDocument());
-    // All 30 days rendered.
-    expect(screen.getByText("Plan hook 1")).toBeInTheDocument();
-    expect(screen.getByText("Plan hook 30")).toBeInTheDocument();
+  it("switches to plan mode and generates 30 editable-hook briefs", async () => {
+    await generatePlan();
+    expect((screen.getByLabelText(/Hook for day 1$/i) as HTMLInputElement).value).toBe("Plan hook 1");
+    expect((screen.getByLabelText(/Hook for day 30$/i) as HTMLInputElement).value).toBe("Plan hook 30");
     expect(mockPlan).toHaveBeenCalledWith(expect.objectContaining({ topic: "AI tools" }));
   });
 
-  it("'Compose' on a day loads its hook into the composer + switches to Single Post", async () => {
-    render(<IgWizardTab showMessage={() => {}} />);
-    fireEvent.click(screen.getByRole("tab", { name: /30-Day Plan/i }));
-    mockPlan.mockResolvedValueOnce(samplePlan());
-    fireEvent.change(screen.getByLabelText(/^Topic$/), { target: { value: "AI tools" } });
-    fireEvent.click(screen.getByRole("button", { name: /Generate 30-day plan/i }));
-    await waitFor(() => expect(screen.getByText("Plan hook 1")).toBeInTheDocument());
+  it("editing one day's hook does NOT clear the other days", async () => {
+    await generatePlan();
+    // Edit day 1's hook.
+    fireEvent.change(screen.getByLabelText(/Hook for day 1$/i), { target: { value: "My edited hook" } });
+    // Day 1 changed; days 2 + 30 are still present + unchanged.
+    expect((screen.getByLabelText(/Hook for day 1$/i) as HTMLInputElement).value).toBe("My edited hook");
+    expect((screen.getByLabelText(/Hook for day 2$/i) as HTMLInputElement).value).toBe("Plan hook 2");
+    expect((screen.getByLabelText(/Hook for day 30$/i) as HTMLInputElement).value).toBe("Plan hook 30");
+  });
 
-    // Compose day 1. Anchor the regex so it doesn't also match "day 10".."day 19".
+  it("composing a day expands IN PLACE — the plan stays visible (no mode switch)", async () => {
+    await generatePlan();
+    mockCaption.mockResolvedValueOnce(sampleCaption());
+
+    // Expand day 1, then compose its caption.
     fireEvent.click(screen.getByRole("button", { name: /Compose caption for day 1$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Generate caption for day 1$/i }));
 
-    // We're now in Single Post mode with the composer seeded with the hook.
-    await waitFor(() => expect(screen.getByText("📝 Caption Composer")).toBeInTheDocument());
-    const hookField = screen.getByLabelText(/Hook \(optional\)/i) as HTMLInputElement;
-    expect(hookField.value).toBe("Plan hook 1");
-    // The plan topic carried into the niche so the caption is about the same thing.
-    const nicheField = screen.getByLabelText(/^Niche$/) as HTMLInputElement;
-    expect(nicheField.value).toBe("AI tools");
+    await waitFor(() => expect(screen.getByLabelText(/Composed caption for day 1$/i)).toBeInTheDocument());
+    // Still in Plan mode: the other days are right there.
+    expect(screen.getByLabelText(/Hook for day 2$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Hook for day 30$/i)).toBeInTheDocument();
+    // The edited hook flowed into the caption call.
+    expect(mockCaption).toHaveBeenCalledWith(expect.objectContaining({ topic: "AI tools", hook: "Plan hook 1" }));
+  });
+
+  it("saves a per-day draft in place", async () => {
+    await generatePlan();
+    mockCaption.mockResolvedValueOnce(sampleCaption());
+    fireEvent.click(screen.getByRole("button", { name: /Compose caption for day 1$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Generate caption for day 1$/i }));
+    await waitFor(() => expect(screen.getByLabelText(/Composed caption for day 1$/i)).toBeInTheDocument());
+
+    mockComposeDraft.mockResolvedValueOnce({
+      caption: sampleCaption(),
+      image: { filename: "i.png", url: "/api/media/file/i.png", path: "/x", prompt: "p", model: "gpt-image-2" },
+      imageError: null,
+      draft: { id: "pd1", text: "t", status: "draft", platforms: ["instagram"], mediaUrls: ["/api/media/file/i.png"], createdAt: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Generate image and save draft for day 1$/i }));
+    await waitFor(() => expect(screen.getByText(/✓ Draft saved → Drafts tab/)).toBeInTheDocument());
   });
 
   it("shows the plan empty-state guidance before generating", async () => {
     render(<IgWizardTab showMessage={() => {}} />);
     fireEvent.click(screen.getByRole("tab", { name: /30-Day Plan/i }));
     expect(screen.getByText(/One topic → 30 distinct post ideas/)).toBeInTheDocument();
+  });
+});
+
+// ─── Engagement / Growth CTA "Use" buttons ───────────────────────────────────
+
+describe("IgWizardTab — Use on engagement/growth CTAs", () => {
+  it("'✍️ Use' on an engagement CTA fills the composer CTA field", async () => {
+    mockGenerate.mockResolvedValueOnce(sampleResult());
+    render(<IgWizardTab showMessage={() => {}} />);
+    fireEvent.change(screen.getByLabelText(/^Niche$/), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Generate/i }));
+    await waitFor(() => expect(screen.getByText("📝 Caption Composer")).toBeInTheDocument());
+
+    // Switch to the Engagement CTA tab, then Use the first one.
+    fireEvent.click(screen.getByRole("tab", { name: /Engagement/i }));
+    const useButtons = screen.getAllByRole("button", { name: /Use CTA in caption composer/i });
+    fireEvent.click(useButtons[0]);
+
+    const ctaField = screen.getByLabelText(/Lead CTA \(optional\)/i) as HTMLInputElement;
+    expect(ctaField.value).toBe("Engagement 1");
   });
 });
 

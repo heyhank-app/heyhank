@@ -233,17 +233,6 @@ export function IgWizardTab({ showMessage }: Props) {
     }
   }, [planTopic, language, showMessage]);
 
-  // Jump a plan brief into the Single-Post composer: seed the hook + the topic
-  // (so the caption is about the same thing) and switch to Single mode where the
-  // composer lives.
-  const composeBrief = useCallback((brief: IgPlanBrief) => {
-    setComposerHook(brief.hook);
-    setComposerCta("");
-    if (planTopic.trim()) setNiche(planTopic.trim());
-    setMode("single");
-    showMessage(`Day ${brief.day} loaded into the Caption Composer.`);
-  }, [planTopic, showMessage]);
-
   const handleCreateRule = useCallback(
     async (lead: IgWizardLeadPackage) => {
       if (!lead.trigger || !lead.dmTemplate) {
@@ -540,13 +529,13 @@ export function IgWizardTab({ showMessage }: Props) {
               ) : (
                 <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 6 }}>
                   {activeStringCtas.map((cta, idx) => (
-                    <li key={idx}>
+                    <li key={idx} style={{ display: "flex", gap: 6 }}>
                       <button
                         type="button"
                         onClick={() => handleCopy(cta, "CTA")}
                         aria-label={`Copy CTA: ${cta}`}
                         style={{
-                          width: "100%",
+                          flex: 1,
                           textAlign: "left",
                           padding: "8px 12px",
                           background: "var(--card-bg, #f8f8f8)",
@@ -558,6 +547,24 @@ export function IgWizardTab({ showMessage }: Props) {
                       >
                         <span style={{ color: "var(--text-muted, #888)", marginRight: 8 }}>{idx + 1}.</span>
                         {cta}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => useCtaInComposer(cta)}
+                        aria-label={`Use CTA in caption composer: ${cta}`}
+                        title="Use in Caption Composer"
+                        style={{
+                          flex: "0 0 auto",
+                          padding: "8px 10px",
+                          background: "transparent",
+                          border: "1px solid var(--border, #ddd)",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          fontSize: 13,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        ✍️ Use
                       </button>
                     </li>
                   ))}
@@ -770,7 +777,8 @@ export function IgWizardTab({ showMessage }: Props) {
           error={planError}
           result={planResult}
           onGenerate={handlePlan}
-          onCompose={composeBrief}
+          onCopy={handleCopy}
+          showMessage={showMessage}
         />
       )}
     </div>
@@ -793,15 +801,16 @@ interface PlanModeProps {
   error: string | null;
   result: IgPlanResult | null;
   onGenerate: () => void;
-  onCompose: (brief: IgPlanBrief) => void;
+  onCopy: (text: string, label: string) => void;
+  showMessage: (text: string, isError?: boolean) => void;
 }
 
 /**
  * The "30-Day Plan" mode: one topic → a month of distinct post ideas. Each day
- * is a light brief (angle + hook + ctaType). Tapping "Compose" hands the brief
- * to the Single-Post Caption Composer to expand into a full caption.
+ * is an editable brief (angle + hook + ctaType) that expands IN PLACE into a
+ * caption + image + draft — the other days stay visible the whole time.
  */
-function PlanMode({ topic, setTopic, language, loading, error, result, onGenerate, onCompose }: PlanModeProps) {
+function PlanMode({ topic, setTopic, language, loading, error, result, onGenerate, onCopy, showMessage }: PlanModeProps) {
   return (
     <div>
       <section
@@ -865,64 +874,267 @@ function PlanMode({ topic, setTopic, language, loading, error, result, onGenerat
           </h3>
           <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 8 }}>
             {result.briefs.map((brief) => (
-              <li
-                key={brief.day}
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 10,
-                  padding: 10,
-                  background: "var(--card-bg, #f8f8f8)",
-                  border: "1px solid var(--border, #ddd)",
-                  borderRadius: 6,
-                }}
-              >
-                <span style={{ fontWeight: 600, color: "var(--text-muted, #888)", fontSize: 13, minWidth: 48 }}>
-                  Day {brief.day}
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 2 }}>{brief.hook}</div>
-                  <div style={{ fontSize: 12, color: "var(--text-muted, #666)" }}>{brief.angle}</div>
-                </div>
-                <span
-                  aria-label={`CTA type: ${CTA_TYPE_LABELS[brief.ctaType]}`}
-                  style={{
-                    fontSize: 11,
-                    padding: "2px 8px",
-                    borderRadius: 10,
-                    whiteSpace: "nowrap",
-                    background: CTA_TYPE_COLORS[brief.ctaType].bg,
-                    color: CTA_TYPE_COLORS[brief.ctaType].fg,
-                  }}
-                >
-                  {CTA_TYPE_LABELS[brief.ctaType]}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onCompose(brief)}
-                  aria-label={`Compose caption for day ${brief.day}`}
-                  title="Open this day in the Caption Composer"
-                  style={{
-                    flex: "0 0 auto",
-                    padding: "6px 12px",
-                    background: "var(--btn-primary, #0066cc)",
-                    color: "white",
-                    border: "none",
-                    borderRadius: 4,
-                    cursor: "pointer",
-                    fontSize: 12,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  ✍️ Compose
-                </button>
+              <li key={brief.day}>
+                <PlanBriefCard
+                  brief={brief}
+                  topic={result.topic === "(empty)" ? topic : result.topic}
+                  language={language}
+                  onCopy={onCopy}
+                  showMessage={showMessage}
+                />
               </li>
             ))}
           </ol>
           <p style={{ margin: "10px 0 0 0", fontSize: 12, color: "var(--text-muted, #888)" }}>
-            {language.toUpperCase()} · Tap <strong>Compose</strong> on a day to build its full caption in the Single Post tab.
+            {language.toUpperCase()} · Edit any hook, then <strong>Compose</strong> a day in place — the other days stay put.
           </p>
         </section>
+      )}
+    </div>
+  );
+}
+
+// ─── PlanBriefCard ───────────────────────────────────────────────────────────
+//
+// One day of the 30-day plan, worked IN PLACE: the hook is editable, and
+// "Compose" expands a caption + image + draft right under the brief without
+// navigating away — so the other 29 days stay on screen the whole time.
+
+function PlanBriefCard({
+  brief,
+  topic,
+  language,
+  onCopy,
+  showMessage,
+}: {
+  brief: IgPlanBrief;
+  topic: string;
+  language: "en" | "de";
+  onCopy: (text: string, label: string) => void;
+  showMessage: (text: string, isError?: boolean) => void;
+}) {
+  const [hook, setHook] = useState(brief.hook);
+  const [expanded, setExpanded] = useState(false);
+  const [caption, setCaption] = useState<IgCaptionResult | null>(null);
+  const [composing, setComposing] = useState(false);
+  const [platforms, setPlatforms] = useState<string[]>(["instagram"]);
+  const [hero, setHero] = useState("notebook");
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState<IgComposeDraftResult | null>(null);
+
+  const togglePlatform = (id: string) =>
+    setPlatforms((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+
+  async function handleCompose() {
+    setComposing(true);
+    setDraft(null);
+    try {
+      const res = await igWizardApi.caption({ topic, language, hook: hook.trim() || undefined });
+      setCaption(res);
+    } catch (e: unknown) {
+      showMessage(`Compose failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setComposing(false);
+    }
+  }
+
+  async function handleSaveDraft() {
+    if (!caption) return;
+    if (platforms.length === 0) {
+      showMessage("Pick at least one platform.", true);
+      return;
+    }
+    setSaving(true);
+    setDraft(null);
+    try {
+      const res = await igWizardApi.composeAndSaveDraft({
+        topic,
+        language,
+        platforms,
+        hero,
+        generateImage: true,
+        caption: { hook: caption.hook, body: caption.body, cta: caption.cta, hashtags: caption.hashtags },
+      });
+      setDraft(res);
+      showMessage(res.imageError ? `Day ${brief.day} draft saved (text-only)` : `Day ${brief.day} draft saved with image`, !!res.imageError);
+    } catch (e: unknown) {
+      showMessage(`Save draft failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "6px 8px",
+    fontSize: 14,
+    fontWeight: 500,
+    border: "1px solid var(--border, #ddd)",
+    borderRadius: 4,
+    background: "var(--bg, #fff)",
+  };
+
+  return (
+    <div style={{ padding: 10, background: "var(--card-bg, #f8f8f8)", border: "1px solid var(--border, #ddd)", borderRadius: 6 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <span style={{ fontWeight: 600, color: "var(--text-muted, #888)", fontSize: 13, minWidth: 48, paddingTop: 6 }}>
+          Day {brief.day}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <input
+            type="text"
+            value={hook}
+            onChange={(e) => setHook(e.target.value)}
+            aria-label={`Hook for day ${brief.day}`}
+            style={inputStyle}
+          />
+          <div style={{ fontSize: 12, color: "var(--text-muted, #666)", marginTop: 3 }}>{brief.angle}</div>
+        </div>
+        <span
+          aria-label={`CTA type: ${CTA_TYPE_LABELS[brief.ctaType]}`}
+          style={{
+            fontSize: 11,
+            padding: "2px 8px",
+            borderRadius: 10,
+            whiteSpace: "nowrap",
+            background: CTA_TYPE_COLORS[brief.ctaType].bg,
+            color: CTA_TYPE_COLORS[brief.ctaType].fg,
+            marginTop: 4,
+          }}
+        >
+          {CTA_TYPE_LABELS[brief.ctaType]}
+        </span>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-label={expanded ? `Collapse day ${brief.day}` : `Compose caption for day ${brief.day}`}
+          aria-expanded={expanded}
+          style={{
+            flex: "0 0 auto",
+            padding: "6px 12px",
+            background: expanded ? "transparent" : "var(--btn-primary, #0066cc)",
+            color: expanded ? "var(--text, #333)" : "white",
+            border: expanded ? "1px solid var(--border, #ddd)" : "none",
+            borderRadius: 4,
+            cursor: "pointer",
+            fontSize: 12,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {expanded ? "Hide" : "✍️ Compose"}
+        </button>
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--border, #ddd)" }}>
+          {!caption ? (
+            <button
+              type="button"
+              onClick={handleCompose}
+              disabled={composing}
+              aria-label={`Generate caption for day ${brief.day}`}
+              style={{
+                padding: "6px 14px",
+                background: composing ? "var(--btn-disabled, #ccc)" : "var(--btn-primary, #0066cc)",
+                color: "white",
+                border: "none",
+                borderRadius: 4,
+                cursor: composing ? "wait" : "pointer",
+                fontSize: 13,
+                fontWeight: 500,
+              }}
+            >
+              {composing ? "Composing…" : "Compose full caption"}
+            </button>
+          ) : (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <span style={{ fontSize: 12, fontWeight: 500 }}>Caption</span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => onCopy(caption.caption, "caption")}
+                    aria-label={`Copy caption for day ${brief.day}`}
+                    style={{ padding: "4px 10px", background: "transparent", border: "1px solid var(--border, #ddd)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
+                  >
+                    📋 Copy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCompose}
+                    disabled={composing}
+                    aria-label={`Regenerate caption for day ${brief.day}`}
+                    style={{ padding: "4px 10px", background: "transparent", border: "1px solid var(--border, #ddd)", borderRadius: 4, cursor: composing ? "wait" : "pointer", fontSize: 12 }}
+                  >
+                    {composing ? "…" : "↻ Redo"}
+                  </button>
+                </div>
+              </div>
+              <textarea
+                readOnly
+                aria-label={`Composed caption for day ${brief.day}`}
+                value={caption.caption}
+                rows={Math.min(14, caption.caption.split("\n").length + 2)}
+                style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", fontSize: 13, lineHeight: 1.5, fontFamily: "inherit", background: "var(--bg, #fff)", border: "1px solid var(--border, #ddd)", borderRadius: 4, resize: "vertical" }}
+              />
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", margin: "8px 0" }}>
+                <div role="group" aria-label="Target platforms" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {DRAFT_PLATFORMS.map((p) => (
+                    <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer" }}>
+                      <input type="checkbox" checked={platforms.includes(p.id)} onChange={() => togglePlatform(p.id)} aria-label={`Day ${brief.day} to ${p.label}`} />
+                      {p.label}
+                    </label>
+                  ))}
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                  Scene:
+                  <select value={hero} onChange={(e) => setHero(e.target.value)} aria-label={`Day ${brief.day} image scene`} style={{ padding: "3px 5px" }}>
+                    {HERO_SCENES.map((h) => (
+                      <option key={h.id} value={h.id}>{h.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveDraft}
+                disabled={saving}
+                aria-label={`Generate image and save draft for day ${brief.day}`}
+                style={{
+                  padding: "6px 14px",
+                  background: saving ? "var(--btn-disabled, #ccc)" : "var(--btn-primary, #0066cc)",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 4,
+                  cursor: saving ? "wait" : "pointer",
+                  fontSize: 13,
+                  fontWeight: 500,
+                }}
+              >
+                {saving ? "Generating image + saving…" : "✨ Image + Save as Draft"}
+              </button>
+              {saving && <span style={{ marginLeft: 8, fontSize: 11, color: "var(--text-muted, #888)" }}>~1 min…</span>}
+
+              {draft && (
+                <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "flex-start" }}>
+                  {draft.image ? (
+                    <img src={draft.image.url} alt={`Day ${brief.day} image`} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border, #ddd)" }} />
+                  ) : (
+                    <div style={{ width: 96, height: 96, borderRadius: 6, border: "1px dashed var(--border, #ddd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "var(--text-muted, #888)", textAlign: "center", padding: 6 }}>
+                      Text-only
+                    </div>
+                  )}
+                  <div style={{ fontSize: 12, color: "var(--success-text, #137333)", fontWeight: 500 }}>
+                    ✓ Draft saved → Drafts tab
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       )}
     </div>
   );
