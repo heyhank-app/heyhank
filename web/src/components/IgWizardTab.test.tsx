@@ -22,11 +22,13 @@ const mockGenerate = vi.fn();
 const mockCreateRule = vi.fn();
 const mockCaption = vi.fn();
 const mockPlan = vi.fn();
+const mockComposeDraft = vi.fn();
 vi.mock("../api.js", () => ({
   igWizardApi: {
     generate: (...args: unknown[]) => mockGenerate(...args),
     caption: (...args: unknown[]) => mockCaption(...args),
     plan: (...args: unknown[]) => mockPlan(...args),
+    composeAndSaveDraft: (...args: unknown[]) => mockComposeDraft(...args),
   },
   autoDmRulesApi: { create: (...args: unknown[]) => mockCreateRule(...args) },
 }));
@@ -91,6 +93,7 @@ beforeEach(() => {
   mockCreateRule.mockReset();
   mockCaption.mockReset();
   mockPlan.mockReset();
+  mockComposeDraft.mockReset();
   // jsdom doesn't ship a clipboard impl by default. Provide one.
   Object.assign(navigator, {
     clipboard: {
@@ -475,5 +478,77 @@ describe("IgWizardTab — 30-Day Plan mode", () => {
     render(<IgWizardTab showMessage={() => {}} />);
     fireEvent.click(screen.getByRole("tab", { name: /30-Day Plan/i }));
     expect(screen.getByText(/One topic → 30 distinct post ideas/)).toBeInTheDocument();
+  });
+});
+
+// ─── Image + Draft (compose-and-save-draft) ──────────────────────────────────
+
+describe("IgWizardTab — image + draft", () => {
+  async function composeFirst() {
+    mockGenerate.mockResolvedValueOnce(sampleResult());
+    render(<IgWizardTab showMessage={() => {}} />);
+    fireEvent.change(screen.getByLabelText(/^Niche$/), { target: { value: "self-hosting AI" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Generate/i }));
+    await waitFor(() => expect(screen.getByText("📝 Caption Composer")).toBeInTheDocument());
+    mockCaption.mockResolvedValueOnce(sampleCaption());
+    fireEvent.click(screen.getByRole("button", { name: /Compose full caption/i }));
+    await waitFor(() => expect(screen.getByLabelText(/Composed caption/i)).toBeInTheDocument());
+  }
+
+  it("saves a draft with the composed caption + selected platforms", async () => {
+    await composeFirst();
+    mockComposeDraft.mockResolvedValueOnce({
+      caption: sampleCaption(),
+      image: { filename: "img.png", url: "/api/media/file/img.png", path: "/x", prompt: "p", model: "gpt-image-2" },
+      imageError: null,
+      draft: { id: "d1", text: "t", status: "draft", platforms: ["instagram"], mediaUrls: ["/api/media/file/img.png"], firstComment: "#ai", createdAt: "" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Generate image and save as draft/i }));
+
+    await waitFor(() => expect(screen.getByText(/✓ Draft saved/)).toBeInTheDocument());
+    // The generated image preview is shown.
+    expect(screen.getByAltText(/Generated branded post image/i)).toBeInTheDocument();
+    // The compose call carried the verbatim caption + default platform.
+    expect(mockComposeDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        topic: "self-hosting AI",
+        platforms: ["instagram"],
+        caption: expect.objectContaining({ hook: "AI wrote this in 3 minutes" }),
+      }),
+    );
+  });
+
+  it("toggling a platform checkbox updates the saved platforms", async () => {
+    await composeFirst();
+    mockComposeDraft.mockResolvedValueOnce({
+      caption: sampleCaption(),
+      image: null,
+      imageError: null,
+      draft: { id: "d2", text: "t", status: "draft", platforms: ["instagram", "facebook"], mediaUrls: [], createdAt: "" },
+    });
+
+    fireEvent.click(screen.getByLabelText(/Post to Facebook/i));
+    fireEvent.click(screen.getByRole("button", { name: /Generate image and save as draft/i }));
+
+    await waitFor(() =>
+      expect(mockComposeDraft).toHaveBeenCalledWith(
+        expect.objectContaining({ platforms: ["instagram", "facebook"] }),
+      ),
+    );
+  });
+
+  it("shows a text-only fallback when the image fails but the draft saved", async () => {
+    await composeFirst();
+    mockComposeDraft.mockResolvedValueOnce({
+      caption: sampleCaption(),
+      image: null,
+      imageError: "gpt-image-2 failed: rate limit",
+      draft: { id: "d3", text: "t", status: "draft", platforms: ["instagram"], mediaUrls: [], createdAt: "" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Generate image and save as draft/i }));
+    await waitFor(() => expect(screen.getByText(/✓ Draft saved/)).toBeInTheDocument());
+    expect(screen.getByText(/Text-only draft/)).toBeInTheDocument();
   });
 });

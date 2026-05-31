@@ -18,7 +18,22 @@ import {
   type IgCaptionResult,
   type IgPlanResult,
   type IgPlanBrief,
+  type IgComposeDraftResult,
 } from "../api.js";
+
+const DRAFT_PLATFORMS: { id: string; label: string }[] = [
+  { id: "instagram", label: "Instagram" },
+  { id: "facebook", label: "Facebook" },
+  { id: "linkedin", label: "LinkedIn" },
+  { id: "threads", label: "Threads" },
+];
+
+const HERO_SCENES: { id: string; label: string }[] = [
+  { id: "notebook", label: "Notebook" },
+  { id: "laptop", label: "Laptop" },
+  { id: "phone", label: "Phone" },
+  { id: "workspace", label: "Workspace" },
+];
 
 type WizardMode = "single" | "plan";
 
@@ -129,6 +144,12 @@ export function IgWizardTab({ showMessage }: Props) {
   const [caption, setCaption] = useState<IgCaptionResult | null>(null);
   const [composing, setComposing] = useState(false);
 
+  // ── Image + Draft state ─────────────────────────────────────────────────────
+  const [draftPlatforms, setDraftPlatforms] = useState<string[]>(["instagram"]);
+  const [draftHero, setDraftHero] = useState("notebook");
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftResult, setDraftResult] = useState<IgComposeDraftResult | null>(null);
+
   const handleCompose = useCallback(async () => {
     setComposing(true);
     setCaption(null);
@@ -148,6 +169,42 @@ export function IgWizardTab({ showMessage }: Props) {
       setComposing(false);
     }
   }, [niche, language, composerHook, composerCta, showMessage]);
+
+  const togglePlatform = useCallback((id: string) => {
+    setDraftPlatforms((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+  }, []);
+
+  const handleSaveDraft = useCallback(async () => {
+    if (!caption) return;
+    if (draftPlatforms.length === 0) {
+      showMessage("Pick at least one platform.", true);
+      return;
+    }
+    setSavingDraft(true);
+    setDraftResult(null);
+    try {
+      const res = await igWizardApi.composeAndSaveDraft({
+        topic: niche.trim(),
+        language,
+        platforms: draftPlatforms,
+        hero: draftHero,
+        generateImage: true,
+        // Save the exact caption shown (no re-generation / drift).
+        caption: { hook: caption.hook, body: caption.body, cta: caption.cta, hashtags: caption.hashtags },
+      });
+      setDraftResult(res);
+      if (res.imageError) {
+        showMessage(`Draft saved (text-only — image failed: ${res.imageError})`, true);
+      } else {
+        showMessage("Draft saved with image — find it in the Drafts tab.");
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showMessage(`Save draft failed: ${msg}`, true);
+    } finally {
+      setSavingDraft(false);
+    }
+  }, [caption, niche, language, draftPlatforms, draftHero, showMessage]);
 
   const useHookInComposer = useCallback((hook: string) => {
     setComposerHook(hook);
@@ -612,6 +669,91 @@ export function IgWizardTab({ showMessage }: Props) {
                     {caption.hashtags.length} hashtags · {caption.language.toUpperCase()}
                   </p>
                 )}
+
+                {/* ── Generate branded image + save as draft ── */}
+                <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px dashed var(--border, #ddd)" }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8 }}>✨ Generate branded image + save as draft</div>
+
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 10 }}>
+                    <div role="group" aria-label="Target platforms" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {DRAFT_PLATFORMS.map((p) => (
+                        <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, cursor: "pointer" }}>
+                          <input
+                            type="checkbox"
+                            checked={draftPlatforms.includes(p.id)}
+                            onChange={() => togglePlatform(p.id)}
+                            aria-label={`Post to ${p.label}`}
+                          />
+                          {p.label}
+                        </label>
+                      ))}
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+                      Scene:
+                      <select
+                        value={draftHero}
+                        onChange={(e) => setDraftHero(e.target.value)}
+                        aria-label="Image hero scene"
+                        style={{ padding: "4px 6px" }}
+                      >
+                        {HERO_SCENES.map((h) => (
+                          <option key={h.id} value={h.id}>{h.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveDraft}
+                    disabled={savingDraft}
+                    aria-label="Generate image and save as draft"
+                    style={{
+                      padding: "8px 16px",
+                      background: savingDraft ? "var(--btn-disabled, #ccc)" : "var(--btn-primary, #0066cc)",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 4,
+                      cursor: savingDraft ? "wait" : "pointer",
+                      fontWeight: 500,
+                    }}
+                  >
+                    {savingDraft ? "Generating image + saving…" : "✨ Generate Image + Save as Draft"}
+                  </button>
+                  {savingDraft && (
+                    <span style={{ marginLeft: 10, fontSize: 12, color: "var(--text-muted, #888)" }}>
+                      Branded image generation takes ~1 minute…
+                    </span>
+                  )}
+
+                  {draftResult && (
+                    <div style={{ marginTop: 14, display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+                      {draftResult.image ? (
+                        <img
+                          src={draftResult.image.url}
+                          alt="Generated branded post image"
+                          style={{ width: 160, height: 160, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border, #ddd)" }}
+                        />
+                      ) : (
+                        <div style={{ width: 160, height: 160, borderRadius: 6, border: "1px dashed var(--border, #ddd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "var(--text-muted, #888)", textAlign: "center", padding: 8 }}>
+                          Text-only draft{draftResult.imageError ? " (image failed)" : ""}
+                        </div>
+                      )}
+                      <div style={{ flex: 1, minWidth: 200 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--success-text, #137333)", marginBottom: 4 }}>
+                          ✓ Draft saved
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--text-muted, #888)" }}>
+                          Platforms: {draftResult.draft.platforms.join(", ")}
+                          {draftResult.draft.firstComment ? <> · hashtags in first comment</> : null}
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--text-muted, #888)", marginTop: 4 }}>
+                          Open the <strong>Drafts</strong> tab to review, edit, schedule or publish it.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
         </section>

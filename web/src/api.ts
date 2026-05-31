@@ -1855,6 +1855,50 @@ export interface IgPlanInput {
   days?: number;
 }
 
+export interface IgCoverImage {
+  filename: string;
+  url: string;
+  path: string;
+  prompt: string;
+  model: string;
+}
+
+export interface IgComposeDraftInput {
+  topic: string;
+  language?: "en" | "de";
+  hook?: string;
+  cta?: string;
+  /** Target platforms for the draft (default ["instagram"]). */
+  platforms?: string[];
+  /** Hero scene for the Style-A image (notebook | laptop | phone | workspace). */
+  hero?: string;
+  /** Badge text on the image (default "Built with AI"). */
+  badge?: string;
+  /** Generate a branded image (default true). Set false for a text-only draft. */
+  generateImage?: boolean;
+  /** Pre-composed caption to save verbatim (skips re-generation on the server). */
+  caption?: { hook: string; body: string; cta: string; hashtags: string[] };
+}
+
+export interface IgComposeDraftPost {
+  id: string;
+  text: string;
+  status: string;
+  platforms: string[];
+  mediaUrls: string[];
+  firstComment?: string;
+  format?: string;
+  createdAt: string;
+}
+
+export interface IgComposeDraftResult {
+  caption: IgCaptionResult;
+  image: IgCoverImage | null;
+  /** Non-fatal image-generation error (the draft still saved, text-only). */
+  imageError: string | null;
+  draft: IgComposeDraftPost;
+}
+
 export const igWizardApi = {
   generate: (niche: string, language: "en" | "de" = "en") =>
     post<IgWizardResult>("/ig-wizard/generate", { niche, language }),
@@ -1862,6 +1906,8 @@ export const igWizardApi = {
     post<IgCaptionResult>("/ig-wizard/caption", { language: "en", ...input }),
   plan: (input: IgPlanInput) =>
     post<IgPlanResult>("/ig-wizard/plan", { language: "en", days: 30, ...input }),
+  composeAndSaveDraft: (input: IgComposeDraftInput) =>
+    post<IgComposeDraftResult>("/ig-wizard/compose-and-save-draft", { language: "en", ...input }),
 };
 
 // ─── Auto-DM rules (used by IG Wizard Create-Rule button) ────────────────────

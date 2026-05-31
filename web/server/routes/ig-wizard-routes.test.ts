@@ -13,6 +13,17 @@ vi.mock("../internal-ai.js", () => ({
   hasInternalAI: vi.fn(() => mockHasProvider),
 }));
 
+// Mock the cover generator + the social-media draft store so compose-and-save
+// tests never hit gpt-image-2 or write real draft files.
+const mockGenerateIgCover = vi.fn();
+const mockCreateDraft = vi.fn();
+vi.mock("../ig-cover.js", () => ({
+  generateIgCover: (...args: unknown[]) => mockGenerateIgCover(...args),
+}));
+vi.mock("../socialmedia/manager.js", () => ({
+  createDraft: (...args: unknown[]) => mockCreateDraft(...args),
+}));
+
 // Helper to build a valid JSON payload like the real model would return.
 function validPayload(): string {
   return JSON.stringify({
@@ -302,5 +313,101 @@ describe("POST /ig-wizard/plan", () => {
       body: JSON.stringify({ topic: "x" }),
     });
     expect(res.status).toBe(503);
+  });
+});
+
+describe("POST /ig-wizard/compose-and-save-draft", () => {
+  let app: Hono;
+
+  beforeEach(() => {
+    app = new Hono();
+    registerIgWizardRoutes(app);
+    mockHasProvider = true;
+    mockGenerateIgCover.mockReset();
+    mockCreateDraft.mockReset();
+    mockGenerateIgCover.mockResolvedValue({
+      filename: "img_1_a.png",
+      url: "/api/media/file/img_1_a.png",
+      path: "/tmp/img_1_a.png",
+      prompt: "…",
+      model: "gpt-image-2",
+    });
+    mockCreateDraft.mockImplementation(async (input: Record<string, unknown>) => ({
+      id: "draft-1",
+      status: "draft",
+      platforms: input.platforms,
+      text: input.text,
+      mediaUrls: input.mediaUrls,
+      firstComment: input.firstComment,
+      format: input.format,
+      createdAt: "2026-05-31T00:00:00.000Z",
+    }));
+  });
+
+  it("saves a draft verbatim from a pre-composed caption (no re-generation)", async () => {
+    const res = await app.request("/ig-wizard/compose-and-save-draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: "self-hosting AI",
+        platforms: ["instagram", "facebook"],
+        caption: { hook: "Stop renting AI", body: "Do this.", cta: "Comment BUILD", hashtags: ["ai", "selfhosted"] },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    // Draft text = hook+body+cta (no inline hashtags); hashtags → first comment.
+    expect(json.draft.text).toBe("Stop renting AI\n\nDo this.\n\nComment BUILD");
+    expect(json.draft.firstComment).toBe("#ai #selfhosted");
+    expect(json.draft.platforms).toEqual(["instagram", "facebook"]);
+    expect(json.draft.mediaUrls).toEqual(["/api/media/file/img_1_a.png"]);
+    // The image was generated with the caption's hook as the headline.
+    expect(mockGenerateIgCover).toHaveBeenCalledWith(expect.objectContaining({ headline: "Stop renting AI" }));
+    // Pre-composed → the AI caption generator was NOT called.
+    // (callInternalAI is mocked; assert createDraft got the verbatim text instead.)
+    expect(json.caption.hook).toBe("Stop renting AI");
+  });
+
+  it("still saves a text-only draft when image generation fails", async () => {
+    mockGenerateIgCover.mockRejectedValueOnce(new Error("gpt-image-2 failed: rate limit"));
+    const res = await app.request("/ig-wizard/compose-and-save-draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: "x",
+        caption: { hook: "H", body: "B", cta: "C", hashtags: [] },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.image).toBeNull();
+    expect(json.imageError).toMatch(/rate limit/);
+    expect(json.draft.mediaUrls).toEqual([]); // text-only
+  });
+
+  it("skips image generation when generateImage:false", async () => {
+    const res = await app.request("/ig-wizard/compose-and-save-draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: "x",
+        generateImage: false,
+        caption: { hook: "H", body: "B", cta: "C", hashtags: [] },
+      }),
+    });
+    const json = await res.json();
+    expect(mockGenerateIgCover).not.toHaveBeenCalled();
+    expect(json.image).toBeNull();
+  });
+
+  it("defaults platforms to [instagram] when none given", async () => {
+    const res = await app.request("/ig-wizard/compose-and-save-draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "x", caption: { hook: "H", body: "", cta: "", hashtags: [] } }),
+    });
+    const json = await res.json();
+    expect(json.draft.platforms).toEqual(["instagram"]);
   });
 });
