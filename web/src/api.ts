@@ -1824,6 +1824,8 @@ export interface AutoDmRuleCreateInput {
   platform: "instagram" | "facebook";
   keyword: string;
   dmTemplate: string;
+  /** Destination for the {{link}} tracking placeholder (usually a Substack post). */
+  targetUrl?: string | null;
   postId?: string | null;
   enabled?: boolean;
   notes?: string;
@@ -1834,6 +1836,7 @@ export interface AutoDmRule {
   platform: "instagram" | "facebook";
   keyword: string;
   dmTemplate: string;
+  targetUrl?: string | null;
   enabled: boolean;
   sentCount: number;
   createdAt: string;
@@ -1842,7 +1845,28 @@ export interface AutoDmRule {
   notes?: string;
 }
 
+export interface RuleFunnel {
+  ruleId: string;
+  keyword: string;
+  linksSent: number;
+  linksClicked: number;
+  totalClicks: number;
+  clickRate: number | null;
+  lastClickAt: string | null;
+}
+
+export interface FunnelSummary {
+  rules: RuleFunnel[];
+  totals: {
+    linksSent: number;
+    linksClicked: number;
+    totalClicks: number;
+    clickRate: number | null;
+  };
+}
+
 export const autoDmRulesApi = {
   create: (input: AutoDmRuleCreateInput) =>
     post<{ ok: boolean; rule: AutoDmRule }>("/automation/rules", input),
+  funnel: () => get<FunnelSummary>("/automation/funnel"),
 };

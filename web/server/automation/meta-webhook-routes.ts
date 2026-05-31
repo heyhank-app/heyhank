@@ -19,6 +19,7 @@ import { getMetaSecrets, exchangeOAuthCode, exchangeFbOAuthCode } from "./meta-s
 import { getSettings as getAppSettings } from "../settings-manager.js";
 import { verifyMetaSignature, extractCommentEvents, type CommentEvent } from "./meta-webhook.js";
 import { findMatchingRule, recordSend } from "./auto-dm-rules.js";
+import { reserveCode, commitLink, trackingLinkBase, LINK_PLACEHOLDER } from "./conversion-tracker.js";
 
 /**
  * Handle a single normalized comment event: find a matching rule, fire the
@@ -50,10 +51,32 @@ export async function processCommentEvent(event: CommentEvent): Promise<{
   if (!rule) return { matched: false, sent: false };
   if (!_sender) return { matched: true, ruleId: rule.id, sent: false, error: "no sender configured" };
 
+  // Personalise the DM with a tracking link iff the template opts in via the
+  // {{link}} placeholder AND the rule has a targetUrl. We reserve the short
+  // code BEFORE sending (the code must be inside the DM text), then commit the
+  // TrackedLink only on send success so failed sends leave no orphan links.
+  const wantsLink = Boolean(rule.targetUrl) && rule.dmTemplate.includes(LINK_PLACEHOLDER);
+  const code = wantsLink ? reserveCode() : null;
+  const dmText = code
+    ? rule.dmTemplate.split(LINK_PLACEHOLDER).join(`${trackingLinkBase()}/${code}`)
+    : rule.dmTemplate;
+
   try {
-    const result = await _sender({ event, dmTemplate: rule.dmTemplate });
+    const result = await _sender({ event, dmTemplate: dmText });
     if (!result.ok) return { matched: true, ruleId: rule.id, sent: false, error: result.error ?? "send failed" };
     recordSend(rule.id, event);
+    if (code) {
+      commitLink(code, {
+        ruleId: rule.id,
+        keyword: rule.keyword,
+        platform: rule.platform,
+        commenterId: event.commenterId,
+        commenterName: event.commenterName,
+        postId: event.postId,
+        targetUrl: rule.targetUrl as string,
+        messageId: result.messageId,
+      });
+    }
     return { matched: true, ruleId: rule.id, sent: true };
   } catch (e) {
     return { matched: true, ruleId: rule.id, sent: false, error: e instanceof Error ? e.message : String(e) };

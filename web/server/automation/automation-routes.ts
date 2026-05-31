@@ -16,6 +16,7 @@ import {
   deleteRule,
   type AutoDmPlatform,
 } from "./auto-dm-rules.js";
+import { buildFunnel, listLinks } from "./conversion-tracker.js";
 
 const SECRET_FIELDS = [
   // Instagram side
@@ -224,6 +225,7 @@ export function registerAutomationRoutes(api: Hono): void {
         keyword: body.keyword,
         dmTemplate: body.dmTemplate,
         postId: typeof body.postId === "string" ? body.postId : null,
+        targetUrl: typeof body.targetUrl === "string" ? body.targetUrl.trim() : null,
         enabled: typeof body.enabled === "boolean" ? body.enabled : true,
         notes: typeof body.notes === "string" ? body.notes : undefined,
       });
@@ -243,6 +245,9 @@ export function registerAutomationRoutes(api: Hono): void {
       if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
       if (typeof body.notes === "string") patch.notes = body.notes;
       if (typeof body.postId === "string" || body.postId === null) patch.postId = body.postId;
+      if (typeof body.targetUrl === "string" || body.targetUrl === null) {
+        patch.targetUrl = typeof body.targetUrl === "string" ? body.targetUrl.trim() : null;
+      }
       const rule = updateRule(c.req.param("id"), patch as Parameters<typeof updateRule>[1]);
       if (!rule) return c.json({ error: "not found" }, 404);
       return c.json(rule);
@@ -256,5 +261,22 @@ export function registerAutomationRoutes(api: Hono): void {
     const ok = deleteRule(c.req.param("id"));
     if (!ok) return c.json({ error: "not found" }, 404);
     return c.json({ ok: true });
+  });
+
+  // ─── Conversion Funnel ─────────────────────────────────────────────────
+
+  /**
+   * Click funnel grouped by rule: comment→DM→click. Reflects only DMs that
+   * carried a {{link}} tracking link. Pair `funnel.rules[].linksSent` with the
+   * rule's own `sentCount` to see how many sends were click-measurable.
+   */
+  api.get("/automation/funnel", (c) => {
+    return c.json(buildFunnel());
+  });
+
+  /** Raw tracked links (newest first), optional ?ruleId filter. For drill-down. */
+  api.get("/automation/links", (c) => {
+    const ruleId = c.req.query("ruleId");
+    return c.json({ links: listLinks(ruleId ? { ruleId } : undefined) });
   });
 }

@@ -69,6 +69,10 @@ beforeEach(() => {
   fetchHandlers = new Map();
   setFetchHandler("GET", "/api/automation/rules", () => ({ body: { rules: [] } }));
   setFetchHandler("GET", "/api/automation/meta-secrets", () => ({ body: configuredSecretsBody() }));
+  // Default: empty funnel — tests that assert click data set their own handler.
+  setFetchHandler("GET", "/api/automation/funnel", () => ({
+    body: { rules: [], totals: { linksSent: 0, linksClicked: 0, totalClicks: 0, clickRate: null } },
+  }));
   // Default: no pages connected — every test that wants pages sets its own handler.
   setFetchHandler("GET", "/api/automation/connected-pages", () => ({
     body: { pages: [], needsReconnect: true, reason: "no FB access token configured" },
@@ -278,6 +282,94 @@ describe("AutoDmTab — Connected Pages panel", () => {
     await waitFor(() => expect(openSpy).toHaveBeenCalled());
     const url = openSpy.mock.calls[0][0] as string;
     expect(url).toMatch(/facebook\.com\/v21\.0\/dialog\/oauth/);
+  });
+});
+
+// ─── Click Funnel panel ──────────────────────────────────────────────────────
+//
+// Conversion tracking added 2026-05-31. The panel surfaces the comment→DM→click
+// funnel from /api/automation/funnel. Only DMs that carried a {{link}} tracking
+// link are measurable; the rule's targetUrl + {{link}} placeholder opt it in.
+
+describe("AutoDmTab — Click Funnel panel", () => {
+  it("renders the empty hint when no clicks are tracked yet", async () => {
+    render(<AutoDmTab showMessage={() => {}} />);
+    await waitFor(() => expect(screen.getByText("Click Funnel")).toBeInTheDocument());
+    expect(screen.getByText(/No tracked clicks yet/)).toBeInTheDocument();
+  });
+
+  it("shows overall CTR + per-rule rows when funnel data is present", async () => {
+    setFetchHandler("GET", "/api/automation/rules", () => ({ body: { rules: [makeRule({ id: "rule-1", keyword: "COURSES" })] } }));
+    setFetchHandler("GET", "/api/automation/funnel", () => ({
+      body: {
+        rules: [
+          { ruleId: "rule-1", keyword: "COURSES", linksSent: 4, linksClicked: 3, totalClicks: 5, clickRate: 0.75, lastClickAt: "2026-05-30T10:00:00.000Z" },
+        ],
+        totals: { linksSent: 4, linksClicked: 3, totalClicks: 5, clickRate: 0.75 },
+      },
+    }));
+    render(<AutoDmTab showMessage={() => {}} />);
+    // 75% appears twice: the overall CTR badge + the single rule's own rate.
+    await waitFor(() => expect(screen.getAllByText("75%").length).toBeGreaterThanOrEqual(2));
+    // Per-rule row shows the clicked/sent ratio.
+    expect(screen.getByText(/3\/4 clicked/)).toBeInTheDocument();
+    // Summary stats.
+    expect(screen.getByText("Links sent")).toBeInTheDocument();
+  });
+});
+
+// ─── Tracking link field (targetUrl + {{link}}) ──────────────────────────────
+
+describe("AutoDmTab — tracking link", () => {
+  it("submits targetUrl + a {{link}} template when the link is set up", async () => {
+    let postedBody: Record<string, unknown> | null = null;
+    setFetchHandler("POST", "/api/automation/rules", (_url, init) => {
+      postedBody = init?.body ? JSON.parse(String(init.body)) : null;
+      return { status: 201, body: { ok: true, rule: makeRule() } };
+    });
+
+    render(<AutoDmTab showMessage={() => {}} />);
+    await waitFor(() => expect(screen.getByText(/Noch keine Rules/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Add new Auto-DM rule/ }));
+
+    fireEvent.change(screen.getByLabelText(/Keyword/), { target: { value: "GUIDE" } });
+    fireEvent.change(screen.getByLabelText(/DM Template/), { target: { value: "Here you go: {{link}}" } });
+    fireEvent.change(screen.getByLabelText(/Target URL/), { target: { value: "https://markusstoeger.substack.com/p/guide" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create Rule/ }));
+
+    await waitFor(() => expect(postedBody).not.toBeNull());
+    expect(postedBody).toMatchObject({
+      keyword: "GUIDE",
+      dmTemplate: "Here you go: {{link}}",
+      targetUrl: "https://markusstoeger.substack.com/p/guide",
+    });
+  });
+
+  it("the {{link}} insert button appends the placeholder to the DM template", async () => {
+    render(<AutoDmTab showMessage={() => {}} />);
+    await waitFor(() => expect(screen.getByText(/Noch keine Rules/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Add new Auto-DM rule/ }));
+
+    const template = screen.getByLabelText(/DM Template/) as HTMLTextAreaElement;
+    fireEvent.change(template, { target: { value: "Here you go:" } });
+    fireEvent.click(screen.getByRole("button", { name: /Insert tracking link placeholder/ }));
+    expect(template.value).toBe("Here you go: {{link}}");
+  });
+
+  it("warns when {{link}} is present but no Target URL is set", async () => {
+    render(<AutoDmTab showMessage={() => {}} />);
+    await waitFor(() => expect(screen.getByText(/Noch keine Rules/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Add new Auto-DM rule/ }));
+    fireEvent.change(screen.getByLabelText(/DM Template/), { target: { value: "Broken {{link}}" } });
+    expect(screen.getByText(/will be sent literally/)).toBeInTheDocument();
+  });
+
+  it("shows a '🔗 tracked' badge on a rule card with targetUrl + {{link}}", async () => {
+    setFetchHandler("GET", "/api/automation/rules", () => ({
+      body: { rules: [makeRule({ dmTemplate: "Tap: {{link}}", targetUrl: "https://markusstoeger.substack.com/p/x" })] },
+    }));
+    render(<AutoDmTab showMessage={() => {}} />);
+    await waitFor(() => expect(screen.getByText(/tracked/)).toBeInTheDocument());
   });
 });
 

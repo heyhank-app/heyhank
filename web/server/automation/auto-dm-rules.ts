@@ -30,8 +30,19 @@ export interface AutoDmRule {
   postId?: string | null;
   /** Case-insensitive substring the comment text must contain. */
   keyword: string;
-  /** The DM body sent via the Private-Reply Send API. */
+  /**
+   * The DM body sent via the Private-Reply Send API. May contain the literal
+   * placeholder `{{link}}`, which is replaced at send-time with a personalised
+   * tracking link (markusstoeger.com/go/<code>) iff `targetUrl` is set.
+   */
   dmTemplate: string;
+  /**
+   * Destination the DM's {{link}} redirects to (usually a Substack post URL).
+   * When set + the dmTemplate contains {{link}}, each send mints a tracked
+   * link so we can measure the comment→DM→click funnel. Optional: a DM with
+   * no link still works, it just isn't click-measurable.
+   */
+  targetUrl?: string | null;
   enabled: boolean;
   /** Total successful sends across all triggers (audit). */
   sentCount: number;
@@ -79,7 +90,7 @@ export function getRule(id: string): AutoDmRule | null {
 
 export function createRule(
   input: Pick<AutoDmRule, "platform" | "keyword" | "dmTemplate"> &
-    Partial<Pick<AutoDmRule, "postId" | "enabled" | "notes">>,
+    Partial<Pick<AutoDmRule, "postId" | "enabled" | "notes" | "targetUrl">>,
 ): AutoDmRule {
   const now = new Date().toISOString();
   const rule: AutoDmRule = {
@@ -88,6 +99,7 @@ export function createRule(
     postId: input.postId ?? null,
     keyword: input.keyword.trim(),
     dmTemplate: input.dmTemplate,
+    targetUrl: input.targetUrl ?? null,
     enabled: input.enabled ?? true,
     sentCount: 0,
     sentTo: [],

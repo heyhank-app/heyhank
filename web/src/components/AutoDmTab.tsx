@@ -16,12 +16,33 @@ interface AutoDmRule {
   postId: string | null;
   keyword: string;
   dmTemplate: string;
+  targetUrl?: string | null;
   enabled: boolean;
   sentCount: number;
   sentTo: Array<{ postId: string; commenterId: string; sentAt: string }>;
   createdAt: string;
   updatedAt: string;
   notes?: string;
+}
+
+interface RuleFunnel {
+  ruleId: string;
+  keyword: string;
+  linksSent: number;
+  linksClicked: number;
+  totalClicks: number;
+  clickRate: number | null;
+  lastClickAt: string | null;
+}
+
+interface FunnelSummary {
+  rules: RuleFunnel[];
+  totals: {
+    linksSent: number;
+    linksClicked: number;
+    totalClicks: number;
+    clickRate: number | null;
+  };
 }
 
 interface MetaSecretsStatus {
@@ -84,6 +105,7 @@ async function apiSend<T>(path: string, method: "POST" | "PATCH" | "DELETE", bod
 export function AutoDmTab({ showMessage }: Props) {
   const [rules, setRules] = useState<AutoDmRule[]>([]);
   const [secrets, setSecrets] = useState<MetaSecretsStatus | null>(null);
+  const [funnel, setFunnel] = useState<FunnelSummary | null>(null);
   const [pagesData, setPagesData] = useState<ConnectedPagesResponse | null>(null);
   const [pagesLoading, setPagesLoading] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -93,12 +115,15 @@ export function AutoDmTab({ showMessage }: Props) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [rulesRes, secretsRes] = await Promise.all([
+      const [rulesRes, secretsRes, funnelRes] = await Promise.all([
         apiGet<{ rules: AutoDmRule[] }>("/api/automation/rules"),
         apiGet<MetaSecretsStatus>("/api/automation/meta-secrets"),
+        // Funnel is best-effort — a failure here shouldn't blank the whole tab.
+        apiGet<FunnelSummary>("/api/automation/funnel").catch(() => null),
       ]);
       setRules(rulesRes.rules);
       setSecrets(secretsRes);
+      setFunnel(funnelRes);
     } catch (e) {
       showMessage(e instanceof Error ? e.message : "Failed to load rules", true);
     } finally {
@@ -223,6 +248,8 @@ export function AutoDmTab({ showMessage }: Props) {
         </button>
       </div>
 
+      <FunnelPanel funnel={funnel} rules={rules} />
+
       {loading ? (
         <div className="text-xs text-cc-muted">Loading…</div>
       ) : rules.length === 0 ? (
@@ -343,6 +370,81 @@ function ConnectedPagesCard({
   );
 }
 
+// ─── FunnelPanel ─────────────────────────────────────────────────────────────
+//
+// Click funnel for the Auto-DM tracking links: comment → DM sent → link
+// clicked. Only DMs whose template carried a {{link}} placeholder (+ a rule
+// targetUrl) appear here — those are the click-measurable sends. Subscribes
+// are intentionally not tracked (Substack has no attribution API); the UTM
+// params on the redirect surface the source inside Substack's own analytics.
+
+function pct(rate: number | null): string {
+  if (rate === null) return "—";
+  return `${Math.round(rate * 100)}%`;
+}
+
+function FunnelPanel({ funnel, rules }: { funnel: FunnelSummary | null; rules: AutoDmRule[] }) {
+  // Nothing tracked yet → show a hint that explains how to opt a rule in.
+  const hasData = funnel && funnel.totals.linksSent > 0;
+  const keywordFor = (ruleId: string) =>
+    rules.find((r) => r.id === ruleId)?.keyword ?? funnel?.rules.find((f) => f.ruleId === ruleId)?.keyword ?? "(deleted rule)";
+
+  return (
+    <div className="rounded-xl border border-cc-border bg-cc-card p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-medium text-cc-fg">Click Funnel</div>
+          <p className="text-[10px] text-cc-muted mt-0.5">
+            DM sent → link clicked. Add <code className="text-cc-accent">{"{{link}}"}</code> to a rule's DM + set a Target URL to make it measurable.
+          </p>
+        </div>
+        {hasData && (
+          <div className="text-right shrink-0">
+            <div className="text-lg font-semibold text-cc-fg leading-none">{pct(funnel!.totals.clickRate)}</div>
+            <div className="text-[9px] text-cc-muted uppercase tracking-wider mt-0.5">overall CTR</div>
+          </div>
+        )}
+      </div>
+
+      {!hasData ? (
+        <div className="text-[11px] text-cc-muted py-1">
+          No tracked clicks yet. Once a rule with a tracking link fires a DM and someone taps it, the funnel shows up here.
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-2 pt-1">
+            <Stat label="Links sent" value={funnel!.totals.linksSent} />
+            <Stat label="Clicked" value={funnel!.totals.linksClicked} />
+            <Stat label="Total clicks" value={funnel!.totals.totalClicks} />
+          </div>
+          <ul className="divide-y divide-cc-border/40 pt-1">
+            {funnel!.rules.map((f) => (
+              <li key={f.ruleId} className="flex items-center gap-2 py-1.5">
+                <code className="text-[11px] font-mono text-cc-accent bg-cc-bg px-1.5 py-0.5 rounded shrink-0">{keywordFor(f.ruleId)}</code>
+                <div className="flex-1 min-w-0 text-[10px] text-cc-muted">
+                  {f.linksClicked}/{f.linksSent} clicked
+                  {f.totalClicks > f.linksClicked ? <> · {f.totalClicks} total taps</> : null}
+                  {f.lastClickAt ? <> · last {new Date(f.lastClickAt).toLocaleDateString()}</> : null}
+                </div>
+                <span className="text-xs font-semibold text-cc-fg shrink-0 tabular-nums">{pct(f.clickRate)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg bg-cc-bg border border-cc-border/50 p-2 text-center">
+      <div className="text-base font-semibold text-cc-fg leading-none tabular-nums">{value}</div>
+      <div className="text-[9px] text-cc-muted uppercase tracking-wider mt-1">{label}</div>
+    </div>
+  );
+}
+
 // ─── RuleCard ────────────────────────────────────────────────────────────────
 
 function RuleCard({
@@ -376,6 +478,11 @@ function RuleCard({
             )}
             {!rule.enabled && (
               <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-cc-border/30 text-cc-muted">paused</span>
+            )}
+            {rule.targetUrl && rule.dmTemplate.includes("{{link}}") && (
+              <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-cc-accent/15 text-cc-accent" title={rule.targetUrl}>
+                🔗 tracked
+              </span>
             )}
           </div>
           <p className="text-xs text-cc-fg/80 line-clamp-2">{rule.dmTemplate}</p>
@@ -430,9 +537,12 @@ function RuleForm({
   const [platform, setPlatform] = useState<Platform>(rule?.platform ?? "instagram");
   const [keyword, setKeyword] = useState(rule?.keyword ?? "");
   const [dmTemplate, setDmTemplate] = useState(rule?.dmTemplate ?? "");
+  const [targetUrl, setTargetUrl] = useState(rule?.targetUrl ?? "");
   const [postId, setPostId] = useState(rule?.postId ?? "");
   const [notes, setNotes] = useState(rule?.notes ?? "");
   const [saving, setSaving] = useState(false);
+
+  const hasPlaceholder = dmTemplate.includes("{{link}}");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -446,6 +556,7 @@ function RuleForm({
         platform,
         keyword: keyword.trim(),
         dmTemplate,
+        targetUrl: targetUrl.trim() || null,
         postId: postId.trim() || null,
         notes: notes.trim() || undefined,
       };
@@ -521,7 +632,39 @@ function RuleForm({
               className="w-full text-xs px-2 py-1.5 rounded-md bg-cc-bg border border-cc-border text-cc-fg focus:border-cc-accent focus:outline-none resize-y"
               required
             />
-            <p className="text-[10px] text-cc-muted mt-0.5">Max 1000 chars. Plain text only — links are auto-clickable.</p>
+            <p className="text-[10px] text-cc-muted mt-0.5">
+              Max 1000 chars. Plain text only — links are auto-clickable. Insert{" "}
+              <button
+                type="button"
+                onClick={() => setDmTemplate((t) => (t.includes("{{link}}") ? t : `${t}${t && !t.endsWith(" ") ? " " : ""}{{link}}`))}
+                className="text-cc-accent underline decoration-dotted hover:text-cc-accent/80"
+                aria-label="Insert tracking link placeholder"
+              >
+                {"{{link}}"}
+              </button>{" "}
+              to drop in a tracked link to your Target URL.
+            </p>
+          </div>
+
+          <div>
+            <label htmlFor="rule-targeturl" className="text-[10px] text-cc-muted uppercase tracking-wider block mb-1">Target URL (for {"{{link}}"} tracking)</label>
+            <input
+              id="rule-targeturl"
+              type="url"
+              value={targetUrl}
+              onChange={(e) => setTargetUrl(e.target.value)}
+              placeholder="https://markusstoeger.substack.com/p/your-post"
+              className="w-full text-xs px-2 py-1.5 rounded-md bg-cc-bg border border-cc-border text-cc-fg focus:border-cc-accent focus:outline-none"
+            />
+            <p className="text-[10px] text-cc-muted mt-0.5">
+              {hasPlaceholder && !targetUrl.trim() ? (
+                <span className="text-amber-300">⚠ Template has {"{{link}}"} but no Target URL — the placeholder will be sent literally.</span>
+              ) : !hasPlaceholder && targetUrl.trim() ? (
+                <span className="text-amber-300">⚠ Target URL set but template has no {"{{link}}"} — no tracked link will be sent.</span>
+              ) : (
+                <>Each DM mints a unique <code className="text-cc-accent">markusstoeger.com/go/…</code> link so clicks attribute to the commenter.</>
+              )}
+            </p>
           </div>
 
           <div>
