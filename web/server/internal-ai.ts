@@ -13,12 +13,21 @@ interface InternalAiRequest {
   maxTokens?: number;
   temperature?: number;
   timeoutMs?: number;
+  /**
+   * Enable Anthropic's server-side `web_search` tool so the model can pull
+   * fresh, real-world facts before answering. ONLY works when the resolved
+   * internal provider is Anthropic — ignored otherwise (callers should gate on
+   * `internalAiSupportsWebSearch()`). maxUses caps the number of searches.
+   */
+  webSearch?: { maxUses?: number };
 }
 
 interface InternalAiResponse {
   text: string;
   ok: boolean;
   error?: string;
+  /** Source URLs the web_search tool cited (when webSearch was used). */
+  sources?: string[];
 }
 
 /** Known provider base URLs for OpenAI-compatible endpoints */
@@ -164,6 +173,11 @@ async function callAnthropic(
     temperature: req.temperature ?? 0.2,
   };
   if (req.systemPrompt) body.system = req.systemPrompt;
+  // Server-side web search: the API runs the searches itself and returns the
+  // final answer (with citations) in one response — no client tool loop.
+  if (req.webSearch) {
+    body.tools = [{ type: "web_search_20250305", name: "web_search", max_uses: req.webSearch.maxUses ?? 4 }];
+  }
 
   const res = await fetch(provider.baseUrl, {
     method: "POST",
@@ -180,9 +194,27 @@ async function callAnthropic(
     return { text: "", ok: false, error: `Anthropic API error: ${res.status}` };
   }
 
-  const data = await res.json() as { content?: Array<{ type: string; text?: string }> };
-  const text = data.content?.[0]?.type === "text" ? (data.content[0].text ?? "") : "";
-  return { text, ok: true };
+  // Web-search responses interleave multiple text blocks with tool-use/result
+  // blocks, so join every text block (not just content[0]) and collect the
+  // cited source URLs.
+  const data = await res.json() as {
+    content?: Array<{
+      type: string;
+      text?: string;
+      citations?: Array<{ url?: string }>;
+      content?: Array<{ type: string; url?: string }>;
+    }>;
+  };
+  const blocks = data.content ?? [];
+  const text = blocks.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+  const sources = new Set<string>();
+  for (const b of blocks) {
+    for (const c of b.citations ?? []) if (c.url) sources.add(c.url);
+    if (b.type === "web_search_tool_result") {
+      for (const r of b.content ?? []) if (r.url) sources.add(r.url);
+    }
+  }
+  return { text, ok: true, sources: sources.size ? [...sources] : undefined };
 }
 
 async function callOpenAICompatible(
@@ -234,4 +266,13 @@ export function getInternalAIProviderName(): string | null {
   if (!provider) return null;
   const def = getProviderById(provider.providerId);
   return def?.name ?? provider.providerId;
+}
+
+/**
+ * Whether the internal AI can run live web searches. Only Anthropic exposes the
+ * server-side `web_search` tool, so research grounding requires it. Callers
+ * should degrade gracefully (skip grounding) when this is false.
+ */
+export function internalAiSupportsWebSearch(): boolean {
+  return resolveProvider()?.providerId === "anthropic";
 }

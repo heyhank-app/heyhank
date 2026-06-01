@@ -1826,6 +1826,8 @@ export interface IgCaptionResult {
   style: IgStyle;
   language: string;
   model: string;
+  /** True if the body was grounded in a research brief (real facts) vs generic. */
+  grounded?: boolean;
 }
 
 export interface IgCaptionInput {
@@ -1835,6 +1837,49 @@ export interface IgCaptionInput {
   hook?: string;
   /** Optional pre-picked lead CTA to anchor the caption to. */
   cta?: string;
+  /** Pre-built grounding text from a research brief (manual research flow). */
+  grounding?: string;
+  /** Research inline before composing (auto flow). Ignored if grounding is set. */
+  autoResearch?: boolean;
+  /** Optional niche/angle to focus the inline research. */
+  niche?: string;
+}
+
+// ─── Research / Content Brief ────────────────────────────────────────────────
+
+export interface IgBriefFact {
+  fact: string;
+  source?: string;
+}
+
+export interface IgFreshItem {
+  headline: string;
+  detail: string;
+  source?: string;
+  date?: string;
+}
+
+export interface IgContentBrief {
+  topic: string;
+  niche: string;
+  language: string;
+  angles: string[];
+  facts: IgBriefFact[];
+  freshItems: IgFreshItem[];
+  painPoints: string[];
+  myths: string[];
+  hotDataPoint?: string;
+  ownTakes: string[];
+  sources: string[];
+  generatedAt: string;
+  cached: boolean;
+}
+
+export interface IgResearchInput {
+  topic: string;
+  niche?: string;
+  language?: "en" | "de";
+  forceRefresh?: boolean;
 }
 
 export type IgPlanCtaType = "lead" | "engagement" | "growth";
@@ -1949,6 +1994,8 @@ export const igWizardApi = {
     post<IgWizardResult>("/ig-wizard/generate", { niche, language }),
   caption: (input: IgCaptionInput) =>
     post<IgCaptionResult>("/ig-wizard/caption", { language: "en", ...input }),
+  research: (input: IgResearchInput) =>
+    post<IgContentBrief>("/ig-wizard/research", { language: "en", ...input }),
   plan: (input: IgPlanInput) =>
     post<IgPlanResult>("/ig-wizard/plan", { language: "en", days: 30, ...input }),
   composeAndSaveDraft: (input: IgComposeDraftInput) =>

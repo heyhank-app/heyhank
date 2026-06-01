@@ -17,6 +17,7 @@ import {
   normalizeSlideCount,
 } from "../ig-wizard.js";
 import { generateIgCover, normalizeStyle } from "../ig-cover.js";
+import { researchTopic, briefToGroundingText } from "../research.js";
 import * as socialManager from "../socialmedia/manager.js";
 import type { SocialPlatform } from "../socialmedia/types.js";
 import * as wizardPosts from "../ig-wizard-posts.js";
@@ -62,23 +63,65 @@ export function registerIgWizardRoutes(api: Hono): void {
     return c.json(res.result);
   });
 
+  // Research a topic into a grounded Content Brief (live web search tuned for
+  // fresh AI news + the local vault for Markus's own POV). The wizard shows this
+  // before composing so captions cite real, current specifics instead of fluff.
+  api.post("/ig-wizard/research", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      topic?: unknown;
+      niche?: unknown;
+      language?: unknown;
+      forceRefresh?: unknown;
+    };
+    const res = await researchTopic({
+      topic: normalizeTopic(body.topic),
+      niche: normalizeNiche(body.niche),
+      language: normalizeLanguage(body.language),
+      forceRefresh: body.forceRefresh === true,
+    });
+    if (!res.ok) return c.json({ error: res.error }, 502);
+    return c.json(res.brief);
+  });
+
   // Compose a complete, ready-to-post caption from a topic (+ optional pre-picked
   // hook / CTA). Reuses the same internal-AI provider as /generate.
+  //
+  // Grounding ("beides wählbar"): the caller can either pass a pre-built
+  // `grounding` string (manual flow — research, edit, then compose) OR set
+  // `autoResearch: true` to research inline. A research failure never blocks the
+  // caption — it just composes ungrounded.
   api.post("/ig-wizard/caption", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as {
       topic?: unknown;
+      niche?: unknown;
       language?: unknown;
       hook?: unknown;
       cta?: unknown;
+      grounding?: unknown;
+      autoResearch?: unknown;
     };
+    const topic = normalizeTopic(body.topic);
+    const language = normalizeLanguage(body.language);
+
+    let grounding = typeof body.grounding === "string" ? body.grounding.trim() : "";
+    let grounded = grounding.length > 0;
+    if (!grounding && body.autoResearch === true) {
+      const research = await researchTopic({ topic, niche: normalizeNiche(body.niche), language });
+      if (research.ok && research.brief) {
+        grounding = briefToGroundingText(research.brief);
+        grounded = grounding.length > 0;
+      }
+    }
+
     const res = await generateCaption({
-      topic: normalizeTopic(body.topic),
-      language: normalizeLanguage(body.language),
+      topic,
+      language,
       hook: normalizeOptionalLine(body.hook),
       cta: normalizeOptionalLine(body.cta),
+      grounding: grounding || undefined,
     });
     if (!res.ok) return c.json({ error: res.error }, res.status);
-    return c.json(res.result);
+    return c.json({ ...res.result, grounded });
   });
 
   // Generate a multi-day content plan (light briefs) from one topic. Each brief
@@ -345,7 +388,9 @@ export function registerIgWizardRoutes(api: Hono): void {
       //    (the compositor trims to the audio length, so too-short VO = too-short
       //    reel). Capped so a long body doesn't run way past the video.
       const voText = `${post.hook}. ${post.body} ${post.cta}`.replace(/\s+/g, " ").trim().slice(0, 600);
-      const tts = await generateTts({ text: voText, style: "Read in a confident, friendly voice:" });
+      // Charon = the reel narrator (deliberately NOT an impersonation of Markus —
+      // the face/brand is visual, the voice is a neutral third-person narrator).
+      const tts = await generateTts({ text: voText, voice: "Charon", style: "Narrate in a clear, confident voice:" });
 
       // 4) Compose: muted Veo video + the voiceover laid over it.
       const composed = await composeReel({

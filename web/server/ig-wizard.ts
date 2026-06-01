@@ -336,6 +336,7 @@ function buildCaptionUserPrompt(input: {
   language: IgWizardLanguage;
   hook?: string;
   cta?: string;
+  grounding?: string;
 }): string {
   const lines = [
     `Topic: ${input.topic || "AI tools for solo creators"}`,
@@ -343,6 +344,15 @@ function buildCaptionUserPrompt(input: {
   ];
   if (input.hook && input.hook.trim()) lines.push(`Use this exact hook: ${input.hook.trim()}`);
   if (input.cta && input.cta.trim()) lines.push(`Use this exact CTA: ${input.cta.trim()}`);
+  if (input.grounding && input.grounding.trim()) {
+    lines.push(
+      "",
+      "RESEARCH BRIEF — ground the body in these real, current specifics. Weave in at",
+      "least one concrete fact, number, or recent development below instead of writing",
+      "generic advice. Do NOT invent facts beyond this brief:",
+      input.grounding.trim(),
+    );
+  }
   return lines.join("\n");
 }
 
@@ -420,6 +430,8 @@ export async function generateCaption(input: {
   language: IgWizardLanguage;
   hook?: string;
   cta?: string;
+  /** Optional research-brief grounding text (see research.ts) for a specific, non-generic body. */
+  grounding?: string;
 }): Promise<CaptionGenerateOk | CaptionGenerateErr> {
   if (!hasInternalAI()) {
     return {

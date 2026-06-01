@@ -19,8 +19,36 @@ import {
   type IgPlanResult,
   type IgPlanBrief,
   type IgComposeDraftResult,
+  type IgContentBrief,
   type WizardPost,
 } from "../api.js";
+
+/**
+ * Build a compact grounding string from a research brief, client-side, so a
+ * manually-loaded brief can ground the caption without triggering a second web
+ * search. Mirrors the server's briefToGroundingText shape loosely — it's just
+ * prompt text, so an exact match isn't required.
+ */
+export function briefToGrounding(brief: IgContentBrief): string {
+  const lines: string[] = [];
+  if (brief.freshItems.length) {
+    lines.push("RECENT & NOTEWORTHY:");
+    for (const f of brief.freshItems) lines.push(`- ${f.headline}: ${f.detail}${f.date ? ` (${f.date})` : ""}`);
+  }
+  if (brief.facts.length) {
+    lines.push("FACTS YOU CAN CITE:");
+    for (const f of brief.facts) lines.push(`- ${f.fact}`);
+  }
+  if (brief.hotDataPoint) lines.push(`STRONG STAT: ${brief.hotDataPoint}`);
+  if (brief.painPoints.length) lines.push(`PAIN POINTS: ${brief.painPoints.join("; ")}`);
+  if (brief.myths.length) lines.push(`MYTHS TO BUST: ${brief.myths.join("; ")}`);
+  if (brief.angles.length) lines.push(`ANGLE IDEAS: ${brief.angles.join("; ")}`);
+  if (brief.ownTakes.length) {
+    lines.push("MARKUS'S OWN TAKES:");
+    for (const t of brief.ownTakes) lines.push(`- ${t}`);
+  }
+  return lines.join("\n");
+}
 
 const DRAFT_PLATFORMS: { id: string; label: string }[] = [
   { id: "instagram", label: "Instagram" },
@@ -155,21 +183,59 @@ export function IgWizardTab({ showMessage }: Props) {
   const [caption, setCaption] = useState<IgCaptionResult | null>(null);
   const [composing, setComposing] = useState(false);
 
+  // Research grounding ("beides wählbar"): autoResearch on = compose researches
+  // inline; clicking 🔬 Research runs it as a visible, reviewable step. A loaded
+  // brief grounds the caption client-side (no second search).
+  const [autoResearch, setAutoResearch] = useState(true);
+  const [brief, setBrief] = useState<IgContentBrief | null>(null);
+  const [researching, setResearching] = useState(false);
+  const [briefOpen, setBriefOpen] = useState(true);
+
   // The composed caption auto-saves into the wizard's persistent Saved Posts
   // workbench. We track the saved post's id so a Redo updates it instead of
   // piling up duplicates. Reset on a fresh Generate (new session = new post).
   const [savedPostId, setSavedPostId] = useState<string | null>(null);
   const [savedTick, setSavedTick] = useState(0); // bump to make the Saved Posts tab refetch
 
+  const handleResearch = useCallback(async (forceRefresh = false) => {
+    const topic = niche.trim();
+    if (!topic) {
+      showMessage("Enter a topic/niche first, then research it.", true);
+      return;
+    }
+    setResearching(true);
+    try {
+      const res = await igWizardApi.research({ topic, language, forceRefresh });
+      setBrief(res);
+      setBriefOpen(true);
+      const n = res.freshItems.length + res.facts.length;
+      showMessage(
+        res.cached
+          ? `Loaded a cached brief (${n} facts/items). Hit ↻ to refresh with live data.`
+          : `Researched — ${n} fresh facts/items${res.ownTakes.length ? ` + ${res.ownTakes.length} of your own takes` : ""}.`,
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showMessage(`Research failed: ${msg}`, true);
+    } finally {
+      setResearching(false);
+    }
+  }, [niche, language, showMessage]);
+
   const handleCompose = useCallback(async () => {
     setComposing(true);
     setCaption(null);
     try {
+      // Prefer a loaded brief (grounds client-side, no extra search). Else, if
+      // autoResearch is on, let the backend research inline.
+      const grounding = brief ? briefToGrounding(brief) : undefined;
       const res = await igWizardApi.caption({
         topic: niche.trim(),
         language,
         hook: composerHook.trim() || undefined,
         cta: composerCta.trim() || undefined,
+        grounding,
+        autoResearch: !grounding && autoResearch,
       });
       setCaption(res);
       // Auto-save to the workbench (best-effort — composing must not fail if
@@ -201,7 +267,7 @@ export function IgWizardTab({ showMessage }: Props) {
     } finally {
       setComposing(false);
     }
-  }, [niche, language, composerHook, composerCta, savedPostId, showMessage]);
+  }, [niche, language, composerHook, composerCta, savedPostId, showMessage, brief, autoResearch]);
 
   const useHookInComposer = useCallback((hook: string) => {
     setComposerHook(hook);
@@ -612,6 +678,22 @@ export function IgWizardTab({ showMessage }: Props) {
               </div>
             </div>
 
+            {/* Research grounding — makes the body cite real, current AI news
+                instead of generic advice. "Beides wählbar": auto-on toggle, or
+                run it as a visible step with the 🔬 button. */}
+            <ResearchPanel
+              brief={brief}
+              researching={researching}
+              autoResearch={autoResearch}
+              open={briefOpen}
+              onToggleAuto={() => setAutoResearch((v) => !v)}
+              onResearch={() => handleResearch(false)}
+              onRefresh={() => handleResearch(true)}
+              onToggleOpen={() => setBriefOpen((v) => !v)}
+              onClear={() => setBrief(null)}
+              onUseAngle={(a) => { setComposerHook(a); showMessage("Angle dropped into the hook field."); }}
+            />
+
             <button
               type="button"
               onClick={handleCompose}
@@ -627,7 +709,7 @@ export function IgWizardTab({ showMessage }: Props) {
                 fontWeight: 500,
               }}
             >
-              {composing ? "Composing…" : "Compose Caption"}
+              {composing ? (brief || autoResearch ? "Researching + Composing…" : "Composing…") : "Compose Caption"}
             </button>
 
             {caption && (
@@ -669,11 +751,13 @@ export function IgWizardTab({ showMessage }: Props) {
                     resize: "vertical",
                   }}
                 />
-                {caption.hashtags.length > 0 && (
-                  <p style={{ margin: "6px 0 0 0", fontSize: 12, color: "var(--text-muted, #888)" }}>
-                    {caption.hashtags.length} hashtags · {caption.language.toUpperCase()}
-                  </p>
-                )}
+                <p style={{ margin: "6px 0 0 0", fontSize: 12, color: "var(--text-muted, #888)" }}>
+                  {caption.hashtags.length > 0 && <>{caption.hashtags.length} hashtags · </>}
+                  {caption.language.toUpperCase()}
+                  {caption.grounded
+                    ? <span style={{ marginLeft: 8, color: "var(--success-text, #137333)", fontWeight: 500 }}>🔬 grounded in research</span>
+                    : <span style={{ marginLeft: 8 }}>· generic (no research)</span>}
+                </p>
 
                 {/* Auto-saved to the wizard workbench. Finalize (image, platforms,
                     → Drafts) over in the Saved Posts tab. */}
@@ -743,6 +827,138 @@ interface PlanModeProps {
   onCopy: (text: string, label: string) => void;
   onSaved: () => void;
   showMessage: (text: string, isError?: boolean) => void;
+}
+
+interface ResearchPanelProps {
+  brief: IgContentBrief | null;
+  researching: boolean;
+  autoResearch: boolean;
+  open: boolean;
+  onToggleAuto: () => void;
+  onResearch: () => void;
+  onRefresh: () => void;
+  onToggleOpen: () => void;
+  onClear: () => void;
+  onUseAngle: (angle: string) => void;
+}
+
+/**
+ * The research-grounding panel above the Compose button. Surfaces the live
+ * Content Brief (fresh AI news + facts + the user's own takes) so captions are
+ * specific. Auto-research toggle = ground every compose; the 🔬 button runs it
+ * as a visible, reviewable step ("beides wählbar").
+ */
+function ResearchPanel({
+  brief, researching, autoResearch, open,
+  onToggleAuto, onResearch, onRefresh, onToggleOpen, onClear, onUseAngle,
+}: ResearchPanelProps) {
+  const pill = {
+    padding: "5px 12px", borderRadius: 4, border: "1px solid var(--border, #ddd)",
+    background: "transparent", cursor: researching ? "wait" : "pointer", fontSize: 12,
+  } as const;
+  return (
+    <section
+      aria-label="Research grounding"
+      style={{ margin: "4px 0 14px 0", padding: 12, border: "1px solid var(--border, #ddd)", borderRadius: 6, background: "var(--card-bg, #f8f8f8)" }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <strong style={{ fontSize: 13 }}>🔬 Research</strong>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+          <input type="checkbox" checked={autoResearch} onChange={onToggleAuto} aria-label="Auto-research before composing" />
+          Auto-ground every caption (live AI news)
+        </label>
+        <span style={{ flex: 1 }} />
+        <button type="button" style={pill} disabled={researching} onClick={onResearch} aria-label="Research this topic now">
+          {researching ? "Researching…" : brief ? "Re-research" : "🔬 Research now"}
+        </button>
+        {brief && (
+          <button type="button" style={pill} disabled={researching} onClick={onRefresh} aria-label="Refresh with live data" title="Bypass cache, fetch live">↻ Live</button>
+        )}
+      </div>
+
+      <p style={{ margin: "8px 0 0 0", fontSize: 11, color: "var(--text-muted, #888)" }}>
+        Pulls fresh, noteworthy AI developments (new Claude/Gemini/ChatGPT features, trending GitHub, cool projects) + your own vault takes so the body cites real specifics instead of generic advice.
+      </p>
+
+      {brief && (
+        <div style={{ marginTop: 10, borderTop: "1px dashed var(--border, #ddd)", paddingTop: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <button
+              type="button"
+              onClick={onToggleOpen}
+              aria-expanded={open}
+              aria-label={open ? "Collapse brief" : "Expand brief"}
+              style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 500, padding: 0 }}
+            >
+              {open ? "▼" : "▶"} Content brief
+              {brief.cached && <span style={{ marginLeft: 6, color: "var(--text-muted, #888)", fontWeight: 400 }}>(cached)</span>}
+            </button>
+            <span style={{ flex: 1 }} />
+            <button type="button" onClick={onClear} aria-label="Clear brief" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 12, color: "var(--text-muted, #888)" }}>✕ clear</button>
+          </div>
+
+          {open && (
+            <div style={{ display: "grid", gap: 10, fontSize: 12 }}>
+              {brief.freshItems.length > 0 && (
+                <div>
+                  <div style={{ fontWeight: 600, marginBottom: 3 }}>📰 Recent & noteworthy</div>
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {brief.freshItems.map((f, i) => (
+                      <li key={i} style={{ marginBottom: 3 }}>
+                        <strong>{f.headline}</strong>{f.detail ? ` — ${f.detail}` : ""}{f.date ? ` (${f.date})` : ""}
+                        {f.source && <> · <a href={f.source} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>source</a></>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {brief.facts.length > 0 && (
+                <div>
+                  <div style={{ fontWeight: 600, marginBottom: 3 }}>✅ Facts to cite</div>
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {brief.facts.map((f, i) => (
+                      <li key={i} style={{ marginBottom: 2 }}>{f.fact}{f.source && <> · <a href={f.source} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>src</a></>}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {brief.hotDataPoint && (
+                <div><strong>📊 Stat:</strong> {brief.hotDataPoint}</div>
+              )}
+              {brief.angles.length > 0 && (
+                <div>
+                  <div style={{ fontWeight: 600, marginBottom: 3 }}>🎯 Angles <span style={{ fontWeight: 400, color: "var(--text-muted, #888)" }}>(click to use as hook)</span></div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {brief.angles.map((a, i) => (
+                      <button key={i} type="button" onClick={() => onUseAngle(a)} style={{ ...pill, cursor: "pointer", textAlign: "left" }} aria-label={`Use angle: ${a}`}>
+                        {a}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {brief.ownTakes.length > 0 && (
+                <div>
+                  <div style={{ fontWeight: 600, marginBottom: 3 }}>📚 Your own takes (vault)</div>
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {brief.ownTakes.map((t, i) => <li key={i} style={{ marginBottom: 2, color: "var(--text-muted, #555)" }}>{t}</li>)}
+                  </ul>
+                </div>
+              )}
+              {brief.sources.length > 0 && (
+                <div style={{ fontSize: 11, color: "var(--text-muted, #888)" }}>
+                  {brief.sources.length} source{brief.sources.length === 1 ? "" : "s"} ·{" "}
+                  {brief.sources.slice(0, 3).map((s, i) => (
+                    <span key={i}><a href={s} target="_blank" rel="noopener noreferrer">[{i + 1}]</a>{" "}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
 
 /**

@@ -23,6 +23,7 @@ const mockCreateRule = vi.fn();
 const mockCaption = vi.fn();
 const mockPlan = vi.fn();
 const mockComposeDraft = vi.fn();
+const mockResearch = vi.fn();
 // Wizard Saved Posts workbench (auto-save + curate).
 const mockPostsList = vi.fn();
 const mockPostsCreate = vi.fn();
@@ -38,6 +39,7 @@ vi.mock("../api.js", () => ({
   igWizardApi: {
     generate: (...args: unknown[]) => mockGenerate(...args),
     caption: (...args: unknown[]) => mockCaption(...args),
+    research: (...args: unknown[]) => mockResearch(...args),
     plan: (...args: unknown[]) => mockPlan(...args),
     composeAndSaveDraft: (...args: unknown[]) => mockComposeDraft(...args),
     posts: {
@@ -137,6 +139,7 @@ beforeEach(() => {
   mockGenerate.mockReset();
   mockCreateRule.mockReset();
   mockCaption.mockReset();
+  mockResearch.mockReset();
   mockPlan.mockReset();
   mockComposeDraft.mockReset();
   mockPostsList.mockReset();
@@ -495,6 +498,97 @@ describe("IgWizardTab — Caption Composer", () => {
   });
 });
 
+// ─── Research grounding ────────────────────────────────────────────────────────
+
+function sampleBrief(overrides: Record<string, unknown> = {}) {
+  return {
+    topic: "AI tools",
+    niche: "",
+    language: "en",
+    angles: ["Self-host Claude on a $5 box"],
+    facts: [{ fact: "ZAYA1-8B runs ~760M active params", source: "https://example.com/z" }],
+    freshItems: [{ headline: "Zyphra ships ZAYA1-8B", detail: "Apache 2.0 MoE", source: "https://example.com/z", date: "May 2026" }],
+    painPoints: ["Vendor lock-in"],
+    myths: ["You need a GPU farm"],
+    hotDataPoint: "72.2% on SWE-bench from an open model",
+    ownTakes: [],
+    sources: ["https://example.com/z"],
+    generatedAt: "2026-06-01T00:00:00Z",
+    cached: false,
+    ...overrides,
+  };
+}
+
+describe("IgWizardTab — Research grounding", () => {
+  async function generateFirst() {
+    mockGenerate.mockResolvedValueOnce(sampleResult());
+    render(<IgWizardTab showMessage={() => {}} />);
+    fireEvent.change(screen.getByLabelText(/^Niche$/), { target: { value: "AI tools" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Generate/i }));
+    await waitFor(() => expect(screen.getByText("📝 Caption Composer")).toBeInTheDocument());
+  }
+
+  it("shows the research panel with the auto-ground toggle on by default", async () => {
+    await generateFirst();
+    const auto = screen.getByLabelText(/Auto-research before composing/i) as HTMLInputElement;
+    expect(auto.checked).toBe(true);
+    expect(screen.getByRole("button", { name: /Research this topic now/i })).toBeInTheDocument();
+  });
+
+  it("🔬 Research now calls the research API and renders the brief", async () => {
+    await generateFirst();
+    mockResearch.mockResolvedValueOnce(sampleBrief());
+    fireEvent.click(screen.getByRole("button", { name: /Research this topic now/i }));
+    await waitFor(() => expect(screen.getByText(/Zyphra ships ZAYA1-8B/i)).toBeInTheDocument());
+    expect(mockResearch).toHaveBeenCalledWith(expect.objectContaining({ topic: "AI tools" }));
+    // The stat + content-brief disclosure render too.
+    expect(screen.getByText(/SWE-bench/i)).toBeInTheDocument();
+  });
+
+  it("composes with a client-built grounding string once a brief is loaded (no second search)", async () => {
+    await generateFirst();
+    mockResearch.mockResolvedValueOnce(sampleBrief());
+    fireEvent.click(screen.getByRole("button", { name: /Research this topic now/i }));
+    await waitFor(() => expect(screen.getByText(/Zyphra ships ZAYA1-8B/i)).toBeInTheDocument());
+
+    mockCaption.mockResolvedValueOnce(sampleCaption({ grounded: true }));
+    fireEvent.click(screen.getByRole("button", { name: /Compose full caption/i }));
+    await waitFor(() => expect(mockCaption).toHaveBeenCalled());
+    const arg = mockCaption.mock.calls[0][0];
+    expect(typeof arg.grounding).toBe("string");
+    expect(arg.grounding).toMatch(/Zyphra ships ZAYA1-8B/);
+    expect(arg.autoResearch).toBe(false); // grounding present → don't re-search
+  });
+
+  it("without a brief but auto-on, compose asks the backend to research inline", async () => {
+    await generateFirst();
+    mockCaption.mockResolvedValueOnce(sampleCaption({ grounded: true }));
+    fireEvent.click(screen.getByRole("button", { name: /Compose full caption/i }));
+    await waitFor(() => expect(mockCaption).toHaveBeenCalled());
+    const arg = mockCaption.mock.calls[0][0];
+    expect(arg.grounding).toBeUndefined();
+    expect(arg.autoResearch).toBe(true);
+  });
+
+  it("renders the 🔬 grounded badge when the caption was grounded", async () => {
+    await generateFirst();
+    mockCaption.mockResolvedValueOnce(sampleCaption({ grounded: true }));
+    fireEvent.click(screen.getByRole("button", { name: /Compose full caption/i }));
+    await waitFor(() => expect(screen.getByText(/grounded in research/i)).toBeInTheDocument());
+  });
+
+  it("turning the auto toggle off composes ungrounded", async () => {
+    await generateFirst();
+    fireEvent.click(screen.getByLabelText(/Auto-research before composing/i));
+    mockCaption.mockResolvedValueOnce(sampleCaption());
+    fireEvent.click(screen.getByRole("button", { name: /Compose full caption/i }));
+    await waitFor(() => expect(mockCaption).toHaveBeenCalled());
+    const arg = mockCaption.mock.calls[0][0];
+    expect(arg.autoResearch).toBe(false);
+    expect(arg.grounding).toBeUndefined();
+  });
+});
+
 // ─── 30-Day Plan mode ────────────────────────────────────────────────────────
 
 describe("IgWizardTab — 30-Day Plan mode", () => {
@@ -664,7 +758,7 @@ describe("IgWizardTab — Saved Posts workbench", () => {
     await openSaved([makeWizardPost({ id: "a", hook: "Post A" })]);
     await waitFor(() => expect(screen.getByText("Post A")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /Generate image for Post A/i }));
-    await waitFor(() => expect(mockPostsImage).toHaveBeenCalledWith("a", "notebook", "cozy"));
+    await waitFor(() => expect(mockPostsImage).toHaveBeenCalledWith("a", "notebook", "cozy", true));
   });
 
   it("changing the style dropdown passes the chosen style to image generation", async () => {
@@ -675,7 +769,7 @@ describe("IgWizardTab — Saved Posts workbench", () => {
     // Switch the style to Pointing, then generate.
     fireEvent.change(screen.getByLabelText(/Image style for Post A/i), { target: { value: "pointing" } });
     fireEvent.click(screen.getByRole("button", { name: /Generate image for Post A/i }));
-    await waitFor(() => expect(mockPostsImage).toHaveBeenCalledWith("a", "notebook", "pointing"));
+    await waitFor(() => expect(mockPostsImage).toHaveBeenCalledWith("a", "notebook", "pointing", true));
   });
 
   it("defaults the style dropdown to the AI-suggested style", async () => {
@@ -695,7 +789,7 @@ describe("IgWizardTab — Saved Posts workbench", () => {
 
     // Default slide count is 5.
     fireEvent.click(screen.getByRole("button", { name: /Generate carousel for Post A/i }));
-    await waitFor(() => expect(mockPostsCarousel).toHaveBeenCalledWith("a", 5, "notebook", "cozy"));
+    await waitFor(() => expect(mockPostsCarousel).toHaveBeenCalledWith("a", 5, "notebook", "cozy", true));
     // After generation both the format badge AND the button read "🎠 Carousel"
     // (before, only the button existed) — proving the badge was added.
     await waitFor(() => expect(screen.getAllByText(/🎠 Carousel/).length).toBeGreaterThanOrEqual(2));

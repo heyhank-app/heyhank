@@ -13,6 +13,14 @@ vi.mock("../internal-ai.js", () => ({
   hasInternalAI: vi.fn(() => mockHasProvider),
 }));
 
+// Mock the research module so caption-grounding + /research tests don't hit a
+// real web search. mockResearch controls researchTopic's return per test.
+const mockResearch = vi.fn();
+vi.mock("../research.js", () => ({
+  researchTopic: (...a: unknown[]) => mockResearch(...a),
+  briefToGroundingText: (b: { hotDataPoint?: string }) => `GROUNDING:${b.hotDataPoint ?? ""}`,
+}));
+
 // Mock the cover generator + the social-media draft store so compose-and-save
 // tests never hit gpt-image-2 or write real draft files.
 const mockGenerateIgCover = vi.fn();
@@ -244,6 +252,7 @@ describe("POST /ig-wizard/caption", () => {
     registerIgWizardRoutes(app);
     mockReturn = { text: captionPayload(), ok: true, error: undefined };
     mockHasProvider = true;
+    mockResearch.mockReset();
   });
 
   it("returns 200 with a fully assembled caption", async () => {
@@ -288,6 +297,89 @@ describe("POST /ig-wizard/caption", () => {
       body: JSON.stringify({ topic: "x" }),
     });
     expect(res.status).toBe(502);
+  });
+
+  it("auto-researches inline when autoResearch is set, marking the caption grounded", async () => {
+    mockResearch.mockResolvedValue({ ok: true, brief: { hotDataPoint: "72% SWE-bench" } });
+    const res = await app.request("/ig-wizard/caption", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "self-hosting AI", autoResearch: true }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(mockResearch).toHaveBeenCalledTimes(1);
+    expect(json.grounded).toBe(true);
+  });
+
+  it("uses a pre-built grounding string without researching again", async () => {
+    const res = await app.request("/ig-wizard/caption", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "x", grounding: "RECENT: ZAYA1-8B ships" }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(mockResearch).not.toHaveBeenCalled(); // grounding supplied → no search
+    expect(json.grounded).toBe(true);
+  });
+
+  it("composes ungrounded (grounded:false) when research fails — never blocks the caption", async () => {
+    mockResearch.mockResolvedValue({ ok: false, error: "rate limited" });
+    const res = await app.request("/ig-wizard/caption", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "x", autoResearch: true }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.grounded).toBe(false);
+  });
+});
+
+describe("POST /ig-wizard/research", () => {
+  let app: Hono;
+
+  beforeEach(() => {
+    app = new Hono();
+    registerIgWizardRoutes(app);
+    mockResearch.mockReset();
+  });
+
+  it("returns 200 with the content brief on success", async () => {
+    const brief = { topic: "self-hosting AI", freshItems: [{ headline: "ZAYA1-8B" }], facts: [] };
+    mockResearch.mockResolvedValue({ ok: true, brief });
+    const res = await app.request("/ig-wizard/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "self-hosting AI", language: "en" }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.freshItems[0].headline).toBe("ZAYA1-8B");
+    expect(mockResearch).toHaveBeenCalledWith(expect.objectContaining({ topic: "self-hosting AI" }));
+  });
+
+  it("returns 502 with the error when research fails (e.g. no Anthropic provider)", async () => {
+    mockResearch.mockResolvedValue({ ok: false, error: "Live research needs the Anthropic provider" });
+    const res = await app.request("/ig-wizard/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "x" }),
+    });
+    expect(res.status).toBe(502);
+    const json = await res.json();
+    expect(json.error).toMatch(/Anthropic/);
+  });
+
+  it("forwards forceRefresh through to the researcher", async () => {
+    mockResearch.mockResolvedValue({ ok: true, brief: { topic: "x" } });
+    await app.request("/ig-wizard/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "x", forceRefresh: true }),
+    });
+    expect(mockResearch).toHaveBeenCalledWith(expect.objectContaining({ forceRefresh: true }));
   });
 });
 
@@ -587,7 +679,15 @@ describe("Wizard Saved Posts routes", () => {
     expect(json.videoUrl).toBe("/api/media/file/reel_x.mp4");
     // Veo got a 9:16 visual prompt; TTS spoke hook + body + CTA; compose replaced audio.
     expect(mockVeoGen).toHaveBeenCalledWith(expect.objectContaining({ aspectRatio: "9:16", durationSeconds: 8 }));
-    expect(mockTts).toHaveBeenCalledWith(expect.objectContaining({ text: "Stop renting AI. Run it yourself. Comment STACK" }));
+    // The reel voiceover is the Charon narrator (deliberately not a Markus
+    // impersonation) read in a narrator style — locked here against regression.
+    expect(mockTts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "Stop renting AI. Run it yourself. Comment STACK",
+        voice: "Charon",
+        style: "Narrate in a clear, confident voice:",
+      }),
+    );
     expect(mockCompose).toHaveBeenCalledWith(expect.objectContaining({
       segments: [expect.objectContaining({ type: "video", path: "/m/veo.mp4", replaceAudio: true, audioPath: "/m/vo.mp3" })],
     }));
