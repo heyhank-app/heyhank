@@ -9,7 +9,7 @@
 // straight into the Auto-DM tab. This closes the funnel loop in one click:
 // caption → comment → auto-DM, no manual setup.
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   igWizardApi,
   autoDmRulesApi,
@@ -19,6 +19,7 @@ import {
   type IgPlanResult,
   type IgPlanBrief,
   type IgComposeDraftResult,
+  type WizardPost,
 } from "../api.js";
 
 const DRAFT_PLATFORMS: { id: string; label: string }[] = [
@@ -35,7 +36,7 @@ const HERO_SCENES: { id: string; label: string }[] = [
   { id: "workspace", label: "Workspace" },
 ];
 
-type WizardMode = "single" | "plan";
+type WizardMode = "single" | "plan" | "saved";
 
 const CTA_TYPE_LABELS: Record<IgPlanBrief["ctaType"], string> = {
   lead: "Lead",
@@ -105,6 +106,8 @@ export function IgWizardTab({ showMessage }: Props) {
     setLoading(true);
     setError(null);
     setResult(null);
+    setSavedPostId(null); // fresh session → next compose creates a new saved post
+    setCaption(null);
     try {
       const res = await igWizardApi.generate(niche.trim(), language);
       setResult(res);
@@ -144,11 +147,11 @@ export function IgWizardTab({ showMessage }: Props) {
   const [caption, setCaption] = useState<IgCaptionResult | null>(null);
   const [composing, setComposing] = useState(false);
 
-  // ── Image + Draft state ─────────────────────────────────────────────────────
-  const [draftPlatforms, setDraftPlatforms] = useState<string[]>(["instagram"]);
-  const [draftHero, setDraftHero] = useState("notebook");
-  const [savingDraft, setSavingDraft] = useState(false);
-  const [draftResult, setDraftResult] = useState<IgComposeDraftResult | null>(null);
+  // The composed caption auto-saves into the wizard's persistent Saved Posts
+  // workbench. We track the saved post's id so a Redo updates it instead of
+  // piling up duplicates. Reset on a fresh Generate (new session = new post).
+  const [savedPostId, setSavedPostId] = useState<string | null>(null);
+  const [savedTick, setSavedTick] = useState(0); // bump to make the Saved Posts tab refetch
 
   const handleCompose = useCallback(async () => {
     setComposing(true);
@@ -161,50 +164,35 @@ export function IgWizardTab({ showMessage }: Props) {
         cta: composerCta.trim() || undefined,
       });
       setCaption(res);
-      showMessage("Caption composed — copy + paste into Instagram.");
+      // Auto-save to the workbench (best-effort — composing must not fail if
+      // the save hiccups). Update the same post on Redo.
+      try {
+        const payload = {
+          topic: niche.trim(),
+          hook: res.hook,
+          body: res.body,
+          cta: res.cta,
+          hashtags: res.hashtags,
+          caption: res.caption,
+        };
+        if (savedPostId) {
+          await igWizardApi.posts.update(savedPostId, payload);
+        } else {
+          const created = await igWizardApi.posts.create({ ...payload, source: "single" });
+          setSavedPostId(created.post.id);
+        }
+        setSavedTick((t) => t + 1);
+        showMessage("Caption composed + saved to your posts.");
+      } catch {
+        showMessage("Caption composed (auto-save to posts failed).", true);
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       showMessage(`Compose failed: ${msg}`, true);
     } finally {
       setComposing(false);
     }
-  }, [niche, language, composerHook, composerCta, showMessage]);
-
-  const togglePlatform = useCallback((id: string) => {
-    setDraftPlatforms((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
-  }, []);
-
-  const handleSaveDraft = useCallback(async () => {
-    if (!caption) return;
-    if (draftPlatforms.length === 0) {
-      showMessage("Pick at least one platform.", true);
-      return;
-    }
-    setSavingDraft(true);
-    setDraftResult(null);
-    try {
-      const res = await igWizardApi.composeAndSaveDraft({
-        topic: niche.trim(),
-        language,
-        platforms: draftPlatforms,
-        hero: draftHero,
-        generateImage: true,
-        // Save the exact caption shown (no re-generation / drift).
-        caption: { hook: caption.hook, body: caption.body, cta: caption.cta, hashtags: caption.hashtags },
-      });
-      setDraftResult(res);
-      if (res.imageError) {
-        showMessage(`Draft saved (text-only — image failed: ${res.imageError})`, true);
-      } else {
-        showMessage("Draft saved with image — find it in the Drafts tab.");
-      }
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      showMessage(`Save draft failed: ${msg}`, true);
-    } finally {
-      setSavingDraft(false);
-    }
-  }, [caption, niche, language, draftPlatforms, draftHero, showMessage]);
+  }, [niche, language, composerHook, composerCta, savedPostId, showMessage]);
 
   const useHookInComposer = useCallback((hook: string) => {
     setComposerHook(hook);
@@ -282,6 +270,7 @@ export function IgWizardTab({ showMessage }: Props) {
         {([
           { id: "single" as const, label: "📝 Single Post" },
           { id: "plan" as const, label: "📅 30-Day Plan" },
+          { id: "saved" as const, label: "💾 Saved Posts" },
         ]).map((m) => (
           <button
             key={m.id}
@@ -677,90 +666,26 @@ export function IgWizardTab({ showMessage }: Props) {
                   </p>
                 )}
 
-                {/* ── Generate branded image + save as draft ── */}
-                <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px dashed var(--border, #ddd)" }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8 }}>✨ Generate branded image + save as draft</div>
-
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 10 }}>
-                    <div role="group" aria-label="Target platforms" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {DRAFT_PLATFORMS.map((p) => (
-                        <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, cursor: "pointer" }}>
-                          <input
-                            type="checkbox"
-                            checked={draftPlatforms.includes(p.id)}
-                            onChange={() => togglePlatform(p.id)}
-                            aria-label={`Post to ${p.label}`}
-                          />
-                          {p.label}
-                        </label>
-                      ))}
-                    </div>
-                    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
-                      Scene:
-                      <select
-                        value={draftHero}
-                        onChange={(e) => setDraftHero(e.target.value)}
-                        aria-label="Image hero scene"
-                        style={{ padding: "4px 6px" }}
-                      >
-                        {HERO_SCENES.map((h) => (
-                          <option key={h.id} value={h.id}>{h.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleSaveDraft}
-                    disabled={savingDraft}
-                    aria-label="Generate image and save as draft"
-                    style={{
-                      padding: "8px 16px",
-                      background: savingDraft ? "var(--btn-disabled, #ccc)" : "var(--btn-primary, #0066cc)",
-                      color: "white",
-                      border: "none",
-                      borderRadius: 4,
-                      cursor: savingDraft ? "wait" : "pointer",
-                      fontWeight: 500,
-                    }}
-                  >
-                    {savingDraft ? "Generating image + saving…" : "✨ Generate Image + Save as Draft"}
-                  </button>
-                  {savingDraft && (
-                    <span style={{ marginLeft: 10, fontSize: 12, color: "var(--text-muted, #888)" }}>
-                      Branded image generation takes ~1 minute…
+                {/* Auto-saved to the wizard workbench. Finalize (image, platforms,
+                    → Drafts) over in the Saved Posts tab. */}
+                {savedPostId && (
+                  <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px dashed var(--border, #ddd)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13, color: "var(--success-text, #137333)", fontWeight: 500 }}>
+                      ✓ Saved to your posts
                     </span>
-                  )}
-
-                  {draftResult && (
-                    <div style={{ marginTop: 14, display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-                      {draftResult.image ? (
-                        <img
-                          src={draftResult.image.url}
-                          alt="Generated branded post image"
-                          style={{ width: 160, height: 160, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border, #ddd)" }}
-                        />
-                      ) : (
-                        <div style={{ width: 160, height: 160, borderRadius: 6, border: "1px dashed var(--border, #ddd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "var(--text-muted, #888)", textAlign: "center", padding: 8 }}>
-                          Text-only draft{draftResult.imageError ? " (image failed)" : ""}
-                        </div>
-                      )}
-                      <div style={{ flex: 1, minWidth: 200 }}>
-                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--success-text, #137333)", marginBottom: 4 }}>
-                          ✓ Draft saved
-                        </div>
-                        <div style={{ fontSize: 12, color: "var(--text-muted, #888)" }}>
-                          Platforms: {draftResult.draft.platforms.join(", ")}
-                          {draftResult.draft.firstComment ? <> · hashtags in first comment</> : null}
-                        </div>
-                        <div style={{ fontSize: 12, color: "var(--text-muted, #888)", marginTop: 4 }}>
-                          Open the <strong>Drafts</strong> tab to review, edit, schedule or publish it.
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                    <button
+                      type="button"
+                      onClick={() => setMode("saved")}
+                      aria-label="Open Saved Posts to add an image and send to Drafts"
+                      style={{ padding: "5px 12px", background: "transparent", border: "1px solid var(--border, #ddd)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
+                    >
+                      💾 Open Saved Posts →
+                    </button>
+                    <span style={{ fontSize: 11, color: "var(--text-muted, #888)" }}>
+                      Add a branded image + send to Drafts there.
+                    </span>
+                  </div>
+                )}
               </div>
             )}
         </section>
@@ -778,8 +703,13 @@ export function IgWizardTab({ showMessage }: Props) {
           result={planResult}
           onGenerate={handlePlan}
           onCopy={handleCopy}
+          onSaved={() => setSavedTick((t) => t + 1)}
           showMessage={showMessage}
         />
+      )}
+
+      {mode === "saved" && (
+        <SavedPostsMode refreshKey={savedTick} onCopy={handleCopy} showMessage={showMessage} />
       )}
     </div>
   );
@@ -802,6 +732,7 @@ interface PlanModeProps {
   result: IgPlanResult | null;
   onGenerate: () => void;
   onCopy: (text: string, label: string) => void;
+  onSaved: () => void;
   showMessage: (text: string, isError?: boolean) => void;
 }
 
@@ -810,7 +741,7 @@ interface PlanModeProps {
  * is an editable brief (angle + hook + ctaType) that expands IN PLACE into a
  * caption + image + draft — the other days stay visible the whole time.
  */
-function PlanMode({ topic, setTopic, language, loading, error, result, onGenerate, onCopy, showMessage }: PlanModeProps) {
+function PlanMode({ topic, setTopic, language, loading, error, result, onGenerate, onCopy, onSaved, showMessage }: PlanModeProps) {
   return (
     <div>
       <section
@@ -880,6 +811,7 @@ function PlanMode({ topic, setTopic, language, loading, error, result, onGenerat
                   topic={result.topic === "(empty)" ? topic : result.topic}
                   language={language}
                   onCopy={onCopy}
+                  onSaved={onSaved}
                   showMessage={showMessage}
                 />
               </li>
@@ -905,62 +837,46 @@ function PlanBriefCard({
   topic,
   language,
   onCopy,
+  onSaved,
   showMessage,
 }: {
   brief: IgPlanBrief;
   topic: string;
   language: "en" | "de";
   onCopy: (text: string, label: string) => void;
+  onSaved: () => void;
   showMessage: (text: string, isError?: boolean) => void;
 }) {
   const [hook, setHook] = useState(brief.hook);
   const [expanded, setExpanded] = useState(false);
   const [caption, setCaption] = useState<IgCaptionResult | null>(null);
   const [composing, setComposing] = useState(false);
-  const [platforms, setPlatforms] = useState<string[]>(["instagram"]);
-  const [hero, setHero] = useState("notebook");
-  const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState<IgComposeDraftResult | null>(null);
+  const [savedPostId, setSavedPostId] = useState<string | null>(null);
 
-  const togglePlatform = (id: string) =>
-    setPlatforms((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
-
+  // Compose this day's caption → auto-save it as a wizard post (source=plan).
+  // Redo updates the same post instead of piling up duplicates.
   async function handleCompose() {
     setComposing(true);
-    setDraft(null);
     try {
       const res = await igWizardApi.caption({ topic, language, hook: hook.trim() || undefined });
       setCaption(res);
+      try {
+        const payload = { topic, hook: res.hook, body: res.body, cta: res.cta, hashtags: res.hashtags, caption: res.caption };
+        if (savedPostId) {
+          await igWizardApi.posts.update(savedPostId, payload);
+        } else {
+          const created = await igWizardApi.posts.create({ ...payload, source: "plan", day: brief.day });
+          setSavedPostId(created.post.id);
+        }
+        onSaved();
+        showMessage(`Day ${brief.day} composed + saved to your posts.`);
+      } catch {
+        showMessage(`Day ${brief.day} composed (auto-save failed).`, true);
+      }
     } catch (e: unknown) {
       showMessage(`Compose failed: ${e instanceof Error ? e.message : String(e)}`, true);
     } finally {
       setComposing(false);
-    }
-  }
-
-  async function handleSaveDraft() {
-    if (!caption) return;
-    if (platforms.length === 0) {
-      showMessage("Pick at least one platform.", true);
-      return;
-    }
-    setSaving(true);
-    setDraft(null);
-    try {
-      const res = await igWizardApi.composeAndSaveDraft({
-        topic,
-        language,
-        platforms,
-        hero,
-        generateImage: true,
-        caption: { hook: caption.hook, body: caption.body, cta: caption.cta, hashtags: caption.hashtags },
-      });
-      setDraft(res);
-      showMessage(res.imageError ? `Day ${brief.day} draft saved (text-only)` : `Day ${brief.day} draft saved with image`, !!res.imageError);
-    } catch (e: unknown) {
-      showMessage(`Save draft failed: ${e instanceof Error ? e.message : String(e)}`, true);
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -1050,7 +966,7 @@ function PlanBriefCard({
           ) : (
             <>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                <span style={{ fontSize: 12, fontWeight: 500 }}>Caption</span>
+                <span style={{ fontSize: 12, fontWeight: 500, color: "var(--success-text, #137333)" }}>✓ Saved to your posts</span>
                 <div style={{ display: "flex", gap: 6 }}>
                   <button
                     type="button"
@@ -1078,60 +994,9 @@ function PlanBriefCard({
                 rows={Math.min(14, caption.caption.split("\n").length + 2)}
                 style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", fontSize: 13, lineHeight: 1.5, fontFamily: "inherit", background: "var(--bg, #fff)", border: "1px solid var(--border, #ddd)", borderRadius: 4, resize: "vertical" }}
               />
-
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", margin: "8px 0" }}>
-                <div role="group" aria-label="Target platforms" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {DRAFT_PLATFORMS.map((p) => (
-                    <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer" }}>
-                      <input type="checkbox" checked={platforms.includes(p.id)} onChange={() => togglePlatform(p.id)} aria-label={`Day ${brief.day} to ${p.label}`} />
-                      {p.label}
-                    </label>
-                  ))}
-                </div>
-                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
-                  Scene:
-                  <select value={hero} onChange={(e) => setHero(e.target.value)} aria-label={`Day ${brief.day} image scene`} style={{ padding: "3px 5px" }}>
-                    {HERO_SCENES.map((h) => (
-                      <option key={h.id} value={h.id}>{h.label}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleSaveDraft}
-                disabled={saving}
-                aria-label={`Generate image and save draft for day ${brief.day}`}
-                style={{
-                  padding: "6px 14px",
-                  background: saving ? "var(--btn-disabled, #ccc)" : "var(--btn-primary, #0066cc)",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 4,
-                  cursor: saving ? "wait" : "pointer",
-                  fontSize: 13,
-                  fontWeight: 500,
-                }}
-              >
-                {saving ? "Generating image + saving…" : "✨ Image + Save as Draft"}
-              </button>
-              {saving && <span style={{ marginLeft: 8, fontSize: 11, color: "var(--text-muted, #888)" }}>~1 min…</span>}
-
-              {draft && (
-                <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "flex-start" }}>
-                  {draft.image ? (
-                    <img src={draft.image.url} alt={`Day ${brief.day} image`} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border, #ddd)" }} />
-                  ) : (
-                    <div style={{ width: 96, height: 96, borderRadius: 6, border: "1px dashed var(--border, #ddd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "var(--text-muted, #888)", textAlign: "center", padding: 6 }}>
-                      Text-only
-                    </div>
-                  )}
-                  <div style={{ fontSize: 12, color: "var(--success-text, #137333)", fontWeight: 500 }}>
-                    ✓ Draft saved → Drafts tab
-                  </div>
-                </div>
-              )}
+              <p style={{ margin: "6px 0 0 0", fontSize: 11, color: "var(--text-muted, #888)" }}>
+                Add a branded image + send to Drafts in the <strong>💾 Saved Posts</strong> tab.
+              </p>
             </>
           )}
         </div>
@@ -1139,6 +1004,270 @@ function PlanBriefCard({
     </div>
   );
 }
+
+// ─── SavedPostsMode (the persistent workbench) ───────────────────────────────
+//
+// Lists every caption you've composed (auto-saved). Persists across wizard
+// restarts. Curate with per-post + bulk delete, generate a branded image, then
+// promote the keepers "→ to Drafts" (the publish queue).
+
+function SavedPostsMode({
+  refreshKey,
+  onCopy,
+  showMessage,
+}: {
+  refreshKey: number;
+  onCopy: (text: string, label: string) => void;
+  showMessage: (text: string, isError?: boolean) => void;
+}) {
+  const [posts, setPosts] = useState<WizardPost[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await igWizardApi.posts.list();
+      setPosts(res.posts);
+    } catch (e: unknown) {
+      showMessage(`Failed to load saved posts: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setLoading(false);
+    }
+  }, [showMessage]);
+
+  // Reload on mount + whenever the wizard signals a new save (refreshKey bump).
+  useEffect(() => { load(); }, [load, refreshKey]);
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  const allSelected = posts.length > 0 && posts.every((p) => selected.has(p.id));
+  function toggleSelectAll() {
+    setSelected(allSelected ? new Set() : new Set(posts.map((p) => p.id)));
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await igWizardApi.posts.remove(id);
+      setPosts((prev) => prev.filter((p) => p.id !== id));
+      setSelected((prev) => { const n = new Set(prev); n.delete(id); return n; });
+      showMessage("Post deleted.");
+    } catch (e: unknown) {
+      showMessage(`Delete failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    }
+  }
+
+  async function handleBulkDelete() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    if (typeof window !== "undefined" && !window.confirm(`Delete ${ids.length} post(s)? This cannot be undone.`)) return;
+    setBulkBusy(true);
+    try {
+      const res = await igWizardApi.posts.bulkRemove(ids);
+      setPosts((prev) => prev.filter((p) => !selected.has(p.id)));
+      setSelected(new Set());
+      showMessage(`Deleted ${res.removed} post(s).`);
+    } catch (e: unknown) {
+      showMessage(`Bulk delete failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  function patchPost(updated: WizardPost) {
+    setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <h3 style={{ margin: "0 0 2px 0" }}>💾 Saved Posts <span style={{ fontWeight: 400, color: "var(--text-muted, #888)" }}>({posts.length})</span></h3>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted, #888)" }}>
+            Your workbench — auto-saved, persists across restarts. Curate, add images, send keepers to Drafts.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={load}
+          disabled={loading}
+          aria-label="Refresh saved posts"
+          style={{ padding: "5px 12px", background: "transparent", border: "1px solid var(--border, #ddd)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
+        >
+          {loading ? "Loading…" : "↻ Refresh"}
+        </button>
+      </div>
+
+      {posts.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+            <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} aria-label="Select all posts" />
+            Select all
+          </label>
+          {selected.size > 0 && (
+            <button
+              type="button"
+              onClick={handleBulkDelete}
+              disabled={bulkBusy}
+              aria-label={`Delete ${selected.size} selected posts`}
+              style={{ padding: "5px 12px", background: bulkBusy ? "var(--btn-disabled, #ccc)" : "#c5221f", color: "white", border: "none", borderRadius: 4, cursor: bulkBusy ? "wait" : "pointer", fontSize: 13, fontWeight: 500 }}
+            >
+              {bulkBusy ? "Deleting…" : `🗑 Delete ${selected.size} selected`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {loading && posts.length === 0 ? (
+        <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted, #888)" }}>Loading…</div>
+      ) : posts.length === 0 ? (
+        <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted, #888)", border: "1px dashed var(--border, #ccc)", borderRadius: 6 }}>
+          <p style={{ margin: "0 0 8px 0" }}>No saved posts yet.</p>
+          <p style={{ margin: 0, fontSize: 12 }}>Compose a caption in <strong>Single Post</strong> or <strong>30-Day Plan</strong> — it auto-saves here.</p>
+        </div>
+      ) : (
+        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 10 }}>
+          {posts.map((post) => (
+            <li key={post.id}>
+              <SavedPostCard
+                post={post}
+                selected={selected.has(post.id)}
+                onToggleSelect={() => toggleSelect(post.id)}
+                onDelete={() => handleDelete(post.id)}
+                onPatch={patchPost}
+                onCopy={onCopy}
+                showMessage={showMessage}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SavedPostCard({
+  post,
+  selected,
+  onToggleSelect,
+  onDelete,
+  onPatch,
+  onCopy,
+  showMessage,
+}: {
+  post: WizardPost;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onDelete: () => void;
+  onPatch: (p: WizardPost) => void;
+  onCopy: (text: string, label: string) => void;
+  showMessage: (text: string, isError?: boolean) => void;
+}) {
+  const [hero, setHero] = useState(post.hero || "notebook");
+  const [generatingImage, setGeneratingImage] = useState(false);
+  const [promoting, setPromoting] = useState(false);
+
+  async function handleGenerateImage() {
+    setGeneratingImage(true);
+    try {
+      const res = await igWizardApi.posts.generateImage(post.id, hero);
+      onPatch(res.post);
+      showMessage("Branded image generated.");
+    } catch (e: unknown) {
+      showMessage(`Image failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setGeneratingImage(false);
+    }
+  }
+
+  async function handleToDraft() {
+    setPromoting(true);
+    try {
+      const res = await igWizardApi.posts.toDraft(post.id);
+      onPatch(res.post);
+      showMessage("Sent to Drafts — schedule/publish it in the Drafts tab.");
+    } catch (e: unknown) {
+      showMessage(`Send to Drafts failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setPromoting(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", gap: 12, padding: 10, background: "var(--card-bg, #f8f8f8)", border: `1px solid ${selected ? "var(--btn-primary, #0066cc)" : "var(--border, #ddd)"}`, borderRadius: 6 }}>
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={onToggleSelect}
+        aria-label={`Select post: ${post.hook || post.topic}`}
+        style={{ marginTop: 4 }}
+      />
+      {post.imageUrl ? (
+        <img src={post.imageUrl} alt="Post image" style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border, #ddd)", flex: "0 0 auto" }} />
+      ) : (
+        <div style={{ width: 88, height: 88, borderRadius: 6, border: "1px dashed var(--border, #ddd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--text-muted, #888)", textAlign: "center", flex: "0 0 auto", padding: 4 }}>
+          no image
+        </div>
+      )}
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em", padding: "1px 6px", borderRadius: 8, background: post.source === "plan" ? "#e8f0fe" : "#e6f4ea", color: post.source === "plan" ? "#1565c0" : "#137333" }}>
+            {post.source === "plan" ? `Plan${post.day ? ` · Day ${post.day}` : ""}` : "Single"}
+          </span>
+          <span style={{ fontSize: 11, color: "var(--text-muted, #888)" }}>{post.platforms.join(", ")}</span>
+          {post.promotedDraftId && (
+            <span style={{ fontSize: 10, color: "var(--success-text, #137333)", fontWeight: 500 }}>✓ in Drafts</span>
+          )}
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{post.hook || "(no hook)"}</div>
+        <div style={{ fontSize: 12, color: "var(--text-muted, #666)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{post.body}</div>
+
+        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <button type="button" onClick={() => onCopy(post.caption, "caption")} aria-label="Copy caption" style={miniBtn}>📋 Copy</button>
+          <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11 }}>
+            <select value={hero} onChange={(e) => setHero(e.target.value)} aria-label={`Image scene for ${post.hook}`} style={{ padding: "2px 4px", fontSize: 11 }}>
+              {HERO_SCENES.map((h) => (<option key={h.id} value={h.id}>{h.label}</option>))}
+            </select>
+          </label>
+          <button type="button" onClick={handleGenerateImage} disabled={generatingImage} aria-label={`Generate image for ${post.hook}`} style={{ ...miniBtn, cursor: generatingImage ? "wait" : "pointer" }}>
+            {generatingImage ? "Generating ~1min…" : post.imageUrl ? "↻ Image" : "✨ Image"}
+          </button>
+          <button type="button" onClick={handleToDraft} disabled={promoting} aria-label={`Send ${post.hook} to Drafts`} style={{ ...miniBtnPrimary, cursor: promoting ? "wait" : "pointer" }}>
+            {promoting ? "Sending…" : "→ Drafts"}
+          </button>
+          <button type="button" onClick={onDelete} aria-label={`Delete ${post.hook}`} style={{ ...miniBtn, color: "#c5221f", borderColor: "#f3b9b6" }}>🗑</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const miniBtn: React.CSSProperties = {
+  padding: "4px 10px",
+  background: "transparent",
+  border: "1px solid var(--border, #ddd)",
+  borderRadius: 4,
+  cursor: "pointer",
+  fontSize: 11,
+};
+const miniBtnPrimary: React.CSSProperties = {
+  padding: "4px 10px",
+  background: "var(--btn-primary, #0066cc)",
+  color: "white",
+  border: "none",
+  borderRadius: 4,
+  cursor: "pointer",
+  fontSize: 11,
+  fontWeight: 500,
+};
 
 // ─── LeadCtaCard ─────────────────────────────────────────────────────────────
 

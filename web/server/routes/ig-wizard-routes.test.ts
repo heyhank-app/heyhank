@@ -24,6 +24,22 @@ vi.mock("../socialmedia/manager.js", () => ({
   createDraft: (...args: unknown[]) => mockCreateDraft(...args),
 }));
 
+// Wizard Saved Posts store mock.
+const mockWpList = vi.fn();
+const mockWpCreate = vi.fn();
+const mockWpGet = vi.fn();
+const mockWpUpdate = vi.fn();
+const mockWpRemove = vi.fn();
+const mockWpBulkRemove = vi.fn();
+vi.mock("../ig-wizard-posts.js", () => ({
+  listPosts: (...a: unknown[]) => mockWpList(...a),
+  createPost: (...a: unknown[]) => mockWpCreate(...a),
+  getPost: (...a: unknown[]) => mockWpGet(...a),
+  updatePost: (...a: unknown[]) => mockWpUpdate(...a),
+  removePost: (...a: unknown[]) => mockWpRemove(...a),
+  bulkRemove: (...a: unknown[]) => mockWpBulkRemove(...a),
+}));
+
 // Helper to build a valid JSON payload like the real model would return.
 function validPayload(): string {
   return JSON.stringify({
@@ -409,5 +425,97 @@ describe("POST /ig-wizard/compose-and-save-draft", () => {
     });
     const json = await res.json();
     expect(json.draft.platforms).toEqual(["instagram"]);
+  });
+});
+
+describe("Wizard Saved Posts routes", () => {
+  let app: Hono;
+
+  beforeEach(() => {
+    app = new Hono();
+    registerIgWizardRoutes(app);
+    [mockWpList, mockWpCreate, mockWpGet, mockWpUpdate, mockWpRemove, mockWpBulkRemove].forEach((m) => m.mockReset());
+    mockGenerateIgCover.mockReset();
+    mockCreateDraft.mockReset();
+  });
+
+  it("GET /ig-wizard/posts returns the list", async () => {
+    mockWpList.mockReturnValue([{ id: "a", hook: "A" }]);
+    const res = await app.request("/ig-wizard/posts");
+    expect(res.status).toBe(200);
+    expect((await res.json()).posts).toEqual([{ id: "a", hook: "A" }]);
+  });
+
+  it("POST /ig-wizard/posts creates a post (caption required)", async () => {
+    mockWpCreate.mockReturnValue({ id: "new", source: "single" });
+    const ok = await app.request("/ig-wizard/posts", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ caption: "Hi", hook: "Hi", source: "plan", day: 3 }),
+    });
+    expect(ok.status).toBe(201);
+    expect(mockWpCreate).toHaveBeenCalledWith(expect.objectContaining({ caption: "Hi", source: "plan", day: 3 }));
+
+    const bad = await app.request("/ig-wizard/posts", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hook: "no caption" }),
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it("DELETE /ig-wizard/posts/:id removes a post", async () => {
+    mockWpRemove.mockReturnValue(true);
+    const res = await app.request("/ig-wizard/posts/abc", { method: "DELETE" });
+    expect(res.status).toBe(200);
+    expect(mockWpRemove).toHaveBeenCalledWith("abc");
+
+    mockWpRemove.mockReturnValue(false);
+    const miss = await app.request("/ig-wizard/posts/gone", { method: "DELETE" });
+    expect(miss.status).toBe(404);
+  });
+
+  it("POST /ig-wizard/posts/bulk-delete removes many", async () => {
+    mockWpBulkRemove.mockReturnValue(2);
+    const res = await app.request("/ig-wizard/posts/bulk-delete", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: ["a", "b"] }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).removed).toBe(2);
+    expect(mockWpBulkRemove).toHaveBeenCalledWith(["a", "b"]);
+  });
+
+  it("POST /ig-wizard/posts/:id/image generates + attaches a branded image", async () => {
+    mockWpGet.mockReturnValue({ id: "a", hook: "Stop renting AI", topic: "x", hero: "notebook" });
+    mockGenerateIgCover.mockResolvedValue({ filename: "i.png", url: "/api/media/file/i.png", path: "/x", prompt: "p", model: "gpt-image-2" });
+    mockWpUpdate.mockReturnValue({ id: "a", imageUrl: "/api/media/file/i.png" });
+
+    const res = await app.request("/ig-wizard/posts/a/image", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hero: "laptop" }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockGenerateIgCover).toHaveBeenCalledWith(expect.objectContaining({ headline: "Stop renting AI", hero: "laptop" }));
+    expect(mockWpUpdate).toHaveBeenCalledWith("a", expect.objectContaining({ imageUrl: "/api/media/file/i.png" }));
+  });
+
+  it("POST /ig-wizard/posts/:id/to-draft promotes to a social draft", async () => {
+    mockWpGet.mockReturnValue({ id: "a", hook: "H", body: "B", cta: "C", hashtags: ["ai"], platforms: ["instagram"], imageUrl: "/api/media/file/i.png" });
+    mockCreateDraft.mockResolvedValue({ id: "draft-9", status: "draft", platforms: ["instagram"], text: "H\n\nB\n\nC", mediaUrls: ["/api/media/file/i.png"], firstComment: "#ai" });
+    mockWpUpdate.mockReturnValue({ id: "a", promotedDraftId: "draft-9" });
+
+    const res = await app.request("/ig-wizard/posts/a/to-draft", { method: "POST" });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.draft.id).toBe("draft-9");
+    // Clean body (no inline hashtags), hashtags → first comment, image as media.
+    expect(mockCreateDraft).toHaveBeenCalledWith(expect.objectContaining({
+      text: "H\n\nB\n\nC",
+      firstComment: "#ai",
+      mediaUrls: ["/api/media/file/i.png"],
+    }));
+    expect(mockWpUpdate).toHaveBeenCalledWith("a", { promotedDraftId: "draft-9" });
+  });
+
+  it("returns 404 for image/to-draft on a missing post", async () => {
+    mockWpGet.mockReturnValue(null);
+    expect((await app.request("/ig-wizard/posts/x/image", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status).toBe(404);
+    expect((await app.request("/ig-wizard/posts/x/to-draft", { method: "POST" })).status).toBe(404);
   });
 });

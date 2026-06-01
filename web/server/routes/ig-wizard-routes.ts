@@ -17,6 +17,7 @@ import {
 import { generateIgCover } from "../ig-cover.js";
 import * as socialManager from "../socialmedia/manager.js";
 import type { SocialPlatform } from "../socialmedia/types.js";
+import * as wizardPosts from "../ig-wizard-posts.js";
 
 const VALID_PLATFORMS: SocialPlatform[] = ["instagram", "facebook", "twitter", "linkedin", "tiktok", "threads"];
 
@@ -153,5 +154,103 @@ export function registerIgWizardRoutes(api: Hono): void {
     });
 
     return c.json({ caption: captionResult, image, imageError, draft });
+  });
+
+  // ─── Wizard Saved Posts (the persistent workbench) ──────────────────────
+
+  /** List all saved wizard posts (newest first). Restores across restarts. */
+  api.get("/ig-wizard/posts", (c) => {
+    return c.json({ posts: wizardPosts.listPosts() });
+  });
+
+  /** Auto-save a composed caption as a wizard post. */
+  api.post("/ig-wizard/posts", async (c) => {
+    const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    if (typeof b.caption !== "string" || !b.caption.trim()) {
+      return c.json({ error: "caption is required" }, 400);
+    }
+    const post = wizardPosts.createPost({
+      topic: typeof b.topic === "string" ? b.topic : "",
+      hook: typeof b.hook === "string" ? b.hook : "",
+      body: typeof b.body === "string" ? b.body : "",
+      cta: typeof b.cta === "string" ? b.cta : "",
+      hashtags: Array.isArray(b.hashtags) ? b.hashtags.filter((h): h is string => typeof h === "string") : [],
+      caption: b.caption,
+      source: b.source === "plan" ? "plan" : "single",
+      platforms: coercePlatforms(b.platforms),
+      hero: typeof b.hero === "string" ? b.hero : undefined,
+      day: typeof b.day === "number" ? b.day : undefined,
+    });
+    return c.json({ ok: true, post }, 201);
+  });
+
+  /** Update a wizard post (edited hook/body/cta/caption/platforms). */
+  api.patch("/ig-wizard/posts/:id", async (c) => {
+    const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const patch: Record<string, unknown> = {};
+    for (const f of ["topic", "hook", "body", "cta", "caption", "hero"] as const) {
+      if (typeof b[f] === "string") patch[f] = b[f];
+    }
+    if (Array.isArray(b.hashtags)) patch.hashtags = b.hashtags.filter((h): h is string => typeof h === "string");
+    if (b.platforms !== undefined) patch.platforms = coercePlatforms(b.platforms);
+    const post = wizardPosts.updatePost(c.req.param("id"), patch as Parameters<typeof wizardPosts.updatePost>[1]);
+    if (!post) return c.json({ error: "not found" }, 404);
+    return c.json(post);
+  });
+
+  api.delete("/ig-wizard/posts/:id", (c) => {
+    const ok = wizardPosts.removePost(c.req.param("id"));
+    if (!ok) return c.json({ error: "not found" }, 404);
+    return c.json({ ok: true });
+  });
+
+  /** Bulk delete — curate the workbench down to the targeted posts. */
+  api.post("/ig-wizard/posts/bulk-delete", async (c) => {
+    const b = (await c.req.json().catch(() => ({}))) as { ids?: unknown };
+    const ids = Array.isArray(b.ids) ? b.ids.filter((x): x is string => typeof x === "string") : [];
+    const removed = wizardPosts.bulkRemove(ids);
+    return c.json({ ok: true, removed });
+  });
+
+  /** Generate (or regenerate) the branded image for a saved post + attach it. */
+  api.post("/ig-wizard/posts/:id/image", async (c) => {
+    const post = wizardPosts.getPost(c.req.param("id"));
+    if (!post) return c.json({ error: "not found" }, 404);
+    const b = (await c.req.json().catch(() => ({}))) as { hero?: unknown };
+    try {
+      const image = await generateIgCover({
+        headline: post.hook || post.topic,
+        badge: "Built with AI",
+        hero: (typeof b.hero === "string" ? b.hero : post.hero) || "notebook",
+      });
+      const updated = wizardPosts.updatePost(post.id, {
+        imageUrl: image.url,
+        imageFilename: image.filename,
+        hero: typeof b.hero === "string" ? b.hero : post.hero,
+      });
+      return c.json({ ok: true, post: updated, image });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
+    }
+  });
+
+  /** Promote a saved wizard post into the social-media drafts (publish queue). */
+  api.post("/ig-wizard/posts/:id/to-draft", async (c) => {
+    const post = wizardPosts.getPost(c.req.param("id"));
+    if (!post) return c.json({ error: "not found" }, 404);
+    // Clean body (no inline hashtags); hashtags → IG first comment.
+    const text = assembleCaption({ hook: post.hook, body: post.body, cta: post.cta, hashtags: [] });
+    const firstComment = post.hashtags.length ? post.hashtags.map((h) => `#${h}`).join(" ") : undefined;
+    const draft = await socialManager.createDraft({
+      text,
+      platforms: coercePlatforms(post.platforms),
+      mediaUrls: post.imageUrl ? [post.imageUrl] : [],
+      firstComment,
+      format: "post",
+      isDraft: true,
+      createdBy: "agent",
+    });
+    const updated = wizardPosts.updatePost(post.id, { promotedDraftId: draft.id });
+    return c.json({ ok: true, draft, post: updated });
   });
 }

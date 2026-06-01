@@ -1899,6 +1899,38 @@ export interface IgComposeDraftResult {
   draft: IgComposeDraftPost;
 }
 
+export interface WizardPost {
+  id: string;
+  topic: string;
+  hook: string;
+  body: string;
+  cta: string;
+  hashtags: string[];
+  caption: string;
+  platforms: string[];
+  imageUrl?: string | null;
+  imageFilename?: string | null;
+  hero?: string;
+  source: "single" | "plan";
+  day?: number | null;
+  promotedDraftId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateWizardPostInput {
+  topic: string;
+  hook: string;
+  body: string;
+  cta: string;
+  hashtags: string[];
+  caption: string;
+  source: "single" | "plan";
+  platforms?: string[];
+  hero?: string;
+  day?: number;
+}
+
 export const igWizardApi = {
   generate: (niche: string, language: "en" | "de" = "en") =>
     post<IgWizardResult>("/ig-wizard/generate", { niche, language }),
@@ -1908,6 +1940,21 @@ export const igWizardApi = {
     post<IgPlanResult>("/ig-wizard/plan", { language: "en", days: 30, ...input }),
   composeAndSaveDraft: (input: IgComposeDraftInput) =>
     post<IgComposeDraftResult>("/ig-wizard/compose-and-save-draft", { language: "en", ...input }),
+  // ── Saved Posts (the wizard's persistent workbench) ──
+  posts: {
+    list: () => get<{ posts: WizardPost[] }>("/ig-wizard/posts"),
+    create: (input: CreateWizardPostInput) =>
+      post<{ ok: boolean; post: WizardPost }>("/ig-wizard/posts", input),
+    update: (id: string, changes: Partial<CreateWizardPostInput>) =>
+      patch<WizardPost>(`/ig-wizard/posts/${encodeURIComponent(id)}`, changes),
+    remove: (id: string) => del<{ ok: boolean }>(`/ig-wizard/posts/${encodeURIComponent(id)}`),
+    bulkRemove: (ids: string[]) =>
+      post<{ ok: boolean; removed: number }>("/ig-wizard/posts/bulk-delete", { ids }),
+    generateImage: (id: string, hero?: string) =>
+      post<{ ok: boolean; post: WizardPost; image: IgCoverImage }>(`/ig-wizard/posts/${encodeURIComponent(id)}/image`, { hero }),
+    toDraft: (id: string) =>
+      post<{ ok: boolean; draft: IgComposeDraftPost; post: WizardPost }>(`/ig-wizard/posts/${encodeURIComponent(id)}/to-draft`, {}),
+  },
 };
 
 // ─── Auto-DM rules (used by IG Wizard Create-Rule button) ────────────────────

@@ -23,15 +23,53 @@ const mockCreateRule = vi.fn();
 const mockCaption = vi.fn();
 const mockPlan = vi.fn();
 const mockComposeDraft = vi.fn();
+// Wizard Saved Posts workbench (auto-save + curate).
+const mockPostsList = vi.fn();
+const mockPostsCreate = vi.fn();
+const mockPostsUpdate = vi.fn();
+const mockPostsRemove = vi.fn();
+const mockPostsBulkRemove = vi.fn();
+const mockPostsImage = vi.fn();
+const mockPostsToDraft = vi.fn();
 vi.mock("../api.js", () => ({
   igWizardApi: {
     generate: (...args: unknown[]) => mockGenerate(...args),
     caption: (...args: unknown[]) => mockCaption(...args),
     plan: (...args: unknown[]) => mockPlan(...args),
     composeAndSaveDraft: (...args: unknown[]) => mockComposeDraft(...args),
+    posts: {
+      list: (...args: unknown[]) => mockPostsList(...args),
+      create: (...args: unknown[]) => mockPostsCreate(...args),
+      update: (...args: unknown[]) => mockPostsUpdate(...args),
+      remove: (...args: unknown[]) => mockPostsRemove(...args),
+      bulkRemove: (...args: unknown[]) => mockPostsBulkRemove(...args),
+      generateImage: (...args: unknown[]) => mockPostsImage(...args),
+      toDraft: (...args: unknown[]) => mockPostsToDraft(...args),
+    },
   },
   autoDmRulesApi: { create: (...args: unknown[]) => mockCreateRule(...args) },
 }));
+
+function makeWizardPost(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "wp-1",
+    topic: "AI tools",
+    hook: "AI wrote this in 3 minutes",
+    body: "Here's the workflow.",
+    cta: "Comment BUILD",
+    hashtags: ["ai"],
+    caption: "AI wrote this in 3 minutes\n\nHere's the workflow.\n\nComment BUILD\n\n#ai",
+    platforms: ["instagram"],
+    imageUrl: null,
+    imageFilename: null,
+    source: "single",
+    day: null,
+    promotedDraftId: null,
+    createdAt: "2026-05-31T00:00:00.000Z",
+    updatedAt: "2026-05-31T00:00:00.000Z",
+    ...overrides,
+  };
+}
 
 function samplePlan(overrides: Record<string, unknown> = {}) {
   return {
@@ -94,6 +132,17 @@ beforeEach(() => {
   mockCaption.mockReset();
   mockPlan.mockReset();
   mockComposeDraft.mockReset();
+  mockPostsList.mockReset();
+  mockPostsCreate.mockReset();
+  mockPostsUpdate.mockReset();
+  mockPostsRemove.mockReset();
+  mockPostsBulkRemove.mockReset();
+  mockPostsImage.mockReset();
+  mockPostsToDraft.mockReset();
+  // Sensible defaults: auto-save succeeds, list is empty.
+  mockPostsCreate.mockResolvedValue({ ok: true, post: makeWizardPost() });
+  mockPostsUpdate.mockResolvedValue(makeWizardPost());
+  mockPostsList.mockResolvedValue({ posts: [] });
   // jsdom doesn't ship a clipboard impl by default. Provide one.
   Object.assign(navigator, {
     clipboard: {
@@ -482,21 +531,17 @@ describe("IgWizardTab — 30-Day Plan mode", () => {
     expect(mockCaption).toHaveBeenCalledWith(expect.objectContaining({ topic: "AI tools", hook: "Plan hook 1" }));
   });
 
-  it("saves a per-day draft in place", async () => {
+  it("auto-saves a composed day as a wizard post (source=plan, day)", async () => {
     await generatePlan();
     mockCaption.mockResolvedValueOnce(sampleCaption());
     fireEvent.click(screen.getByRole("button", { name: /Compose caption for day 1$/i }));
     fireEvent.click(screen.getByRole("button", { name: /Generate caption for day 1$/i }));
     await waitFor(() => expect(screen.getByLabelText(/Composed caption for day 1$/i)).toBeInTheDocument());
 
-    mockComposeDraft.mockResolvedValueOnce({
-      caption: sampleCaption(),
-      image: { filename: "i.png", url: "/api/media/file/i.png", path: "/x", prompt: "p", model: "gpt-image-2" },
-      imageError: null,
-      draft: { id: "pd1", text: "t", status: "draft", platforms: ["instagram"], mediaUrls: ["/api/media/file/i.png"], createdAt: "" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /Generate image and save draft for day 1$/i }));
-    await waitFor(() => expect(screen.getByText(/✓ Draft saved → Drafts tab/)).toBeInTheDocument());
+    // The day auto-saved to the workbench with source=plan + the day number.
+    expect(mockPostsCreate).toHaveBeenCalledWith(expect.objectContaining({ source: "plan", day: 1 }));
+    // The "saved to your posts" confirmation shows.
+    expect(screen.getByText(/✓ Saved to your posts/)).toBeInTheDocument();
   });
 
   it("shows the plan empty-state guidance before generating", async () => {
@@ -526,10 +571,10 @@ describe("IgWizardTab — Use on engagement/growth CTAs", () => {
   });
 });
 
-// ─── Image + Draft (compose-and-save-draft) ──────────────────────────────────
+// ─── Auto-save to the Saved Posts workbench ──────────────────────────────────
 
-describe("IgWizardTab — image + draft", () => {
-  async function composeFirst() {
+describe("IgWizardTab — auto-save on compose", () => {
+  async function composeSingle() {
     mockGenerate.mockResolvedValueOnce(sampleResult());
     render(<IgWizardTab showMessage={() => {}} />);
     fireEvent.change(screen.getByLabelText(/^Niche$/), { target: { value: "self-hosting AI" } });
@@ -540,60 +585,85 @@ describe("IgWizardTab — image + draft", () => {
     await waitFor(() => expect(screen.getByLabelText(/Composed caption/i)).toBeInTheDocument());
   }
 
-  it("saves a draft with the composed caption + selected platforms", async () => {
-    await composeFirst();
-    mockComposeDraft.mockResolvedValueOnce({
-      caption: sampleCaption(),
-      image: { filename: "img.png", url: "/api/media/file/img.png", path: "/x", prompt: "p", model: "gpt-image-2" },
-      imageError: null,
-      draft: { id: "d1", text: "t", status: "draft", platforms: ["instagram"], mediaUrls: ["/api/media/file/img.png"], firstComment: "#ai", createdAt: "" },
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: /Generate image and save as draft/i }));
-
-    await waitFor(() => expect(screen.getByText(/✓ Draft saved/)).toBeInTheDocument());
-    // The generated image preview is shown.
-    expect(screen.getByAltText(/Generated branded post image/i)).toBeInTheDocument();
-    // The compose call carried the verbatim caption + default platform.
-    expect(mockComposeDraft).toHaveBeenCalledWith(
-      expect.objectContaining({
-        topic: "self-hosting AI",
-        platforms: ["instagram"],
-        caption: expect.objectContaining({ hook: "AI wrote this in 3 minutes" }),
-      }),
-    );
-  });
-
-  it("toggling a platform checkbox updates the saved platforms", async () => {
-    await composeFirst();
-    mockComposeDraft.mockResolvedValueOnce({
-      caption: sampleCaption(),
-      image: null,
-      imageError: null,
-      draft: { id: "d2", text: "t", status: "draft", platforms: ["instagram", "facebook"], mediaUrls: [], createdAt: "" },
-    });
-
-    fireEvent.click(screen.getByLabelText(/Post to Facebook/i));
-    fireEvent.click(screen.getByRole("button", { name: /Generate image and save as draft/i }));
-
+  it("auto-saves the composed caption as a single wizard post", async () => {
+    await composeSingle();
     await waitFor(() =>
-      expect(mockComposeDraft).toHaveBeenCalledWith(
-        expect.objectContaining({ platforms: ["instagram", "facebook"] }),
+      expect(mockPostsCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ source: "single", topic: "self-hosting AI", hook: "AI wrote this in 3 minutes" }),
       ),
     );
+    // The "saved" confirmation + a link to Saved Posts appears.
+    expect(screen.getByText(/✓ Saved to your posts/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open Saved Posts/i })).toBeInTheDocument();
   });
 
-  it("shows a text-only fallback when the image fails but the draft saved", async () => {
-    await composeFirst();
-    mockComposeDraft.mockResolvedValueOnce({
-      caption: sampleCaption(),
-      image: null,
-      imageError: "gpt-image-2 failed: rate limit",
-      draft: { id: "d3", text: "t", status: "draft", platforms: ["instagram"], mediaUrls: [], createdAt: "" },
-    });
+  it("Redo updates the same post instead of creating a duplicate", async () => {
+    await composeSingle();
+    await waitFor(() => expect(mockPostsCreate).toHaveBeenCalledTimes(1));
+    // Redo (compose again) → updates the existing post.
+    mockCaption.mockResolvedValueOnce(sampleCaption());
+    fireEvent.click(screen.getByRole("button", { name: /Compose full caption/i }));
+    await waitFor(() => expect(mockPostsUpdate).toHaveBeenCalledWith("wp-1", expect.any(Object)));
+    expect(mockPostsCreate).toHaveBeenCalledTimes(1); // still only one create
+  });
+});
 
-    fireEvent.click(screen.getByRole("button", { name: /Generate image and save as draft/i }));
-    await waitFor(() => expect(screen.getByText(/✓ Draft saved/)).toBeInTheDocument());
-    expect(screen.getByText(/Text-only draft/)).toBeInTheDocument();
+// ─── Saved Posts workbench (list, delete, bulk, image, → Drafts) ─────────────
+
+describe("IgWizardTab — Saved Posts workbench", () => {
+  async function openSaved(posts: ReturnType<typeof makeWizardPost>[]) {
+    mockPostsList.mockResolvedValue({ posts });
+    render(<IgWizardTab showMessage={() => {}} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Saved Posts/i }));
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalled());
+  }
+
+  it("lists persisted posts on open (restores across restarts)", async () => {
+    await openSaved([makeWizardPost({ id: "a", hook: "Post A" }), makeWizardPost({ id: "b", hook: "Post B" })]);
+    await waitFor(() => expect(screen.getByText("Post A")).toBeInTheDocument());
+    expect(screen.getByText("Post B")).toBeInTheDocument();
+  });
+
+  it("shows an empty state when there are no saved posts", async () => {
+    await openSaved([]);
+    await waitFor(() => expect(screen.getByText(/No saved posts yet/)).toBeInTheDocument());
+  });
+
+  it("deletes a single post", async () => {
+    mockPostsRemove.mockResolvedValueOnce({ ok: true });
+    await openSaved([makeWizardPost({ id: "a", hook: "Post A" })]);
+    await waitFor(() => expect(screen.getByText("Post A")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Delete Post A/i }));
+    await waitFor(() => expect(mockPostsRemove).toHaveBeenCalledWith("a"));
+  });
+
+  it("bulk-deletes selected posts", async () => {
+    mockPostsBulkRemove.mockResolvedValueOnce({ ok: true, removed: 2 });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await openSaved([makeWizardPost({ id: "a", hook: "Post A" }), makeWizardPost({ id: "b", hook: "Post B" })]);
+    await waitFor(() => expect(screen.getByText("Post A")).toBeInTheDocument());
+
+    // Select all, then bulk-delete.
+    fireEvent.click(screen.getByLabelText(/Select all posts/i));
+    fireEvent.click(screen.getByRole("button", { name: /Delete 2 selected posts/i }));
+    await waitFor(() => expect(mockPostsBulkRemove).toHaveBeenCalledWith(["a", "b"]));
+  });
+
+  it("generates a branded image for a post", async () => {
+    mockPostsImage.mockResolvedValueOnce({ ok: true, post: makeWizardPost({ id: "a", imageUrl: "/api/media/file/x.png" }), image: { url: "/api/media/file/x.png" } });
+    await openSaved([makeWizardPost({ id: "a", hook: "Post A" })]);
+    await waitFor(() => expect(screen.getByText("Post A")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Generate image for Post A/i }));
+    await waitFor(() => expect(mockPostsImage).toHaveBeenCalledWith("a", "notebook"));
+  });
+
+  it("promotes a post to Drafts", async () => {
+    mockPostsToDraft.mockResolvedValueOnce({ ok: true, draft: { id: "d1" }, post: makeWizardPost({ id: "a", promotedDraftId: "d1" }) });
+    await openSaved([makeWizardPost({ id: "a", hook: "Post A" })]);
+    await waitFor(() => expect(screen.getByText("Post A")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Send Post A to Drafts/i }));
+    await waitFor(() => expect(mockPostsToDraft).toHaveBeenCalledWith("a"));
+    // The "in Drafts" badge shows after promotion.
+    await waitFor(() => expect(screen.getByText(/in Drafts/i)).toBeInTheDocument());
   });
 });
