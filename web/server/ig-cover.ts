@@ -22,8 +22,13 @@ import { HEYHANK_HOME } from "./paths.js";
 const MEDIA_DIR = join(HEYHANK_HOME, "media");
 const OPENAI_EDITS_URL = "https://api.openai.com/v1/images/edits";
 
+// Capped identity refs (M-cap, the original builder look).
 const REF_1 = process.env.MARKUS_REF_1 || "/opt/agentplatform/Markus.jpeg";
 const REF_2 = process.env.MARKUS_REF_2 || "/opt/agentplatform/Markus_2.jpeg";
+// No-cap identity refs (bald head + beard, from the reference-images/person set).
+const PERSON_DIR = join(HEYHANK_HOME, "reference-images", "person");
+const NOCAP_REF_1 = process.env.MARKUS_NOCAP_REF_1 || join(PERSON_DIR, "markus-identity-360-nocap.png");
+const NOCAP_REF_2 = process.env.MARKUS_NOCAP_REF_2 || join(PERSON_DIR, "markus-fullbody-denim-nocap.png");
 
 export interface IgCoverResult {
   filename: string;
@@ -88,10 +93,11 @@ export function normalizeStyle(raw: unknown): IgStyle {
   return raw === "business" || raw === "pointing" || raw === "bold" || raw === "screen" ? raw : "cozy";
 }
 
-/** The locked identity clause, shared by every style. */
-const IDENTITY = "the man from the two reference photos — a black M-cap with a capital letter M on the front, thin-rimmed glasses, a full short beard. Natural skin texture, a real person, not a stock photo, not glamorous, not AI-sterile";
+/** The locked identity clause. Capped (M-cap + glasses) or bare-headed. */
+const IDENTITY_CAP = "the man from the reference photos — a black M-cap with a capital letter M on the front, thin-rimmed glasses, a full short beard. Natural skin texture, a real person, not a stock photo, not glamorous, not AI-sterile";
+const IDENTITY_NOCAP = "the man from the reference photos — NO hat (bare head, cleanly shaved / bald on top), a full short beard, no glasses. Natural skin texture, a real person, not a stock photo, not glamorous, not AI-sterile";
 
-function styleBlocks(style: IgStyle, scene: string): { subject: string; composition: string } {
+function styleBlocks(style: IgStyle, scene: string, IDENTITY: string): { subject: string; composition: string } {
   switch (style) {
     case "business":
       return {
@@ -132,10 +138,13 @@ export function buildIgCoverPrompt(input: {
   badge?: string;
   hero?: IgCoverHero;
   style?: IgStyle;
+  /** Wear the M-cap (default true) or generate bare-headed. */
+  cap?: boolean;
 }): string {
   const badge = input.badge?.trim() || "Built with AI";
   const scene = heroScene(input.hero || "notebook");
-  const { subject, composition } = styleBlocks(normalizeStyle(input.style), scene);
+  const identity = input.cap === false ? IDENTITY_NOCAP : IDENTITY_CAP;
+  const { subject, composition } = styleBlocks(normalizeStyle(input.style), scene, identity);
   return `Photorealistic 1:1 square Instagram post image, editorial photography quality.
 
 ${subject}
@@ -166,13 +175,16 @@ export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
  * message. `deps.fetch` + `deps.now`/`deps.rand` are injectable for tests.
  */
 export async function generateIgCover(
-  input: { headline: string; badge?: string; hero?: IgCoverHero; style?: IgStyle; quality?: "low" | "medium" | "high" },
+  input: { headline: string; badge?: string; hero?: IgCoverHero; style?: IgStyle; cap?: boolean; quality?: "low" | "medium" | "high" },
   deps?: { fetch?: FetchLike; now?: () => number; rand?: () => string },
 ): Promise<IgCoverResult> {
   const key = openaiKey();
   if (!key) throw new Error("OpenAI API key not configured (set OPENAI_API_KEY or ~/.config/openai-image/credentials.json)");
-  if (!existsSync(REF_1) || !existsSync(REF_2)) {
-    throw new Error(`Markus reference photos not found (${REF_1}, ${REF_2})`);
+  // Pick the reference set that matches the requested headwear so identity
+  // locks correctly (capped refs vs the bare-headed person set).
+  const [ref1, ref2] = input.cap === false ? [NOCAP_REF_1, NOCAP_REF_2] : [REF_1, REF_2];
+  if (!existsSync(ref1) || !existsSync(ref2)) {
+    throw new Error(`Markus reference photos not found (${ref1}, ${ref2})`);
   }
   if (!input.headline || !input.headline.trim()) throw new Error("headline is required");
 
@@ -188,8 +200,8 @@ export async function generateIgCover(
   form.append("quality", input.quality || "medium");
   form.append("n", "1");
   // gpt-image-2 edit endpoint accepts multiple reference images under image[].
-  form.append("image[]", new Blob([readFileSync(REF_1)], { type: "image/jpeg" }), "ref1.jpeg");
-  form.append("image[]", new Blob([readFileSync(REF_2)], { type: "image/jpeg" }), "ref2.jpeg");
+  form.append("image[]", new Blob([readFileSync(ref1)], { type: "image/jpeg" }), "ref1.jpeg");
+  form.append("image[]", new Blob([readFileSync(ref2)], { type: "image/jpeg" }), "ref2.jpeg");
 
   const res = await doFetch(OPENAI_EDITS_URL, {
     method: "POST",

@@ -1922,6 +1922,7 @@ export interface WizardPost {
   thumbnailUrl?: string | null;
   hero?: string;
   style?: string;
+  cap?: boolean;
   source: "single" | "plan";
   day?: number | null;
   promotedDraftId?: string | null;
@@ -1962,10 +1963,10 @@ export const igWizardApi = {
     remove: (id: string) => del<{ ok: boolean }>(`/ig-wizard/posts/${encodeURIComponent(id)}`),
     bulkRemove: (ids: string[]) =>
       post<{ ok: boolean; removed: number }>("/ig-wizard/posts/bulk-delete", { ids }),
-    generateImage: (id: string, hero?: string, style?: string) =>
-      post<{ ok: boolean; post: WizardPost; image: IgCoverImage }>(`/ig-wizard/posts/${encodeURIComponent(id)}/image`, { hero, style }),
-    generateCarousel: (id: string, slides: number, hero?: string, style?: string) =>
-      post<{ ok: boolean; post: WizardPost; slides: { text: string }[]; mediaUrls: string[] }>(`/ig-wizard/posts/${encodeURIComponent(id)}/carousel`, { slides, hero, style }),
+    generateImage: (id: string, hero?: string, style?: string, cap?: boolean) =>
+      post<{ ok: boolean; post: WizardPost; image: IgCoverImage }>(`/ig-wizard/posts/${encodeURIComponent(id)}/image`, { hero, style, cap }),
+    generateCarousel: (id: string, slides: number, hero?: string, style?: string, cap?: boolean) =>
+      post<{ ok: boolean; post: WizardPost; slides: { text: string }[]; mediaUrls: string[] }>(`/ig-wizard/posts/${encodeURIComponent(id)}/carousel`, { slides, hero, style, cap }),
     generateReel: (id: string, durationSeconds?: 4 | 6 | 8) =>
       post<{ ok: boolean; post: WizardPost; videoUrl: string }>(`/ig-wizard/posts/${encodeURIComponent(id)}/reel`, { durationSeconds }),
     toDraft: (id: string) =>

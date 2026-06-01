@@ -1211,6 +1211,7 @@ function SavedPostCard({
 }) {
   const [hero, setHero] = useState(post.hero || "notebook");
   const [style, setStyle] = useState(post.style || "cozy");
+  const [cap, setCap] = useState(post.cap !== false);
   const [generatingImage, setGeneratingImage] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [slides, setSlides] = useState(5);
@@ -1221,7 +1222,7 @@ function SavedPostCard({
   async function handleGenerateImage() {
     setGeneratingImage(true);
     try {
-      const res = await igWizardApi.posts.generateImage(post.id, hero, style);
+      const res = await igWizardApi.posts.generateImage(post.id, hero, style, cap);
       onPatch(res.post);
       showMessage("Branded image generated.");
     } catch (e: unknown) {
@@ -1234,7 +1235,7 @@ function SavedPostCard({
   async function handleGenerateCarousel() {
     setGeneratingCarousel(true);
     try {
-      const res = await igWizardApi.posts.generateCarousel(post.id, slides, hero, style);
+      const res = await igWizardApi.posts.generateCarousel(post.id, slides, hero, style, cap);
       onPatch(res.post);
       showMessage(`Carousel generated (${res.mediaUrls.length} slides).`);
     } catch (e: unknown) {
@@ -1322,6 +1323,10 @@ function SavedPostCard({
             <select value={style} onChange={(e) => setStyle(e.target.value)} aria-label={`Image style for ${post.hook}`} style={{ padding: "2px 4px", fontSize: 11 }}>
               {IG_STYLES.map((s) => (<option key={s.id} value={s.id}>{s.label}</option>))}
             </select>
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, cursor: "pointer" }} title="Wear the M-cap or generate bare-headed">
+            <input type="checkbox" checked={cap} onChange={(e) => setCap(e.target.checked)} aria-label={`M-cap for ${post.hook}`} />
+            cap
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11 }}>
             <select value={hero} onChange={(e) => setHero(e.target.value)} aria-label={`Image scene for ${post.hook}`} style={{ padding: "2px 4px", fontSize: 11 }}>

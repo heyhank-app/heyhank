@@ -77,6 +77,14 @@ describe("buildIgCoverPrompt", () => {
   it("exposes the 5-style library", () => {
     expect(cover.IG_STYLES.map((s) => s.id)).toEqual(["cozy", "business", "pointing", "bold", "screen"]);
   });
+
+  it("drops the M-cap from the prompt when cap is false", () => {
+    const capped = cover.buildIgCoverPrompt({ headline: "X", cap: true });
+    const bare = cover.buildIgCoverPrompt({ headline: "X", cap: false });
+    expect(capped).toContain("M-cap");
+    expect(bare).not.toContain("M-cap");
+    expect(bare).toMatch(/NO hat|bare head|bald/i);
+  });
 });
 
 describe("generateIgCover", () => {
