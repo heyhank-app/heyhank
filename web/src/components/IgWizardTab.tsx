@@ -1205,7 +1205,8 @@ function SavedPostCard({
   const [promoting, setPromoting] = useState(false);
   const [slides, setSlides] = useState(5);
   const [generatingCarousel, setGeneratingCarousel] = useState(false);
-  const busy = generatingImage || generatingCarousel || promoting;
+  const [generatingReel, setGeneratingReel] = useState(false);
+  const busy = generatingImage || generatingCarousel || generatingReel || promoting;
 
   async function handleGenerateImage() {
     setGeneratingImage(true);
@@ -1230,6 +1231,19 @@ function SavedPostCard({
       showMessage(`Carousel failed: ${e instanceof Error ? e.message : String(e)}`, true);
     } finally {
       setGeneratingCarousel(false);
+    }
+  }
+
+  async function handleGenerateReel() {
+    setGeneratingReel(true);
+    try {
+      const res = await igWizardApi.posts.generateReel(post.id, 8);
+      onPatch(res.post);
+      showMessage("Reel generated (Veo + voiceover).");
+    } catch (e: unknown) {
+      showMessage(`Reel failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setGeneratingReel(false);
     }
   }
 
@@ -1309,6 +1323,9 @@ function SavedPostCard({
           </label>
           <button type="button" onClick={handleGenerateCarousel} disabled={busy} aria-label={`Generate carousel for ${post.hook}`} style={{ ...miniBtn, cursor: busy ? "wait" : "pointer" }}>
             {generatingCarousel ? `Generating ${slides} slides…` : "🎠 Carousel"}
+          </button>
+          <button type="button" onClick={handleGenerateReel} disabled={busy} aria-label={`Generate reel for ${post.hook}`} title="Veo video + voiceover (~1-3 min)" style={{ ...miniBtn, cursor: busy ? "wait" : "pointer" }}>
+            {generatingReel ? "Generating reel ~2min…" : "🎬 Reel"}
           </button>
           <button type="button" onClick={handleToDraft} disabled={busy} aria-label={`Send ${post.hook} to Drafts`} style={{ ...miniBtnPrimary, cursor: busy ? "wait" : "pointer" }}>
             {promoting ? "Sending…" : "→ Drafts"}

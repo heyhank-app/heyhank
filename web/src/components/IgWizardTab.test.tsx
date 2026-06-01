@@ -31,6 +31,7 @@ const mockPostsRemove = vi.fn();
 const mockPostsBulkRemove = vi.fn();
 const mockPostsImage = vi.fn();
 const mockPostsCarousel = vi.fn();
+const mockPostsReel = vi.fn();
 const mockPostsToDraft = vi.fn();
 const mockPostsBulkToDraft = vi.fn();
 vi.mock("../api.js", () => ({
@@ -47,6 +48,7 @@ vi.mock("../api.js", () => ({
       bulkRemove: (...args: unknown[]) => mockPostsBulkRemove(...args),
       generateImage: (...args: unknown[]) => mockPostsImage(...args),
       generateCarousel: (...args: unknown[]) => mockPostsCarousel(...args),
+      generateReel: (...args: unknown[]) => mockPostsReel(...args),
       toDraft: (...args: unknown[]) => mockPostsToDraft(...args),
       bulkToDraft: (...args: unknown[]) => mockPostsBulkToDraft(...args),
     },
@@ -143,6 +145,7 @@ beforeEach(() => {
   mockPostsBulkRemove.mockReset();
   mockPostsImage.mockReset();
   mockPostsCarousel.mockReset();
+  mockPostsReel.mockReset();
   mockPostsToDraft.mockReset();
   mockPostsBulkToDraft.mockReset();
   // Sensible defaults: auto-save succeeds, list is empty.
@@ -678,6 +681,16 @@ describe("IgWizardTab — Saved Posts workbench", () => {
     // After generation both the format badge AND the button read "🎠 Carousel"
     // (before, only the button existed) — proving the badge was added.
     await waitFor(() => expect(screen.getAllByText(/🎠 Carousel/).length).toBeGreaterThanOrEqual(2));
+  });
+
+  it("generates a reel (Veo + voiceover) + shows the Reel badge", async () => {
+    mockPostsReel.mockResolvedValueOnce({ ok: true, post: makeWizardPost({ id: "a", format: "reel", videoUrl: "/api/media/file/r.mp4" }), videoUrl: "/api/media/file/r.mp4" });
+    await openSaved([makeWizardPost({ id: "a", hook: "Post A" })]);
+    await waitFor(() => expect(screen.getByText("Post A")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Generate reel for Post A/i }));
+    await waitFor(() => expect(mockPostsReel).toHaveBeenCalledWith("a", 8));
+    // Badge + button both read "🎬 Reel" after generation (only the button before).
+    await waitFor(() => expect(screen.getAllByText(/🎬 Reel/).length).toBeGreaterThanOrEqual(2));
   });
 
   it("promotes a post to Drafts", async () => {

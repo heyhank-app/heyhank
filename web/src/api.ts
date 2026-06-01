@@ -1960,6 +1960,8 @@ export const igWizardApi = {
       post<{ ok: boolean; post: WizardPost; image: IgCoverImage }>(`/ig-wizard/posts/${encodeURIComponent(id)}/image`, { hero }),
     generateCarousel: (id: string, slides: number, hero?: string) =>
       post<{ ok: boolean; post: WizardPost; slides: { text: string }[]; mediaUrls: string[] }>(`/ig-wizard/posts/${encodeURIComponent(id)}/carousel`, { slides, hero }),
+    generateReel: (id: string, durationSeconds?: 4 | 6 | 8) =>
+      post<{ ok: boolean; post: WizardPost; videoUrl: string }>(`/ig-wizard/posts/${encodeURIComponent(id)}/reel`, { durationSeconds }),
     toDraft: (id: string) =>
       post<{ ok: boolean; draft: IgComposeDraftPost; post: WizardPost }>(`/ig-wizard/posts/${encodeURIComponent(id)}/to-draft`, {}),
     bulkToDraft: (ids: string[]) =>

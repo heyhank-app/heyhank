@@ -20,6 +20,28 @@ import { generateIgCover } from "../ig-cover.js";
 import * as socialManager from "../socialmedia/manager.js";
 import type { SocialPlatform } from "../socialmedia/types.js";
 import * as wizardPosts from "../ig-wizard-posts.js";
+import { generateVeoGoogle, pollVeoGoogle } from "../fal-video.js";
+import { generateTts } from "../gemini-tts.js";
+import { composeReel } from "../video-compose.js";
+import { join, basename } from "node:path";
+import { existsSync } from "node:fs";
+import { HEYHANK_HOME } from "../paths.js";
+
+const WIZARD_MEDIA_DIR = join(HEYHANK_HOME, "media");
+
+/** Resolve an /api/media/file/<name> URL back to its local path (or null). */
+function mediaUrlToLocalPath(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const name = basename(url);
+  const p = join(WIZARD_MEDIA_DIR, name);
+  return existsSync(p) ? p : null;
+}
+
+function mediaPathToUrl(absPath: string): string {
+  return `/api/media/file/${basename(absPath)}`;
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 const VALID_PLATFORMS: SocialPlatform[] = ["instagram", "facebook", "twitter", "linkedin", "tiktok", "threads"];
 
@@ -268,6 +290,64 @@ export function registerIgWizardRoutes(api: Hono): void {
         hero,
       });
       return c.json({ ok: true, post: updated, slides: script.result.slides, mediaUrls: images.map((i) => i.url) });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
+    }
+  });
+
+  /** Generate a REEL for a saved post: Veo makes a silent vertical clip (its
+      first frame = the post's branded cover, locking identity/continuity), then
+      Gemini TTS voices the hook+CTA and the compositor lays the voiceover over
+      the muted video. Long (~1-3 min): Veo is async + polled server-side. */
+  api.post("/ig-wizard/posts/:id/reel", async (c) => {
+    const post = wizardPosts.getPost(c.req.param("id"));
+    if (!post) return c.json({ error: "not found" }, 404);
+    const b = (await c.req.json().catch(() => ({}))) as { durationSeconds?: unknown; voice?: unknown };
+    const duration = (b.durationSeconds === 4 || b.durationSeconds === 6 || b.durationSeconds === 8 ? b.durationSeconds : 8) as 4 | 6 | 8;
+
+    try {
+      // 1) Veo — silent vertical clip. Keep the prompt visual-only (no person
+      //    description, no dialogue quotes) so it stays mute + dodges the audio
+      //    safety filter; the cover image conditions the first frame.
+      const firstFrame = mediaUrlToLocalPath(post.imageUrl);
+      const veoPrompt =
+        "Vertical 9:16 cinematic clip. Warm home-office scene, soft window light, shallow depth of field, a slow gentle camera push-in. Cozy, premium, editorial mood. No on-screen text, no captions, no subtitles.";
+      const { operationName } = await generateVeoGoogle({
+        prompt: veoPrompt,
+        aspectRatio: "9:16",
+        durationSeconds: duration,
+        ...(firstFrame ? { firstFrameImagePath: firstFrame, mode: "firstFrame" as const } : {}),
+      });
+
+      // 2) Poll Veo until done (server-side; nginx /api/ allows 600s).
+      let veoPath: string | undefined;
+      for (let i = 0; i < 60; i++) {
+        const op = await pollVeoGoogle(operationName);
+        if (op.error) throw new Error(`Veo failed: ${op.error}`);
+        if (op.done) { veoPath = op.videoPath; break; }
+        await sleep(5000);
+      }
+      if (!veoPath) throw new Error("Veo timed out (>5 min)");
+
+      // 3) Gemini TTS voiceover — hook + body + CTA so the speech fills the clip
+      //    (the compositor trims to the audio length, so too-short VO = too-short
+      //    reel). Capped so a long body doesn't run way past the video.
+      const voText = `${post.hook}. ${post.body} ${post.cta}`.replace(/\s+/g, " ").trim().slice(0, 600);
+      const tts = await generateTts({ text: voText, style: "Read in a confident, friendly voice:" });
+
+      // 4) Compose: muted Veo video + the voiceover laid over it.
+      const composed = await composeReel({
+        segments: [{ type: "video", path: veoPath, durationSeconds: duration, replaceAudio: true, audioPath: tts.audioPath }],
+        outputName: `wizard_reel_${post.id.slice(0, 8)}`,
+      });
+      const videoUrl = mediaPathToUrl(composed.videoPath);
+
+      const updated = wizardPosts.updatePost(post.id, {
+        format: "reel",
+        videoUrl,
+        thumbnailUrl: post.imageUrl ?? null,
+      });
+      return c.json({ ok: true, post: updated, videoUrl });
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
     }

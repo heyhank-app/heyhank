@@ -40,6 +40,18 @@ vi.mock("../ig-wizard-posts.js", () => ({
   bulkRemove: (...a: unknown[]) => mockWpBulkRemove(...a),
 }));
 
+// Reel pipeline mocks (Veo + TTS + compositor) — no real video generation.
+const mockVeoGen = vi.fn();
+const mockVeoPoll = vi.fn();
+const mockTts = vi.fn();
+const mockCompose = vi.fn();
+vi.mock("../fal-video.js", () => ({
+  generateVeoGoogle: (...a: unknown[]) => mockVeoGen(...a),
+  pollVeoGoogle: (...a: unknown[]) => mockVeoPoll(...a),
+}));
+vi.mock("../gemini-tts.js", () => ({ generateTts: (...a: unknown[]) => mockTts(...a) }));
+vi.mock("../video-compose.js", () => ({ composeReel: (...a: unknown[]) => mockCompose(...a) }));
+
 // Helper to build a valid JSON payload like the real model would return.
 function validPayload(): string {
   return JSON.stringify({
@@ -541,6 +553,38 @@ describe("Wizard Saved Posts routes", () => {
   it("carousel route 404s on a missing post", async () => {
     mockWpGet.mockReturnValue(null);
     expect((await app.request("/ig-wizard/posts/x/carousel", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status).toBe(404);
+  });
+
+  it("POST /ig-wizard/posts/:id/reel runs Veo → TTS → compose → format=reel", async () => {
+    // No imageUrl → firstFrame resolution is skipped (no fs dependency).
+    mockWpGet.mockReturnValue({ id: "a", hook: "Stop renting AI", body: "Run it yourself.", cta: "Comment STACK", topic: "x", imageUrl: null });
+    mockVeoGen.mockResolvedValue({ operationName: "op/123" });
+    mockVeoPoll.mockResolvedValue({ operationName: "op/123", done: true, videoPath: "/m/veo.mp4" });
+    mockTts.mockResolvedValue({ audioPath: "/m/vo.mp3", cached: false, size: 100 });
+    mockCompose.mockResolvedValue({ videoPath: "/m/reel_x.mp4", themeSlug: "neutral", durationSeconds: 8, placeholderLogos: [] });
+    mockWpUpdate.mockImplementation((_id: string, patch: Record<string, unknown>) => ({ id: "a", ...patch }));
+
+    const res = await app.request("/ig-wizard/posts/a/reel", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ durationSeconds: 8 }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.videoUrl).toBe("/api/media/file/reel_x.mp4");
+    // Veo got a 9:16 visual prompt; TTS spoke hook + body + CTA; compose replaced audio.
+    expect(mockVeoGen).toHaveBeenCalledWith(expect.objectContaining({ aspectRatio: "9:16", durationSeconds: 8 }));
+    expect(mockTts).toHaveBeenCalledWith(expect.objectContaining({ text: "Stop renting AI. Run it yourself. Comment STACK" }));
+    expect(mockCompose).toHaveBeenCalledWith(expect.objectContaining({
+      segments: [expect.objectContaining({ type: "video", path: "/m/veo.mp4", replaceAudio: true, audioPath: "/m/vo.mp3" })],
+    }));
+    expect(mockWpUpdate).toHaveBeenCalledWith("a", expect.objectContaining({ format: "reel", videoUrl: "/api/media/file/reel_x.mp4" }));
+  });
+
+  it("reel route surfaces a Veo failure as 502", async () => {
+    mockWpGet.mockReturnValue({ id: "a", hook: "h", cta: "c", topic: "x", imageUrl: null });
+    mockVeoGen.mockResolvedValue({ operationName: "op/1" });
+    mockVeoPoll.mockResolvedValue({ operationName: "op/1", done: false, error: "quota exceeded" });
+    const res = await app.request("/ig-wizard/posts/a/reel", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    expect(res.status).toBe(502);
   });
 
   it("POST /ig-wizard/posts/bulk-to-draft promotes many, skipping missing ids", async () => {
