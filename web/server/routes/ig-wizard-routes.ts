@@ -238,19 +238,44 @@ export function registerIgWizardRoutes(api: Hono): void {
   api.post("/ig-wizard/posts/:id/to-draft", async (c) => {
     const post = wizardPosts.getPost(c.req.param("id"));
     if (!post) return c.json({ error: "not found" }, 404);
-    // Clean body (no inline hashtags); hashtags → IG first comment.
-    const text = assembleCaption({ hook: post.hook, body: post.body, cta: post.cta, hashtags: [] });
-    const firstComment = post.hashtags.length ? post.hashtags.map((h) => `#${h}`).join(" ") : undefined;
-    const draft = await socialManager.createDraft({
-      text,
-      platforms: coercePlatforms(post.platforms),
-      mediaUrls: post.imageUrl ? [post.imageUrl] : [],
-      firstComment,
-      format: "post",
-      isDraft: true,
-      createdBy: "agent",
-    });
-    const updated = wizardPosts.updatePost(post.id, { promotedDraftId: draft.id });
+    const { draft, post: updated } = await promotePostToDraft(post);
     return c.json({ ok: true, draft, post: updated });
   });
+
+  /** Promote MANY saved posts to drafts at once. Per-id results so a single
+      failure doesn't sink the batch. */
+  api.post("/ig-wizard/posts/bulk-to-draft", async (c) => {
+    const b = (await c.req.json().catch(() => ({}))) as { ids?: unknown };
+    const ids = Array.isArray(b.ids) ? b.ids.filter((x): x is string => typeof x === "string") : [];
+    const results: Array<{ id: string; ok: boolean; draftId?: string; error?: string }> = [];
+    for (const id of ids) {
+      const post = wizardPosts.getPost(id);
+      if (!post) { results.push({ id, ok: false, error: "not found" }); continue; }
+      try {
+        const { draft } = await promotePostToDraft(post);
+        results.push({ id, ok: true, draftId: draft.id });
+      } catch (e) {
+        results.push({ id, ok: false, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    return c.json({ ok: true, promoted: results.filter((r) => r.ok).length, results });
+  });
+}
+
+/** Shared promote logic: build a clean draft from a wizard post + tag the post. */
+async function promotePostToDraft(post: wizardPosts.WizardPost) {
+  // Clean body (no inline hashtags); hashtags → IG first comment.
+  const text = assembleCaption({ hook: post.hook, body: post.body, cta: post.cta, hashtags: [] });
+  const firstComment = post.hashtags.length ? post.hashtags.map((h) => `#${h}`).join(" ") : undefined;
+  const draft = await socialManager.createDraft({
+    text,
+    platforms: coercePlatforms(post.platforms),
+    mediaUrls: post.imageUrl ? [post.imageUrl] : [],
+    firstComment,
+    format: "post",
+    isDraft: true,
+    createdBy: "agent",
+  });
+  const updated = wizardPosts.updatePost(post.id, { promotedDraftId: draft.id });
+  return { draft, post: updated };
 }

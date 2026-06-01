@@ -1024,6 +1024,7 @@ function SavedPostsMode({
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkDraftBusy, setBulkDraftBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1085,6 +1086,24 @@ function SavedPostsMode({
     setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
   }
 
+  async function handleBulkToDraft() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setBulkDraftBusy(true);
+    try {
+      const res = await igWizardApi.posts.bulkToDraft(ids);
+      // Mark the promoted ones so the "in Drafts" badge shows.
+      const promotedIds = new Set(res.results.filter((r) => r.ok).map((r) => r.id));
+      setPosts((prev) => prev.map((p) => (promotedIds.has(p.id) ? { ...p, promotedDraftId: "promoted" } : p)));
+      setSelected(new Set());
+      showMessage(`Sent ${res.promoted} post(s) to Drafts.`);
+    } catch (e: unknown) {
+      showMessage(`Bulk → Drafts failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setBulkDraftBusy(false);
+    }
+  }
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
@@ -1112,15 +1131,26 @@ function SavedPostsMode({
             Select all
           </label>
           {selected.size > 0 && (
-            <button
-              type="button"
-              onClick={handleBulkDelete}
-              disabled={bulkBusy}
-              aria-label={`Delete ${selected.size} selected posts`}
-              style={{ padding: "5px 12px", background: bulkBusy ? "var(--btn-disabled, #ccc)" : "#c5221f", color: "white", border: "none", borderRadius: 4, cursor: bulkBusy ? "wait" : "pointer", fontSize: 13, fontWeight: 500 }}
-            >
-              {bulkBusy ? "Deleting…" : `🗑 Delete ${selected.size} selected`}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleBulkToDraft}
+                disabled={bulkDraftBusy}
+                aria-label={`Send ${selected.size} selected posts to Drafts`}
+                style={{ padding: "5px 12px", background: bulkDraftBusy ? "var(--btn-disabled, #ccc)" : "var(--btn-primary, #0066cc)", color: "white", border: "none", borderRadius: 4, cursor: bulkDraftBusy ? "wait" : "pointer", fontSize: 13, fontWeight: 500 }}
+              >
+                {bulkDraftBusy ? "Sending…" : `→ Send ${selected.size} to Drafts`}
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                disabled={bulkBusy}
+                aria-label={`Delete ${selected.size} selected posts`}
+                style={{ padding: "5px 12px", background: bulkBusy ? "var(--btn-disabled, #ccc)" : "#c5221f", color: "white", border: "none", borderRadius: 4, cursor: bulkBusy ? "wait" : "pointer", fontSize: 13, fontWeight: 500 }}
+              >
+                {bulkBusy ? "Deleting…" : `🗑 Delete ${selected.size} selected`}
+              </button>
+            </>
           )}
         </div>
       )}

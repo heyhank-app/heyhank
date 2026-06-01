@@ -1954,6 +1954,11 @@ export const igWizardApi = {
       post<{ ok: boolean; post: WizardPost; image: IgCoverImage }>(`/ig-wizard/posts/${encodeURIComponent(id)}/image`, { hero }),
     toDraft: (id: string) =>
       post<{ ok: boolean; draft: IgComposeDraftPost; post: WizardPost }>(`/ig-wizard/posts/${encodeURIComponent(id)}/to-draft`, {}),
+    bulkToDraft: (ids: string[]) =>
+      post<{ ok: boolean; promoted: number; results: Array<{ id: string; ok: boolean; draftId?: string; error?: string }> }>(
+        "/ig-wizard/posts/bulk-to-draft",
+        { ids },
+      ),
   },
 };
 

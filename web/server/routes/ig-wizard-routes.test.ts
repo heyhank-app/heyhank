@@ -518,4 +518,23 @@ describe("Wizard Saved Posts routes", () => {
     expect((await app.request("/ig-wizard/posts/x/image", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status).toBe(404);
     expect((await app.request("/ig-wizard/posts/x/to-draft", { method: "POST" })).status).toBe(404);
   });
+
+  it("POST /ig-wizard/posts/bulk-to-draft promotes many, skipping missing ids", async () => {
+    // a + b exist, c is missing.
+    mockWpGet.mockImplementation((id: string) =>
+      id === "c" ? null : { id, hook: "H", body: "B", cta: "C", hashtags: ["ai"], platforms: ["instagram"], imageUrl: null },
+    );
+    mockCreateDraft.mockImplementation(async () => ({ id: `draft-${Math.random()}`, status: "draft", platforms: ["instagram"], text: "H", mediaUrls: [] }));
+    mockWpUpdate.mockReturnValue({ id: "x", promotedDraftId: "d" });
+
+    const res = await app.request("/ig-wizard/posts/bulk-to-draft", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: ["a", "b", "c"] }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.promoted).toBe(2); // a + b promoted, c skipped
+    expect(json.results).toHaveLength(3);
+    expect(json.results.find((r: { id: string }) => r.id === "c").ok).toBe(false);
+    expect(mockCreateDraft).toHaveBeenCalledTimes(2);
+  });
 });

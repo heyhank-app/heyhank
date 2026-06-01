@@ -31,6 +31,7 @@ const mockPostsRemove = vi.fn();
 const mockPostsBulkRemove = vi.fn();
 const mockPostsImage = vi.fn();
 const mockPostsToDraft = vi.fn();
+const mockPostsBulkToDraft = vi.fn();
 vi.mock("../api.js", () => ({
   igWizardApi: {
     generate: (...args: unknown[]) => mockGenerate(...args),
@@ -45,6 +46,7 @@ vi.mock("../api.js", () => ({
       bulkRemove: (...args: unknown[]) => mockPostsBulkRemove(...args),
       generateImage: (...args: unknown[]) => mockPostsImage(...args),
       toDraft: (...args: unknown[]) => mockPostsToDraft(...args),
+      bulkToDraft: (...args: unknown[]) => mockPostsBulkToDraft(...args),
     },
   },
   autoDmRulesApi: { create: (...args: unknown[]) => mockCreateRule(...args) },
@@ -139,6 +141,7 @@ beforeEach(() => {
   mockPostsBulkRemove.mockReset();
   mockPostsImage.mockReset();
   mockPostsToDraft.mockReset();
+  mockPostsBulkToDraft.mockReset();
   // Sensible defaults: auto-save succeeds, list is empty.
   mockPostsCreate.mockResolvedValue({ ok: true, post: makeWizardPost() });
   mockPostsUpdate.mockResolvedValue(makeWizardPost());
@@ -665,5 +668,17 @@ describe("IgWizardTab — Saved Posts workbench", () => {
     await waitFor(() => expect(mockPostsToDraft).toHaveBeenCalledWith("a"));
     // The "in Drafts" badge shows after promotion.
     await waitFor(() => expect(screen.getByText(/in Drafts/i)).toBeInTheDocument());
+  });
+
+  it("bulk-sends selected posts to Drafts", async () => {
+    mockPostsBulkToDraft.mockResolvedValueOnce({ ok: true, promoted: 2, results: [{ id: "a", ok: true, draftId: "d1" }, { id: "b", ok: true, draftId: "d2" }] });
+    await openSaved([makeWizardPost({ id: "a", hook: "Post A" }), makeWizardPost({ id: "b", hook: "Post B" })]);
+    await waitFor(() => expect(screen.getByText("Post A")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText(/Select all posts/i));
+    fireEvent.click(screen.getByRole("button", { name: /Send 2 selected posts to Drafts/i }));
+    await waitFor(() => expect(mockPostsBulkToDraft).toHaveBeenCalledWith(["a", "b"]));
+    // Both flip to "in Drafts".
+    await waitFor(() => expect(screen.getAllByText(/in Drafts/i).length).toBe(2));
   });
 });
