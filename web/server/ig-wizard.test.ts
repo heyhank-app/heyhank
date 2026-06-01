@@ -211,6 +211,16 @@ describe("generateCaption", () => {
     if (res.ok) return;
     expect(res.status).toBe(502);
   });
+
+  it("returns the AI-suggested style (falls back to cozy if missing/unknown)", async () => {
+    mockReturn = { text: JSON.stringify({ hook: "h", body: "b", cta: "c", hashtags: [], style: "pointing" }), ok: true, error: undefined };
+    const r1 = await generateCaption({ topic: "AI", language: "en" });
+    expect(r1.ok && r1.result.style).toBe("pointing");
+
+    mockReturn = { text: JSON.stringify({ hook: "h", body: "b", cta: "c", hashtags: [] }), ok: true, error: undefined };
+    const r2 = await generateCaption({ topic: "AI", language: "en" });
+    expect(r2.ok && r2.result.style).toBe("cozy");
+  });
 });
 
 // ─── 30-Day Plan ────────────────────────────────────────────────────────────────

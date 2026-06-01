@@ -69,32 +69,85 @@ function heroScene(hero: IgCoverHero): string {
   }
 }
 
+// ─── Style library ───────────────────────────────────────────────────────────
+// Each style is the same locked brand identity (M-cap, glasses, beard) +
+// shared text-overlay + base directives, but a different SUBJECT pose/attire +
+// COMPOSITION + mood. Pick the one that fits the post type.
+
+export type IgStyle = "cozy" | "business" | "pointing" | "bold" | "screen";
+
+export const IG_STYLES: { id: IgStyle; label: string; note: string }[] = [
+  { id: "cozy", label: "Cozy Builder", note: "warm home office — builds + stories (default)" },
+  { id: "business", label: "Authority", note: "clean studio, smart-casual — news + opinions" },
+  { id: "pointing", label: "Pointing", note: "gestures at the headline — hooks + reveals" },
+  { id: "bold", label: "Bold Text", note: "huge typography — hot takes + quotes" },
+  { id: "screen", label: "Screen / Demo", note: "beside a UI screen — tool reviews" },
+];
+
+export function normalizeStyle(raw: unknown): IgStyle {
+  return raw === "business" || raw === "pointing" || raw === "bold" || raw === "screen" ? raw : "cozy";
+}
+
+/** The locked identity clause, shared by every style. */
+const IDENTITY = "the man from the two reference photos — a black M-cap with a capital letter M on the front, thin-rimmed glasses, a full short beard. Natural skin texture, a real person, not a stock photo, not glamorous, not AI-sterile";
+
+function styleBlocks(style: IgStyle, scene: string): { subject: string; composition: string } {
+  switch (style) {
+    case "business":
+      return {
+        subject: `SUBJECT:\n${IDENTITY}. Smart-casual professional — a crisp collared shirt or a clean smart knit (no suit jacket needed), confident, looking toward the camera. Clean modern studio / office setting, softly out of focus. Crisp soft key light, premium and credible.`,
+        composition: `COMPOSITION (square 1:1):\nMarkus on the right third. The left two-thirds is a clean, slightly desaturated warm-neutral panel that holds the headline. Authoritative, magazine-editorial feel.`,
+      };
+    case "pointing":
+      return {
+        subject: `SUBJECT:\n${IDENTITY}, wearing a dark vest over a long-sleeved shirt. Expressive and animated: one hand raised, pointing/gesturing toward the headline, eyebrows up, a curious-excited "you have to see this" look. Warm light, candid energy.`,
+        composition: `COMPOSITION (square 1:1):\nMarkus on one side gesturing across the frame toward the headline text on the other side. High energy, strong eye-line leading to the words.`,
+      };
+    case "bold":
+      return {
+        subject: `SUBJECT:\nA small portrait of ${IDENTITY}, occupying only the lower-right corner (roughly a quarter of the height).`,
+        composition: `COMPOSITION (square 1:1):\nThe HEADLINE DOMINATES the frame — huge bold typography on a clean, flat, warm color-blocked background (deep brown / amber brand tones). Minimal, punchy, poster-like. Lots of negative space around the text.`,
+      };
+    case "screen":
+      return {
+        subject: `SUBJECT:\n${IDENTITY}, smart-casual, standing beside a large glowing monitor/screen that shows an abstract modern app dashboard — soft glowing UI panels, charts and cards with NO readable text on the screen. He gestures toward the screen, presenting it.`,
+        composition: `COMPOSITION (square 1:1):\nMarkus on one side, the glowing screen on the other, the headline overlaid across the top. Modern, techy, product-demo mood.`,
+      };
+    case "cozy":
+    default:
+      return {
+        subject: `SUBJECT (lower half of the square):\n${IDENTITY}, wearing a dark vest over a long-sleeved shirt, candidly ${scene}. Warm window light from the left, 85mm portrait-lens look, shallow depth of field, sharp focus on his face.`,
+        composition: `COMPOSITION (square 1:1):\nMarkus sits in the lower portion of the frame. The upper portion is a slightly darker warm-brown band that holds the headline so the text is always legible. Balanced, magazine-cover feel.`,
+      };
+  }
+}
+
 /**
- * Build the square Style-A prompt. Identity-locking order follows the proven
- * recipe: subject (person) first, then composition, then text overlays, then
- * style directives (see memory feedback_gpt_image_identity).
+ * Build the square prompt for the chosen style. Identity-locking order follows
+ * the proven recipe: subject (person) first, then composition, then text
+ * overlays, then style directives (see memory feedback_gpt_image_identity).
  */
 export function buildIgCoverPrompt(input: {
   headline: string;
   badge?: string;
   hero?: IgCoverHero;
+  style?: IgStyle;
 }): string {
   const badge = input.badge?.trim() || "Built with AI";
   const scene = heroScene(input.hero || "notebook");
+  const { subject, composition } = styleBlocks(normalizeStyle(input.style), scene);
   return `Photorealistic 1:1 square Instagram post image, editorial photography quality.
 
-SUBJECT (lower half of the square):
-The man from the two reference photos, candidly ${scene}. He wears a black M-cap (capital letter M on the front), thin-rimmed glasses, a full short beard, and a dark vest over a long-sleeved shirt. Warm window light from the left, 85mm portrait-lens look, shallow depth of field, sharp focus on his face. Natural skin texture, a real working person — not a stock photo, not glamorous, not AI-sterile.
+${subject}
 
-COMPOSITION (square 1:1):
-Markus sits in the lower portion of the frame. The upper portion is a slightly darker warm-brown band that holds the headline so the text is always legible. Balanced, magazine-cover feel.
+${composition}
 
 TEXT OVERLAYS — render EXACTLY these strings, nothing else:
 
-1. HEADLINE — large bold serif typography (Playfair / Garamond feel), white, centered in the upper band, wrapped over up to 3 lines:
+1. HEADLINE — large bold serif typography (Playfair / Garamond feel), wrapped over up to 3 lines, placed for legibility per the composition above:
 "${input.headline.trim()}"
 
-2. BADGE — a small bright orange six-point asterisk star (Anthropic-style spark) followed by small white text: "${badge}"
+2. BADGE — a small bright orange six-point asterisk star (Anthropic-style spark) followed by small text: "${badge}"
 
 STYLE DIRECTIVES:
 - Photoreal, NOT illustration, NOT 3D render, NOT vector.
@@ -113,7 +166,7 @@ export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
  * message. `deps.fetch` + `deps.now`/`deps.rand` are injectable for tests.
  */
 export async function generateIgCover(
-  input: { headline: string; badge?: string; hero?: IgCoverHero; quality?: "low" | "medium" | "high" },
+  input: { headline: string; badge?: string; hero?: IgCoverHero; style?: IgStyle; quality?: "low" | "medium" | "high" },
   deps?: { fetch?: FetchLike; now?: () => number; rand?: () => string },
 ): Promise<IgCoverResult> {
   const key = openaiKey();

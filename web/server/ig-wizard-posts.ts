@@ -45,6 +45,8 @@ export interface WizardPost {
   thumbnailUrl?: string | null;
   /** Hero scene used / to use for the image. */
   hero?: string;
+  /** Image style id (cozy|business|pointing|bold|screen). AI-suggested, overridable. */
+  style?: string;
   /** Where it came from — a standalone compose or a plan day. */
   source: WizardPostSource;
   /** For plan posts: the day number (1..30). */
@@ -87,7 +89,7 @@ export function getPost(id: string): WizardPost | null {
 }
 
 export type CreateWizardPostInput = Pick<WizardPost, "topic" | "hook" | "body" | "cta" | "hashtags" | "caption" | "source"> &
-  Partial<Pick<WizardPost, "platforms" | "imageUrl" | "imageFilename" | "hero" | "day" | "format" | "mediaUrls" | "videoUrl" | "thumbnailUrl">>;
+  Partial<Pick<WizardPost, "platforms" | "imageUrl" | "imageFilename" | "hero" | "day" | "format" | "mediaUrls" | "videoUrl" | "thumbnailUrl" | "style">>;
 
 export function createPost(input: CreateWizardPostInput): WizardPost {
   const now = new Date().toISOString();
@@ -107,6 +109,7 @@ export function createPost(input: CreateWizardPostInput): WizardPost {
     videoUrl: input.videoUrl ?? null,
     thumbnailUrl: input.thumbnailUrl ?? null,
     hero: input.hero,
+    style: input.style ?? "cozy",
     source: input.source,
     day: input.day ?? null,
     promotedDraftId: null,

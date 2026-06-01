@@ -36,6 +36,14 @@ const HERO_SCENES: { id: string; label: string }[] = [
   { id: "workspace", label: "Workspace" },
 ];
 
+const IG_STYLES: { id: string; label: string }[] = [
+  { id: "cozy", label: "Cozy Builder" },
+  { id: "business", label: "Authority" },
+  { id: "pointing", label: "Pointing" },
+  { id: "bold", label: "Bold Text" },
+  { id: "screen", label: "Screen / Demo" },
+];
+
 type WizardMode = "single" | "plan" | "saved";
 
 const CTA_TYPE_LABELS: Record<IgPlanBrief["ctaType"], string> = {
@@ -174,6 +182,7 @@ export function IgWizardTab({ showMessage }: Props) {
           cta: res.cta,
           hashtags: res.hashtags,
           caption: res.caption,
+          style: res.style,
         };
         if (savedPostId) {
           await igWizardApi.posts.update(savedPostId, payload);
@@ -861,7 +870,7 @@ function PlanBriefCard({
       const res = await igWizardApi.caption({ topic, language, hook: hook.trim() || undefined });
       setCaption(res);
       try {
-        const payload = { topic, hook: res.hook, body: res.body, cta: res.cta, hashtags: res.hashtags, caption: res.caption };
+        const payload = { topic, hook: res.hook, body: res.body, cta: res.cta, hashtags: res.hashtags, caption: res.caption, style: res.style };
         if (savedPostId) {
           await igWizardApi.posts.update(savedPostId, payload);
         } else {
@@ -1201,6 +1210,7 @@ function SavedPostCard({
   showMessage: (text: string, isError?: boolean) => void;
 }) {
   const [hero, setHero] = useState(post.hero || "notebook");
+  const [style, setStyle] = useState(post.style || "cozy");
   const [generatingImage, setGeneratingImage] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [slides, setSlides] = useState(5);
@@ -1211,7 +1221,7 @@ function SavedPostCard({
   async function handleGenerateImage() {
     setGeneratingImage(true);
     try {
-      const res = await igWizardApi.posts.generateImage(post.id, hero);
+      const res = await igWizardApi.posts.generateImage(post.id, hero, style);
       onPatch(res.post);
       showMessage("Branded image generated.");
     } catch (e: unknown) {
@@ -1224,7 +1234,7 @@ function SavedPostCard({
   async function handleGenerateCarousel() {
     setGeneratingCarousel(true);
     try {
-      const res = await igWizardApi.posts.generateCarousel(post.id, slides, hero);
+      const res = await igWizardApi.posts.generateCarousel(post.id, slides, hero, style);
       onPatch(res.post);
       showMessage(`Carousel generated (${res.mediaUrls.length} slides).`);
     } catch (e: unknown) {
@@ -1308,6 +1318,11 @@ function SavedPostCard({
 
         <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button type="button" onClick={() => onCopy(post.caption, "caption")} aria-label="Copy caption" style={miniBtn}>📋 Copy</button>
+          <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11 }}>
+            <select value={style} onChange={(e) => setStyle(e.target.value)} aria-label={`Image style for ${post.hook}`} style={{ padding: "2px 4px", fontSize: 11 }}>
+              {IG_STYLES.map((s) => (<option key={s.id} value={s.id}>{s.label}</option>))}
+            </select>
+          </label>
           <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11 }}>
             <select value={hero} onChange={(e) => setHero(e.target.value)} aria-label={`Image scene for ${post.hook}`} style={{ padding: "2px 4px", fontSize: 11 }}>
               {HERO_SCENES.map((h) => (<option key={h.id} value={h.id}>{h.label}</option>))}

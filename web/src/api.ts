@@ -1813,6 +1813,8 @@ export interface IgWizardResult {
   model: string;
 }
 
+export type IgStyle = "cozy" | "business" | "pointing" | "bold" | "screen";
+
 export interface IgCaptionResult {
   hook: string;
   body: string;
@@ -1820,6 +1822,8 @@ export interface IgCaptionResult {
   hashtags: string[];
   /** hook + body + cta + hashtags, joined and ready to paste. */
   caption: string;
+  /** AI-suggested image style for this post. */
+  style: IgStyle;
   language: string;
   model: string;
 }
@@ -1917,6 +1921,7 @@ export interface WizardPost {
   videoUrl?: string | null;
   thumbnailUrl?: string | null;
   hero?: string;
+  style?: string;
   source: "single" | "plan";
   day?: number | null;
   promotedDraftId?: string | null;
@@ -1934,6 +1939,7 @@ export interface CreateWizardPostInput {
   source: "single" | "plan";
   platforms?: string[];
   hero?: string;
+  style?: string;
   day?: number;
 }
 
@@ -1956,10 +1962,10 @@ export const igWizardApi = {
     remove: (id: string) => del<{ ok: boolean }>(`/ig-wizard/posts/${encodeURIComponent(id)}`),
     bulkRemove: (ids: string[]) =>
       post<{ ok: boolean; removed: number }>("/ig-wizard/posts/bulk-delete", { ids }),
-    generateImage: (id: string, hero?: string) =>
-      post<{ ok: boolean; post: WizardPost; image: IgCoverImage }>(`/ig-wizard/posts/${encodeURIComponent(id)}/image`, { hero }),
-    generateCarousel: (id: string, slides: number, hero?: string) =>
-      post<{ ok: boolean; post: WizardPost; slides: { text: string }[]; mediaUrls: string[] }>(`/ig-wizard/posts/${encodeURIComponent(id)}/carousel`, { slides, hero }),
+    generateImage: (id: string, hero?: string, style?: string) =>
+      post<{ ok: boolean; post: WizardPost; image: IgCoverImage }>(`/ig-wizard/posts/${encodeURIComponent(id)}/image`, { hero, style }),
+    generateCarousel: (id: string, slides: number, hero?: string, style?: string) =>
+      post<{ ok: boolean; post: WizardPost; slides: { text: string }[]; mediaUrls: string[] }>(`/ig-wizard/posts/${encodeURIComponent(id)}/carousel`, { slides, hero, style }),
     generateReel: (id: string, durationSeconds?: 4 | 6 | 8) =>
       post<{ ok: boolean; post: WizardPost; videoUrl: string }>(`/ig-wizard/posts/${encodeURIComponent(id)}/reel`, { durationSeconds }),
     toDraft: (id: string) =>

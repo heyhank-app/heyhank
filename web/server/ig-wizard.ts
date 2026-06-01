@@ -47,6 +47,8 @@ export type IgWizardLanguage = "en" | "de";
  * the UI can show structure, plus a pre-joined `caption` string for one-click
  * copy-paste.
  */
+export type IgStyleId = "cozy" | "business" | "pointing" | "bold" | "screen";
+
 export interface CaptionResult {
   hook: string;
   body: string;
@@ -54,8 +56,14 @@ export interface CaptionResult {
   hashtags: string[];
   /** hook + body + cta + hashtags, joined and ready to paste. */
   caption: string;
+  /** AI-suggested image style for this post (overridable in the UI). */
+  style: IgStyleId;
   language: string;
   model: string;
+}
+
+export function normalizeStyleId(raw: unknown): IgStyleId {
+  return raw === "business" || raw === "pointing" || raw === "bold" || raw === "screen" ? raw : "cozy";
 }
 
 export interface CaptionGenerateOk {
@@ -311,6 +319,7 @@ Write ONE caption for the given topic with these parts:
   - "body": 2-4 short lines of concrete, specific value. Each line is its own short paragraph. No fluff, no filler, no hype. Give real substance a reader can act on.
   - "cta": one clear call-to-action that drives a comment-triggered DM funnel. If the user supplied a CTA, use it VERBATIM. Otherwise write a "Comment KEYWORD for X" style line with one ALL-CAPS trigger word.
   - "hashtags": 8-12 relevant hashtags as an array of strings WITHOUT the # symbol, mixing broad + niche tags.
+  - "style": the best image style for this post — one of: "cozy" (warm builder-at-work, for build stories / how-I-did-it), "business" (clean studio authority, for news / opinions / credibility), "pointing" (expressive, points at the headline, for hooks / reveals / curiosity), "bold" (huge typography, for contrarian hot-takes / quotes), "screen" (beside a UI screen, for tool reviews / demos). Choose the one that matches THIS post's angle.
 
 Voice rules (critical):
   - Confident but never arrogant. NEVER write self-congratulatory proof sentences like "My proof: X" or "I'm living proof". Show, don't boast.
@@ -320,7 +329,7 @@ Voice rules (critical):
   - Never use "as an AI", never refuse.
 
 Return ONLY valid JSON in this exact shape, no markdown fences, no commentary:
-{ "hook": "...", "body": "line one\\n\\nline two", "cta": "Comment WORD for ...", "hashtags": ["tag1", "tag2", ...] }`;
+{ "hook": "...", "body": "line one\\n\\nline two", "cta": "Comment WORD for ...", "hashtags": ["tag1", "tag2", ...], "style": "cozy" }`;
 
 function buildCaptionUserPrompt(input: {
   topic: string;
@@ -342,6 +351,7 @@ interface ParsedCaption {
   body?: unknown;
   cta?: unknown;
   hashtags?: unknown;
+  style?: unknown;
 }
 
 /** Normalise hashtags: strip leading #, drop blanks, dedupe, cap at 15. */
@@ -372,7 +382,7 @@ export function assembleCaption(parts: { hook: string; body: string; cta: string
   return blocks.join("\n\n");
 }
 
-function parseCaption(raw: string): { hook: string; body: string; cta: string; hashtags: string[] } | null {
+function parseCaption(raw: string): { hook: string; body: string; cta: string; hashtags: string[]; style: IgStyleId } | null {
   const block = extractJsonBlock(raw);
   let parsed: ParsedCaption;
   try {
@@ -384,9 +394,10 @@ function parseCaption(raw: string): { hook: string; body: string; cta: string; h
   const body = typeof parsed.body === "string" ? parsed.body.trim() : "";
   const cta = typeof parsed.cta === "string" ? parsed.cta.trim() : "";
   const hashtags = normalizeHashtags(parsed.hashtags);
+  const style = normalizeStyleId(parsed.style);
   // Need at least a hook or body to be a usable caption.
   if (!hook && !body) return null;
-  return { hook, body, cta, hashtags };
+  return { hook, body, cta, hashtags, style };
 }
 
 export function normalizeTopic(raw: unknown): string {
@@ -453,6 +464,7 @@ export async function generateCaption(input: {
       cta,
       hashtags: parsed.hashtags,
       caption,
+      style: parsed.style,
       language: input.language,
       model: "internal-ai",
     },

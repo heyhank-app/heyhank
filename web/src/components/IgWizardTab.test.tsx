@@ -68,6 +68,7 @@ function makeWizardPost(overrides: Record<string, unknown> = {}) {
     platforms: ["instagram"],
     imageUrl: null,
     imageFilename: null,
+    style: "cozy",
     source: "single",
     day: null,
     promotedDraftId: null,
@@ -663,7 +664,24 @@ describe("IgWizardTab — Saved Posts workbench", () => {
     await openSaved([makeWizardPost({ id: "a", hook: "Post A" })]);
     await waitFor(() => expect(screen.getByText("Post A")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /Generate image for Post A/i }));
-    await waitFor(() => expect(mockPostsImage).toHaveBeenCalledWith("a", "notebook"));
+    await waitFor(() => expect(mockPostsImage).toHaveBeenCalledWith("a", "notebook", "cozy"));
+  });
+
+  it("changing the style dropdown passes the chosen style to image generation", async () => {
+    mockPostsImage.mockResolvedValueOnce({ ok: true, post: makeWizardPost({ id: "a", style: "pointing", imageUrl: "/x.png" }), image: { url: "/x.png" } });
+    await openSaved([makeWizardPost({ id: "a", hook: "Post A", style: "cozy" })]);
+    await waitFor(() => expect(screen.getByText("Post A")).toBeInTheDocument());
+
+    // Switch the style to Pointing, then generate.
+    fireEvent.change(screen.getByLabelText(/Image style for Post A/i), { target: { value: "pointing" } });
+    fireEvent.click(screen.getByRole("button", { name: /Generate image for Post A/i }));
+    await waitFor(() => expect(mockPostsImage).toHaveBeenCalledWith("a", "notebook", "pointing"));
+  });
+
+  it("defaults the style dropdown to the AI-suggested style", async () => {
+    await openSaved([makeWizardPost({ id: "a", hook: "Post A", style: "business" })]);
+    await waitFor(() => expect(screen.getByText("Post A")).toBeInTheDocument());
+    expect((screen.getByLabelText(/Image style for Post A/i) as HTMLSelectElement).value).toBe("business");
   });
 
   it("generates a carousel with the chosen slide count + shows the format badge", async () => {
@@ -677,7 +695,7 @@ describe("IgWizardTab — Saved Posts workbench", () => {
 
     // Default slide count is 5.
     fireEvent.click(screen.getByRole("button", { name: /Generate carousel for Post A/i }));
-    await waitFor(() => expect(mockPostsCarousel).toHaveBeenCalledWith("a", 5, "notebook"));
+    await waitFor(() => expect(mockPostsCarousel).toHaveBeenCalledWith("a", 5, "notebook", "cozy"));
     // After generation both the format badge AND the button read "🎠 Carousel"
     // (before, only the button existed) — proving the badge was added.
     await waitFor(() => expect(screen.getAllByText(/🎠 Carousel/).length).toBeGreaterThanOrEqual(2));

@@ -16,7 +16,7 @@ import {
   normalizePlanDays,
   normalizeSlideCount,
 } from "../ig-wizard.js";
-import { generateIgCover } from "../ig-cover.js";
+import { generateIgCover, normalizeStyle } from "../ig-cover.js";
 import * as socialManager from "../socialmedia/manager.js";
 import type { SocialPlatform } from "../socialmedia/types.js";
 import * as wizardPosts from "../ig-wizard-posts.js";
@@ -203,6 +203,7 @@ export function registerIgWizardRoutes(api: Hono): void {
       source: b.source === "plan" ? "plan" : "single",
       platforms: coercePlatforms(b.platforms),
       hero: typeof b.hero === "string" ? b.hero : undefined,
+      style: typeof b.style === "string" ? b.style : undefined,
       day: typeof b.day === "number" ? b.day : undefined,
     });
     return c.json({ ok: true, post }, 201);
@@ -240,17 +241,21 @@ export function registerIgWizardRoutes(api: Hono): void {
   api.post("/ig-wizard/posts/:id/image", async (c) => {
     const post = wizardPosts.getPost(c.req.param("id"));
     if (!post) return c.json({ error: "not found" }, 404);
-    const b = (await c.req.json().catch(() => ({}))) as { hero?: unknown };
+    const b = (await c.req.json().catch(() => ({}))) as { hero?: unknown; style?: unknown };
+    const style = normalizeStyle(typeof b.style === "string" ? b.style : post.style);
     try {
       const image = await generateIgCover({
         headline: post.hook || post.topic,
         badge: "Built with AI",
         hero: (typeof b.hero === "string" ? b.hero : post.hero) || "notebook",
+        style,
       });
       const updated = wizardPosts.updatePost(post.id, {
+        format: "post",
         imageUrl: image.url,
         imageFilename: image.filename,
         hero: typeof b.hero === "string" ? b.hero : post.hero,
+        style,
       });
       return c.json({ ok: true, post: updated, image });
     } catch (e) {
@@ -263,8 +268,9 @@ export function registerIgWizardRoutes(api: Hono): void {
   api.post("/ig-wizard/posts/:id/carousel", async (c) => {
     const post = wizardPosts.getPost(c.req.param("id"));
     if (!post) return c.json({ error: "not found" }, 404);
-    const b = (await c.req.json().catch(() => ({}))) as { slides?: unknown; hero?: unknown };
+    const b = (await c.req.json().catch(() => ({}))) as { slides?: unknown; hero?: unknown; style?: unknown };
     const slideCount = normalizeSlideCount(b.slides);
+    const style = normalizeStyle(typeof b.style === "string" ? b.style : post.style);
 
     const script = await generateCarouselScript({
       topic: post.topic,
@@ -281,13 +287,14 @@ export function registerIgWizardRoutes(api: Hono): void {
       // Render every slide in parallel — N gpt-image-2 calls at once keeps the
       // whole carousel near single-image latency instead of N×.
       const images = await Promise.all(
-        script.result.slides.map((s) => generateIgCover({ headline: s.text, badge: "Built with AI", hero })),
+        script.result.slides.map((s) => generateIgCover({ headline: s.text, badge: "Built with AI", hero, style })),
       );
       const updated = wizardPosts.updatePost(post.id, {
         format: "carousel",
         mediaUrls: images.map((i) => i.url),
         imageUrl: images[0]?.url ?? post.imageUrl,
         hero,
+        style,
       });
       return c.json({ ok: true, post: updated, slides: script.result.slides, mediaUrls: images.map((i) => i.url) });
     } catch (e) {

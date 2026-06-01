@@ -53,6 +53,30 @@ describe("buildIgCoverPrompt", () => {
     expect(p).toContain("Built with AI");
     expect(p).toContain("notebook");
   });
+
+  it("varies the composition per style while keeping the locked identity", () => {
+    const business = cover.buildIgCoverPrompt({ headline: "X", style: "business" });
+    const pointing = cover.buildIgCoverPrompt({ headline: "X", style: "pointing" });
+    const bold = cover.buildIgCoverPrompt({ headline: "X", style: "bold" });
+    const screen = cover.buildIgCoverPrompt({ headline: "X", style: "screen" });
+    // Every style keeps the M-cap identity anchor.
+    for (const p of [business, pointing, bold, screen]) expect(p).toContain("M-cap");
+    // But each has its own composition cue.
+    expect(business).toMatch(/studio|professional|collared/i);
+    expect(pointing).toMatch(/pointing|gestur/i);
+    expect(bold).toMatch(/DOMINATES|typography|poster/i);
+    expect(screen).toMatch(/screen|monitor|dashboard/i);
+  });
+
+  it("normalizeStyle falls back to cozy for unknown values", () => {
+    expect(cover.normalizeStyle("business")).toBe("business");
+    expect(cover.normalizeStyle("nonsense")).toBe("cozy");
+    expect(cover.normalizeStyle(undefined)).toBe("cozy");
+  });
+
+  it("exposes the 5-style library", () => {
+    expect(cover.IG_STYLES.map((s) => s.id)).toEqual(["cozy", "business", "pointing", "bold", "screen"]);
+  });
 });
 
 describe("generateIgCover", () => {

@@ -19,6 +19,8 @@ const mockGenerateIgCover = vi.fn();
 const mockCreateDraft = vi.fn();
 vi.mock("../ig-cover.js", () => ({
   generateIgCover: (...args: unknown[]) => mockGenerateIgCover(...args),
+  normalizeStyle: (raw: unknown) =>
+    raw === "business" || raw === "pointing" || raw === "bold" || raw === "screen" ? raw : "cozy",
 }));
 vi.mock("../socialmedia/manager.js", () => ({
   createDraft: (...args: unknown[]) => mockCreateDraft(...args),
@@ -553,6 +555,19 @@ describe("Wizard Saved Posts routes", () => {
   it("carousel route 404s on a missing post", async () => {
     mockWpGet.mockReturnValue(null);
     expect((await app.request("/ig-wizard/posts/x/carousel", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status).toBe(404);
+  });
+
+  it("image route passes the style override to the cover generator + persists it", async () => {
+    mockWpGet.mockReturnValue({ id: "a", hook: "H", topic: "x", hero: "notebook", style: "cozy" });
+    mockGenerateIgCover.mockResolvedValue({ filename: "i.png", url: "/api/media/file/i.png", path: "/x", prompt: "p", model: "gpt-image-2" });
+    mockWpUpdate.mockImplementation((_id: string, patch: Record<string, unknown>) => ({ id: "a", ...patch }));
+
+    const res = await app.request("/ig-wizard/posts/a/image", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ style: "pointing" }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockGenerateIgCover).toHaveBeenCalledWith(expect.objectContaining({ style: "pointing" }));
+    expect(mockWpUpdate).toHaveBeenCalledWith("a", expect.objectContaining({ style: "pointing" }));
   });
 
   it("POST /ig-wizard/posts/:id/reel runs Veo → TTS → compose → format=reel", async () => {
