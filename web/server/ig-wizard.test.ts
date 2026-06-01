@@ -3,6 +3,7 @@ import {
   generateIgWizard,
   generateCaption,
   generatePlan,
+  generateCarouselScript,
   normalizeLanguage,
   normalizeNiche,
   normalizeTopic,
@@ -10,6 +11,7 @@ import {
   normalizeHashtags,
   assembleCaption,
   normalizePlanDays,
+  normalizeSlideCount,
 } from "./ig-wizard.js";
 
 // Mock the AI provider for predictable tests.
@@ -294,5 +296,53 @@ describe("generatePlan", () => {
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.status).toBe(502);
+  });
+});
+
+// ─── Carousel Script ────────────────────────────────────────────────────────────
+
+describe("normalizeSlideCount", () => {
+  it("defaults to 5 + clamps to 3..10", () => {
+    expect(normalizeSlideCount(undefined)).toBe(5);
+    expect(normalizeSlideCount(1)).toBe(3);
+    expect(normalizeSlideCount(99)).toBe(10);
+    expect(normalizeSlideCount("7")).toBe(7);
+  });
+});
+
+describe("generateCarouselScript", () => {
+  beforeEach(() => {
+    mockReturn = {
+      text: JSON.stringify({ slides: Array.from({ length: 5 }, (_, i) => ({ text: `Slide ${i + 1}` })) }),
+      ok: true,
+      error: undefined,
+    };
+    mockHasProvider = true;
+  });
+
+  it("returns N slides on success", async () => {
+    const res = await generateCarouselScript({ topic: "AI", hook: "h", body: "b", cta: "c", language: "en", slides: 5 });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.result.slides).toHaveLength(5);
+    expect(res.result.slides[0].text).toBe("Slide 1");
+  });
+
+  it("caps slides at the requested count + drops blanks", async () => {
+    mockReturn = { text: JSON.stringify({ slides: [{ text: "A" }, { text: "" }, { text: "B" }] }), ok: true, error: undefined };
+    const res = await generateCarouselScript({ topic: "x", hook: "h", body: "b", cta: "c", language: "en", slides: 3 });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.result.slides.map((s) => s.text)).toEqual(["A", "B"]);
+  });
+
+  it("returns 503 when no provider, 502 on junk", async () => {
+    mockHasProvider = false;
+    expect((await generateCarouselScript({ topic: "x", hook: "h", body: "b", cta: "c", language: "en", slides: 5 })).ok).toBe(false);
+    mockHasProvider = true;
+    mockReturn = { text: "not json", ok: true, error: undefined };
+    const r = await generateCarouselScript({ topic: "x", hook: "h", body: "b", cta: "c", language: "en", slides: 5 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(502);
   });
 });

@@ -7,12 +7,14 @@ import {
   generateIgWizard,
   generateCaption,
   generatePlan,
+  generateCarouselScript,
   assembleCaption,
   normalizeLanguage,
   normalizeNiche,
   normalizeTopic,
   normalizeOptionalLine,
   normalizePlanDays,
+  normalizeSlideCount,
 } from "../ig-wizard.js";
 import { generateIgCover } from "../ig-cover.js";
 import * as socialManager from "../socialmedia/manager.js";
@@ -234,6 +236,43 @@ export function registerIgWizardRoutes(api: Hono): void {
     }
   });
 
+  /** Generate a branded CAROUSEL for a saved post: an AI slide-script rendered
+      as N Style-A images (generated in parallel). Sets format=carousel. */
+  api.post("/ig-wizard/posts/:id/carousel", async (c) => {
+    const post = wizardPosts.getPost(c.req.param("id"));
+    if (!post) return c.json({ error: "not found" }, 404);
+    const b = (await c.req.json().catch(() => ({}))) as { slides?: unknown; hero?: unknown };
+    const slideCount = normalizeSlideCount(b.slides);
+
+    const script = await generateCarouselScript({
+      topic: post.topic,
+      hook: post.hook,
+      body: post.body,
+      cta: post.cta,
+      language: normalizeLanguage(undefined),
+      slides: slideCount,
+    });
+    if (!script.ok) return c.json({ error: script.error }, script.status);
+
+    const hero = (typeof b.hero === "string" ? b.hero : post.hero) || "notebook";
+    try {
+      // Render every slide in parallel — N gpt-image-2 calls at once keeps the
+      // whole carousel near single-image latency instead of N×.
+      const images = await Promise.all(
+        script.result.slides.map((s) => generateIgCover({ headline: s.text, badge: "Built with AI", hero })),
+      );
+      const updated = wizardPosts.updatePost(post.id, {
+        format: "carousel",
+        mediaUrls: images.map((i) => i.url),
+        imageUrl: images[0]?.url ?? post.imageUrl,
+        hero,
+      });
+      return c.json({ ok: true, post: updated, slides: script.result.slides, mediaUrls: images.map((i) => i.url) });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
+    }
+  });
+
   /** Promote a saved wizard post into the social-media drafts (publish queue). */
   api.post("/ig-wizard/posts/:id/to-draft", async (c) => {
     const post = wizardPosts.getPost(c.req.param("id"));
@@ -262,17 +301,34 @@ export function registerIgWizardRoutes(api: Hono): void {
   });
 }
 
-/** Shared promote logic: build a clean draft from a wizard post + tag the post. */
+/** Shared promote logic: build a clean draft from a wizard post + tag the post.
+    Format-aware — carousel sends the slide array, reel sends the video. */
 async function promotePostToDraft(post: wizardPosts.WizardPost) {
   // Clean body (no inline hashtags); hashtags → IG first comment.
   const text = assembleCaption({ hook: post.hook, body: post.body, cta: post.cta, hashtags: [] });
   const firstComment = post.hashtags.length ? post.hashtags.map((h) => `#${h}`).join(" ") : undefined;
+  const format = post.format ?? "post";
+
+  let mediaUrls: string[] = [];
+  let videoUrl: string | undefined;
+  let thumbnailUrl: string | undefined;
+  if (format === "carousel") {
+    mediaUrls = post.mediaUrls && post.mediaUrls.length ? post.mediaUrls : post.imageUrl ? [post.imageUrl] : [];
+  } else if (format === "reel") {
+    videoUrl = post.videoUrl ?? undefined;
+    thumbnailUrl = post.thumbnailUrl ?? undefined;
+  } else {
+    mediaUrls = post.imageUrl ? [post.imageUrl] : [];
+  }
+
   const draft = await socialManager.createDraft({
     text,
     platforms: coercePlatforms(post.platforms),
-    mediaUrls: post.imageUrl ? [post.imageUrl] : [],
+    mediaUrls,
+    videoUrl,
+    thumbnailUrl,
     firstComment,
-    format: "post",
+    format,
     isDraft: true,
     createdBy: "agent",
   });

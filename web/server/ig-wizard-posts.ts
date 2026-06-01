@@ -18,6 +18,7 @@ const DIR = join(HEYHANK_HOME, "socialmedia");
 const POSTS_FILE = join(DIR, "ig-wizard-posts.json");
 
 export type WizardPostSource = "single" | "plan";
+export type WizardPostFormat = "post" | "carousel" | "reel";
 
 export interface WizardPost {
   id: string;
@@ -31,9 +32,17 @@ export interface WizardPost {
   caption: string;
   /** Target platforms carried to the draft when promoted. */
   platforms: string[];
-  /** Generated branded image, if any. */
+  /** Post format. "post" = single image, "carousel" = mediaUrls slides, "reel" = videoUrl. */
+  format?: WizardPostFormat;
+  /** Generated branded image (single-post format), if any. */
   imageUrl?: string | null;
   imageFilename?: string | null;
+  /** Carousel slide image URLs (format === "carousel"). */
+  mediaUrls?: string[];
+  /** Reel video URL (format === "reel"). */
+  videoUrl?: string | null;
+  /** Reel poster/thumbnail image URL. */
+  thumbnailUrl?: string | null;
   /** Hero scene used / to use for the image. */
   hero?: string;
   /** Where it came from — a standalone compose or a plan day. */
@@ -78,7 +87,7 @@ export function getPost(id: string): WizardPost | null {
 }
 
 export type CreateWizardPostInput = Pick<WizardPost, "topic" | "hook" | "body" | "cta" | "hashtags" | "caption" | "source"> &
-  Partial<Pick<WizardPost, "platforms" | "imageUrl" | "imageFilename" | "hero" | "day">>;
+  Partial<Pick<WizardPost, "platforms" | "imageUrl" | "imageFilename" | "hero" | "day" | "format" | "mediaUrls" | "videoUrl" | "thumbnailUrl">>;
 
 export function createPost(input: CreateWizardPostInput): WizardPost {
   const now = new Date().toISOString();
@@ -91,8 +100,12 @@ export function createPost(input: CreateWizardPostInput): WizardPost {
     hashtags: input.hashtags ?? [],
     caption: input.caption,
     platforms: input.platforms ?? ["instagram"],
+    format: input.format ?? "post",
     imageUrl: input.imageUrl ?? null,
     imageFilename: input.imageFilename ?? null,
+    mediaUrls: input.mediaUrls ?? [],
+    videoUrl: input.videoUrl ?? null,
+    thumbnailUrl: input.thumbnailUrl ?? null,
     hero: input.hero,
     source: input.source,
     day: input.day ?? null,

@@ -1899,6 +1899,8 @@ export interface IgComposeDraftResult {
   draft: IgComposeDraftPost;
 }
 
+export type WizardPostFormat = "post" | "carousel" | "reel";
+
 export interface WizardPost {
   id: string;
   topic: string;
@@ -1908,8 +1910,12 @@ export interface WizardPost {
   hashtags: string[];
   caption: string;
   platforms: string[];
+  format?: WizardPostFormat;
   imageUrl?: string | null;
   imageFilename?: string | null;
+  mediaUrls?: string[];
+  videoUrl?: string | null;
+  thumbnailUrl?: string | null;
   hero?: string;
   source: "single" | "plan";
   day?: number | null;
@@ -1952,6 +1958,8 @@ export const igWizardApi = {
       post<{ ok: boolean; removed: number }>("/ig-wizard/posts/bulk-delete", { ids }),
     generateImage: (id: string, hero?: string) =>
       post<{ ok: boolean; post: WizardPost; image: IgCoverImage }>(`/ig-wizard/posts/${encodeURIComponent(id)}/image`, { hero }),
+    generateCarousel: (id: string, slides: number, hero?: string) =>
+      post<{ ok: boolean; post: WizardPost; slides: { text: string }[]; mediaUrls: string[] }>(`/ig-wizard/posts/${encodeURIComponent(id)}/carousel`, { slides, hero }),
     toDraft: (id: string) =>
       post<{ ok: boolean; draft: IgComposeDraftPost; post: WizardPost }>(`/ig-wizard/posts/${encodeURIComponent(id)}/to-draft`, {}),
     bulkToDraft: (ids: string[]) =>

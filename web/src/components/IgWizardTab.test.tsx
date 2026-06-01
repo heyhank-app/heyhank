@@ -30,6 +30,7 @@ const mockPostsUpdate = vi.fn();
 const mockPostsRemove = vi.fn();
 const mockPostsBulkRemove = vi.fn();
 const mockPostsImage = vi.fn();
+const mockPostsCarousel = vi.fn();
 const mockPostsToDraft = vi.fn();
 const mockPostsBulkToDraft = vi.fn();
 vi.mock("../api.js", () => ({
@@ -45,6 +46,7 @@ vi.mock("../api.js", () => ({
       remove: (...args: unknown[]) => mockPostsRemove(...args),
       bulkRemove: (...args: unknown[]) => mockPostsBulkRemove(...args),
       generateImage: (...args: unknown[]) => mockPostsImage(...args),
+      generateCarousel: (...args: unknown[]) => mockPostsCarousel(...args),
       toDraft: (...args: unknown[]) => mockPostsToDraft(...args),
       bulkToDraft: (...args: unknown[]) => mockPostsBulkToDraft(...args),
     },
@@ -140,6 +142,7 @@ beforeEach(() => {
   mockPostsRemove.mockReset();
   mockPostsBulkRemove.mockReset();
   mockPostsImage.mockReset();
+  mockPostsCarousel.mockReset();
   mockPostsToDraft.mockReset();
   mockPostsBulkToDraft.mockReset();
   // Sensible defaults: auto-save succeeds, list is empty.
@@ -658,6 +661,23 @@ describe("IgWizardTab — Saved Posts workbench", () => {
     await waitFor(() => expect(screen.getByText("Post A")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /Generate image for Post A/i }));
     await waitFor(() => expect(mockPostsImage).toHaveBeenCalledWith("a", "notebook"));
+  });
+
+  it("generates a carousel with the chosen slide count + shows the format badge", async () => {
+    mockPostsCarousel.mockResolvedValueOnce({
+      ok: true,
+      post: makeWizardPost({ id: "a", format: "carousel", mediaUrls: ["/m/1.png", "/m/2.png", "/m/3.png", "/m/4.png", "/m/5.png"] }),
+      slides: [], mediaUrls: ["/m/1.png", "/m/2.png", "/m/3.png", "/m/4.png", "/m/5.png"],
+    });
+    await openSaved([makeWizardPost({ id: "a", hook: "Post A" })]);
+    await waitFor(() => expect(screen.getByText("Post A")).toBeInTheDocument());
+
+    // Default slide count is 5.
+    fireEvent.click(screen.getByRole("button", { name: /Generate carousel for Post A/i }));
+    await waitFor(() => expect(mockPostsCarousel).toHaveBeenCalledWith("a", 5, "notebook"));
+    // After generation both the format badge AND the button read "🎠 Carousel"
+    // (before, only the button existed) — proving the badge was added.
+    await waitFor(() => expect(screen.getAllByText(/🎠 Carousel/).length).toBeGreaterThanOrEqual(2));
   });
 
   it("promotes a post to Drafts", async () => {

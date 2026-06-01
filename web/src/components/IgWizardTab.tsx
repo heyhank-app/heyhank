@@ -1203,6 +1203,9 @@ function SavedPostCard({
   const [hero, setHero] = useState(post.hero || "notebook");
   const [generatingImage, setGeneratingImage] = useState(false);
   const [promoting, setPromoting] = useState(false);
+  const [slides, setSlides] = useState(5);
+  const [generatingCarousel, setGeneratingCarousel] = useState(false);
+  const busy = generatingImage || generatingCarousel || promoting;
 
   async function handleGenerateImage() {
     setGeneratingImage(true);
@@ -1214,6 +1217,19 @@ function SavedPostCard({
       showMessage(`Image failed: ${e instanceof Error ? e.message : String(e)}`, true);
     } finally {
       setGeneratingImage(false);
+    }
+  }
+
+  async function handleGenerateCarousel() {
+    setGeneratingCarousel(true);
+    try {
+      const res = await igWizardApi.posts.generateCarousel(post.id, slides, hero);
+      onPatch(res.post);
+      showMessage(`Carousel generated (${res.mediaUrls.length} slides).`);
+    } catch (e: unknown) {
+      showMessage(`Carousel failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setGeneratingCarousel(false);
     }
   }
 
@@ -1239,19 +1255,35 @@ function SavedPostCard({
         aria-label={`Select post: ${post.hook || post.topic}`}
         style={{ marginTop: 4 }}
       />
-      {post.imageUrl ? (
-        <img src={post.imageUrl} alt="Post image" style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border, #ddd)", flex: "0 0 auto" }} />
-      ) : (
-        <div style={{ width: 88, height: 88, borderRadius: 6, border: "1px dashed var(--border, #ddd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--text-muted, #888)", textAlign: "center", flex: "0 0 auto", padding: 4 }}>
-          no image
-        </div>
-      )}
+      {(() => {
+        const thumb = post.format === "reel" ? (post.thumbnailUrl || post.imageUrl) : (post.mediaUrls && post.mediaUrls.length ? post.mediaUrls[0] : post.imageUrl);
+        return thumb ? (
+          <div style={{ position: "relative", flex: "0 0 auto" }}>
+            <img src={thumb} alt="Post media" style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border, #ddd)", display: "block" }} />
+            {post.format === "carousel" && post.mediaUrls && post.mediaUrls.length > 1 && (
+              <span style={{ position: "absolute", top: 3, right: 3, fontSize: 10, fontWeight: 600, background: "rgba(0,0,0,0.65)", color: "white", borderRadius: 8, padding: "1px 6px" }}>🎠 {post.mediaUrls.length}</span>
+            )}
+            {post.format === "reel" && (
+              <span style={{ position: "absolute", bottom: 3, right: 3, fontSize: 12, background: "rgba(0,0,0,0.65)", color: "white", borderRadius: 8, padding: "0 5px" }}>▶</span>
+            )}
+          </div>
+        ) : (
+          <div style={{ width: 88, height: 88, borderRadius: 6, border: "1px dashed var(--border, #ddd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--text-muted, #888)", textAlign: "center", flex: "0 0 auto", padding: 4 }}>
+            no media
+          </div>
+        );
+      })()}
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
           <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em", padding: "1px 6px", borderRadius: 8, background: post.source === "plan" ? "#e8f0fe" : "#e6f4ea", color: post.source === "plan" ? "#1565c0" : "#137333" }}>
             {post.source === "plan" ? `Plan${post.day ? ` · Day ${post.day}` : ""}` : "Single"}
           </span>
+          {post.format && post.format !== "post" && (
+            <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em", padding: "1px 6px", borderRadius: 8, background: "#fff3e0", color: "#e65100" }}>
+              {post.format === "carousel" ? "🎠 Carousel" : "🎬 Reel"}
+            </span>
+          )}
           <span style={{ fontSize: 11, color: "var(--text-muted, #888)" }}>{post.platforms.join(", ")}</span>
           {post.promotedDraftId && (
             <span style={{ fontSize: 10, color: "var(--success-text, #137333)", fontWeight: 500 }}>✓ in Drafts</span>
@@ -1267,10 +1299,18 @@ function SavedPostCard({
               {HERO_SCENES.map((h) => (<option key={h.id} value={h.id}>{h.label}</option>))}
             </select>
           </label>
-          <button type="button" onClick={handleGenerateImage} disabled={generatingImage} aria-label={`Generate image for ${post.hook}`} style={{ ...miniBtn, cursor: generatingImage ? "wait" : "pointer" }}>
-            {generatingImage ? "Generating ~1min…" : post.imageUrl ? "↻ Image" : "✨ Image"}
+          <button type="button" onClick={handleGenerateImage} disabled={busy} aria-label={`Generate image for ${post.hook}`} style={{ ...miniBtn, cursor: busy ? "wait" : "pointer" }}>
+            {generatingImage ? "Generating ~1min…" : post.imageUrl && post.format === "post" ? "↻ Image" : "✨ Image"}
           </button>
-          <button type="button" onClick={handleToDraft} disabled={promoting} aria-label={`Send ${post.hook} to Drafts`} style={{ ...miniBtnPrimary, cursor: promoting ? "wait" : "pointer" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11 }}>
+            <select value={slides} onChange={(e) => setSlides(Number(e.target.value))} aria-label={`Carousel slide count for ${post.hook}`} style={{ padding: "2px 4px", fontSize: 11 }}>
+              {[3, 4, 5, 6, 7, 8, 9, 10].map((n) => (<option key={n} value={n}>{n}</option>))}
+            </select>
+          </label>
+          <button type="button" onClick={handleGenerateCarousel} disabled={busy} aria-label={`Generate carousel for ${post.hook}`} style={{ ...miniBtn, cursor: busy ? "wait" : "pointer" }}>
+            {generatingCarousel ? `Generating ${slides} slides…` : "🎠 Carousel"}
+          </button>
+          <button type="button" onClick={handleToDraft} disabled={busy} aria-label={`Send ${post.hook} to Drafts`} style={{ ...miniBtnPrimary, cursor: busy ? "wait" : "pointer" }}>
             {promoting ? "Sending…" : "→ Drafts"}
           </button>
           <button type="button" onClick={onDelete} aria-label={`Delete ${post.hook}`} style={{ ...miniBtn, color: "#c5221f", borderColor: "#f3b9b6" }}>🗑</button>

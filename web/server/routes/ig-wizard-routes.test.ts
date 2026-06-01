@@ -519,6 +519,30 @@ describe("Wizard Saved Posts routes", () => {
     expect((await app.request("/ig-wizard/posts/x/to-draft", { method: "POST" })).status).toBe(404);
   });
 
+  it("POST /ig-wizard/posts/:id/carousel renders an N-slide carousel", async () => {
+    mockWpGet.mockReturnValue({ id: "a", hook: "Stop renting AI", topic: "x", body: "b", cta: "c", hero: "notebook" });
+    // The carousel script comes from the internal-AI mock.
+    mockReturn = { text: JSON.stringify({ slides: [{ text: "S1" }, { text: "S2" }, { text: "S3" }] }), ok: true, error: undefined };
+    let imgN = 0;
+    mockGenerateIgCover.mockImplementation(async () => ({ filename: `s${++imgN}.png`, url: `/api/media/file/s${imgN}.png`, path: "/x", prompt: "p", model: "gpt-image-2" }));
+    mockWpUpdate.mockImplementation((_id: string, patch: Record<string, unknown>) => ({ id: "a", ...patch }));
+
+    const res = await app.request("/ig-wizard/posts/a/carousel", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slides: 3 }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.mediaUrls).toHaveLength(3);
+    // One image per slide, format set to carousel.
+    expect(mockGenerateIgCover).toHaveBeenCalledTimes(3);
+    expect(mockWpUpdate).toHaveBeenCalledWith("a", expect.objectContaining({ format: "carousel" }));
+  });
+
+  it("carousel route 404s on a missing post", async () => {
+    mockWpGet.mockReturnValue(null);
+    expect((await app.request("/ig-wizard/posts/x/carousel", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status).toBe(404);
+  });
+
   it("POST /ig-wizard/posts/bulk-to-draft promotes many, skipping missing ids", async () => {
     // a + b exist, c is missing.
     mockWpGet.mockImplementation((id: string) =>

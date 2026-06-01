@@ -459,6 +459,84 @@ export async function generateCaption(input: {
   };
 }
 
+// ─── Carousel Script ────────────────────────────────────────────────────────────
+
+export interface CarouselSlide {
+  /** Short on-image text for this slide (a headline, not a paragraph). */
+  text: string;
+}
+
+export interface CarouselScriptResult {
+  slides: CarouselSlide[];
+  model: string;
+}
+
+export interface CarouselScriptOk { ok: true; result: CarouselScriptResult; }
+export interface CarouselScriptErr { ok: false; error: string; status: 400 | 502 | 503; }
+
+/** Clamp the slide count to Instagram's 3..10 carousel range. */
+export function normalizeSlideCount(raw: unknown): number {
+  const n = typeof raw === "number" ? raw : typeof raw === "string" ? parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(n)) return 5;
+  return Math.max(3, Math.min(10, Math.round(n)));
+}
+
+const CAROUSEL_SYSTEM_PROMPT = `You are a social-media designer who writes Instagram CAROUSEL scripts — short on-image text, one line per slide, built to make people swipe.
+
+Given a post (topic + hook + body + CTA), write exactly {{N}} slides:
+  - Slide 1: the HOOK — the scroll-stopper, the strongest promise/curiosity. Make them swipe.
+  - Slides 2..{{N-1}}: ONE concrete, specific point each. Short. Punchy. A single idea per slide — no paragraphs. Build momentum.
+  - Slide {{N}}: the CTA — tell them exactly what to do next (comment / follow / save / DM).
+
+Rules:
+  - Each slide's "text" is what gets PRINTED ON the image — keep it under ~12 words, ideally under 8. No slide numbers in the text.
+  - Concrete over vague. Real specifics from the post.
+  - Match the post's language. 1 emoji max per slide, only if it adds punch.
+  - Never use "as an AI", never refuse.
+
+Return ONLY valid JSON, no markdown fences, no commentary:
+{ "slides": [ { "text": "..." }, ... exactly {{N}} items ] }`;
+
+interface ParsedCarousel { slides?: unknown; }
+
+export async function generateCarouselScript(input: {
+  topic: string;
+  hook: string;
+  body: string;
+  cta: string;
+  language: IgWizardLanguage;
+  slides: number;
+}): Promise<CarouselScriptOk | CarouselScriptErr> {
+  if (!hasInternalAI()) {
+    return { ok: false, status: 503, error: "No internal AI provider is configured." };
+  }
+  const n = normalizeSlideCount(input.slides);
+  const sys = CAROUSEL_SYSTEM_PROMPT.replace(/\{\{N-1\}\}/g, String(n - 1)).replace(/\{\{N\}\}/g, String(n));
+  const ai = await callInternalAI({
+    systemPrompt: sys,
+    userPrompt: `Topic: ${input.topic || "AI tools"}\nHook: ${input.hook}\nBody: ${input.body}\nCTA: ${input.cta}\nLanguage: ${input.language}\nSlides: ${n}`,
+    maxTokens: 1200,
+    temperature: 0.8,
+    timeoutMs: 60_000,
+  });
+  if (!ai.ok) return { ok: false, status: 502, error: ai.error || "AI call failed" };
+
+  const block = extractJsonBlock(ai.text);
+  let parsed: ParsedCarousel;
+  try { parsed = JSON.parse(block) as ParsedCarousel; } catch { return { ok: false, status: 502, error: "AI returned invalid carousel JSON." }; }
+  const slides: CarouselSlide[] = Array.isArray(parsed.slides)
+    ? parsed.slides
+        .map((s): CarouselSlide | null => {
+          const text = s && typeof s === "object" && typeof (s as { text?: unknown }).text === "string" ? (s as { text: string }).text.trim() : "";
+          return text ? { text } : null;
+        })
+        .filter((s): s is CarouselSlide => s !== null)
+        .slice(0, n)
+    : [];
+  if (slides.length === 0) return { ok: false, status: 502, error: "AI returned no usable slides." };
+  return { ok: true, result: { slides, model: "internal-ai" } };
+}
+
 // ─── 30-Day Plan ────────────────────────────────────────────────────────────────
 
 const PLAN_SYSTEM_PROMPT = `You are a social-media strategist who turns ONE topic into a month of Instagram content that builds an email list.
