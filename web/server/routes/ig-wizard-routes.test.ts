@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
-import { registerIgWizardRoutes } from "./ig-wizard-routes.js";
+import { registerIgWizardRoutes, buildReelCaptions, buildReelVeoPrompt } from "./ig-wizard-routes.js";
 
 // Mock the internal-ai module so tests don't hit a real provider.
 // We control the response text per-test by reassigning these variables before
@@ -595,6 +595,12 @@ describe("Wizard Saved Posts routes", () => {
         style: "Narrate in a clear, confident voice:",
       }),
     );
+    // The video segment carries burned-in timed captions (hook → body → CTA) so
+    // the reel reads as content, not blank b-roll.
+    const composeArg = mockCompose.mock.calls[0][0] as { segments: Array<{ textOverlays?: unknown[] }> };
+    const overlays = composeArg.segments[0].textOverlays ?? [];
+    expect(overlays.length).toBeGreaterThanOrEqual(2);
+    expect(overlays.map((o) => (o as { text: string }).text)).toContain("Stop renting AI");
     expect(mockCompose).toHaveBeenCalledWith(expect.objectContaining({
       segments: [expect.objectContaining({ type: "video", path: "/m/veo.mp4", replaceAudio: true, audioPath: "/m/vo.mp3" })],
     }));
@@ -626,5 +632,74 @@ describe("Wizard Saved Posts routes", () => {
     expect(json.results).toHaveLength(3);
     expect(json.results.find((r: { id: string }) => r.id === "c").ok).toBe(false);
     expect(mockCreateDraft).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("buildReelCaptions", () => {
+  it("turns hook + body + CTA into timed, ordered captions covering the duration", () => {
+    const caps = buildReelCaptions(
+      { hook: "Stop renting AI", body: "Run it yourself. It is cheap.", cta: "Comment STACK" },
+      8,
+    );
+    expect(caps.length).toBeGreaterThanOrEqual(3);
+    // Hook is first + centered + larger; CTA is last.
+    expect(caps[0].text).toBe("Stop renting AI");
+    expect(caps[0].position).toBe("center");
+    expect(caps[caps.length - 1].text).toBe("Comment STACK");
+    // Captions are sequential and span the whole clip.
+    expect(caps[0].startSeconds).toBe(0);
+    expect(caps[caps.length - 1].endSeconds).toBeCloseTo(8, 1);
+    for (let i = 1; i < caps.length; i++) {
+      expect(caps[i].startSeconds).toBeGreaterThanOrEqual(caps[i - 1].startSeconds ?? 0);
+    }
+  });
+
+  it("caps caption count so each stays on screen long enough to read", () => {
+    // 10 sentences but a 4s clip → at most floor(4/1.3)=3 captions.
+    const body = Array.from({ length: 10 }, (_, i) => `Sentence ${i + 1}.`).join(" ");
+    const caps = buildReelCaptions({ hook: "H", body, cta: "C" }, 4);
+    expect(caps.length).toBeLessThanOrEqual(3);
+  });
+
+  it("returns no captions for an empty post", () => {
+    expect(buildReelCaptions({ hook: "", body: "", cta: "" }, 8)).toEqual([]);
+  });
+
+  it("always keeps the CTA even when a long body would overflow the line budget", () => {
+    // 8 body sentences but only ~6 caption slots → the body must be trimmed,
+    // NOT the CTA (the funnel-critical line).
+    const body = Array.from({ length: 8 }, (_, i) => `Body point ${i + 1}.`).join(" ");
+    const caps = buildReelCaptions({ hook: "Hook line", body, cta: "Comment STACK for the guide" }, 8);
+    expect(caps[caps.length - 1].text).toBe("Comment STACK for the guide");
+    expect(caps[0].text).toBe("Hook line");
+  });
+
+  it("strips emoji from on-screen captions (the font renders them as tofu)", () => {
+    const caps = buildReelCaptions(
+      { hook: "Run your own AI 🔒💡", body: "Cheap and private. 🚀", cta: "Comment VPS 📩" },
+      8,
+    );
+    for (const c of caps) {
+      expect(c.text).not.toMatch(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
+    }
+    expect(caps[0].text).toBe("Run your own AI");
+    expect(caps[caps.length - 1].text).toBe("Comment VPS");
+  });
+});
+
+describe("buildReelVeoPrompt", () => {
+  it("is topic-aware and stays visual-only (no on-screen text)", () => {
+    const p = buildReelVeoPrompt("self-hosting AI on a $5 server");
+    expect(p).toContain("self-hosting AI on a $5 server");
+    expect(p).toMatch(/9:16/);
+    expect(p).toMatch(/no on-screen text/i);
+    // Not the old hardcoded cozy-laptop scene.
+    expect(p).not.toMatch(/warm home-office/i);
+  });
+
+  it("still produces a valid prompt with no topic", () => {
+    const p = buildReelVeoPrompt("");
+    expect(p).toMatch(/9:16/);
+    expect(p).toMatch(/no on-screen text/i);
   });
 });

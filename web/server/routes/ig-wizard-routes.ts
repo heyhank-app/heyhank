@@ -23,7 +23,7 @@ import type { SocialPlatform } from "../socialmedia/types.js";
 import * as wizardPosts from "../ig-wizard-posts.js";
 import { generateVeoGoogle, pollVeoGoogle } from "../fal-video.js";
 import { generateTts } from "../gemini-tts.js";
-import { composeReel } from "../video-compose.js";
+import { composeReel, type TextOverlay } from "../video-compose.js";
 import { join, basename } from "node:path";
 import { existsSync } from "node:fs";
 import { HEYHANK_HOME } from "../paths.js";
@@ -283,8 +283,7 @@ export function registerIgWizardRoutes(api: Hono): void {
       //    description, no dialogue quotes) so it stays mute + dodges the audio
       //    safety filter; the cover image conditions the first frame.
       const firstFrame = mediaUrlToLocalPath(post.imageUrl);
-      const veoPrompt =
-        "Vertical 9:16 cinematic clip. Warm home-office scene, soft window light, shallow depth of field, a slow gentle camera push-in. Cozy, premium, editorial mood. No on-screen text, no captions, no subtitles.";
+      const veoPrompt = buildReelVeoPrompt(post.topic);
       const { operationName } = await generateVeoGoogle({
         prompt: veoPrompt,
         aspectRatio: "9:16",
@@ -310,9 +309,18 @@ export function registerIgWizardRoutes(api: Hono): void {
       // the face/brand is visual, the voice is a neutral third-person narrator).
       const tts = await generateTts({ text: voText, voice: "Charon", style: "Narrate in a clear, confident voice:" });
 
-      // 4) Compose: muted Veo video + the voiceover laid over it.
+      // 4) Compose: muted Veo video + the voiceover + burned-in timed captions
+      //    (hook → body → CTA) so the reel reads as content, not blank b-roll.
+      const captions = buildReelCaptions(post, duration);
       const composed = await composeReel({
-        segments: [{ type: "video", path: veoPath, durationSeconds: duration, replaceAudio: true, audioPath: tts.audioPath }],
+        segments: [{
+          type: "video",
+          path: veoPath,
+          durationSeconds: duration,
+          replaceAudio: true,
+          audioPath: tts.audioPath,
+          textOverlays: captions,
+        }],
         outputName: `wizard_reel_${post.id.slice(0, 8)}`,
       });
       const videoUrl = mediaPathToUrl(composed.videoPath);
@@ -389,4 +397,103 @@ async function promotePostToDraft(post: wizardPosts.WizardPost) {
   });
   const updated = wizardPosts.updatePost(post.id, { promotedDraftId: draft.id });
   return { draft, post: updated };
+}
+
+// ─── Reel helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Strip emoji + pictographs from on-screen caption text. The reel font
+ * (Lato-Bold) has no emoji glyphs, so they render as tofu "?" boxes — clean
+ * them out for burned-in captions (the voiceover/caption text keeps them).
+ */
+export function stripEmoji(s: string): string {
+  return s
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}\u{200D}\u{20E3}]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Split prose into sentences for caption chunking. */
+function splitSentences(text: string): string[] {
+  return (text || "")
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Build time-sequenced burned-in captions for a reel from the post's caption.
+ * A blank B-roll clip reads as filler; on-screen text is what makes a reel land.
+ * The hook opens centered + large, then body sentences + the CTA scroll along
+ * the bottom in sync with the Charon voiceover (which speaks the same text).
+ */
+export function buildReelCaptions(
+  post: Pick<wizardPosts.WizardPost, "hook" | "body" | "cta">,
+  duration: number,
+): TextOverlay[] {
+  const hook = stripEmoji(post.hook ?? "");
+  const cta = stripEmoji(post.cta ?? "");
+  const bodyLines = splitSentences(post.body).map(stripEmoji).filter((s) => s.length > 0);
+
+  // Keep each caption on screen long enough to read (≥1.3s).
+  const maxLines = Math.max(1, Math.floor(duration / 1.3));
+
+  // Hook and CTA are the load-bearing lines (the hook stops the scroll, the CTA
+  // drives the funnel) — always keep them and trim the body middle to fit,
+  // rather than letting a long body push the CTA off the end.
+  const chosen: Array<{ text: string; kind: "hook" | "body" | "cta" }> = [];
+  if (hook) chosen.push({ text: hook, kind: "hook" });
+  if (cta) chosen.push({ text: cta, kind: "cta" }); // reserved; moved to the end below
+  const bodyBudget = Math.max(0, maxLines - chosen.length);
+  const bodyChosen = bodyLines.slice(0, bodyBudget).map((text) => ({ text, kind: "body" as const }));
+  // Order: hook → body → cta.
+  const ordered = [
+    ...chosen.filter((l) => l.kind === "hook"),
+    ...bodyChosen,
+    ...chosen.filter((l) => l.kind === "cta"),
+  ];
+  if (!ordered.length) return [];
+  const slice = duration / ordered.length;
+
+  return ordered.map((line, i) => {
+    const start = +(i * slice).toFixed(2);
+    const end = +((i + 1) * slice).toFixed(2);
+    if (line.kind === "hook") {
+      return { text: line.text, position: "center" as const, fontSize: 52, color: "#ffffff",
+        bgColor: "black", bgPadding: 22, bold: true, maxWidth: 600, lineHeight: 1.2,
+        startSeconds: start, endSeconds: end };
+    }
+    if (line.kind === "cta") {
+      // Centered (not bottom-anchored) so a wrapped 2-3 line CTA never clips off
+      // the bottom edge. Orange box = the funnel call-to-action.
+      return { text: line.text, position: "center" as const, fontSize: 46, color: "#ffffff",
+        bgColor: "#c2410c", bgPadding: 20, bold: true, maxWidth: 600, lineHeight: 1.2,
+        startSeconds: start, endSeconds: end };
+    }
+    return { text: line.text, position: "center" as const, fontSize: 42, color: "#ffffff",
+      bgColor: "black", bgPadding: 18, bold: true, maxWidth: 620, lineHeight: 1.2,
+      startSeconds: start, endSeconds: end };
+  });
+}
+
+/**
+ * A topic-aware visual prompt for the silent Veo b-roll. Stays visual-only (no
+ * person, no dialogue, no on-screen text — we burn clean captions ourselves) so
+ * it dodges the audio-safety filter, but is themed to the post instead of a
+ * single hardcoded cozy-laptop scene that looked identical for every reel.
+ */
+export function buildReelVeoPrompt(topic: string): string {
+  const t = (topic || "").trim();
+  const theme = t
+    ? `B-roll for a short video about "${t}". `
+    : "";
+  return (
+    `Vertical 9:16 cinematic b-roll. ${theme}` +
+    "Modern, energetic tech atmosphere: glowing screens and terminal windows, " +
+    "server status LEDs, code and dashboards reflecting on a clean desk, dynamic " +
+    "rim lighting, subtle particle/bokeh, a smooth dolly camera move. Premium " +
+    "editorial color grade, high contrast, fast premium product-film feel. " +
+    "No on-screen text, no captions, no subtitles, no logos, no watermark."
+  );
 }
