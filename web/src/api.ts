@@ -1912,23 +1912,7 @@ export interface IgCoverImage {
   model: string;
 }
 
-export interface IgComposeDraftInput {
-  topic: string;
-  language?: "en" | "de";
-  hook?: string;
-  cta?: string;
-  /** Target platforms for the draft (default ["instagram"]). */
-  platforms?: string[];
-  /** Hero scene for the Style-A image (notebook | laptop | phone | workspace). */
-  hero?: string;
-  /** Badge text on the image (default "Built with AI"). */
-  badge?: string;
-  /** Generate a branded image (default true). Set false for a text-only draft. */
-  generateImage?: boolean;
-  /** Pre-composed caption to save verbatim (skips re-generation on the server). */
-  caption?: { hook: string; body: string; cta: string; hashtags: string[] };
-}
-
+/** A social draft created by promoting a wizard post (see posts/:id/to-draft). */
 export interface IgComposeDraftPost {
   id: string;
   text: string;
@@ -1938,14 +1922,6 @@ export interface IgComposeDraftPost {
   firstComment?: string;
   format?: string;
   createdAt: string;
-}
-
-export interface IgComposeDraftResult {
-  caption: IgCaptionResult;
-  image: IgCoverImage | null;
-  /** Non-fatal image-generation error (the draft still saved, text-only). */
-  imageError: string | null;
-  draft: IgComposeDraftPost;
 }
 
 export type WizardPostFormat = "post" | "carousel" | "reel";
@@ -1998,8 +1974,6 @@ export const igWizardApi = {
     post<IgContentBrief>("/ig-wizard/research", { language: "en", ...input }),
   plan: (input: IgPlanInput) =>
     post<IgPlanResult>("/ig-wizard/plan", { language: "en", days: 30, ...input }),
-  composeAndSaveDraft: (input: IgComposeDraftInput) =>
-    post<IgComposeDraftResult>("/ig-wizard/compose-and-save-draft", { language: "en", ...input }),
   // ── Saved Posts (the wizard's persistent workbench) ──
   posts: {
     list: () => get<{ posts: WizardPost[] }>("/ig-wizard/posts"),

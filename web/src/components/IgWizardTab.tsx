@@ -18,7 +18,6 @@ import {
   type IgCaptionResult,
   type IgPlanResult,
   type IgPlanBrief,
-  type IgComposeDraftResult,
   type IgContentBrief,
   type WizardPost,
 } from "../api.js";

@@ -22,7 +22,6 @@ const mockGenerate = vi.fn();
 const mockCreateRule = vi.fn();
 const mockCaption = vi.fn();
 const mockPlan = vi.fn();
-const mockComposeDraft = vi.fn();
 const mockResearch = vi.fn();
 // Wizard Saved Posts workbench (auto-save + curate).
 const mockPostsList = vi.fn();
@@ -41,7 +40,6 @@ vi.mock("../api.js", () => ({
     caption: (...args: unknown[]) => mockCaption(...args),
     research: (...args: unknown[]) => mockResearch(...args),
     plan: (...args: unknown[]) => mockPlan(...args),
-    composeAndSaveDraft: (...args: unknown[]) => mockComposeDraft(...args),
     posts: {
       list: (...args: unknown[]) => mockPostsList(...args),
       create: (...args: unknown[]) => mockPostsCreate(...args),
@@ -141,7 +139,6 @@ beforeEach(() => {
   mockCaption.mockReset();
   mockResearch.mockReset();
   mockPlan.mockReset();
-  mockComposeDraft.mockReset();
   mockPostsList.mockReset();
   mockPostsCreate.mockReset();
   mockPostsUpdate.mockReset();
