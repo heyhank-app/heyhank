@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
-import { registerIgWizardRoutes, buildReelCaptions, buildReelVeoPrompt } from "./ig-wizard-routes.js";
+import { registerIgWizardRoutes, buildReelCaptions, buildReelVeoPrompt, buildReelLogos } from "./ig-wizard-routes.js";
 
 // Mock the internal-ai module so tests don't hit a real provider.
 // We control the response text per-test by reassigning these variables before
@@ -646,19 +646,24 @@ describe("buildReelCaptions", () => {
     expect(caps[0].text).toBe("Stop renting AI");
     expect(caps[0].position).toBe("center");
     expect(caps[caps.length - 1].text).toBe("Comment STACK");
-    // Captions are sequential and span the whole clip.
+    // Captions are sequential and span (almost) the whole clip (a small gap
+    // before the end prevents overlapping boxes).
     expect(caps[0].startSeconds).toBe(0);
-    expect(caps[caps.length - 1].endSeconds).toBeCloseTo(8, 1);
+    expect(caps[caps.length - 1].endSeconds).toBeGreaterThan(7);
     for (let i = 1; i < caps.length; i++) {
       expect(caps[i].startSeconds).toBeGreaterThanOrEqual(caps[i - 1].startSeconds ?? 0);
     }
   });
 
-  it("caps caption count so each stays on screen long enough to read", () => {
-    // 10 sentences but a 4s clip → at most floor(4/1.3)=3 captions.
-    const body = Array.from({ length: 10 }, (_, i) => `Sentence ${i + 1}.`).join(" ");
-    const caps = buildReelCaptions({ hook: "H", body, cta: "C" }, 4);
+  it("paces captions by reading time — each stays on screen long enough to read", () => {
+    // A rich body must NOT produce many flash-by captions: each window ≥ ~1.5s.
+    const body = Array.from({ length: 10 }, (_, i) => `This is body sentence number ${i + 1}.`).join(" ");
+    const caps = buildReelCaptions({ hook: "Hook", body, cta: "CTA" }, 8);
+    // 8s / 2.3s reading floor → at most ~3 captions.
     expect(caps.length).toBeLessThanOrEqual(3);
+    for (const c of caps) {
+      expect((c.endSeconds ?? 0) - (c.startSeconds ?? 0)).toBeGreaterThanOrEqual(1.3);
+    }
   });
 
   it("returns no captions for an empty post", () => {
@@ -684,6 +689,25 @@ describe("buildReelCaptions", () => {
     }
     expect(caps[0].text).toBe("Run your own AI");
     expect(caps[caps.length - 1].text).toBe("Comment VPS");
+  });
+});
+
+describe("buildReelLogos", () => {
+  it("detects the AI tools a post mentions and maps them to logo slugs", () => {
+    const logos = buildReelLogos({
+      topic: "running AI locally",
+      hook: "Swap ChatGPT for a local model",
+      body: "Ollama is OpenAI-compatible; pair it with Claude for review.",
+      cta: "Comment STACK",
+    });
+    const brands = logos.map((l) => l.brand);
+    expect(brands).toContain("openai"); // ChatGPT/OpenAI
+    expect(brands).toContain("claude");
+    expect(logos.length).toBeLessThanOrEqual(3); // capped
+  });
+
+  it("returns no logos when no known brand is mentioned", () => {
+    expect(buildReelLogos({ topic: "productivity tips", hook: "Do more", body: "Focus.", cta: "Go" })).toEqual([]);
   });
 });
 

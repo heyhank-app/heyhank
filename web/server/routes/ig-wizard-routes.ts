@@ -23,7 +23,7 @@ import type { SocialPlatform } from "../socialmedia/types.js";
 import * as wizardPosts from "../ig-wizard-posts.js";
 import { generateVeoGoogle, pollVeoGoogle } from "../fal-video.js";
 import { generateTts } from "../gemini-tts.js";
-import { composeReel, type TextOverlay } from "../video-compose.js";
+import { composeReel, type TextOverlay, type LogoOverlay } from "../video-compose.js";
 import { join, basename } from "node:path";
 import { existsSync } from "node:fs";
 import { HEYHANK_HOME } from "../paths.js";
@@ -310,8 +310,10 @@ export function registerIgWizardRoutes(api: Hono): void {
       const tts = await generateTts({ text: voText, voice: "Charon", style: "Narrate in a clear, confident voice:" });
 
       // 4) Compose: muted Veo video + the voiceover + burned-in timed captions
-      //    (hook → body → CTA) so the reel reads as content, not blank b-roll.
+      //    (hook → body → CTA) + theme logos (the AI tools the post is about),
+      //    so the reel reads as content, not blank b-roll.
       const captions = buildReelCaptions(post, duration);
+      const logos = buildReelLogos(post);
       const composed = await composeReel({
         segments: [{
           type: "video",
@@ -320,6 +322,7 @@ export function registerIgWizardRoutes(api: Hono): void {
           replaceAudio: true,
           audioPath: tts.audioPath,
           textOverlays: captions,
+          ...(logos.length ? { logos } : {}),
         }],
         outputName: `wizard_reel_${post.id.slice(0, 8)}`,
       });
@@ -436,8 +439,10 @@ export function buildReelCaptions(
   const cta = stripEmoji(post.cta ?? "");
   const bodyLines = splitSentences(post.body).map(stripEmoji).filter((s) => s.length > 0);
 
-  // Keep each caption on screen long enough to read (≥1.3s).
-  const maxLines = Math.max(1, Math.floor(duration / 1.3));
+  // Each caption needs ~2.3s+ on screen to actually be read — so cap the COUNT
+  // by reading time, not just fit. Fewer, longer captions > many that flash by.
+  const MIN_READ = 2.3;
+  const maxLines = Math.max(2, Math.floor(duration / MIN_READ));
 
   // Hook and CTA are the load-bearing lines (the hook stops the scroll, the CTA
   // drives the funnel) — always keep them and trim the body middle to fit,
@@ -454,25 +459,40 @@ export function buildReelCaptions(
     ...chosen.filter((l) => l.kind === "cta"),
   ];
   if (!ordered.length) return [];
-  const slice = duration / ordered.length;
+
+  // Allocate time per caption: a base floor each + the remainder weighted by
+  // text length (long lines get more reading time). A small gap before the next
+  // caption means only one is ever on screen — no overlapping boxes.
+  const n = ordered.length;
+  const GAP = 0.08;
+  const floorEach = Math.min(1.6, (duration / n) * 0.7);
+  const lens = ordered.map((l) => Math.max(14, l.text.length));
+  const totalLen = lens.reduce((a, b) => a + b, 0);
+  const extra = Math.max(0, duration - floorEach * n);
+  let cursor = 0;
 
   return ordered.map((line, i) => {
-    const start = +(i * slice).toFixed(2);
-    const end = +((i + 1) * slice).toFixed(2);
+    const dur = floorEach + (extra * lens[i]) / totalLen;
+    const start = +cursor.toFixed(2);
+    const end = +Math.min(duration, cursor + dur - GAP).toFixed(2);
+    cursor += dur;
+    // lineHeight 1.5 + small padding keeps each wrapped line's box from
+    // overlapping the next (box height ≈ fontSize + 2·padding must stay under
+    // the line spacing = fontSize · lineHeight) — clean stacked boxes.
     if (line.kind === "hook") {
       return { text: line.text, position: "center" as const, fontSize: 52, color: "#ffffff",
-        bgColor: "black", bgPadding: 22, bold: true, maxWidth: 600, lineHeight: 1.2,
+        bgColor: "black", bgPadding: 12, bold: true, maxWidth: 600, lineHeight: 1.5,
         startSeconds: start, endSeconds: end };
     }
     if (line.kind === "cta") {
       // Centered (not bottom-anchored) so a wrapped 2-3 line CTA never clips off
       // the bottom edge. Orange box = the funnel call-to-action.
       return { text: line.text, position: "center" as const, fontSize: 46, color: "#ffffff",
-        bgColor: "#c2410c", bgPadding: 20, bold: true, maxWidth: 600, lineHeight: 1.2,
+        bgColor: "#c2410c", bgPadding: 11, bold: true, maxWidth: 600, lineHeight: 1.5,
         startSeconds: start, endSeconds: end };
     }
     return { text: line.text, position: "center" as const, fontSize: 42, color: "#ffffff",
-      bgColor: "black", bgPadding: 18, bold: true, maxWidth: 620, lineHeight: 1.2,
+      bgColor: "black", bgPadding: 10, bold: true, maxWidth: 620, lineHeight: 1.5,
       startSeconds: start, endSeconds: end };
   });
 }
@@ -496,4 +516,40 @@ export function buildReelVeoPrompt(topic: string): string {
     "editorial color grade, high contrast, fast premium product-film feel. " +
     "No on-screen text, no captions, no subtitles, no logos, no watermark."
   );
+}
+
+/**
+ * Brand keyword → logo slug. The AI tools a post talks about get their real
+ * logos overlaid (top-left stack) so the reel is visibly on-topic. Slugs resolve
+ * via logo-resolver (local PNG → favicon fetch → placeholder), so even brands
+ * without a bundled logo render something sensible.
+ */
+const REEL_LOGO_KEYWORDS: Array<[RegExp, string]> = [
+  [/\b(claude|anthropic)\b/i, "claude"],
+  [/\b(chatgpt|openai|gpt-?\d)\b/i, "openai"],
+  [/\bgemini\b/i, "gemini"],
+  [/\bcopilot\b/i, "copilot"],
+  [/\bcursor\b/i, "cursor"],
+  [/\bperplexity\b/i, "perplexity"],
+  [/\bnotion\b/i, "notion"],
+  [/\bvercel\b/i, "vercel"],
+  [/\bn8n\b/i, "n8n"],
+  [/\bmidjourney\b/i, "midjourney"],
+  [/\brunway\b/i, "runway"],
+  [/\bsuno\b/i, "suno"],
+  [/\bgithub\b/i, "github"],
+  [/\bgoogle\b/i, "google"],
+];
+
+/** Detect up to 3 theme logos to overlay on the reel from the post's text. */
+export function buildReelLogos(
+  post: Pick<wizardPosts.WizardPost, "topic" | "hook" | "body" | "cta">,
+): LogoOverlay[] {
+  const hay = `${post.topic ?? ""} ${post.hook ?? ""} ${post.body ?? ""} ${post.cta ?? ""}`;
+  const slugs: string[] = [];
+  for (const [re, slug] of REEL_LOGO_KEYWORDS) {
+    if (re.test(hay) && !slugs.includes(slug)) slugs.push(slug);
+    if (slugs.length >= 3) break;
+  }
+  return slugs.map((brand) => ({ brand, width: 72, hideLabel: true }));
 }
