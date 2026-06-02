@@ -44,6 +44,18 @@ function mediaPathToUrl(absPath: string): string {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/** Probe an audio/video file's duration in seconds via ffprobe (0 on failure). */
+async function probeDurationSeconds(path: string): Promise<number> {
+  const { spawn } = await import("node:child_process");
+  return new Promise<number>((resolve) => {
+    const ff = spawn("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path]);
+    let out = "";
+    ff.stdout.on("data", (d) => { out += d; });
+    ff.on("close", () => resolve(parseFloat(out.trim()) || 0));
+    ff.on("error", () => resolve(0));
+  });
+}
+
 const VALID_PLATFORMS: SocialPlatform[] = ["instagram", "facebook", "twitter", "linkedin", "tiktok", "threads"];
 
 function coercePlatforms(raw: unknown): SocialPlatform[] {
@@ -275,55 +287,68 @@ export function registerIgWizardRoutes(api: Hono): void {
   api.post("/ig-wizard/posts/:id/reel", async (c) => {
     const post = wizardPosts.getPost(c.req.param("id"));
     if (!post) return c.json({ error: "not found" }, 404);
-    const b = (await c.req.json().catch(() => ({}))) as { durationSeconds?: unknown; voice?: unknown };
-    const duration = (b.durationSeconds === 4 || b.durationSeconds === 6 || b.durationSeconds === 8 ? b.durationSeconds : 8) as 4 | 6 | 8;
+    await c.req.json().catch(() => ({})); // body currently carries no options
 
     try {
-      // 1) Veo — silent vertical clip. Keep the prompt visual-only (no person
-      //    description, no dialogue quotes) so it stays mute + dodges the audio
-      //    safety filter; the cover image conditions the first frame.
+      // 1) Voiceover FIRST — its length drives the reel length so the whole
+      //    narration plays (an 8s clip would cut a 40s VO off after one line).
+      //    Charon = the reel narrator (deliberately NOT a Markus impersonation;
+      //    the brand is visual, the voice is a neutral third-person narrator).
+      const voText = `${post.hook}. ${post.body} ${post.cta}`.replace(/\s+/g, " ").trim().slice(0, 900);
+      const tts = await generateTts({ text: voText, voice: "Charon", style: "Narrate in a clear, confident voice:" });
+      const voDuration = await probeDurationSeconds(tts.audioPath);
+      const plan = planReelClips(voDuration);
+
+      // 2) Generate the distinct silent Veo b-roll clips IN PARALLEL (each a
+      //    different scene so tiled repeats don't look identical). The cover
+      //    conditions the first clip's opening frame for brand continuity.
       const firstFrame = mediaUrlToLocalPath(post.imageUrl);
-      const veoPrompt = buildReelVeoPrompt(post.topic);
-      const { operationName } = await generateVeoGoogle({
-        prompt: veoPrompt,
-        aspectRatio: "9:16",
-        durationSeconds: duration,
-        ...(firstFrame ? { firstFrameImagePath: firstFrame, mode: "firstFrame" as const } : {}),
+      const genClip = async (variant: number): Promise<string> => {
+        const { operationName } = await generateVeoGoogle({
+          prompt: buildReelVeoPrompt(post.topic, variant),
+          aspectRatio: "9:16",
+          durationSeconds: REEL_CLIP_SECONDS,
+          ...(variant === 0 && firstFrame ? { firstFrameImagePath: firstFrame, mode: "firstFrame" as const } : {}),
+        });
+        // Poll up to ~8 min/clip (nginx /api/ allows 600s; clips run in
+        // parallel so wall time ≈ the slowest clip, not the sum).
+        for (let i = 0; i < 96; i++) {
+          const op = await pollVeoGoogle(operationName);
+          if (op.error) throw new Error(`Veo failed: ${op.error}`);
+          if (op.done && op.videoPath) return op.videoPath;
+          await sleep(5000);
+        }
+        throw new Error("Veo timed out (>8 min)");
+      };
+      const clipPaths = await Promise.all(
+        Array.from({ length: plan.distinctClips }, (_, i) => genClip(i)),
+      );
+
+      // 3) Tile the clips across the slots into one silent long video.
+      const tiled = await composeReel({
+        segments: plan.slotDurations.map((d, i) => ({
+          type: "video" as const,
+          path: clipPaths[i % clipPaths.length],
+          durationSeconds: d,
+          replaceAudio: true, // strip any source audio; the VO is added below
+        })),
+        outputName: `wizard_reel_${post.id.slice(0, 8)}_bg`,
       });
 
-      // 2) Poll Veo until done (server-side; nginx /api/ allows 600s).
-      let veoPath: string | undefined;
-      for (let i = 0; i < 60; i++) {
-        const op = await pollVeoGoogle(operationName);
-        if (op.error) throw new Error(`Veo failed: ${op.error}`);
-        if (op.done) { veoPath = op.videoPath; break; }
-        await sleep(5000);
-      }
-      if (!veoPath) throw new Error("Veo timed out (>5 min)");
-
-      // 3) Gemini TTS voiceover — hook + body + CTA so the speech fills the clip
-      //    (the compositor trims to the audio length, so too-short VO = too-short
-      //    reel). Capped so a long body doesn't run way past the video.
-      const voText = `${post.hook}. ${post.body} ${post.cta}`.replace(/\s+/g, " ").trim().slice(0, 600);
-      // Charon = the reel narrator (deliberately NOT an impersonation of Markus —
-      // the face/brand is visual, the voice is a neutral third-person narrator).
-      const tts = await generateTts({ text: voText, voice: "Charon", style: "Narrate in a clear, confident voice:" });
-
-      // 4) Compose: muted Veo video + the voiceover + burned-in timed captions
-      //    (hook → body → CTA) + theme logos (the AI tools the post is about),
-      //    so the reel reads as content, not blank b-roll.
-      const captions = buildReelCaptions(post, duration);
+      // 4) Final pass: burn captions (hook → body → CTA, paced across the FULL
+      //    duration so they're readable) + theme logos onto the long video, and
+      //    lay the complete voiceover over the whole reel.
+      const captions = buildReelCaptions(post, plan.reelDuration);
       const logos = buildReelLogos(post);
       const composed = await composeReel({
         segments: [{
           type: "video",
-          path: veoPath,
-          durationSeconds: duration,
-          replaceAudio: true,
-          audioPath: tts.audioPath,
+          path: tiled.videoPath,
+          durationSeconds: plan.reelDuration,
           textOverlays: captions,
           ...(logos.length ? { logos } : {}),
         }],
+        audioPath: tts.audioPath,
         outputName: `wizard_reel_${post.id.slice(0, 8)}`,
       });
       const videoUrl = mediaPathToUrl(composed.videoPath);
@@ -503,19 +528,56 @@ export function buildReelCaptions(
  * it dodges the audio-safety filter, but is themed to the post instead of a
  * single hardcoded cozy-laptop scene that looked identical for every reel.
  */
-export function buildReelVeoPrompt(topic: string): string {
+/** Distinct scene focuses so tiled clips don't look identical. */
+const REEL_SCENE_VARIANTS = [
+  "glowing screens and terminal windows, code and dashboards reflecting on a clean desk",
+  "a rack of servers with blinking status LEDs in a dim data-centre, cables and cool blue light",
+  "a macro close-up of a tiny single-board computer / mini PC on a desk, shallow depth of field",
+  "an abstract flowing network of glowing nodes and data streams, dark premium background",
+];
+
+export function buildReelVeoPrompt(topic: string, variant = 0): string {
   const t = (topic || "").trim();
-  const theme = t
-    ? `B-roll for a short video about "${t}". `
-    : "";
+  const theme = t ? `B-roll for a short video about "${t}". ` : "";
+  const scene = REEL_SCENE_VARIANTS[variant % REEL_SCENE_VARIANTS.length];
   return (
     `Vertical 9:16 cinematic b-roll. ${theme}` +
-    "Modern, energetic tech atmosphere: glowing screens and terminal windows, " +
-    "server status LEDs, code and dashboards reflecting on a clean desk, dynamic " +
-    "rim lighting, subtle particle/bokeh, a smooth dolly camera move. Premium " +
-    "editorial color grade, high contrast, fast premium product-film feel. " +
+    `Modern, energetic tech atmosphere: ${scene}, dynamic rim lighting, ` +
+    "subtle particle/bokeh, a smooth dolly camera move. Premium editorial color " +
+    "grade, high contrast, fast premium product-film feel. " +
     "No on-screen text, no captions, no subtitles, no logos, no watermark."
   );
+}
+
+/** Per-clip length Veo produces. */
+const REEL_CLIP_SECONDS = 8;
+/** Hard cap on total reel length (IG reels stay punchy). */
+const REEL_MAX_SECONDS = 60;
+/** Cap on distinct Veo generations — extra slots reuse/tile these. Kept low
+    (cost + parallel Veo jobs contend and slow each other down). */
+const REEL_MAX_DISTINCT_CLIPS = 3;
+
+/**
+ * Plan a reel long enough to fit the full voiceover: how long the reel runs,
+ * how many distinct Veo clips to generate, and each tiled slot's duration. A
+ * 44s voiceover → ~44s reel, 4 distinct 8s clips tiled across 6 slots.
+ */
+export function planReelClips(voDuration: number): {
+  reelDuration: number;
+  distinctClips: number;
+  slotDurations: number[];
+} {
+  const reelDuration = Math.min(REEL_MAX_SECONDS, Math.max(REEL_CLIP_SECONDS, +(voDuration + 0.5).toFixed(2)));
+  const numSlots = Math.ceil(reelDuration / REEL_CLIP_SECONDS);
+  const distinctClips = Math.max(1, Math.min(numSlots, REEL_MAX_DISTINCT_CLIPS));
+  const slotDurations: number[] = [];
+  let remaining = reelDuration;
+  for (let i = 0; i < numSlots; i++) {
+    const d = Math.min(REEL_CLIP_SECONDS, +remaining.toFixed(2));
+    slotDurations.push(d);
+    remaining = +(remaining - d).toFixed(2);
+  }
+  return { reelDuration, distinctClips, slotDurations };
 }
 
 /**

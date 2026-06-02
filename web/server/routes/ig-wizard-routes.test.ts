@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
-import { registerIgWizardRoutes, buildReelCaptions, buildReelVeoPrompt, buildReelLogos } from "./ig-wizard-routes.js";
+import { registerIgWizardRoutes, buildReelCaptions, buildReelVeoPrompt, buildReelLogos, planReelClips } from "./ig-wizard-routes.js";
 
 // Mock the internal-ai module so tests don't hit a real provider.
 // We control the response text per-test by reassigning these variables before
@@ -595,20 +595,27 @@ describe("Wizard Saved Posts routes", () => {
         style: "Narrate in a clear, confident voice:",
       }),
     );
-    // The video segment carries burned-in timed captions (hook → body → CTA) so
-    // the reel reads as content, not blank b-roll.
-    const composeArg = mockCompose.mock.calls[0][0] as { segments: Array<{ textOverlays?: unknown[] }> };
-    const overlays = composeArg.segments[0].textOverlays ?? [];
+    // Two compose passes: (1) tile the silent b-roll clips, (2) burn captions +
+    // logos and lay the full voiceover over the whole reel.
+    expect(mockCompose).toHaveBeenCalledTimes(2);
+    const tiledArg = mockCompose.mock.calls[0][0] as { segments: Array<{ type: string; replaceAudio?: boolean }> };
+    expect(tiledArg.segments[0].type).toBe("video");
+    const finalArg = mockCompose.mock.calls[1][0] as {
+      segments: Array<{ path: string; textOverlays?: Array<{ text: string }> }>;
+      audioPath?: string;
+    };
+    // Final pass wraps the tiled video, carries the captions, and the global VO.
+    expect(finalArg.segments[0].path).toBe("/m/reel_x.mp4"); // = tiled output
+    expect(finalArg.audioPath).toBe("/m/vo.mp3"); // full voiceover over the whole reel
+    const overlays = finalArg.segments[0].textOverlays ?? [];
     expect(overlays.length).toBeGreaterThanOrEqual(2);
-    expect(overlays.map((o) => (o as { text: string }).text)).toContain("Stop renting AI");
-    expect(mockCompose).toHaveBeenCalledWith(expect.objectContaining({
-      segments: [expect.objectContaining({ type: "video", path: "/m/veo.mp4", replaceAudio: true, audioPath: "/m/vo.mp3" })],
-    }));
+    expect(overlays.map((o) => o.text)).toContain("Stop renting AI");
     expect(mockWpUpdate).toHaveBeenCalledWith("a", expect.objectContaining({ format: "reel", videoUrl: "/api/media/file/reel_x.mp4" }));
   });
 
   it("reel route surfaces a Veo failure as 502", async () => {
     mockWpGet.mockReturnValue({ id: "a", hook: "h", cta: "c", topic: "x", imageUrl: null });
+    mockTts.mockResolvedValue({ audioPath: "/m/vo.mp3", cached: false, size: 100 }); // VO runs first now
     mockVeoGen.mockResolvedValue({ operationName: "op/1" });
     mockVeoPoll.mockResolvedValue({ operationName: "op/1", done: false, error: "quota exceeded" });
     const res = await app.request("/ig-wizard/posts/a/reel", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
@@ -689,6 +696,31 @@ describe("buildReelCaptions", () => {
     }
     expect(caps[0].text).toBe("Run your own AI");
     expect(caps[caps.length - 1].text).toBe("Comment VPS");
+  });
+});
+
+describe("planReelClips", () => {
+  it("makes the reel long enough to fit the full voiceover", () => {
+    // A 43.6s voiceover must NOT be crammed into an 8s clip.
+    const plan = planReelClips(43.6);
+    expect(plan.reelDuration).toBeGreaterThanOrEqual(43.6);
+    expect(plan.slotDurations.reduce((a, b) => a + b, 0)).toBeCloseTo(plan.reelDuration, 1);
+    // Slots are ≤8s (Veo's clip cap) and distinct clips are capped for cost.
+    for (const d of plan.slotDurations) expect(d).toBeLessThanOrEqual(8);
+    expect(plan.distinctClips).toBeLessThanOrEqual(4);
+    expect(plan.distinctClips).toBeGreaterThanOrEqual(1);
+  });
+
+  it("clamps a tiny voiceover to a single 8s clip", () => {
+    const plan = planReelClips(2);
+    expect(plan.reelDuration).toBe(8);
+    expect(plan.slotDurations).toEqual([8]);
+    expect(plan.distinctClips).toBe(1);
+  });
+
+  it("caps a very long voiceover at the max reel length", () => {
+    const plan = planReelClips(300);
+    expect(plan.reelDuration).toBeLessThanOrEqual(60);
   });
 });
 

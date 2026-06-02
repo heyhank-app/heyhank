@@ -117,6 +117,13 @@ export interface ComposeRequest {
   brand?: string;
   /** Output basename (no extension). Default `reel_<ts>_<rnd>`. */
   outputName?: string;
+  /**
+   * Optional single audio track laid over the ENTIRE concatenated reel (e.g. a
+   * voiceover that should span all segments). Muxed in a final pass after concat
+   * with `-shortest`, replacing any per-segment audio. Use this instead of
+   * per-segment `audioPath` when one continuous track covers the whole video.
+   */
+  audioPath?: string;
 }
 
 export interface ComposeResult {
@@ -534,6 +541,9 @@ export async function composeReel(request: ComposeRequest): Promise<ComposeResul
     const listBody = segmentPaths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n");
     writeFileSync(listPath, listBody);
 
+    // Concat to the final path, unless a global audio track needs a second
+    // pass — then concat to a temp and mux the audio over the whole video.
+    const concatTarget = request.audioPath ? join(workDir, "concat_out.mp4") : outputPath;
     await runFfmpeg([
       "-y",
       "-f",
@@ -544,8 +554,25 @@ export async function composeReel(request: ComposeRequest): Promise<ComposeResul
       listPath,
       "-c",
       "copy",
-      outputPath,
+      concatTarget,
     ]);
+
+    if (request.audioPath) {
+      // Lay one continuous audio track over the entire reel; `-shortest` ends at
+      // whichever of video/audio runs out first.
+      await runFfmpeg([
+        "-y",
+        "-i", concatTarget,
+        "-i", request.audioPath,
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
+        outputPath,
+      ]);
+    }
 
     const totalDuration = request.segments.reduce((sum, s) => {
       if (s.type === "image") return sum + s.durationSeconds;
