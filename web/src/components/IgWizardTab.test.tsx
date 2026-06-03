@@ -34,6 +34,12 @@ const mockPostsCarousel = vi.fn();
 const mockPostsReel = vi.fn();
 const mockPostsToDraft = vi.fn();
 const mockPostsBulkToDraft = vi.fn();
+// Inspiration (manual swipe file) surface.
+const mockInspList = vi.fn();
+const mockInspCreate = vi.fn();
+const mockInspRemove = vi.fn();
+const mockInspAdapt = vi.fn();
+const mockInspUpload = vi.fn();
 vi.mock("../api.js", () => ({
   igWizardApi: {
     generate: (...args: unknown[]) => mockGenerate(...args),
@@ -51,6 +57,13 @@ vi.mock("../api.js", () => ({
       generateReel: (...args: unknown[]) => mockPostsReel(...args),
       toDraft: (...args: unknown[]) => mockPostsToDraft(...args),
       bulkToDraft: (...args: unknown[]) => mockPostsBulkToDraft(...args),
+    },
+    inspiration: {
+      list: (...args: unknown[]) => mockInspList(...args),
+      create: (...args: unknown[]) => mockInspCreate(...args),
+      remove: (...args: unknown[]) => mockInspRemove(...args),
+      adapt: (...args: unknown[]) => mockInspAdapt(...args),
+      uploadMedia: (...args: unknown[]) => mockInspUpload(...args),
     },
   },
   autoDmRulesApi: { create: (...args: unknown[]) => mockCreateRule(...args) },
@@ -149,10 +162,16 @@ beforeEach(() => {
   mockPostsReel.mockReset();
   mockPostsToDraft.mockReset();
   mockPostsBulkToDraft.mockReset();
+  mockInspList.mockReset();
+  mockInspCreate.mockReset();
+  mockInspRemove.mockReset();
+  mockInspAdapt.mockReset();
+  mockInspUpload.mockReset();
   // Sensible defaults: auto-save succeeds, list is empty.
   mockPostsCreate.mockResolvedValue({ ok: true, post: makeWizardPost() });
   mockPostsUpdate.mockResolvedValue(makeWizardPost());
   mockPostsList.mockResolvedValue({ posts: [] });
+  mockInspList.mockResolvedValue({ items: [] });
   // jsdom doesn't ship a clipboard impl by default. Provide one.
   Object.assign(navigator, {
     clipboard: {
@@ -822,5 +841,99 @@ describe("IgWizardTab — Saved Posts workbench", () => {
     await waitFor(() => expect(mockPostsBulkToDraft).toHaveBeenCalledWith(["a", "b"]));
     // Both flip to "in Drafts".
     await waitFor(() => expect(screen.getAllByText(/in Drafts/i).length).toBe(2));
+  });
+});
+
+// ─── Inspiration (manual swipe file) ─────────────────────────────────────────
+describe("IgWizardTab — Inspiration mode", () => {
+  const noop = () => {};
+
+  function makeInsp(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "i1",
+      handle: "vaibhavsisinty",
+      format: "reel",
+      caption: "Stop paying for AI APIs — self-host instead.",
+      topic: "self-hosting",
+      mediaUrls: ["/api/media/file/clip.mp4"],
+      notes: "strong hook",
+      createdAt: "2026-06-03T10:00:00Z",
+      updatedAt: "2026-06-03T10:00:00Z",
+      ...overrides,
+    };
+  }
+
+  it("loads saved inspiration items when the tab opens", async () => {
+    mockInspList.mockResolvedValue({ items: [makeInsp()] });
+    render(<IgWizardTab showMessage={noop} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Inspiration/i }));
+    await waitFor(() => expect(screen.getByText(/@vaibhavsisinty/)).toBeInTheDocument());
+    // Format badge + caption excerpt render.
+    expect(screen.getByText(/Stop paying for AI APIs/)).toBeInTheDocument();
+    expect(screen.getByTestId("inspiration-card")).toBeInTheDocument();
+  });
+
+  it("requires a handle + caption before saving (shows an error, no API call)", async () => {
+    const showMessage = vi.fn();
+    render(<IgWizardTab showMessage={showMessage} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Inspiration/i }));
+    await waitFor(() => expect(screen.getByLabelText("Creator handle")).toBeInTheDocument());
+    // Click save with empty form.
+    fireEvent.click(screen.getByRole("button", { name: /Save inspiration/i }));
+    await waitFor(() => expect(showMessage).toHaveBeenCalledWith(expect.stringMatching(/handle/i), true));
+    expect(mockInspCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates an item from the import form + reloads the list", async () => {
+    render(<IgWizardTab showMessage={noop} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Inspiration/i }));
+    await waitFor(() => expect(screen.getByLabelText("Creator handle")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("Creator handle"), { target: { value: "@creator" } });
+    fireEvent.change(screen.getByLabelText("Post caption"), { target: { value: "great reference post" } });
+    mockInspCreate.mockResolvedValue({ ok: true, item: makeInsp() });
+    mockInspList.mockResolvedValue({ items: [makeInsp()] });
+
+    fireEvent.click(screen.getByRole("button", { name: /Save inspiration/i }));
+    await waitFor(() =>
+      expect(mockInspCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ handle: "@creator", caption: "great reference post", format: "reel" }),
+      ),
+    );
+  });
+
+  it("adapts an item → calls adapt with the selected language", async () => {
+    mockInspList.mockResolvedValue({ items: [makeInsp()] });
+    mockInspAdapt.mockResolvedValue({ ok: true, post: makeWizardPost(), result: {} });
+    const showMessage = vi.fn();
+    render(<IgWizardTab showMessage={showMessage} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Inspiration/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Adapt for me/i })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /Adapt for me/i }));
+    await waitFor(() => expect(mockInspAdapt).toHaveBeenCalledWith("i1", "en"));
+    await waitFor(() => expect(showMessage).toHaveBeenCalledWith(expect.stringMatching(/adapted/i)));
+  });
+
+  it("deletes an item from the swipe file", async () => {
+    mockInspList.mockResolvedValue({ items: [makeInsp()] });
+    mockInspRemove.mockResolvedValue({ ok: true });
+    render(<IgWizardTab showMessage={noop} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Inspiration/i }));
+    await waitFor(() => expect(screen.getByTestId("inspiration-card")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /Delete inspiration from vaibhavsisinty/i }));
+    await waitFor(() => expect(mockInspRemove).toHaveBeenCalledWith("i1"));
+    await waitFor(() => expect(screen.queryByTestId("inspiration-card")).not.toBeInTheDocument());
+  });
+
+  it("has no axe violations in inspiration mode", async () => {
+    mockInspList.mockResolvedValue({ items: [makeInsp()] });
+    const { container } = render(<IgWizardTab showMessage={noop} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Inspiration/i }));
+    await waitFor(() => expect(screen.getByTestId("inspiration-mode")).toBeInTheDocument());
+    const { axe } = await import("vitest-axe");
+    const results = await axe(container, axeRules);
+    expect(results).toHaveNoViolations();
   });
 });

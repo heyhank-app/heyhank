@@ -54,6 +54,23 @@ vi.mock("../ig-wizard-posts.js", () => ({
   bulkRemove: (...a: unknown[]) => mockWpBulkRemove(...a),
 }));
 
+// Inspiration store mock. The normalize helpers keep their real shape so the
+// route's validation (handle/format coercion) behaves like production.
+const mockInspList = vi.fn();
+const mockInspCreate = vi.fn();
+const mockInspGet = vi.fn();
+const mockInspRemove = vi.fn();
+vi.mock("../ig-inspiration.js", () => ({
+  listItems: (...a: unknown[]) => mockInspList(...a),
+  createItem: (...a: unknown[]) => mockInspCreate(...a),
+  getItem: (...a: unknown[]) => mockInspGet(...a),
+  removeItem: (...a: unknown[]) => mockInspRemove(...a),
+  normalizeHandle: (raw: unknown) =>
+    typeof raw === "string" ? raw.trim().replace(/^@+/, "").trim() : "",
+  normalizeInspirationFormat: (raw: unknown) =>
+    raw === "carousel" || raw === "reel" || raw === "story" ? raw : "post",
+}));
+
 // Reel pipeline mocks (Veo + TTS + compositor) — no real video generation.
 const mockVeoGen = vi.fn();
 const mockVeoPoll = vi.fn();
@@ -768,5 +785,144 @@ describe("buildReelVeoPrompt", () => {
     const p = buildReelVeoPrompt("");
     expect(p).toMatch(/9:16/);
     expect(p).toMatch(/no on-screen text/i);
+  });
+});
+
+// ─── Inspiration (manual swipe file) routes ──────────────────────────────────
+describe("inspiration routes", () => {
+  let app: Hono;
+
+  beforeEach(() => {
+    app = new Hono();
+    registerIgWizardRoutes(app);
+    mockInspList.mockReset();
+    mockInspCreate.mockReset();
+    mockInspGet.mockReset();
+    mockInspRemove.mockReset();
+    mockWpCreate.mockReset();
+    // Adapt uses the real adaptInspiration → mocked internal-ai. Default to a
+    // valid adapted caption payload.
+    mockReturn = {
+      text: JSON.stringify({
+        hook: "You don't need a GPU",
+        body: "Here's how.\n\nStep by step.",
+        cta: "Comment VPS",
+        hashtags: ["selfhosted"],
+        style: "screen",
+      }),
+      ok: true,
+      error: undefined,
+    };
+    mockHasProvider = true;
+  });
+
+  it("GET lists items", async () => {
+    mockInspList.mockReturnValue([{ id: "i1", handle: "creator", format: "reel", caption: "x", mediaUrls: [] }]);
+    const res = await app.request("/ig-wizard/inspiration");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.items).toHaveLength(1);
+  });
+
+  it("POST creates an item (handle + caption required)", async () => {
+    mockInspCreate.mockReturnValue({ id: "new", handle: "creator", format: "reel", caption: "ref", mediaUrls: [] });
+    const res = await app.request("/ig-wizard/inspiration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: "@creator", format: "reel", caption: "ref post", mediaUrls: ["/api/media/file/a.mp4"] }),
+    });
+    expect(res.status).toBe(201);
+    expect(mockInspCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ handle: "creator", caption: "ref post" }),
+    );
+  });
+
+  it("POST rejects a missing handle (400)", async () => {
+    const res = await app.request("/ig-wizard/inspiration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ caption: "ref post" }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockInspCreate).not.toHaveBeenCalled();
+  });
+
+  it("POST rejects a missing caption (400)", async () => {
+    const res = await app.request("/ig-wizard/inspiration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: "@creator", caption: "   " }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("DELETE removes an item, 404 when absent", async () => {
+    mockInspRemove.mockReturnValueOnce(true);
+    const ok = await app.request("/ig-wizard/inspiration/i1", { method: "DELETE" });
+    expect(ok.status).toBe(200);
+
+    mockInspRemove.mockReturnValueOnce(false);
+    const gone = await app.request("/ig-wizard/inspiration/i1", { method: "DELETE" });
+    expect(gone.status).toBe(404);
+  });
+
+  it("POST adapt rewrites the item + saves a wizard post (reel → reel format)", async () => {
+    mockInspGet.mockReturnValue({
+      id: "i1",
+      handle: "creator",
+      format: "reel",
+      caption: "Stop paying for AI APIs.",
+      topic: "self-hosting",
+      mediaUrls: [],
+    });
+    mockWpCreate.mockReturnValue({ id: "wp1", format: "reel", hook: "You don't need a GPU" });
+
+    const res = await app.request("/ig-wizard/inspiration/i1/adapt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ language: "en" }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.post.id).toBe("wp1");
+    // The adapted caption was assembled + handed to the WizardPost store with
+    // the format mapped from the inspiration (reel → reel).
+    expect(mockWpCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ format: "reel", hook: "You don't need a GPU", source: "single" }),
+    );
+  });
+
+  it("POST adapt maps a story inspiration to a post-format draft", async () => {
+    mockInspGet.mockReturnValue({ id: "i2", handle: "c", format: "story", caption: "ref", mediaUrls: [] });
+    mockWpCreate.mockReturnValue({ id: "wp2" });
+    const res = await app.request("/ig-wizard/inspiration/i2/adapt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(201);
+    expect(mockWpCreate).toHaveBeenCalledWith(expect.objectContaining({ format: "post" }));
+  });
+
+  it("POST adapt returns 404 for an unknown item", async () => {
+    mockInspGet.mockReturnValue(null);
+    const res = await app.request("/ig-wizard/inspiration/nope/adapt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("POST adapt surfaces the 503 when no AI provider is configured", async () => {
+    mockHasProvider = false;
+    mockInspGet.mockReturnValue({ id: "i1", handle: "c", format: "post", caption: "ref", mediaUrls: [] });
+    const res = await app.request("/ig-wizard/inspiration/i1/adapt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(503);
+    expect(mockWpCreate).not.toHaveBeenCalled();
   });
 });

@@ -20,6 +20,8 @@ import {
   type IgPlanBrief,
   type IgContentBrief,
   type WizardPost,
+  type InspirationItem,
+  type InspirationFormat,
 } from "../api.js";
 
 /**
@@ -71,7 +73,7 @@ const IG_STYLES: { id: string; label: string }[] = [
   { id: "screen", label: "Screen / Demo" },
 ];
 
-type WizardMode = "single" | "plan" | "saved";
+type WizardMode = "single" | "plan" | "inspiration" | "saved";
 
 const CTA_TYPE_LABELS: Record<IgPlanBrief["ctaType"], string> = {
   lead: "Lead",
@@ -344,6 +346,7 @@ export function IgWizardTab({ showMessage }: Props) {
         {([
           { id: "single" as const, label: "📝 Single Post" },
           { id: "plan" as const, label: "📅 30-Day Plan" },
+          { id: "inspiration" as const, label: "💡 Inspiration" },
           { id: "saved" as const, label: "💾 Saved Posts" },
         ]).map((m) => (
           <button
@@ -800,8 +803,553 @@ export function IgWizardTab({ showMessage }: Props) {
         />
       )}
 
+      {mode === "inspiration" && (
+        <InspirationMode
+          onAdapted={() => setSavedTick((t) => t + 1)}
+          onGoToSaved={() => setMode("saved")}
+          showMessage={showMessage}
+        />
+      )}
+
       {mode === "saved" && (
         <SavedPostsMode refreshKey={savedTick} onCopy={handleCopy} showMessage={showMessage} />
+      )}
+    </div>
+  );
+}
+
+// ─── InspirationMode (manual swipe file) ─────────────────────────────────────
+
+const INSPIRATION_FORMAT_OPTIONS: { id: InspirationFormat; label: string }[] = [
+  { id: "post", label: "Post" },
+  { id: "carousel", label: "Carousel" },
+  { id: "reel", label: "Reel" },
+  { id: "story", label: "Story" },
+];
+
+const FORMAT_BADGE: Record<InspirationFormat, { bg: string; fg: string }> = {
+  post: { bg: "#e8f0fe", fg: "#1565c0" },
+  carousel: { bg: "#fef7e0", fg: "#b06000" },
+  reel: { bg: "#fce8e6", fg: "#c5221f" },
+  story: { bg: "#e6f4ea", fg: "#137333" },
+};
+
+/** True for media URLs that should render in a <video> rather than <img>. */
+function isVideoUrl(url: string): boolean {
+  return /\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(url);
+}
+
+interface InspirationModeProps {
+  onAdapted: () => void;
+  onGoToSaved: () => void;
+  showMessage: (text: string, isError?: boolean) => void;
+}
+
+function InspirationMode({ onAdapted, onGoToSaved, showMessage }: InspirationModeProps) {
+  const [items, setItems] = useState<InspirationItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Import form state.
+  const [handle, setHandle] = useState("");
+  const [format, setFormat] = useState<InspirationFormat>("reel");
+  const [captionText, setCaptionText] = useState("");
+  const [topic, setTopic] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [notes, setNotes] = useState("");
+  const [mediaUrls, setMediaUrls] = useState<string[]>([]);
+  const [mediaUrlInput, setMediaUrlInput] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const [adaptingId, setAdaptingId] = useState<string | null>(null);
+  const [adaptLang, setAdaptLang] = useState<"en" | "de">("en");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await igWizardApi.inspiration.list();
+      setItems(res.items);
+    } catch (e) {
+      showMessage(e instanceof Error ? e.message : "Failed to load inspiration", true);
+    } finally {
+      setLoading(false);
+    }
+  }, [showMessage]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleUpload = useCallback(
+    async (file: File | null | undefined) => {
+      if (!file) return;
+      setUploading(true);
+      try {
+        const res = await igWizardApi.inspiration.uploadMedia(file);
+        setMediaUrls((prev) => [...prev, res.url]);
+      } catch (e) {
+        showMessage(e instanceof Error ? e.message : "Upload failed", true);
+      } finally {
+        setUploading(false);
+      }
+    },
+    [showMessage],
+  );
+
+  const handleAddUrl = useCallback(() => {
+    const u = mediaUrlInput.trim();
+    if (!u) return;
+    setMediaUrls((prev) => [...prev, u]);
+    setMediaUrlInput("");
+  }, [mediaUrlInput]);
+
+  const resetForm = useCallback(() => {
+    setHandle("");
+    setCaptionText("");
+    setTopic("");
+    setSourceUrl("");
+    setNotes("");
+    setMediaUrls([]);
+    setMediaUrlInput("");
+  }, []);
+
+  const handleCreate = useCallback(async () => {
+    if (!handle.trim()) {
+      showMessage("Handle is required (e.g. @creator)", true);
+      return;
+    }
+    if (!captionText.trim()) {
+      showMessage("Paste the post caption/text", true);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await igWizardApi.inspiration.create({
+        handle: handle.trim(),
+        format,
+        caption: captionText.trim(),
+        topic: topic.trim() || undefined,
+        mediaUrls,
+        sourceUrl: sourceUrl.trim() || undefined,
+        notes: notes.trim() || undefined,
+      });
+      resetForm();
+      await load();
+      showMessage("Inspiration saved 💡");
+    } catch (e) {
+      showMessage(e instanceof Error ? e.message : "Save failed", true);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [handle, captionText, format, topic, mediaUrls, sourceUrl, notes, resetForm, load, showMessage]);
+
+  const handleAdapt = useCallback(
+    async (id: string) => {
+      setAdaptingId(id);
+      try {
+        await igWizardApi.inspiration.adapt(id, adaptLang);
+        onAdapted();
+        showMessage("Adapted into your voice — saved to 💾 Saved Posts");
+      } catch (e) {
+        showMessage(e instanceof Error ? e.message : "Adapt failed", true);
+      } finally {
+        setAdaptingId(null);
+      }
+    },
+    [adaptLang, onAdapted, showMessage],
+  );
+
+  const handleDelete = useCallback(
+    async (id: string) => {
+      try {
+        await igWizardApi.inspiration.remove(id);
+        setItems((prev) => prev.filter((i) => i.id !== id));
+      } catch (e) {
+        showMessage(e instanceof Error ? e.message : "Delete failed", true);
+      }
+    },
+    [showMessage],
+  );
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "8px 10px",
+    border: "1px solid var(--border, #ddd)",
+    borderRadius: 4,
+    fontSize: 14,
+    boxSizing: "border-box",
+    background: "var(--input-bg, #fff)",
+    color: "var(--text, #333)",
+  };
+
+  return (
+    <div data-testid="inspiration-mode">
+      <p style={{ margin: "0 0 16px 0", color: "var(--text-muted, #888)", fontSize: 14 }}>
+        Paste posts you admire from other creators, then one-click <strong>“→ Adapt for me”</strong>{" "}
+        rewrites the idea in your own voice as a draft. No crawling, no Instagram risk — you curate the swipe file by hand.
+      </p>
+
+      {/* ── Import form ── */}
+      <section
+        aria-label="Import inspiration"
+        style={{
+          border: "1px solid var(--border, #ddd)",
+          borderRadius: 8,
+          padding: 16,
+          marginBottom: 24,
+          display: "grid",
+          gap: 12,
+        }}
+      >
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <label style={{ flex: "1 1 180px", fontSize: 13, fontWeight: 500 }}>
+            Creator handle
+            <input
+              aria-label="Creator handle"
+              placeholder="@vaibhavsisinty"
+              value={handle}
+              onChange={(e) => setHandle(e.target.value)}
+              style={{ ...inputStyle, marginTop: 4 }}
+            />
+          </label>
+          <label style={{ flex: "1 1 140px", fontSize: 13, fontWeight: 500 }}>
+            Format
+            <select
+              aria-label="Post format"
+              value={format}
+              onChange={(e) => setFormat(e.target.value as InspirationFormat)}
+              style={{ ...inputStyle, marginTop: 4 }}
+            >
+              {INSPIRATION_FORMAT_OPTIONS.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ flex: "1 1 180px", fontSize: 13, fontWeight: 500 }}>
+            Theme (optional)
+            <input
+              aria-label="Theme"
+              placeholder="self-hosting AI cheap"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              style={{ ...inputStyle, marginTop: 4 }}
+            />
+          </label>
+        </div>
+
+        <label style={{ fontSize: 13, fontWeight: 500 }}>
+          Post caption / text
+          <textarea
+            aria-label="Post caption"
+            placeholder="Paste the creator's caption or on-screen text here…"
+            value={captionText}
+            onChange={(e) => setCaptionText(e.target.value)}
+            rows={4}
+            style={{ ...inputStyle, marginTop: 4, resize: "vertical", fontFamily: "inherit" }}
+          />
+        </label>
+
+        {/* Media: upload + URL */}
+        <div style={{ display: "grid", gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 500 }}>Media (images / videos)</span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <label
+              style={{
+                padding: "6px 12px",
+                border: "1px dashed var(--border, #aaa)",
+                borderRadius: 4,
+                cursor: "pointer",
+                fontSize: 13,
+              }}
+            >
+              {uploading ? "Uploading…" : "⬆ Upload file"}
+              <input
+                aria-label="Upload media file"
+                type="file"
+                accept="image/*,video/*"
+                onChange={(e) => {
+                  void handleUpload(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+                style={{ display: "none" }}
+              />
+            </label>
+            <input
+              aria-label="Media URL"
+              placeholder="…or paste an image/video URL"
+              value={mediaUrlInput}
+              onChange={(e) => setMediaUrlInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAddUrl();
+                }
+              }}
+              style={{ ...inputStyle, flex: "1 1 220px", width: "auto" }}
+            />
+            <button
+              type="button"
+              onClick={handleAddUrl}
+              style={{
+                padding: "6px 12px",
+                border: "1px solid var(--border, #ddd)",
+                borderRadius: 4,
+                cursor: "pointer",
+                fontSize: 13,
+                background: "transparent",
+                color: "var(--text, #333)",
+              }}
+            >
+              Add URL
+            </button>
+          </div>
+          {mediaUrls.length > 0 && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {mediaUrls.map((u, i) => (
+                <div key={`${u}-${i}`} style={{ position: "relative" }}>
+                  {isVideoUrl(u) ? (
+                    <video
+                      src={u}
+                      muted
+                      playsInline
+                      style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 4, border: "1px solid var(--border,#ddd)" }}
+                    />
+                  ) : (
+                    <img
+                      src={u}
+                      alt={`media ${i + 1}`}
+                      style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 4, border: "1px solid var(--border,#ddd)" }}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    aria-label={`Remove media ${i + 1}`}
+                    onClick={() => setMediaUrls((prev) => prev.filter((_, j) => j !== i))}
+                    style={{
+                      position: "absolute",
+                      top: -6,
+                      right: -6,
+                      width: 18,
+                      height: 18,
+                      borderRadius: "50%",
+                      border: "none",
+                      background: "#c5221f",
+                      color: "white",
+                      fontSize: 11,
+                      cursor: "pointer",
+                      lineHeight: "18px",
+                      padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <label style={{ flex: "1 1 220px", fontSize: 13, fontWeight: 500 }}>
+            Source URL (optional)
+            <input
+              aria-label="Source URL"
+              placeholder="https://instagram.com/p/…"
+              value={sourceUrl}
+              onChange={(e) => setSourceUrl(e.target.value)}
+              style={{ ...inputStyle, marginTop: 4 }}
+            />
+          </label>
+          <label style={{ flex: "1 1 220px", fontSize: 13, fontWeight: 500 }}>
+            Why I like it (optional)
+            <input
+              aria-label="Notes"
+              placeholder="strong hook, clear payoff…"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              style={{ ...inputStyle, marginTop: 4 }}
+            />
+          </label>
+        </div>
+
+        <div>
+          <button
+            type="button"
+            onClick={handleCreate}
+            disabled={submitting}
+            style={{
+              padding: "8px 18px",
+              background: "var(--btn-primary, #0066cc)",
+              color: "white",
+              border: "none",
+              borderRadius: 4,
+              cursor: submitting ? "default" : "pointer",
+              fontWeight: 500,
+              fontSize: 14,
+              opacity: submitting ? 0.6 : 1,
+            }}
+          >
+            {submitting ? "Saving…" : "💡 Save inspiration"}
+          </button>
+        </div>
+      </section>
+
+      {/* ── Saved inspiration cards ── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <h3 style={{ margin: 0, fontSize: 15 }}>Your swipe file ({items.length})</h3>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+          <span style={{ color: "var(--text-muted,#888)" }}>Adapt in:</span>
+          <select
+            aria-label="Adapt language"
+            value={adaptLang}
+            onChange={(e) => setAdaptLang(e.target.value as "en" | "de")}
+            style={{ ...inputStyle, width: "auto", padding: "4px 8px" }}
+          >
+            <option value="en">English</option>
+            <option value="de">Deutsch</option>
+          </select>
+        </div>
+      </div>
+
+      {loading ? (
+        <p style={{ color: "var(--text-muted, #888)" }}>Loading…</p>
+      ) : items.length === 0 ? (
+        <p style={{ color: "var(--text-muted, #888)" }}>
+          No inspiration yet — paste your first creator post above.
+        </p>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+          {items.map((item) => {
+            const badge = FORMAT_BADGE[item.format];
+            const firstMedia = item.mediaUrls[0];
+            return (
+              <div
+                key={item.id}
+                data-testid="inspiration-card"
+                style={{
+                  border: "1px solid var(--border, #ddd)",
+                  borderRadius: 8,
+                  padding: 12,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  background: "var(--card-bg, #fff)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontWeight: 600, fontSize: 14 }}>@{item.handle}</span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      padding: "2px 8px",
+                      borderRadius: 10,
+                      background: badge.bg,
+                      color: badge.fg,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {item.format}
+                  </span>
+                </div>
+
+                {firstMedia &&
+                  (isVideoUrl(firstMedia) ? (
+                    <video
+                      src={firstMedia}
+                      controls
+                      muted
+                      playsInline
+                      style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 4, background: "#000" }}
+                    />
+                  ) : (
+                    <img
+                      src={firstMedia}
+                      alt={`${item.handle} ${item.format}`}
+                      style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 4 }}
+                    />
+                  ))}
+
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 13,
+                    color: "var(--text, #333)",
+                    whiteSpace: "pre-wrap",
+                    maxHeight: 80,
+                    overflow: "hidden",
+                  }}
+                >
+                  {item.caption}
+                </p>
+                {item.notes && (
+                  <p style={{ margin: 0, fontSize: 12, fontStyle: "italic", color: "var(--text-muted, #888)" }}>
+                    💭 {item.notes}
+                  </p>
+                )}
+
+                <div style={{ display: "flex", gap: 8, marginTop: "auto" }}>
+                  <button
+                    type="button"
+                    onClick={() => handleAdapt(item.id)}
+                    disabled={adaptingId === item.id}
+                    style={{
+                      flex: 1,
+                      padding: "8px 10px",
+                      background: "var(--btn-primary, #0066cc)",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 4,
+                      cursor: adaptingId === item.id ? "default" : "pointer",
+                      fontSize: 13,
+                      fontWeight: 500,
+                      opacity: adaptingId === item.id ? 0.6 : 1,
+                    }}
+                  >
+                    {adaptingId === item.id ? "Adapting…" : "→ Adapt for me"}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Delete inspiration from ${item.handle}`}
+                    onClick={() => handleDelete(item.id)}
+                    style={{
+                      padding: "8px 12px",
+                      background: "transparent",
+                      border: "1px solid var(--border, #ddd)",
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      fontSize: 13,
+                      color: "#c5221f",
+                    }}
+                  >
+                    🗑
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {items.length > 0 && (
+        <button
+          type="button"
+          onClick={onGoToSaved}
+          style={{
+            marginTop: 16,
+            padding: "6px 12px",
+            background: "transparent",
+            border: "1px solid var(--border, #ddd)",
+            borderRadius: 4,
+            cursor: "pointer",
+            fontSize: 13,
+            color: "var(--text, #333)",
+          }}
+        >
+          💾 View adapted drafts in Saved Posts →
+        </button>
       )}
     </div>
   );

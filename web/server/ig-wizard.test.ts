@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   generateIgWizard,
   generateCaption,
+  adaptInspiration,
   generatePlan,
   generateCarouselScript,
   normalizeLanguage,
@@ -220,6 +221,58 @@ describe("generateCaption", () => {
     mockReturn = { text: JSON.stringify({ hook: "h", body: "b", cta: "c", hashtags: [] }), ok: true, error: undefined };
     const r2 = await generateCaption({ topic: "AI", language: "en" });
     expect(r2.ok && r2.result.style).toBe("cozy");
+  });
+});
+
+describe("adaptInspiration", () => {
+  const adaptedPayload = JSON.stringify({
+    hook: "You don't need a GPU to run AI",
+    body: "Here's how I do it on a $5 box.\n\nStep by step.",
+    cta: "Comment VPS for the setup",
+    hashtags: ["selfhosted", "ai"],
+    style: "screen",
+  });
+
+  beforeEach(() => {
+    mockReturn = { text: adaptedPayload, ok: true, error: undefined };
+    mockHasProvider = true;
+  });
+
+  it("rewrites a reference post into a fully assembled caption", async () => {
+    const res = await adaptInspiration({
+      handle: "vaibhavsisinty",
+      format: "reel",
+      referenceCaption: "Stop paying for AI APIs. Here's why self-hosting wins.",
+      language: "en",
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.result.hook).toBe("You don't need a GPU to run AI");
+    expect(res.result.style).toBe("screen");
+    expect(res.result.caption).toContain("#selfhosted #ai");
+  });
+
+  it("requires a non-empty reference caption (400)", async () => {
+    const res = await adaptInspiration({ handle: "x", format: "post", referenceCaption: "  ", language: "en" });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 503 when no AI provider is configured", async () => {
+    mockHasProvider = false;
+    const res = await adaptInspiration({ handle: "x", format: "post", referenceCaption: "ref", language: "en" });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.status).toBe(503);
+  });
+
+  it("returns 502 when the model returns junk", async () => {
+    mockReturn = { text: "no json here", ok: true, error: undefined };
+    const res = await adaptInspiration({ handle: "x", format: "post", referenceCaption: "ref", language: "de" });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.status).toBe(502);
   });
 });
 

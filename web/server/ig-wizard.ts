@@ -483,6 +483,125 @@ export async function generateCaption(input: {
   };
 }
 
+// ─── Adapt Inspiration ──────────────────────────────────────────────────────────
+
+const ADAPT_SYSTEM_PROMPT = `You are a ghostwriter for Markus, an Austrian indie maker who builds and ships
+real things with AI. His brand is "Built with AI": practical, hands-on, broad
+across AI tools (Claude, Gemini, ChatGPT, Veo, image models, GitHub projects,
+AI news) — not tied to any single vendor.
+
+You are given a REFERENCE post from another creator that Markus admires. Your
+job is to ADAPT it — NOT translate, NOT copy. Extract the underlying idea:
+the hook angle, the content structure, the emotional pull, the type of payoff.
+Then write a brand-new post that delivers that same kind of value in Markus'
+own voice and from his own real experience.
+
+Hard rules:
+- Do NOT reproduce the reference's exact sentences, lists, or phrasing. If the
+  result could be flagged as a near-duplicate of the source, you failed.
+- Keep the WINNING STRUCTURE (e.g. "myth → reveal → steps", "mistake → fix"),
+  but fill it with Markus' own specifics and examples.
+- Make it concrete: real tools, real numbers, real steps — never vague hype.
+- Confident but NEVER arrogant. NEVER write self-congratulatory proof sentences
+  like "My proof: X" or "I'm living proof". Show, don't boast.
+- 1 emoji max per line, for emphasis not decoration.
+- Match the requested language ("en" or "de"). For "de" write fluent native
+  German, not a literal translation.
+- Never mention the reference creator, never say "inspired by", never use
+  "as an AI", never refuse.
+
+Return ONLY valid JSON in this exact shape, no markdown fences, no commentary:
+{ "hook": "...", "body": "line one\\n\\nline two", "cta": "Comment WORD for ...", "hashtags": ["tag1", "tag2", ...], "style": "cozy" }`;
+
+function buildAdaptUserPrompt(input: {
+  handle: string;
+  format: string;
+  referenceCaption: string;
+  topic?: string;
+  language: IgWizardLanguage;
+}): string {
+  const lines = [
+    `Language: ${input.language}`,
+    `Reference post format: ${input.format}`,
+  ];
+  if (input.topic && input.topic.trim()) {
+    lines.push(`Theme to focus the adaptation on: ${input.topic.trim()}`);
+  }
+  lines.push(
+    "",
+    `REFERENCE POST (by another creator — adapt the idea, do NOT copy the wording):`,
+    input.referenceCaption.trim(),
+  );
+  return lines.join("\n");
+}
+
+/**
+ * Take a post Markus saved from a creator he admires and rewrite the underlying
+ * idea as his own original caption (same JSON shape as generateCaption, so the
+ * UI and the WizardPost draft path are identical). Theme-level reuse, not
+ * verbatim copy — this is the risk-free alternative to crawling.
+ */
+export async function adaptInspiration(input: {
+  handle: string;
+  format: string;
+  referenceCaption: string;
+  topic?: string;
+  language: IgWizardLanguage;
+}): Promise<CaptionGenerateOk | CaptionGenerateErr> {
+  if (!input.referenceCaption || !input.referenceCaption.trim()) {
+    return { ok: false, status: 400, error: "referenceCaption is required to adapt." };
+  }
+  if (!hasInternalAI()) {
+    return {
+      ok: false,
+      status: 503,
+      error: "No internal AI provider is configured. Add an Anthropic or OpenAI-compatible provider in Settings.",
+    };
+  }
+
+  const ai = await callInternalAI({
+    systemPrompt: ADAPT_SYSTEM_PROMPT,
+    userPrompt: buildAdaptUserPrompt(input),
+    maxTokens: 1500,
+    temperature: 0.85,
+    timeoutMs: 60_000,
+  });
+
+  if (!ai.ok) {
+    return { ok: false, status: 502, error: ai.error || "AI call failed" };
+  }
+
+  const parsed = parseCaption(ai.text);
+  if (!parsed) {
+    return {
+      ok: false,
+      status: 502,
+      error: "AI returned invalid caption JSON. Try again — the model occasionally adds prose around the JSON block.",
+    };
+  }
+
+  const caption = assembleCaption({
+    hook: parsed.hook,
+    body: parsed.body,
+    cta: parsed.cta,
+    hashtags: parsed.hashtags,
+  });
+
+  return {
+    ok: true,
+    result: {
+      hook: parsed.hook,
+      body: parsed.body,
+      cta: parsed.cta,
+      hashtags: parsed.hashtags,
+      caption,
+      style: parsed.style,
+      language: input.language,
+      model: "internal-ai",
+    },
+  };
+}
+
 // ─── Carousel Script ────────────────────────────────────────────────────────────
 
 export interface CarouselSlide {

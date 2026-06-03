@@ -6,6 +6,7 @@ import type { Hono } from "hono";
 import {
   generateIgWizard,
   generateCaption,
+  adaptInspiration,
   generatePlan,
   generateCarouselScript,
   assembleCaption,
@@ -21,6 +22,7 @@ import { researchTopic, briefToGroundingText } from "../research.js";
 import * as socialManager from "../socialmedia/manager.js";
 import type { SocialPlatform } from "../socialmedia/types.js";
 import * as wizardPosts from "../ig-wizard-posts.js";
+import * as inspiration from "../ig-inspiration.js";
 import { generateVeoGoogle, pollVeoGoogle } from "../fal-video.js";
 import { generateTts } from "../gemini-tts.js";
 import { composeReel, type TextOverlay, type LogoOverlay } from "../video-compose.js";
@@ -413,6 +415,76 @@ export function registerIgWizardRoutes(api: Hono): void {
       }
     }
     return c.json({ ok: true, promoted: results.filter((r) => r.ok).length, results });
+  });
+
+  // ─── Inspiration (manual swipe file) ──────────────────────────────────────
+  // Paste posts you admire from other creators (caption + format + media), then
+  // one-click "adapt for me" rewrites the idea in Markus' voice as a draft.
+  // The risk-free alternative to crawling Instagram. Media uploads go through
+  // the existing POST /api/media/upload; we just store the returned URLs here.
+
+  api.get("/ig-wizard/inspiration", (c) => {
+    return c.json({ items: inspiration.listItems() });
+  });
+
+  api.post("/ig-wizard/inspiration", async (c) => {
+    const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const handle = inspiration.normalizeHandle(b.handle);
+    const caption = typeof b.caption === "string" ? b.caption.trim() : "";
+    if (!handle) return c.json({ error: "handle is required" }, 400);
+    if (!caption) return c.json({ error: "caption is required" }, 400);
+    const item = inspiration.createItem({
+      handle,
+      format: b.format,
+      caption,
+      topic: typeof b.topic === "string" ? b.topic : undefined,
+      mediaUrls: b.mediaUrls,
+      sourceUrl: typeof b.sourceUrl === "string" ? b.sourceUrl : undefined,
+      notes: typeof b.notes === "string" ? b.notes : undefined,
+    });
+    return c.json({ ok: true, item }, 201);
+  });
+
+  api.delete("/ig-wizard/inspiration/:id", (c) => {
+    const ok = inspiration.removeItem(c.req.param("id"));
+    if (!ok) return c.json({ error: "not found" }, 404);
+    return c.json({ ok: true });
+  });
+
+  /** Adapt a saved inspiration into Markus' own caption + auto-save as a draft. */
+  api.post("/ig-wizard/inspiration/:id/adapt", async (c) => {
+    const item = inspiration.getItem(c.req.param("id"));
+    if (!item) return c.json({ error: "not found" }, 404);
+    const b = (await c.req.json().catch(() => ({}))) as { language?: unknown; topic?: unknown };
+    const language = normalizeLanguage(b.language);
+    const topic = typeof b.topic === "string" && b.topic.trim() ? b.topic.trim() : item.topic;
+
+    const res = await adaptInspiration({
+      handle: item.handle,
+      format: item.format,
+      referenceCaption: item.caption,
+      topic,
+      language,
+    });
+    if (!res.ok) return c.json({ error: res.error }, res.status);
+
+    // Map the inspiration format to a WizardPost format (no "story" there → post).
+    const wpFormat: wizardPosts.WizardPostFormat =
+      item.format === "carousel" ? "carousel" : item.format === "reel" ? "reel" : "post";
+
+    const post = wizardPosts.createPost({
+      topic: topic || `Adapted from @${item.handle}`,
+      hook: res.result.hook,
+      body: res.result.body,
+      cta: res.result.cta,
+      hashtags: res.result.hashtags,
+      caption: res.result.caption,
+      source: "single",
+      format: wpFormat,
+      style: res.result.style,
+      platforms: ["instagram"],
+    });
+    return c.json({ ok: true, post, result: res.result }, 201);
   });
 }
 

@@ -1965,6 +1965,31 @@ export interface CreateWizardPostInput {
   day?: number;
 }
 
+export type InspirationFormat = "post" | "carousel" | "reel" | "story";
+
+export interface InspirationItem {
+  id: string;
+  handle: string;
+  format: InspirationFormat;
+  caption: string;
+  topic?: string;
+  mediaUrls: string[];
+  sourceUrl?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateInspirationInput {
+  handle: string;
+  format: InspirationFormat;
+  caption: string;
+  topic?: string;
+  mediaUrls?: string[];
+  sourceUrl?: string;
+  notes?: string;
+}
+
 export const igWizardApi = {
   generate: (niche: string, language: "en" | "de" = "en") =>
     post<IgWizardResult>("/ig-wizard/generate", { niche, language }),
@@ -1997,6 +2022,34 @@ export const igWizardApi = {
         "/ig-wizard/posts/bulk-to-draft",
         { ids },
       ),
+  },
+  // ── Inspiration (manual swipe file from creators you admire) ──
+  inspiration: {
+    list: () => get<{ items: InspirationItem[] }>("/ig-wizard/inspiration"),
+    create: (input: CreateInspirationInput) =>
+      post<{ ok: boolean; item: InspirationItem }>("/ig-wizard/inspiration", input),
+    remove: (id: string) =>
+      del<{ ok: boolean }>(`/ig-wizard/inspiration/${encodeURIComponent(id)}`),
+    adapt: (id: string, language: "en" | "de" = "en", topic?: string) =>
+      post<{ ok: boolean; post: WizardPost; result: IgCaptionResult }>(
+        `/ig-wizard/inspiration/${encodeURIComponent(id)}/adapt`,
+        { language, topic },
+      ),
+    /** Upload an image/video file → returns its /api/media/file URL. */
+    uploadMedia: async (file: File): Promise<{ ok: boolean; filename: string; url: string }> => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/media/upload", {
+        method: "POST",
+        headers: { ...getAuthHeaders() },
+        body: formData,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Upload failed (${res.status}): ${text}`);
+      }
+      return res.json();
+    },
   },
 };
 
