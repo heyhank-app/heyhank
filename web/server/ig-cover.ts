@@ -174,30 +174,32 @@ export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
  * on missing key / missing refs / API error so the route can surface a clean
  * message. `deps.fetch` + `deps.now`/`deps.rand` are injectable for tests.
  */
-export async function generateIgCover(
-  input: { headline: string; badge?: string; hero?: IgCoverHero; style?: IgStyle; cap?: boolean; quality?: "low" | "medium" | "high" },
+/**
+ * Shared gpt-image-2 edit call: identity-locked against the Markus reference
+ * photos, decodes + saves the PNG. Both the square cover and the portrait reel
+ * hook frame go through here — only the prompt + size differ.
+ */
+async function gptImageEdit(
+  opts: { prompt: string; size: string; cap?: boolean; quality?: "low" | "medium" | "high" },
   deps?: { fetch?: FetchLike; now?: () => number; rand?: () => string },
 ): Promise<IgCoverResult> {
   const key = openaiKey();
   if (!key) throw new Error("OpenAI API key not configured (set OPENAI_API_KEY or ~/.config/openai-image/credentials.json)");
   // Pick the reference set that matches the requested headwear so identity
   // locks correctly (capped refs vs the bare-headed person set).
-  const [ref1, ref2] = input.cap === false ? [NOCAP_REF_1, NOCAP_REF_2] : [REF_1, REF_2];
+  const [ref1, ref2] = opts.cap === false ? [NOCAP_REF_1, NOCAP_REF_2] : [REF_1, REF_2];
   if (!existsSync(ref1) || !existsSync(ref2)) {
     throw new Error(`Markus reference photos not found (${ref1}, ${ref2})`);
   }
-  if (!input.headline || !input.headline.trim()) throw new Error("headline is required");
-
-  const prompt = buildIgCoverPrompt(input);
   const doFetch = deps?.fetch ?? (globalThis.fetch as FetchLike);
 
   const form = new FormData();
   form.append("model", "gpt-image-2");
-  form.append("prompt", prompt);
-  form.append("size", "1024x1024");
+  form.append("prompt", opts.prompt);
+  form.append("size", opts.size);
   // "medium" keeps the synchronous request well under proxy timeouts while still
-  // looking great for an IG feed image; callers can opt into "high" if needed.
-  form.append("quality", input.quality || "medium");
+  // looking great; callers can opt into "high" if needed.
+  form.append("quality", opts.quality || "medium");
   form.append("n", "1");
   // gpt-image-2 edit endpoint accepts multiple reference images under image[].
   form.append("image[]", new Blob([readFileSync(ref1)], { type: "image/jpeg" }), "ref1.jpeg");
@@ -234,11 +236,63 @@ export async function generateIgCover(
   const filepath = join(MEDIA_DIR, filename);
   writeFileSync(filepath, Buffer.from(b64, "base64"));
 
-  return {
-    filename,
-    url: `/api/media/file/${filename}`,
-    path: filepath,
-    prompt,
-    model: "gpt-image-2",
-  };
+  return { filename, url: `/api/media/file/${filename}`, path: filepath, prompt: opts.prompt, model: "gpt-image-2" };
+}
+
+export async function generateIgCover(
+  input: { headline: string; badge?: string; hero?: IgCoverHero; style?: IgStyle; cap?: boolean; quality?: "low" | "medium" | "high" },
+  deps?: { fetch?: FetchLike; now?: () => number; rand?: () => string },
+): Promise<IgCoverResult> {
+  if (!input.headline || !input.headline.trim()) throw new Error("headline is required");
+  return gptImageEdit({ prompt: buildIgCoverPrompt(input), size: "1024x1024", cap: input.cap, quality: input.quality }, deps);
+}
+
+/**
+ * Build the prompt for the reel hook frame: a portrait presenter shot of Markus
+ * in a premium creator studio, expressive + welcoming, NO text and NO logos
+ * (clean plate — captions + the theme logos are composited on later). This is
+ * the Veo first-frame that opens the reel like a charismatic talking-head.
+ */
+/** Settings the hook frame can use — not just a studio (the user can vary it). */
+export const REEL_HOOK_SETTINGS: Record<string, string> = {
+  studio: "a premium modern creator studio: deep dark background with cool blue rim/edge lighting, soft glowing accent strips, a subtly glowing neon brain / AI motif on one side, tasteful shelves softly blurred behind. High-end YouTube-creator look",
+  desk: "a bright modern home-office at a clean wooden desk, a laptop and a plant softly blurred behind, warm daylight from a window, cozy premium creator vibe",
+  cafe: "a stylish modern café with warm bokeh lights and big windows softly blurred behind, relaxed premium lifestyle vibe",
+  outdoor: "an airy outdoor setting — a sunlit rooftop terrace or balcony with a soft city skyline blurred behind, golden-hour light, premium lifestyle vibe",
+  loft: "a modern industrial loft with large windows, exposed brick and warm accent lighting softly blurred behind, premium creator vibe",
+};
+
+export type ReelHookSetting = keyof typeof REEL_HOOK_SETTINGS;
+
+export function normalizeHookSetting(raw: unknown): ReelHookSetting {
+  return typeof raw === "string" && raw in REEL_HOOK_SETTINGS ? (raw as ReelHookSetting) : "studio";
+}
+
+export function buildReelHookPrompt(cap?: boolean, setting: ReelHookSetting = "studio"): string {
+  const identity = cap === false ? IDENTITY_NOCAP : IDENTITY_CAP;
+  const place = REEL_HOOK_SETTINGS[setting] ?? REEL_HOOK_SETTINGS.studio;
+  return `Photorealistic vertical 2:3 portrait, cinematic photography.
+
+SUBJECT:
+${identity}. Smart-casual, facing the camera in an energetic, welcoming pose — open hands raised as if presenting something exciting, bright expressive face, big confident smile, looking straight into the lens.
+
+SETTING:
+${place}.
+
+STYLE DIRECTIVES:
+- Photoreal, NOT illustration, NOT 3D render. Natural skin texture, a real person.
+- Exactly ONE Markus in frame, centered, upper-body framing with headroom.
+- Cinematic color grade, crisp premium lighting, shallow depth of field.
+- ABSOLUTELY NO text, NO captions, NO logos, NO watermark anywhere in the image.`;
+}
+
+/** Generate the portrait reel-hook presenter frame (Veo first-frame). */
+export async function generateReelHookImage(
+  input: { cap?: boolean; setting?: ReelHookSetting; quality?: "low" | "medium" | "high" } = {},
+  deps?: { fetch?: FetchLike; now?: () => number; rand?: () => string },
+): Promise<IgCoverResult> {
+  return gptImageEdit(
+    { prompt: buildReelHookPrompt(input.cap, input.setting ?? "studio"), size: "1024x1536", cap: input.cap, quality: input.quality },
+    deps,
+  );
 }

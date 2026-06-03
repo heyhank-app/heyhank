@@ -137,3 +137,32 @@ describe("generateIgCover", () => {
     ).rejects.toThrow(/headline is required/);
   });
 });
+
+describe("buildReelHookPrompt + normalizeHookSetting", () => {
+  it("locks identity, varies the setting, and forbids text/logos (clean plate)", () => {
+    const studio = cover.buildReelHookPrompt(true, "studio");
+    const cafe = cover.buildReelHookPrompt(true, "cafe");
+    // Identity anchor present (capped).
+    for (const p of [studio, cafe]) {
+      expect(p).toMatch(/M-cap/);
+      expect(p).toMatch(/2:3 portrait/);
+      // Clean plate: no burned text or logos — those are composited later.
+      expect(p).toMatch(/NO text/i);
+      expect(p).toMatch(/NO logos/i);
+    }
+    // Setting actually changes (not always a studio — the user can vary it).
+    expect(studio).toMatch(/studio/i);
+    expect(cafe).toMatch(/caf/i);
+    expect(studio).not.toEqual(cafe);
+  });
+
+  it("drops the M-cap when cap is false", () => {
+    expect(cover.buildReelHookPrompt(false, "desk")).toMatch(/NO hat|bare head|bald/i);
+  });
+
+  it("normalizeHookSetting falls back to studio for unknown values", () => {
+    expect(cover.normalizeHookSetting("outdoor")).toBe("outdoor");
+    expect(cover.normalizeHookSetting("nonsense")).toBe("studio");
+    expect(cover.normalizeHookSetting(undefined)).toBe("studio");
+  });
+});

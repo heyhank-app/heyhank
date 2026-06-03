@@ -24,11 +24,15 @@ vi.mock("../research.js", () => ({
 // Mock the cover generator + the social-media draft store so compose-and-save
 // tests never hit gpt-image-2 or write real draft files.
 const mockGenerateIgCover = vi.fn();
+const mockGenerateReelHookImage = vi.fn();
 const mockCreateDraft = vi.fn();
 vi.mock("../ig-cover.js", () => ({
   generateIgCover: (...args: unknown[]) => mockGenerateIgCover(...args),
+  generateReelHookImage: (...args: unknown[]) => mockGenerateReelHookImage(...args),
   normalizeStyle: (raw: unknown) =>
     raw === "business" || raw === "pointing" || raw === "bold" || raw === "screen" ? raw : "cozy",
+  normalizeHookSetting: (raw: unknown) =>
+    raw === "desk" || raw === "cafe" || raw === "outdoor" || raw === "loft" ? raw : "studio",
 }));
 vi.mock("../socialmedia/manager.js", () => ({
   createDraft: (...args: unknown[]) => mockCreateDraft(...args),
@@ -446,6 +450,7 @@ describe("Wizard Saved Posts routes", () => {
     registerIgWizardRoutes(app);
     [mockWpList, mockWpCreate, mockWpGet, mockWpUpdate, mockWpRemove, mockWpBulkRemove].forEach((m) => m.mockReset());
     mockGenerateIgCover.mockReset();
+    mockGenerateReelHookImage.mockReset();
     mockCreateDraft.mockReset();
     // The carousel route runs generateCarouselScript → the AI provider must
     // look configured (a prior describe may have toggled this off).
@@ -575,11 +580,12 @@ describe("Wizard Saved Posts routes", () => {
     mockVeoGen.mockResolvedValue({ operationName: "op/123" });
     mockVeoPoll.mockResolvedValue({ operationName: "op/123", done: true, videoPath: "/m/veo.mp4" });
     mockTts.mockResolvedValue({ audioPath: "/m/vo.mp3", cached: false, size: 100 });
+    mockGenerateReelHookImage.mockResolvedValue({ path: "/m/hook.png", url: "/api/media/file/hook.png", filename: "hook.png", model: "gpt-image-2", prompt: "p" });
     mockCompose.mockResolvedValue({ videoPath: "/m/reel_x.mp4", themeSlug: "neutral", durationSeconds: 8, placeholderLogos: [] });
     mockWpUpdate.mockImplementation((_id: string, patch: Record<string, unknown>) => ({ id: "a", ...patch }));
 
     const res = await app.request("/ig-wizard/posts/a/reel", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ durationSeconds: 8 }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
     });
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -598,8 +604,13 @@ describe("Wizard Saved Posts routes", () => {
     // Two compose passes: (1) tile the silent b-roll clips, (2) burn captions +
     // logos and lay the full voiceover over the whole reel.
     expect(mockCompose).toHaveBeenCalledTimes(2);
-    const tiledArg = mockCompose.mock.calls[0][0] as { segments: Array<{ type: string; replaceAudio?: boolean }> };
+    const tiledArg = mockCompose.mock.calls[0][0] as { segments: Array<{ type: string; path: string; durationSeconds?: number; replaceAudio?: boolean }> };
     expect(tiledArg.segments[0].type).toBe("video");
+    // The branded presenter hook intro (Veo from the gpt-image hook frame) leads
+    // the reel: first segment is the hook clip, ~3s.
+    expect(mockGenerateReelHookImage).toHaveBeenCalledTimes(1);
+    expect(tiledArg.segments[0].path).toBe("/m/veo.mp4"); // hook clip (also a Veo output)
+    expect(tiledArg.segments[0].durationSeconds).toBe(3);
     const finalArg = mockCompose.mock.calls[1][0] as {
       segments: Array<{ path: string; textOverlays?: Array<{ text: string }> }>;
       audioPath?: string;

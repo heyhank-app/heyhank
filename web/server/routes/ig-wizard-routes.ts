@@ -16,7 +16,7 @@ import {
   normalizePlanDays,
   normalizeSlideCount,
 } from "../ig-wizard.js";
-import { generateIgCover, normalizeStyle } from "../ig-cover.js";
+import { generateIgCover, normalizeStyle, generateReelHookImage, normalizeHookSetting } from "../ig-cover.js";
 import { researchTopic, briefToGroundingText } from "../research.js";
 import * as socialManager from "../socialmedia/manager.js";
 import type { SocialPlatform } from "../socialmedia/types.js";
@@ -287,7 +287,11 @@ export function registerIgWizardRoutes(api: Hono): void {
   api.post("/ig-wizard/posts/:id/reel", async (c) => {
     const post = wizardPosts.getPost(c.req.param("id"));
     if (!post) return c.json({ error: "not found" }, 404);
-    await c.req.json().catch(() => ({})); // body currently carries no options
+    const body = (await c.req.json().catch(() => ({}))) as { hookIntro?: unknown; hookSetting?: unknown };
+    // Branded presenter hook intro is on by default; the setting (studio, desk,
+    // cafe, outdoor, loft) is the user's choice — it doesn't have to be a studio.
+    const hookIntro = body.hookIntro !== false;
+    const hookSetting = normalizeHookSetting(body.hookSetting);
 
     try {
       // 1) Voiceover FIRST — its length drives the reel length so the whole
@@ -297,21 +301,19 @@ export function registerIgWizardRoutes(api: Hono): void {
       const voText = `${post.hook}. ${post.body} ${post.cta}`.replace(/\s+/g, " ").trim().slice(0, 900);
       const tts = await generateTts({ text: voText, voice: "Charon", style: "Narrate in a clear, confident voice:" });
       const voDuration = await probeDurationSeconds(tts.audioPath);
-      const plan = planReelClips(voDuration);
+      const reelDuration = planReelClips(voDuration).reelDuration;
+      const distinctBody = Math.max(1, Math.min(Math.ceil(reelDuration / REEL_CLIP_SECONDS), REEL_MAX_DISTINCT_CLIPS));
 
-      // 2) Generate the distinct silent Veo b-roll clips IN PARALLEL (each a
-      //    different scene so tiled repeats don't look identical). The cover
-      //    conditions the first clip's opening frame for brand continuity.
-      const firstFrame = mediaUrlToLocalPath(post.imageUrl);
-      const genClip = async (variant: number): Promise<string> => {
+      // Generic Veo clip generator (a scene from a text prompt + optional first
+      // frame). Polls up to ~8 min/clip; clips run in parallel so wall time ≈
+      // the slowest clip, not the sum.
+      const genClip = async (opts: { prompt: string; firstFramePath?: string }): Promise<string> => {
         const { operationName } = await generateVeoGoogle({
-          prompt: buildReelVeoPrompt(post.topic, variant),
+          prompt: opts.prompt,
           aspectRatio: "9:16",
           durationSeconds: REEL_CLIP_SECONDS,
-          ...(variant === 0 && firstFrame ? { firstFrameImagePath: firstFrame, mode: "firstFrame" as const } : {}),
+          ...(opts.firstFramePath ? { firstFrameImagePath: opts.firstFramePath, mode: "firstFrame" as const } : {}),
         });
-        // Poll up to ~8 min/clip (nginx /api/ allows 600s; clips run in
-        // parallel so wall time ≈ the slowest clip, not the sum).
         for (let i = 0; i < 96; i++) {
           const op = await pollVeoGoogle(operationName);
           if (op.error) throw new Error(`Veo failed: ${op.error}`);
@@ -320,31 +322,53 @@ export function registerIgWizardRoutes(api: Hono): void {
         }
         throw new Error("Veo timed out (>8 min)");
       };
-      const clipPaths = await Promise.all(
-        Array.from({ length: plan.distinctClips }, (_, i) => genClip(i)),
-      );
 
-      // 3) Tile the clips across the slots into one silent long video.
-      const tiled = await composeReel({
-        segments: plan.slotDurations.map((d, i) => ({
+      // 2) Generate the b-roll scenes in parallel; overlap the branded presenter
+      //    HOOK INTRO (gpt-image-2 presenter frame → Veo motion). The hook opens
+      //    the reel like a charismatic talking-head, then it cuts to b-roll +
+      //    the Charon narration. Best-effort: a hook failure never sinks the reel.
+      const bodyClipsP = Promise.all(
+        Array.from({ length: distinctBody }, (_, i) => genClip({ prompt: buildReelVeoPrompt(post.topic, i) })),
+      );
+      let hookClip: string | null = null;
+      if (hookIntro) {
+        try {
+          const hookImage = await generateReelHookImage({ cap: post.cap !== false, setting: hookSetting });
+          hookClip = await genClip({ prompt: REEL_HOOK_MOTION_PROMPT, firstFramePath: hookImage.path });
+        } catch (e) {
+          console.warn(`reel hook intro skipped: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      const bodyClips = await bodyClipsP;
+
+      // 3) Tile clips into one silent long video: [hook?] + b-roll filling the
+      //    rest so the total still equals the voiceover length.
+      const bodyDuration = +(reelDuration - (hookClip ? REEL_HOOK_SECONDS : 0)).toFixed(2);
+      const bodySlots = tileSlots(bodyDuration);
+      const segments = [
+        ...(hookClip ? [{ type: "video" as const, path: hookClip, durationSeconds: REEL_HOOK_SECONDS, replaceAudio: true }] : []),
+        ...bodySlots.map((d, i) => ({
           type: "video" as const,
-          path: clipPaths[i % clipPaths.length],
+          path: bodyClips[i % bodyClips.length],
           durationSeconds: d,
           replaceAudio: true, // strip any source audio; the VO is added below
         })),
+      ];
+      const tiled = await composeReel({
+        segments,
         outputName: `wizard_reel_${post.id.slice(0, 8)}_bg`,
       });
 
       // 4) Final pass: burn captions (hook → body → CTA, paced across the FULL
       //    duration so they're readable) + theme logos onto the long video, and
       //    lay the complete voiceover over the whole reel.
-      const captions = buildReelCaptions(post, plan.reelDuration);
+      const captions = buildReelCaptions(post, reelDuration);
       const logos = buildReelLogos(post);
       const composed = await composeReel({
         segments: [{
           type: "video",
           path: tiled.videoPath,
-          durationSeconds: plan.reelDuration,
+          durationSeconds: reelDuration,
           textOverlays: captions,
           ...(logos.length ? { logos } : {}),
         }],
@@ -562,23 +586,38 @@ const REEL_MAX_DISTINCT_CLIPS = 3;
  * how many distinct Veo clips to generate, and each tiled slot's duration. A
  * 44s voiceover → ~44s reel, 4 distinct 8s clips tiled across 6 slots.
  */
+/** Split a duration into ≤8s slots (a clip per slot, last one trimmed). */
+export function tileSlots(duration: number): number[] {
+  const slots: number[] = [];
+  let remaining = Math.max(0, +duration.toFixed(2));
+  while (remaining > 0.1) {
+    const d = Math.min(REEL_CLIP_SECONDS, +remaining.toFixed(2));
+    slots.push(d);
+    remaining = +(remaining - d).toFixed(2);
+  }
+  return slots.length ? slots : [REEL_CLIP_SECONDS];
+}
+
 export function planReelClips(voDuration: number): {
   reelDuration: number;
   distinctClips: number;
   slotDurations: number[];
 } {
   const reelDuration = Math.min(REEL_MAX_SECONDS, Math.max(REEL_CLIP_SECONDS, +(voDuration + 0.5).toFixed(2)));
-  const numSlots = Math.ceil(reelDuration / REEL_CLIP_SECONDS);
-  const distinctClips = Math.max(1, Math.min(numSlots, REEL_MAX_DISTINCT_CLIPS));
-  const slotDurations: number[] = [];
-  let remaining = reelDuration;
-  for (let i = 0; i < numSlots; i++) {
-    const d = Math.min(REEL_CLIP_SECONDS, +remaining.toFixed(2));
-    slotDurations.push(d);
-    remaining = +(remaining - d).toFixed(2);
-  }
+  const slotDurations = tileSlots(reelDuration);
+  const distinctClips = Math.max(1, Math.min(slotDurations.length, REEL_MAX_DISTINCT_CLIPS));
   return { reelDuration, distinctClips, slotDurations };
 }
+
+/** Seconds the branded presenter hook intro occupies at the start of a reel. */
+const REEL_HOOK_SECONDS = 3;
+/** Veo motion prompt for the hook clip (the presenter frame is the first frame). */
+const REEL_HOOK_MOTION_PROMPT =
+  "Vertical 9:16. The person looks straight at the camera with an energetic, " +
+  "welcoming expression and a confident smile, subtle natural head and hand " +
+  "motion as if starting to present, a slow gentle camera push-in. Premium " +
+  "creator-studio lighting, cool blue rim light. No on-screen text, no captions, " +
+  "no subtitles, no logos, no watermark.";
 
 /**
  * Brand keyword → logo slug. The AI tools a post talks about get their real
