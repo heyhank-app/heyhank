@@ -21,6 +21,7 @@ import { HEYHANK_HOME } from "./paths.js";
 
 const MEDIA_DIR = join(HEYHANK_HOME, "media");
 const OPENAI_EDITS_URL = "https://api.openai.com/v1/images/edits";
+const OPENAI_GENERATIONS_URL = "https://api.openai.com/v1/images/generations";
 
 // Capped identity refs (M-cap, the original builder look).
 const REF_1 = process.env.MARKUS_REF_1 || "/opt/agentplatform/Markus.jpeg";
@@ -245,6 +246,115 @@ export async function generateIgCover(
 ): Promise<IgCoverResult> {
   if (!input.headline || !input.headline.trim()) throw new Error("headline is required");
   return gptImageEdit({ prompt: buildIgCoverPrompt(input), size: "1024x1024", cap: input.cap, quality: input.quality }, deps);
+}
+
+// ─── Concept slides (no person) ─────────────────────────────────────────────
+// Carousel middle slides shouldn't all be Markus standing next to a monitor.
+// These are branded, person-FREE concept slides: a distinct thematic motif per
+// slide on a dark premium background, with the slide headline as the focal
+// typography. Generated via the plain generations endpoint (NO Markus refs) so
+// there's no identity to lock — just a clean on-brand graphic.
+
+/** Accent palette rotated across middle slides so no two look alike. */
+export const CONCEPT_ACCENTS: { name: string; hex: string }[] = [
+  { name: "electric violet", hex: "#7C5CFF" },
+  { name: "cyan blue", hex: "#2BB3FF" },
+  { name: "emerald green", hex: "#21C087" },
+  { name: "warm amber", hex: "#FFB020" },
+  { name: "magenta pink", hex: "#FF5DA2" },
+  { name: "teal", hex: "#19C2C2" },
+];
+
+/** Pick a deterministic accent for slide index `i` (wraps around the palette). */
+export function conceptAccent(i: number): { name: string; hex: string } {
+  return CONCEPT_ACCENTS[((i % CONCEPT_ACCENTS.length) + CONCEPT_ACCENTS.length) % CONCEPT_ACCENTS.length];
+}
+
+export function buildConceptSlidePrompt(input: {
+  headline: string;
+  /** A short visual concept for this slide, e.g. "a stylized terminal/command motif". */
+  visual?: string;
+  badge?: string;
+  accent?: { name: string; hex: string };
+}): string {
+  const badge = input.badge?.trim() || "Built with AI";
+  const accent = input.accent ?? CONCEPT_ACCENTS[0];
+  const visual =
+    input.visual?.trim() ||
+    "an abstract modern tech motif — clean geometric shapes, soft connected nodes and gentle data-flow lines";
+  return `Photorealistic 1:1 square Instagram carousel slide, premium dark editorial tech design. NO people, no faces, no hands.
+
+VISUAL CONCEPT:
+${visual}. Rendered as a clean, modern, slightly abstract motif glowing in ${accent.name} (${accent.hex}) on a deep near-black background (#0c0c10). Cinematic high-end software aesthetic, lots of negative space, subtle glow and depth.
+
+TEXT OVERLAY — render EXACTLY this one string, nothing else:
+
+1. HEADLINE — large bold serif typography (Playfair / Garamond feel), wrapped over up to 3 lines, high contrast against the dark background, placed in the clear negative space:
+"${input.headline.trim()}"
+
+2. BADGE — a small bright orange six-point asterisk star followed by small text: "${badge}"
+
+STYLE DIRECTIVES:
+- Dark premium background, ${accent.name} accent lighting/glow ONLY (one accent color, not rainbow).
+- Modern, minimal, editorial. NOT cluttered, NOT a busy dashboard.
+- The visual concept must be ABSTRACT/iconographic — do NOT render any readable text, code, UI labels, numbers or gibberish inside the motif. The ONLY text in the whole image is the headline + badge above.
+- NOT a photo of a screen, NOT a person, NOT a 3D render. No watermark, no logo.
+- The asterisk must be a sharp 6-point geometric symbol in saturated orange (#FF6719).`;
+}
+
+/**
+ * Shared gpt-image-2 generations call (no reference images). Used for the
+ * person-free concept slides. Mirrors gptImageEdit's save/return shape.
+ */
+async function gptImageGenerate(
+  opts: { prompt: string; size: string; quality?: "low" | "medium" | "high" },
+  deps?: { fetch?: FetchLike; now?: () => number; rand?: () => string },
+): Promise<IgCoverResult> {
+  const key = openaiKey();
+  if (!key) throw new Error("OpenAI API key not configured (set OPENAI_API_KEY or ~/.config/openai-image/credentials.json)");
+  const doFetch = deps?.fetch ?? (globalThis.fetch as FetchLike);
+
+  const res = await doFetch(OPENAI_GENERATIONS_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "gpt-image-2", prompt: opts.prompt, size: opts.size, quality: opts.quality || "medium", n: 1 }),
+  });
+
+  const text = await res.text();
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { parsed = text; }
+
+  if (!res.ok) {
+    const msg =
+      parsed && typeof parsed === "object" && "error" in parsed
+        ? String((parsed as { error?: { message?: string } }).error?.message ?? `HTTP ${res.status}`)
+        : `HTTP ${res.status}`;
+    throw new Error(`gpt-image-2 failed: ${msg}`);
+  }
+
+  const b64 =
+    parsed && typeof parsed === "object" && "data" in parsed
+      ? (parsed as { data?: Array<{ b64_json?: string }> }).data?.[0]?.b64_json
+      : undefined;
+  if (!b64) throw new Error("gpt-image-2 returned no image data (possible content-policy block)");
+
+  mkdirSync(MEDIA_DIR, { recursive: true });
+  const now = deps?.now ? deps.now() : Date.now();
+  const rand = deps?.rand ? deps.rand() : Math.random().toString(36).slice(2, 8);
+  const filename = `img_${now}_${rand}.png`;
+  const filepath = join(MEDIA_DIR, filename);
+  writeFileSync(filepath, Buffer.from(b64, "base64"));
+
+  return { filename, url: `/api/media/file/${filename}`, path: filepath, prompt: opts.prompt, model: "gpt-image-2" };
+}
+
+/** Generate a person-free branded concept slide for a carousel middle slide. */
+export async function generateConceptSlide(
+  input: { headline: string; visual?: string; badge?: string; accent?: { name: string; hex: string }; quality?: "low" | "medium" | "high" },
+  deps?: { fetch?: FetchLike; now?: () => number; rand?: () => string },
+): Promise<IgCoverResult> {
+  if (!input.headline || !input.headline.trim()) throw new Error("headline is required");
+  return gptImageGenerate({ prompt: buildConceptSlidePrompt(input), size: "1024x1024", quality: input.quality }, deps);
 }
 
 /**

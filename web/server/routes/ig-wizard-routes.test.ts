@@ -26,9 +26,12 @@ vi.mock("../research.js", () => ({
 const mockGenerateIgCover = vi.fn();
 const mockGenerateReelHookImage = vi.fn();
 const mockCreateDraft = vi.fn();
+const mockGenerateConceptSlide = vi.fn();
 vi.mock("../ig-cover.js", () => ({
   generateIgCover: (...args: unknown[]) => mockGenerateIgCover(...args),
+  generateConceptSlide: (...args: unknown[]) => mockGenerateConceptSlide(...args),
   generateReelHookImage: (...args: unknown[]) => mockGenerateReelHookImage(...args),
+  conceptAccent: (i: number) => ({ name: `accent${i}`, hex: "#000000" }),
   normalizeStyle: (raw: unknown) =>
     raw === "business" || raw === "pointing" || raw === "bold" || raw === "screen" ? raw : "cozy",
   normalizeHookSetting: (raw: unknown) =>
@@ -467,6 +470,7 @@ describe("Wizard Saved Posts routes", () => {
     registerIgWizardRoutes(app);
     [mockWpList, mockWpCreate, mockWpGet, mockWpUpdate, mockWpRemove, mockWpBulkRemove].forEach((m) => m.mockReset());
     mockGenerateIgCover.mockReset();
+    mockGenerateConceptSlide.mockReset();
     mockGenerateReelHookImage.mockReset();
     mockCreateDraft.mockReset();
     // The carousel route runs generateCarouselScript → the AI provider must
@@ -554,12 +558,24 @@ describe("Wizard Saved Posts routes", () => {
     expect((await app.request("/ig-wizard/posts/x/to-draft", { method: "POST" })).status).toBe(404);
   });
 
-  it("POST /ig-wizard/posts/:id/carousel renders an N-slide carousel", async () => {
+  it("POST /ig-wizard/posts/:id/carousel — clone hook+CTA slides, concept middle slides", async () => {
     mockWpGet.mockReturnValue({ id: "a", hook: "Stop renting AI", topic: "x", body: "b", cta: "c", hero: "notebook" });
-    // The carousel script comes from the internal-AI mock.
-    mockReturn = { text: JSON.stringify({ slides: [{ text: "S1" }, { text: "S2" }, { text: "S3" }] }), ok: true, error: undefined };
+    // The carousel script comes from the internal-AI mock — now with a per-slide visual.
+    mockReturn = {
+      text: JSON.stringify({
+        slides: [
+          { text: "S1", visual: "hook motif" },
+          { text: "S2", visual: "terminal motif" },
+          { text: "S3", visual: "cta motif" },
+        ],
+      }),
+      ok: true,
+      error: undefined,
+    };
     let imgN = 0;
-    mockGenerateIgCover.mockImplementation(async () => ({ filename: `s${++imgN}.png`, url: `/api/media/file/s${imgN}.png`, path: "/x", prompt: "p", model: "gpt-image-2" }));
+    mockGenerateIgCover.mockImplementation(async () => ({ filename: `clone${++imgN}.png`, url: `/api/media/file/clone${imgN}.png`, path: "/x", prompt: "p", model: "gpt-image-2" }));
+    let conceptN = 0;
+    mockGenerateConceptSlide.mockImplementation(async () => ({ filename: `concept${++conceptN}.png`, url: `/api/media/file/concept${conceptN}.png`, path: "/x", prompt: "p", model: "gpt-image-2" }));
     mockWpUpdate.mockImplementation((_id: string, patch: Record<string, unknown>) => ({ id: "a", ...patch }));
 
     const res = await app.request("/ig-wizard/posts/a/carousel", {
@@ -568,8 +584,12 @@ describe("Wizard Saved Posts routes", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.mediaUrls).toHaveLength(3);
-    // One image per slide, format set to carousel.
-    expect(mockGenerateIgCover).toHaveBeenCalledTimes(3);
+    // First (hook) + last (CTA) slides are the identity-locked Markus edit;
+    // the single middle slide is a person-free concept slide.
+    expect(mockGenerateIgCover).toHaveBeenCalledTimes(2);
+    expect(mockGenerateConceptSlide).toHaveBeenCalledTimes(1);
+    // The middle concept slide gets the slide's visual concept passed through.
+    expect(mockGenerateConceptSlide).toHaveBeenCalledWith(expect.objectContaining({ headline: "S2", visual: "terminal motif" }));
     expect(mockWpUpdate).toHaveBeenCalledWith("a", expect.objectContaining({ format: "carousel" }));
   });
 

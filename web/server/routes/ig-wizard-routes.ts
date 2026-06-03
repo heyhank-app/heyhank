@@ -17,7 +17,7 @@ import {
   normalizePlanDays,
   normalizeSlideCount,
 } from "../ig-wizard.js";
-import { generateIgCover, normalizeStyle, generateReelHookImage, normalizeHookSetting } from "../ig-cover.js";
+import { generateIgCover, normalizeStyle, generateReelHookImage, normalizeHookSetting, generateConceptSlide, conceptAccent } from "../ig-cover.js";
 import { researchTopic, briefToGroundingText } from "../research.js";
 import * as socialManager from "../socialmedia/manager.js";
 import type { SocialPlatform } from "../socialmedia/types.js";
@@ -265,8 +265,20 @@ export function registerIgWizardRoutes(api: Hono): void {
     try {
       // Render every slide in parallel — N gpt-image-2 calls at once keeps the
       // whole carousel near single-image latency instead of N×.
+      // Slide variety: the FIRST slide (hook) and the LAST slide (CTA) feature
+      // Markus (identity-locked edit). The MIDDLE slides are person-free concept
+      // slides — a distinct accent + thematic visual per slide — so the carousel
+      // doesn't read as "the same photo 5 times with different captions".
+      const slides = script.result.slides;
+      const lastIdx = slides.length - 1;
       const images = await Promise.all(
-        script.result.slides.map((s) => generateIgCover({ headline: s.text, badge: "Built with AI", hero, style, cap })),
+        slides.map((s, i) => {
+          const isClonedSlide = i === 0 || i === lastIdx;
+          if (isClonedSlide) {
+            return generateIgCover({ headline: s.text, badge: "Built with AI", hero, style, cap });
+          }
+          return generateConceptSlide({ headline: s.text, visual: s.visual, badge: "Built with AI", accent: conceptAccent(i) });
+        }),
       );
       const updated = wizardPosts.updatePost(post.id, {
         format: "carousel",

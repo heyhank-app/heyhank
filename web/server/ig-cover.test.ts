@@ -138,6 +138,59 @@ describe("generateIgCover", () => {
   });
 });
 
+describe("buildConceptSlidePrompt + generateConceptSlide", () => {
+  it("builds a person-free prompt with the headline, visual + accent", () => {
+    const p = cover.buildConceptSlidePrompt({
+      headline: "Your prompts are the problem",
+      visual: "a stylized terminal motif",
+      accent: { name: "cyan blue", hex: "#2BB3FF" },
+    });
+    expect(p).toMatch(/NO people/i);
+    expect(p).toContain("Your prompts are the problem");
+    expect(p).toContain("a stylized terminal motif");
+    expect(p).toContain("cyan blue");
+    expect(p).toContain("Built with AI");
+    // Critically: no readable text/gibberish inside the visual (only headline+badge).
+    expect(p).toMatch(/do NOT render any readable text|ABSTRACT/i);
+  });
+
+  it("conceptAccent rotates deterministically and wraps", () => {
+    expect(cover.conceptAccent(0)).toEqual(cover.CONCEPT_ACCENTS[0]);
+    expect(cover.conceptAccent(cover.CONCEPT_ACCENTS.length)).toEqual(cover.CONCEPT_ACCENTS[0]); // wraps
+    expect(cover.conceptAccent(1)).toEqual(cover.CONCEPT_ACCENTS[1]);
+  });
+
+  it("posts to the GENERATIONS endpoint (JSON body, NO reference images) + saves the PNG", async () => {
+    let capturedUrl = "";
+    let capturedBody: unknown = null;
+    const fakeFetch = vi.fn(async (url: string, init: RequestInit) => {
+      capturedUrl = url;
+      // Concept slides use a JSON body (no FormData / no Markus refs).
+      expect(typeof init.body).toBe("string");
+      capturedBody = JSON.parse(init.body as string);
+      return new Response(JSON.stringify({ data: [{ b64_json: PNG_B64 }] }), { status: 200 });
+    });
+
+    const res = await cover.generateConceptSlide(
+      { headline: "One idea per slide", visual: "abstract nodes", accent: { name: "teal", hex: "#19C2C2" } },
+      { fetch: fakeFetch as never, now: () => 1717000000001, rand: () => "cncpt1" },
+    );
+
+    expect(capturedUrl).toContain("/v1/images/generations");
+    expect((capturedBody as { model?: string }).model).toBe("gpt-image-2");
+    expect(res.filename).toBe("img_1717000000001_cncpt1.png");
+    expect(existsSync(res.path)).toBe(true);
+    expect(readFileSync(res.path).length).toBeGreaterThan(0);
+  });
+
+  it("requires a headline", async () => {
+    const fakeFetch = vi.fn(async () => new Response("{}", { status: 200 }));
+    await expect(
+      cover.generateConceptSlide({ headline: "  " }, { fetch: fakeFetch as never }),
+    ).rejects.toThrow(/headline is required/);
+  });
+});
+
 describe("buildReelHookPrompt + normalizeHookSetting", () => {
   it("locks identity, varies setting, keeps the presenter silent + magical (no talking)", () => {
     const studio = cover.buildReelHookPrompt(true, "studio");

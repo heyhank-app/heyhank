@@ -607,6 +607,9 @@ export async function adaptInspiration(input: {
 export interface CarouselSlide {
   /** Short on-image text for this slide (a headline, not a paragraph). */
   text: string;
+  /** Short visual concept for the slide image, e.g. "a stylized terminal motif".
+      Used for person-free middle slides; ignored for the hook/CTA (Markus) slides. */
+  visual?: string;
 }
 
 export interface CarouselScriptResult {
@@ -631,6 +634,13 @@ Given a post (topic + hook + body + CTA), write exactly {{N}} slides:
   - Slides 2..{{N-1}}: ONE concrete, specific point each. Short. Punchy. A single idea per slide — no paragraphs. Build momentum.
   - Slide {{N}}: the CTA — tell them exactly what to do next (comment / follow / save / DM).
 
+COHERENCE — this is the most important rule:
+  - The hook in slide 1 makes a SPECIFIC promise. Every middle slide MUST pay off THAT exact promise. Do NOT drift to a different sub-topic.
+  - Example of the trap to avoid: if the hook is "Your prompts are the problem, not the model", the slides must be about PROMPTS (how to write them, what to fix) — they must NOT pivot to a different fix like "connect an MCP server". Stay on the hook's thread the whole way.
+  - If the provided body drifts off the hook, IGNORE the drift and keep all slides true to the hook's promise.
+
+For EACH slide also give a "visual": a SHORT (3-8 word) concept for that slide's background image — an abstract/iconographic motif that matches the slide's point (e.g. "a stylized terminal command motif", "abstract glowing schema diagram", "a clean file-tree graphic", "split before/after panels"). No people in the visual. Vary the visual across slides so no two slides look alike.
+
 Rules:
   - Each slide's "text" is what gets PRINTED ON the image — keep it under ~12 words, ideally under 8. No slide numbers in the text.
   - Concrete over vague. Real specifics from the post.
@@ -638,7 +648,7 @@ Rules:
   - Never use "as an AI", never refuse.
 
 Return ONLY valid JSON, no markdown fences, no commentary:
-{ "slides": [ { "text": "..." }, ... exactly {{N}} items ] }`;
+{ "slides": [ { "text": "...", "visual": "..." }, ... exactly {{N}} items ] }`;
 
 interface ParsedCarousel { slides?: unknown; }
 
@@ -670,8 +680,12 @@ export async function generateCarouselScript(input: {
   const slides: CarouselSlide[] = Array.isArray(parsed.slides)
     ? parsed.slides
         .map((s): CarouselSlide | null => {
-          const text = s && typeof s === "object" && typeof (s as { text?: unknown }).text === "string" ? (s as { text: string }).text.trim() : "";
-          return text ? { text } : null;
+          if (!s || typeof s !== "object") return null;
+          const obj = s as { text?: unknown; visual?: unknown };
+          const text = typeof obj.text === "string" ? obj.text.trim() : "";
+          if (!text) return null;
+          const visual = typeof obj.visual === "string" && obj.visual.trim() ? obj.visual.trim() : undefined;
+          return { text, visual };
         })
         .filter((s): s is CarouselSlide => s !== null)
         .slice(0, n)

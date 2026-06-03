@@ -399,6 +399,19 @@ describe("generateCarouselScript", () => {
     expect(res.result.slides.map((s) => s.text)).toEqual(["A", "B"]);
   });
 
+  it("carries the per-slide visual concept through (for person-free middle slides)", async () => {
+    mockReturn = {
+      text: JSON.stringify({ slides: [{ text: "A", visual: "terminal motif" }, { text: "B" }] }),
+      ok: true,
+      error: undefined,
+    };
+    const res = await generateCarouselScript({ topic: "x", hook: "h", body: "b", cta: "c", language: "en", slides: 3 });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.result.slides[0].visual).toBe("terminal motif");
+    expect(res.result.slides[1].visual).toBeUndefined(); // missing visual → undefined, not a crash
+  });
+
   it("returns 503 when no provider, 502 on junk", async () => {
     mockHasProvider = false;
     expect((await generateCarouselScript({ topic: "x", hook: "h", body: "b", cta: "c", language: "en", slides: 5 })).ok).toBe(false);
