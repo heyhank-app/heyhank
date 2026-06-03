@@ -271,10 +271,13 @@ export function normalizeHookSetting(raw: unknown): ReelHookSetting {
 export function buildReelHookPrompt(cap?: boolean, setting: ReelHookSetting = "studio"): string {
   const identity = cap === false ? IDENTITY_NOCAP : IDENTITY_CAP;
   const place = REEL_HOOK_SETTINGS[setting] ?? REEL_HOOK_SETTINGS.studio;
+  // The presenter does NOT speak (no lip-sync look — Charon narrates). Instead he
+  // does something "magical": conjures two glowing holographic tiles between his
+  // hands that are about to collide. Veo animates the collision.
   return `Photorealistic vertical 2:3 portrait, cinematic photography.
 
 SUBJECT:
-${identity}. Smart-casual, facing the camera in an energetic, welcoming pose — open hands raised as if presenting something exciting, bright expressive face, big confident smile, looking straight into the lens.
+${identity}. Smart-casual, facing the camera with an excited, wonder-filled expression and a confident CLOSED-MOUTH smile — he is NOT talking, his mouth stays closed. His hands are raised and open in front of his chest, conjuring TWO glowing holographic app tiles that float just above his palms — one cool-blue, one warm-orange — radiating soft magical light and energy particles, as if he is about to make them collide.
 
 SETTING:
 ${place}.
@@ -282,8 +285,10 @@ ${place}.
 STYLE DIRECTIVES:
 - Photoreal, NOT illustration, NOT 3D render. Natural skin texture, a real person.
 - Exactly ONE Markus in frame, centered, upper-body framing with headroom.
-- Cinematic color grade, crisp premium lighting, shallow depth of field.
-- ABSOLUTELY NO text, NO captions, NO logos, NO watermark anywhere in the image.`;
+- His MOUTH IS CLOSED — he is NOT speaking, no open-mouth talking pose.
+- Cinematic color grade, crisp premium lighting, shallow depth of field, glowing rim light.
+- The two floating tiles are abstract glowing holographic squares — NO text, NO letters, NO real brand logos on them.
+- NO on-screen text, NO captions, NO watermark anywhere in the image.`;
 }
 
 /** Generate the portrait reel-hook presenter frame (Veo first-frame). */

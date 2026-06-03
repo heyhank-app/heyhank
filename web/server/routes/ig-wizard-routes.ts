@@ -611,13 +611,16 @@ export function planReelClips(voDuration: number): {
 
 /** Seconds the branded presenter hook intro occupies at the start of a reel. */
 const REEL_HOOK_SECONDS = 3;
-/** Veo motion prompt for the hook clip (the presenter frame is the first frame). */
+/** Veo motion prompt for the hook clip (the presenter frame is the first frame).
+    The presenter does NOT speak — he does something magical with the floating
+    tiles (Charon narrates the audio). */
 const REEL_HOOK_MOTION_PROMPT =
-  "Vertical 9:16. The person looks straight at the camera with an energetic, " +
-  "welcoming expression and a confident smile, subtle natural head and hand " +
-  "motion as if starting to present, a slow gentle camera push-in. Premium " +
-  "creator-studio lighting, cool blue rim light. No on-screen text, no captions, " +
-  "no subtitles, no logos, no watermark.";
+  "Vertical 9:16. The person does NOT speak — his mouth stays closed in a " +
+  "confident smile, NO talking, NO lip movement. The two glowing holographic " +
+  "tiles floating above his open hands pulse, orbit and rush together, colliding " +
+  "in a burst of magical light and energy particles. Subtle confident head " +
+  "movement and a slow gentle camera push-in. Premium cinematic lighting, cool " +
+  "blue rim light. No on-screen text, no captions, no subtitles, no watermark.";
 
 /**
  * Brand keyword → logo slug. The AI tools a post talks about get their real

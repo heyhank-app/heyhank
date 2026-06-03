@@ -139,16 +139,18 @@ describe("generateIgCover", () => {
 });
 
 describe("buildReelHookPrompt + normalizeHookSetting", () => {
-  it("locks identity, varies the setting, and forbids text/logos (clean plate)", () => {
+  it("locks identity, varies setting, keeps the presenter silent + magical (no talking)", () => {
     const studio = cover.buildReelHookPrompt(true, "studio");
     const cafe = cover.buildReelHookPrompt(true, "cafe");
-    // Identity anchor present (capped).
     for (const p of [studio, cafe]) {
       expect(p).toMatch(/M-cap/);
       expect(p).toMatch(/2:3 portrait/);
-      // Clean plate: no burned text or logos — those are composited later.
       expect(p).toMatch(/NO text/i);
-      expect(p).toMatch(/NO logos/i);
+      // The clone must NOT look like it's talking (Charon narrates the audio).
+      expect(p).toMatch(/closed[- ]mouth|mouth.*closed|NOT talking|NOT speaking/i);
+      // It does something magical with two glowing tiles (no real brand logos).
+      expect(p).toMatch(/holographic|glowing/i);
+      expect(p).toMatch(/brand logos/i);
     }
     // Setting actually changes (not always a studio — the user can vary it).
     expect(studio).toMatch(/studio/i);
