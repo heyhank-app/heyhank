@@ -69,7 +69,12 @@ import {
   get as watchListGet,
   _resetForTest as watchListResetForTest,
 } from "./watch-list.js";
-import { crawlOnce, crawlEntry, _resetForTest as crawlerResetForTest } from "./auto-crawler.js";
+import {
+  crawlOnce,
+  crawlEntry,
+  classifyCrawlError,
+  _resetForTest as crawlerResetForTest,
+} from "./auto-crawler.js";
 
 let tempDir: string;
 
@@ -275,5 +280,32 @@ describe("crawlOnce — concurrency guard", () => {
     // Release the first crawl so we don't leak the promise.
     resolveExtract({ posts: [], errors: [] });
     await firstPromise;
+  });
+});
+
+// classifyCrawlError turns raw Playwright/navigation errors into actionable
+// messages so the watch-list UI tells the user *why* a crawl failed (expired
+// session vs IP block) instead of surfacing a cryptic Chromium error.
+describe("classifyCrawlError", () => {
+  it("flags HTTP 403/429 hard blocks as BLOCKED (IP rate-limit / bot-detect)", () => {
+    const msg = classifyCrawlError(
+      "goto: net::ERR_HTTP_RESPONSE_CODE_FAILURE at https://www.instagram.com/vaibhavsisinty/",
+    );
+    expect(msg).toMatch(/^BLOCKED:/);
+    expect(msg).toMatch(/re-import fresh cookies/i);
+  });
+
+  it("flags a 429 status string as BLOCKED", () => {
+    expect(classifyCrawlError("Request failed with 429 Too Many Requests")).toMatch(/^BLOCKED:/);
+  });
+
+  it("flags a login-redirect navigation error as LOGIN_REQUIRED", () => {
+    const msg = classifyCrawlError("net::ERR_ABORTED at https://www.instagram.com/accounts/login/?next=/x/");
+    expect(msg).toMatch(/^LOGIN_REQUIRED:/);
+    expect(msg).toMatch(/session expired/i);
+  });
+
+  it("passes unrelated errors through unchanged", () => {
+    expect(classifyCrawlError("browser page not available")).toBe("browser page not available");
   });
 });

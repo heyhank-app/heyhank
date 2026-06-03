@@ -201,7 +201,7 @@ export async function crawlEntry(entry: WatchListEntry): Promise<EntryCrawlResul
     });
     return { ok: postsExtracted > 0 || result.errors.length === 0, postsExtracted };
   } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
+    const error = classifyCrawlError(e instanceof Error ? e.message : String(e));
     watchList.update(entry.id, {
       lastCrawledAt: new Date().toISOString(),
       lastCrawlStatus: "error",
@@ -209,6 +209,22 @@ export async function crawlEntry(entry: WatchListEntry): Promise<EntryCrawlResul
     });
     return { ok: false, postsExtracted: 0, error };
   }
+}
+
+/**
+ * Turn a raw navigation/browser error into an actionable message. The most
+ * common failure is Instagram hard-blocking the request (HTTP 403/429 surfaces
+ * in Playwright as ERR_HTTP_RESPONSE_CODE_FAILURE), which means the IP is being
+ * rate-limited or bot-detected rather than anything wrong with our code.
+ */
+export function classifyCrawlError(raw: string): string {
+  if (/ERR_HTTP_RESPONSE_CODE_FAILURE|\b(403|429)\b|too many requests/i.test(raw)) {
+    return `BLOCKED: Instagram blocked this request (HTTP 403/429 — IP rate-limited or bot-detected). Re-import fresh cookies and/or slow down crawling. [${raw.slice(0, 200)}]`;
+  }
+  if (/accounts\/login|net::ERR_ABORTED.*login/i.test(raw)) {
+    return `LOGIN_REQUIRED: Instagram session expired — re-import fresh cookies in the SocialView tab. [${raw.slice(0, 200)}]`;
+  }
+  return raw;
 }
 
 /** Start the nightly cron. Called once at server bootstrap. */

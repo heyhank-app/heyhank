@@ -39,6 +39,17 @@ export async function extractCurrentPage(opts: ExtractOptions): Promise<ExtractR
       opts.onLog?.("Detected: Instagram profile (up to 9 posts)");
       return await extractInstagramProfile(opts, 25);
     }
+    // A redirect to /accounts/login means the persisted IG session expired and
+    // Instagram bounced us to the login wall — surface a clear, actionable
+    // reason instead of a cryptic "URL not recognized".
+    if (/\/accounts\/login/i.test(url)) {
+      return {
+        posts: [],
+        errors: [
+          "LOGIN_REQUIRED: Instagram session expired — the crawler was redirected to the login page. Re-import fresh cookies in the SocialView tab.",
+        ],
+      };
+    }
     return { posts: [], errors: [`Instagram URL not recognized for extraction: ${url}`] };
   }
 
