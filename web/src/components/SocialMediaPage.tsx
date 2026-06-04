@@ -16,6 +16,7 @@ interface SocialPost {
   status: string;
   platforms: string[];
   createdAt: string;
+  updatedAt?: string;
   scheduledAt?: string | null;
   title?: string;
   firstComment?: string;
@@ -826,7 +827,11 @@ function DraftsTab({ refreshKey, showMessage, onEdit, onRefresh }: {
   const loadDrafts = useCallback(async () => {
     try {
       const data = await api.listSocialPosts({ limit: 50, status: "draft" });
-      setDrafts((data.posts || []).map(normalizePost));
+      // Newest drafts first (server order isn't guaranteed). Uses updated/created.
+      const sorted = (data.posts || [])
+        .map(normalizePost)
+        .sort((a, b) => postSortDate(b) - postSortDate(a));
+      setDrafts(sorted);
     } catch { /* silent */ }
   }, []);
 
@@ -1119,12 +1124,17 @@ function PostCard({ post, selected, onToggleSelect, onEdit, onDelete, onArchive,
           />
         )}
 
-        {/* Video */}
+        {/* Video — a real, playable preview (reels), not just a text link. */}
         {post.videoUrl && (
-          <div className="flex items-center gap-1.5 text-[10px] text-cc-muted bg-cc-bg rounded-md px-2 py-1">
-            <span>🎬</span>
-            <span className="truncate">{post.videoUrl}</span>
-          </div>
+          <video
+            src={post.videoUrl}
+            poster={post.thumbnailUrl || undefined}
+            controls
+            muted
+            playsInline
+            data-testid="draft-video"
+            className="h-40 w-auto rounded-lg border border-cc-border/30 bg-black block"
+          />
         )}
 
         {/* First Comment */}

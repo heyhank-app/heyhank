@@ -1462,7 +1462,7 @@ export const api = {
     if (opts?.status) params.set("status", opts.status);
     if (opts?.platform) params.set("platform", opts.platform);
     if (opts?.limit) params.set("limit", String(opts.limit));
-    return get<{ posts: Array<{ id: string; text: string; status: string; platforms: string[]; createdAt: string; scheduledAt?: string | null }> }>(`/socialmedia/posts?${params}`);
+    return get<{ posts: Array<{ id: string; text: string; status: string; platforms: string[]; createdAt: string; updatedAt?: string; scheduledAt?: string | null; videoUrl?: string; thumbnailUrl?: string; mediaUrls?: string[]; format?: "post" | "carousel" | "story" | "reel" }> }>(`/socialmedia/posts?${params}`);
   },
   getSocialPost: (id: string) =>
     get<{ id: string; text: string; status: string; platforms: string[]; createdAt: string; scheduledAt?: string | null }>(`/socialmedia/posts/${encodeURIComponent(id)}`),
