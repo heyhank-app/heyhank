@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
-import { registerIgWizardRoutes, buildReelCaptions, buildReelVeoPrompt, buildReelLogos, planReelClips } from "./ig-wizard-routes.js";
+import { registerIgWizardRoutes, buildReelCaptions, chunkCaption, buildReelVeoPrompt, buildReelLogos, planReelClips } from "./ig-wizard-routes.js";
 
 // Mock the internal-ai module so tests don't hit a real provider.
 // We control the response text per-test by reassigning these variables before
@@ -707,9 +707,12 @@ describe("buildReelCaptions", () => {
       8,
     );
     expect(caps.length).toBeGreaterThanOrEqual(3);
-    // Hook is first + centered + larger; CTA is last.
+    // Hook is first; captions sit small at the BOTTOM so they don't cover the subject.
     expect(caps[0].text).toBe("Stop renting AI");
-    expect(caps[0].position).toBe("center");
+    expect(caps[0].position).toBe("bottom");
+    expect(caps.every((c) => c.position === "bottom")).toBe(true);
+    // Small fonts (≤ 40) so the hook magic + face stay the star.
+    expect(caps.every((c) => (c.fontSize ?? 0) <= 40)).toBe(true);
     expect(caps[caps.length - 1].text).toBe("Comment STACK");
     // Captions are sequential and span (almost) the whole clip (a small gap
     // before the end prevents overlapping boxes).
@@ -754,6 +757,38 @@ describe("buildReelCaptions", () => {
     }
     expect(caps[0].text).toBe("Run your own AI");
     expect(caps[caps.length - 1].text).toBe("Comment VPS");
+  });
+
+  it("chunks a long step-list line so no caption is a wall of text", () => {
+    // A run-on step list with no sentence breaks must be split into short chunks,
+    // never one giant caption that covers the whole video.
+    const body =
+      "Here's how to get running in 5 steps: Download the app at antigravity.google.com Log in with your Google account Start a project and choose your working folder Select Claude Sonnet 4.6 Type out what you want to build";
+    const caps = buildReelCaptions({ hook: "Short hook", body, cta: "Comment AGENT" }, 45);
+    // Every on-screen caption stays short (≤ ~64 chars) — no wall.
+    for (const c of caps) {
+      expect(c.text.length).toBeLessThanOrEqual(66);
+    }
+    // The long body produced more than one body chunk (it was split, not dumped).
+    expect(caps.length).toBeGreaterThan(3);
+  });
+});
+
+describe("chunkCaption", () => {
+  it("keeps a short line intact", () => {
+    expect(chunkCaption("Hello there", 64)).toEqual(["Hello there"]);
+  });
+
+  it("splits a long line at word boundaries, each ≤ maxChars", () => {
+    const chunks = chunkCaption("one two three four five six seven eight nine ten", 16);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const c of chunks) expect(c.length).toBeLessThanOrEqual(16);
+    // Rejoining the chunks reproduces the original words in order.
+    expect(chunks.join(" ")).toBe("one two three four five six seven eight nine ten");
+  });
+
+  it("returns [] for blank input", () => {
+    expect(chunkCaption("   ", 64)).toEqual([]);
   });
 });
 

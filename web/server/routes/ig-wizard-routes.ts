@@ -598,10 +598,35 @@ function splitSentences(text: string): string[] {
 }
 
 /**
+ * Split one line into short on-screen chunks (≤ maxChars) at word boundaries.
+ * A step-list dumped as one long "sentence" must NOT become a wall of text that
+ * covers the video — small, sequential chunks read cleanly along the bottom.
+ */
+export function chunkCaption(text: string, maxChars: number): string[] {
+  const t = text.trim();
+  if (!t) return [];
+  if (t.length <= maxChars) return [t];
+  const out: string[] = [];
+  let cur = "";
+  for (const w of t.split(/\s+/)) {
+    if (cur && cur.length + 1 + w.length > maxChars) {
+      out.push(cur);
+      cur = w;
+    } else {
+      cur = cur ? `${cur} ${w}` : w;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+/**
  * Build time-sequenced burned-in captions for a reel from the post's caption.
  * A blank B-roll clip reads as filler; on-screen text is what makes a reel land.
- * The hook opens centered + large, then body sentences + the CTA scroll along
- * the bottom in sync with the Charon voiceover (which speaks the same text).
+ * Captions are kept SMALL and anchored to the BOTTOM so they never cover the
+ * subject — the hook's magic moment + Markus' face stay the star — and long
+ * sentences are chunked so nothing ever becomes a wall of text. They run in sync
+ * with the Charon voiceover (which speaks the same text).
  */
 export function buildReelCaptions(
   post: Pick<wizardPosts.WizardPost, "hook" | "body" | "cta">,
@@ -616,20 +641,17 @@ export function buildReelCaptions(
   const MIN_READ = 2.3;
   const maxLines = Math.max(2, Math.floor(duration / MIN_READ));
 
-  // Hook and CTA are the load-bearing lines (the hook stops the scroll, the CTA
-  // drives the funnel) — always keep them and trim the body middle to fit,
-  // rather than letting a long body push the CTA off the end.
-  const chosen: Array<{ text: string; kind: "hook" | "body" | "cta" }> = [];
-  if (hook) chosen.push({ text: hook, kind: "hook" });
-  if (cta) chosen.push({ text: cta, kind: "cta" }); // reserved; moved to the end below
-  const bodyBudget = Math.max(0, maxLines - chosen.length);
-  const bodyChosen = bodyLines.slice(0, bodyBudget).map((text) => ({ text, kind: "body" as const }));
-  // Order: hook → body → cta.
-  const ordered = [
-    ...chosen.filter((l) => l.kind === "hook"),
-    ...bodyChosen,
-    ...chosen.filter((l) => l.kind === "cta"),
-  ];
+  // Split every line into short chunks (~2 lines on screen) so no caption ever
+  // grows into a wall. Hook and CTA chunks are load-bearing (scroll-stopper +
+  // funnel) — always kept; the body middle is trimmed to the remaining budget.
+  const CHUNK = 64;
+  const hookChunks = chunkCaption(hook, CHUNK).map((text) => ({ text, kind: "hook" as const }));
+  const ctaChunks = chunkCaption(cta, CHUNK).map((text) => ({ text, kind: "cta" as const }));
+  const bodyChunks = bodyLines.flatMap((l) => chunkCaption(l, CHUNK)).map((text) => ({ text, kind: "body" as const }));
+
+  const reserved = hookChunks.length + ctaChunks.length;
+  const bodyBudget = Math.max(0, maxLines - reserved);
+  const ordered = [...hookChunks, ...bodyChunks.slice(0, bodyBudget), ...ctaChunks];
   if (!ordered.length) return [];
 
   // Allocate time per caption: a base floor each + the remainder weighted by
@@ -648,23 +670,16 @@ export function buildReelCaptions(
     const start = +cursor.toFixed(2);
     const end = +Math.min(duration, cursor + dur - GAP).toFixed(2);
     cursor += dur;
-    // lineHeight 1.5 + small padding keeps each wrapped line's box from
-    // overlapping the next (box height ≈ fontSize + 2·padding must stay under
-    // the line spacing = fontSize · lineHeight) — clean stacked boxes.
-    if (line.kind === "hook") {
-      return { text: line.text, position: "center" as const, fontSize: 52, color: "#ffffff",
-        bgColor: "black", bgPadding: 12, bold: true, maxWidth: 600, lineHeight: 1.5,
-        startSeconds: start, endSeconds: end };
-    }
+    // SMALL + BOTTOM: the box sits low so the subject (hook magic, face, b-roll)
+    // is never covered. lineHeight 1.3 + small padding keeps wrapped lines tight.
     if (line.kind === "cta") {
-      // Centered (not bottom-anchored) so a wrapped 2-3 line CTA never clips off
-      // the bottom edge. Orange box = the funnel call-to-action.
-      return { text: line.text, position: "center" as const, fontSize: 46, color: "#ffffff",
-        bgColor: "#c2410c", bgPadding: 11, bold: true, maxWidth: 600, lineHeight: 1.5,
+      // Orange box = the funnel call-to-action.
+      return { text: line.text, position: "bottom" as const, fontSize: 38, color: "#ffffff",
+        bgColor: "#c2410c", bgPadding: 9, bold: true, maxWidth: 660, lineHeight: 1.3,
         startSeconds: start, endSeconds: end };
     }
-    return { text: line.text, position: "center" as const, fontSize: 42, color: "#ffffff",
-      bgColor: "black", bgPadding: 10, bold: true, maxWidth: 620, lineHeight: 1.5,
+    return { text: line.text, position: "bottom" as const, fontSize: line.kind === "hook" ? 40 : 38, color: "#ffffff",
+      bgColor: "black", bgPadding: 9, bold: true, maxWidth: 660, lineHeight: 1.3,
       startSeconds: start, endSeconds: end };
   });
 }
