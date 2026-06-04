@@ -74,6 +74,16 @@ vi.mock("../ig-inspiration.js", () => ({
     raw === "carousel" || raw === "reel" || raw === "story" ? raw : "post",
 }));
 
+// Apify Instagram scraper mock — no real Apify run.
+const mockApifyScrape = vi.fn();
+const mockApifyDownload = vi.fn();
+let mockHasApify = true;
+vi.mock("../apify-instagram.js", () => ({
+  scrapeInstagramPosts: (...a: unknown[]) => mockApifyScrape(...a),
+  downloadToMedia: (...a: unknown[]) => mockApifyDownload(...a),
+  hasApifyToken: () => mockHasApify,
+}));
+
 // Reel pipeline mocks (Veo + TTS + compositor) — no real video generation.
 const mockVeoGen = vi.fn();
 const mockVeoPoll = vi.fn();
@@ -820,6 +830,9 @@ describe("inspiration routes", () => {
     mockInspGet.mockReset();
     mockInspRemove.mockReset();
     mockWpCreate.mockReset();
+    mockApifyScrape.mockReset();
+    mockApifyDownload.mockReset();
+    mockHasApify = true;
     // Adapt uses the real adaptInspiration → mocked internal-ai. Default to a
     // valid adapted caption payload.
     mockReturn = {
@@ -944,5 +957,64 @@ describe("inspiration routes", () => {
     });
     expect(res.status).toBe(503);
     expect(mockWpCreate).not.toHaveBeenCalled();
+  });
+
+  // ── Apify Instagram import ──
+  it("POST import-instagram scrapes + creates items with downloaded thumbnails", async () => {
+    mockApifyScrape.mockResolvedValue([
+      { caption: "c1", format: "reel", url: "https://ig/p/1", imageUrl: "https://cdn/1.jpg", videoUrl: null, ownerUsername: "creator", timestamp: null, likes: 10, comments: 1 },
+    ]);
+    mockApifyDownload.mockResolvedValue("/api/media/file/insp_1.jpg");
+    mockInspCreate.mockImplementation((inp: Record<string, unknown>) => ({ id: "x", ...inp }));
+
+    const res = await app.request("/ig-wizard/inspiration/import-instagram", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: "@creator", limit: 12 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.imported).toBe(1);
+    // The downloaded local thumbnail (not the expiring CDN URL) is stored.
+    expect(mockInspCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ handle: "creator", format: "reel", caption: "c1", mediaUrls: ["/api/media/file/insp_1.jpg"] }),
+    );
+  });
+
+  it("import-instagram falls back to the raw URL when the thumbnail download fails", async () => {
+    mockApifyScrape.mockResolvedValue([
+      { caption: "c", format: "post", url: "u", imageUrl: "https://cdn/raw.jpg", videoUrl: null, ownerUsername: "creator", timestamp: null, likes: 0, comments: 0 },
+    ]);
+    mockApifyDownload.mockResolvedValue(null); // download failed
+    mockInspCreate.mockImplementation((inp: Record<string, unknown>) => ({ id: "x", ...inp }));
+    const res = await app.request("/ig-wizard/inspiration/import-instagram", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ handle: "creator" }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockInspCreate).toHaveBeenCalledWith(expect.objectContaining({ mediaUrls: ["https://cdn/raw.jpg"] }));
+  });
+
+  it("import-instagram returns 400 when no Apify token is configured", async () => {
+    mockHasApify = false;
+    const res = await app.request("/ig-wizard/inspiration/import-instagram", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ handle: "x" }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockApifyScrape).not.toHaveBeenCalled();
+  });
+
+  it("import-instagram returns 400 on a missing handle", async () => {
+    const res = await app.request("/ig-wizard/inspiration/import-instagram", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("import-instagram surfaces scrape failures as 502", async () => {
+    mockApifyScrape.mockRejectedValue(new Error("Apify scrape failed: quota"));
+    const res = await app.request("/ig-wizard/inspiration/import-instagram", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ handle: "x" }),
+    });
+    expect(res.status).toBe(502);
   });
 });

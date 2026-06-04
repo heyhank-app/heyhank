@@ -76,6 +76,7 @@ export function registerSettingsRoutes(api: Hono): void {
       codexCliAuth: { ...codexAuth, apiKeyConfigured: !!settings.openaiApiKey.trim(), cliVersion: detectCodexVersion() },
       onboardingCompleted: settings.onboardingCompleted,
       geminiApiKeyConfigured: !!settings.geminiApiKey.trim(),
+      apifyApiKeyConfigured: !!settings.apifyApiKey.trim(),
       geminiVoice: settings.geminiVoice || "Kore",
       assistantName: settings.assistantName || "",
       userName: settings.userName || "",
@@ -106,6 +107,9 @@ export function registerSettingsRoutes(api: Hono): void {
     }
     if (body.geminiApiKey !== undefined && typeof body.geminiApiKey !== "string") {
       return c.json({ error: "geminiApiKey must be a string" }, 400);
+    }
+    if (body.apifyApiKey !== undefined && typeof body.apifyApiKey !== "string") {
+      return c.json({ error: "apifyApiKey must be a string" }, 400);
     }
     if (body.geminiVoice !== undefined && typeof body.geminiVoice !== "string") {
       return c.json({ error: "geminiVoice must be a string" }, 400);
@@ -158,7 +162,7 @@ export function registerSettingsRoutes(api: Hono): void {
     const hasAnyField = body.anthropicApiKey !== undefined || body.anthropicModel !== undefined
       || body.claudeCodeOAuthToken !== undefined || body.openaiApiKey !== undefined
       || body.onboardingCompleted !== undefined
-      || body.geminiApiKey !== undefined || body.geminiVoice !== undefined || body.assistantName !== undefined || body.userName !== undefined
+      || body.geminiApiKey !== undefined || body.apifyApiKey !== undefined || body.geminiVoice !== undefined || body.assistantName !== undefined || body.userName !== undefined
       || body.editorTabEnabled !== undefined
       || body.internalAiProvider !== undefined
       || body.aiValidationEnabled !== undefined || body.aiValidationAutoApprove !== undefined
@@ -199,6 +203,10 @@ export function registerSettingsRoutes(api: Hono): void {
       geminiApiKey:
         typeof body.geminiApiKey === "string"
           ? body.geminiApiKey.trim()
+          : undefined,
+      apifyApiKey:
+        typeof body.apifyApiKey === "string"
+          ? body.apifyApiKey.trim()
           : undefined,
       geminiVoice:
         typeof body.geminiVoice === "string"
@@ -282,6 +290,7 @@ export function registerSettingsRoutes(api: Hono): void {
       codexCliAuth: { ...codexAuthAfter, apiKeyConfigured: !!settings.openaiApiKey.trim(), cliVersion: detectCodexVersion() },
       onboardingCompleted: settings.onboardingCompleted,
       geminiApiKeyConfigured: !!settings.geminiApiKey.trim(),
+      apifyApiKeyConfigured: !!settings.apifyApiKey.trim(),
       geminiVoice: settings.geminiVoice || "Kore",
       assistantName: settings.assistantName || "",
       userName: settings.userName || "",

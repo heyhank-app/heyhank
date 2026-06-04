@@ -864,6 +864,11 @@ function InspirationMode({ onAdapted, onGoToSaved, showMessage }: InspirationMod
   const [adaptingId, setAdaptingId] = useState<string | null>(null);
   const [adaptLang, setAdaptLang] = useState<"en" | "de">("en");
 
+  // Apify Instagram import.
+  const [importHandle, setImportHandle] = useState("");
+  const [importLimit, setImportLimit] = useState(12);
+  const [importing, setImporting] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -971,6 +976,24 @@ function InspirationMode({ onAdapted, onGoToSaved, showMessage }: InspirationMod
     [showMessage],
   );
 
+  const handleImportInstagram = useCallback(async () => {
+    if (!importHandle.trim()) {
+      showMessage("Enter a creator handle to import (e.g. @creator)", true);
+      return;
+    }
+    setImporting(true);
+    try {
+      const res = await igWizardApi.inspiration.importInstagram(importHandle.trim(), importLimit);
+      await load();
+      setImportHandle("");
+      showMessage(`Imported ${res.imported} post${res.imported === 1 ? "" : "s"} from Instagram ⚡`);
+    } catch (e) {
+      showMessage(e instanceof Error ? e.message : "Import failed", true);
+    } finally {
+      setImporting(false);
+    }
+  }, [importHandle, importLimit, load, showMessage]);
+
   const inputStyle: React.CSSProperties = {
     width: "100%",
     padding: "8px 10px",
@@ -986,10 +1009,75 @@ function InspirationMode({ onAdapted, onGoToSaved, showMessage }: InspirationMod
     <div data-testid="inspiration-mode">
       <p style={{ margin: "0 0 16px 0", color: "var(--text-muted, #888)", fontSize: 14 }}>
         Paste posts you admire from other creators, then one-click <strong>“→ Adapt for me”</strong>{" "}
-        rewrites the idea in your own voice as a draft. No crawling, no Instagram risk — you curate the swipe file by hand.
+        rewrites the idea in your own voice as a draft. No Instagram risk — you curate the swipe file.
       </p>
 
-      {/* ── Import form ── */}
+      {/* ── Auto-import from Instagram via Apify ── */}
+      <section
+        aria-label="Import from Instagram"
+        style={{
+          border: "1px solid var(--accent-border, #b3d1ff)",
+          background: "var(--accent-bg, #f0f6ff)",
+          borderRadius: 8,
+          padding: 14,
+          marginBottom: 16,
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 600, marginRight: 4 }}>⚡ Auto-import from Instagram</span>
+        <input
+          aria-label="Instagram handle to import"
+          placeholder="@vaibhavsisinty"
+          value={importHandle}
+          onChange={(e) => setImportHandle(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void handleImportInstagram();
+            }
+          }}
+          style={{ ...inputStyle, flex: "1 1 180px", width: "auto" }}
+        />
+        <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
+          posts:
+          <select
+            aria-label="Number of posts to import"
+            value={importLimit}
+            onChange={(e) => setImportLimit(Number(e.target.value))}
+            style={{ ...inputStyle, width: "auto", padding: "4px 8px" }}
+          >
+            {[6, 12, 24, 36].map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={handleImportInstagram}
+          disabled={importing}
+          style={{
+            padding: "8px 16px",
+            background: "var(--btn-primary, #0066cc)",
+            color: "white",
+            border: "none",
+            borderRadius: 4,
+            cursor: importing ? "default" : "pointer",
+            fontWeight: 500,
+            fontSize: 13,
+            opacity: importing ? 0.6 : 1,
+          }}
+        >
+          {importing ? "Importing…" : "Import"}
+        </button>
+        <span style={{ flexBasis: "100%", fontSize: 11, color: "var(--text-muted, #888)" }}>
+          Pulls recent posts via Apify (residential proxies, no login) — needs an Apify token in Settings.
+        </span>
+      </section>
+
+      {/* ── Manual import form ── */}
       <section
         aria-label="Import inspiration"
         style={{

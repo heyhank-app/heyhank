@@ -40,6 +40,7 @@ const mockInspCreate = vi.fn();
 const mockInspRemove = vi.fn();
 const mockInspAdapt = vi.fn();
 const mockInspUpload = vi.fn();
+const mockInspImport = vi.fn();
 vi.mock("../api.js", () => ({
   igWizardApi: {
     generate: (...args: unknown[]) => mockGenerate(...args),
@@ -64,6 +65,7 @@ vi.mock("../api.js", () => ({
       remove: (...args: unknown[]) => mockInspRemove(...args),
       adapt: (...args: unknown[]) => mockInspAdapt(...args),
       uploadMedia: (...args: unknown[]) => mockInspUpload(...args),
+      importInstagram: (...args: unknown[]) => mockInspImport(...args),
     },
   },
   autoDmRulesApi: { create: (...args: unknown[]) => mockCreateRule(...args) },
@@ -167,6 +169,7 @@ beforeEach(() => {
   mockInspRemove.mockReset();
   mockInspAdapt.mockReset();
   mockInspUpload.mockReset();
+  mockInspImport.mockReset();
   // Sensible defaults: auto-save succeeds, list is empty.
   mockPostsCreate.mockResolvedValue({ ok: true, post: makeWizardPost() });
   mockPostsUpdate.mockResolvedValue(makeWizardPost());
@@ -871,6 +874,31 @@ describe("IgWizardTab — Inspiration mode", () => {
     // Format badge + caption excerpt render.
     expect(screen.getByText(/Stop paying for AI APIs/)).toBeInTheDocument();
     expect(screen.getByTestId("inspiration-card")).toBeInTheDocument();
+  });
+
+  it("auto-imports a creator's posts via Apify + reloads the list", async () => {
+    const showMessage = vi.fn();
+    mockInspList.mockResolvedValueOnce({ items: [] }).mockResolvedValue({ items: [makeInsp(), makeInsp()] });
+    mockInspImport.mockResolvedValue({ ok: true, imported: 2, items: [] });
+    render(<IgWizardTab showMessage={showMessage} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Inspiration/i }));
+    await waitFor(() => expect(screen.getByLabelText("Instagram handle to import")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("Instagram handle to import"), { target: { value: "@vaibhavsisinty" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Import$/i }));
+
+    await waitFor(() => expect(mockInspImport).toHaveBeenCalledWith("@vaibhavsisinty", 12));
+    await waitFor(() => expect(showMessage).toHaveBeenCalledWith(expect.stringMatching(/imported 2/i)));
+  });
+
+  it("blocks the Instagram import when no handle is entered", async () => {
+    const showMessage = vi.fn();
+    render(<IgWizardTab showMessage={showMessage} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Inspiration/i }));
+    await waitFor(() => expect(screen.getByLabelText("Instagram handle to import")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /^Import$/i }));
+    await waitFor(() => expect(showMessage).toHaveBeenCalledWith(expect.stringMatching(/handle/i), true));
+    expect(mockInspImport).not.toHaveBeenCalled();
   });
 
   it("requires a handle + caption before saving (shows an error, no API call)", async () => {

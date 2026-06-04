@@ -2035,6 +2035,12 @@ export const igWizardApi = {
         `/ig-wizard/inspiration/${encodeURIComponent(id)}/adapt`,
         { language, topic },
       ),
+    /** Pull a creator's recent posts via Apify straight into the swipe file. */
+    importInstagram: (handle: string, limit = 12) =>
+      post<{ ok: boolean; imported: number; items: InspirationItem[] }>(
+        "/ig-wizard/inspiration/import-instagram",
+        { handle, limit },
+      ),
     /** Upload an image/video file → returns its /api/media/file URL. */
     uploadMedia: async (file: File): Promise<{ ok: boolean; filename: string; url: string }> => {
       const formData = new FormData();

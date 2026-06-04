@@ -23,6 +23,8 @@ export interface HeyHankSettings {
   onboardingCompleted: boolean;
   /** Gemini API key for voice chat */
   geminiApiKey: string;
+  /** Apify API token for Instagram scraping (SocialView/Inspiration import) */
+  apifyApiKey: string;
   /** Gemini Live voice name (e.g. Kore, Puck, Charon, Fenrir, Aoede, Leda, Orus, Zephyr) */
   geminiVoice: string;
   /** Custom name for the voice assistant (e.g. "Jarvis", "Friday") */
@@ -68,6 +70,7 @@ let settings: HeyHankSettings = {
   openaiApiKey: "",
   onboardingCompleted: false,
   geminiApiKey: "",
+  apifyApiKey: "",
   geminiVoice: "Kore",
   assistantName: "",
   userName: "",
@@ -103,6 +106,7 @@ function normalize(raw: Partial<HeyHankSettings> | null | undefined): HeyHankSet
     openaiApiKey: typeof raw?.openaiApiKey === "string" ? raw.openaiApiKey : "",
     onboardingCompleted: typeof raw?.onboardingCompleted === "boolean" ? raw.onboardingCompleted : false,
     geminiApiKey: typeof raw?.geminiApiKey === "string" ? raw.geminiApiKey : "",
+    apifyApiKey: typeof raw?.apifyApiKey === "string" ? raw.apifyApiKey : "",
     geminiVoice: typeof raw?.geminiVoice === "string" && raw.geminiVoice.trim() ? raw.geminiVoice : "Kore",
     assistantName: typeof raw?.assistantName === "string" ? raw.assistantName.trim() : "",
     userName: typeof raw?.userName === "string" ? raw.userName.trim() : "",
@@ -155,7 +159,7 @@ export function getSettings(): HeyHankSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<HeyHankSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "geminiApiKey" | "geminiVoice" | "assistantName" | "userName" | "hankChatProvider" | "hankChatModel" | "hankChatAvatarEnabled" | "hankChatAvatarUrl" | "mem0ApiKey" | "mem0UserId" | "memoryAutoDetect" | "editorTabEnabled" | "internalAiProvider" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "obsidianVaultPath">>,
+  patch: Partial<Pick<HeyHankSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "geminiApiKey" | "apifyApiKey" | "geminiVoice" | "assistantName" | "userName" | "hankChatProvider" | "hankChatModel" | "hankChatAvatarEnabled" | "hankChatAvatarUrl" | "mem0ApiKey" | "mem0UserId" | "memoryAutoDetect" | "editorTabEnabled" | "internalAiProvider" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "obsidianVaultPath">>,
 ): HeyHankSettings {
   ensureLoaded();
   settings = normalize({
@@ -165,6 +169,7 @@ export function updateSettings(
     openaiApiKey: patch.openaiApiKey ?? settings.openaiApiKey,
     onboardingCompleted: patch.onboardingCompleted ?? settings.onboardingCompleted,
     geminiApiKey: patch.geminiApiKey ?? settings.geminiApiKey,
+    apifyApiKey: patch.apifyApiKey ?? settings.apifyApiKey,
     geminiVoice: patch.geminiVoice ?? settings.geminiVoice,
     assistantName: patch.assistantName ?? settings.assistantName,
     userName: patch.userName ?? settings.userName,

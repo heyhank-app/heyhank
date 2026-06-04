@@ -23,6 +23,7 @@ import * as socialManager from "../socialmedia/manager.js";
 import type { SocialPlatform } from "../socialmedia/types.js";
 import * as wizardPosts from "../ig-wizard-posts.js";
 import * as inspiration from "../ig-inspiration.js";
+import { scrapeInstagramPosts, downloadToMedia, hasApifyToken } from "../apify-instagram.js";
 import { generateVeoGoogle, pollVeoGoogle } from "../fal-video.js";
 import { generateTts } from "../gemini-tts.js";
 import { composeReel, type TextOverlay, type LogoOverlay } from "../video-compose.js";
@@ -461,6 +462,44 @@ export function registerIgWizardRoutes(api: Hono): void {
     const ok = inspiration.removeItem(c.req.param("id"));
     if (!ok) return c.json({ error: "not found" }, 404);
     return c.json({ ok: true });
+  });
+
+  /**
+   * Import a creator's recent posts via Apify (rotating residential proxies +
+   * anonymous public IG endpoints) straight into the inspiration swipe file —
+   * the risk-free, no-login alternative to crawling. Thumbnails are downloaded
+   * locally so previews don't expire when IG's CDN links do.
+   */
+  api.post("/ig-wizard/inspiration/import-instagram", async (c) => {
+    if (!hasApifyToken()) {
+      return c.json({ error: "Apify API token not configured — add it in Settings." }, 400);
+    }
+    const b = (await c.req.json().catch(() => ({}))) as { handle?: unknown; limit?: unknown };
+    const handle = inspiration.normalizeHandle(b.handle);
+    const limit = typeof b.limit === "number" ? b.limit : 12;
+    if (!handle) return c.json({ error: "handle is required" }, 400);
+
+    try {
+      const posts = await scrapeInstagramPosts({ handle, limit });
+      // Download thumbnails in parallel (best-effort), THEN create items
+      // sequentially so the flat-file store never races on concurrent writes.
+      const withThumbs = await Promise.all(
+        posts.map(async (p) => ({ p, thumb: p.imageUrl ? await downloadToMedia(p.imageUrl) : null })),
+      );
+      const items = withThumbs.map(({ p, thumb }) =>
+        inspiration.createItem({
+          handle: p.ownerUsername || handle,
+          format: p.format,
+          caption: p.caption,
+          mediaUrls: [thumb || p.imageUrl].filter((u): u is string => !!u),
+          sourceUrl: p.url || undefined,
+          notes: `Imported from Instagram via Apify · ${p.likes} likes`,
+        }),
+      );
+      return c.json({ ok: true, imported: items.length, items });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
+    }
   });
 
   /** Adapt a saved inspiration into Markus' own caption + auto-save as a draft. */
