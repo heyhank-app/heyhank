@@ -2132,6 +2132,22 @@ function SavedPostCard({
         style={{ marginTop: 4 }}
       />
       {(() => {
+        // A rendered reel gets a real, playable <video> — not just a dead
+        // thumbnail. Otherwise the user clicks "🎬 Reel", it generates, and the
+        // video is invisible in the card ("where is the reel?").
+        if (post.format === "reel" && post.videoUrl) {
+          return (
+            <video
+              src={post.videoUrl}
+              poster={post.thumbnailUrl || post.imageUrl || undefined}
+              controls
+              muted
+              playsInline
+              data-testid="saved-reel-video"
+              style={{ width: 120, height: 160, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border, #ddd)", background: "#000", flex: "0 0 auto", display: "block" }}
+            />
+          );
+        }
         const thumb = post.format === "reel" ? (post.thumbnailUrl || post.imageUrl) : (post.mediaUrls && post.mediaUrls.length ? post.mediaUrls[0] : post.imageUrl);
         return thumb ? (
           <div style={{ position: "relative", flex: "0 0 auto" }}>
@@ -2140,8 +2156,12 @@ function SavedPostCard({
               <span style={{ position: "absolute", top: 3, right: 3, fontSize: 10, fontWeight: 600, background: "rgba(0,0,0,0.65)", color: "white", borderRadius: 8, padding: "1px 6px" }}>🎠 {post.mediaUrls.length}</span>
             )}
             {post.format === "reel" && (
-              <span style={{ position: "absolute", bottom: 3, right: 3, fontSize: 12, background: "rgba(0,0,0,0.65)", color: "white", borderRadius: 8, padding: "0 5px" }}>▶</span>
+              <span style={{ position: "absolute", bottom: 3, right: 3, fontSize: 12, background: "rgba(0,0,0,0.65)", color: "white", borderRadius: 8, padding: "0 5px" }}>▶ render to play</span>
             )}
+          </div>
+        ) : post.format === "reel" ? (
+          <div style={{ width: 88, height: 88, borderRadius: 6, border: "1px dashed var(--border, #ddd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--text-muted, #888)", textAlign: "center", flex: "0 0 auto", padding: 4 }}>
+            click 🎬 Reel to render
           </div>
         ) : (
           <div style={{ width: 88, height: 88, borderRadius: 6, border: "1px dashed var(--border, #ddd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--text-muted, #888)", textAlign: "center", flex: "0 0 auto", padding: 4 }}>

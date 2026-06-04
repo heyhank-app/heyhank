@@ -822,6 +822,16 @@ describe("IgWizardTab — Saved Posts workbench", () => {
     await waitFor(() => expect(mockPostsReel).toHaveBeenCalledWith("a", 8));
     // Badge + button both read "🎬 Reel" after generation (only the button before).
     await waitFor(() => expect(screen.getAllByText(/🎬 Reel/).length).toBeGreaterThanOrEqual(2));
+    // And the rendered reel becomes a real, playable <video> in the card.
+    await waitFor(() => expect(screen.getByTestId("saved-reel-video")).toBeInTheDocument());
+    expect(screen.getByTestId("saved-reel-video")).toHaveAttribute("src", "/api/media/file/r.mp4");
+  });
+
+  it("renders a playable <video> for a reel post that already has a videoUrl", async () => {
+    await openSaved([makeWizardPost({ id: "a", hook: "Post A", format: "reel", videoUrl: "/api/media/file/done.mp4" })]);
+    await waitFor(() => expect(screen.getByText("Post A")).toBeInTheDocument());
+    const vid = screen.getByTestId("saved-reel-video");
+    expect(vid).toHaveAttribute("src", "/api/media/file/done.mp4");
   });
 
   it("promotes a post to Drafts", async () => {
