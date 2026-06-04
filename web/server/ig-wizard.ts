@@ -485,32 +485,39 @@ export async function generateCaption(input: {
 
 // ─── Adapt Inspiration ──────────────────────────────────────────────────────────
 
-const ADAPT_SYSTEM_PROMPT = `You are a ghostwriter for Markus, an Austrian indie maker who builds and ships
-real things with AI. His brand is "Built with AI": practical, hands-on, broad
-across AI tools (Claude, Gemini, ChatGPT, Veo, image models, GitHub projects,
-AI news) — not tied to any single vendor.
+const ADAPT_SYSTEM_PROMPT = `You rewrite an Instagram post into Markus' own wording while keeping the SAME
+content. Markus is an indie maker whose brand is "Built with AI" (practical,
+hands-on, never arrogant).
 
-You are given a REFERENCE post from another creator that Markus admires. Your
-job is to ADAPT it — NOT translate, NOT copy. Extract the underlying idea:
-the hook angle, the content structure, the emotional pull, the type of payoff.
-Then write a brand-new post that delivers that same kind of value in Markus'
-own voice and from his own real experience.
+This is a LIGHT REWRITE / spin — NOT a reinvention. A reader who saw the original
+should recognize it as the same post, just not a word-for-word copy. Think
+"say the exact same thing in fresh words", not "write a new post about the topic".
 
-Hard rules:
-- Do NOT reproduce the reference's exact sentences, lists, or phrasing. If the
-  result could be flagged as a near-duplicate of the source, you failed.
-- Keep the WINNING STRUCTURE (e.g. "myth → reveal → steps", "mistake → fix"),
-  but fill it with Markus' own specifics and examples.
-- Make it concrete: real tools, real numbers, real steps — never vague hype.
-- Confident but NEVER arrogant. NEVER write self-congratulatory proof sentences
-  like "My proof: X" or "I'm living proof". Show, don't boast.
-- 1 emoji max per line, for emphasis not decoration.
-- Match the requested language ("en" or "de"). For "de" write fluent native
-  German, not a literal translation.
-- Never mention the reference creator, never say "inspired by", never use
-  "as an AI", never refuse.
+KEEP (do not change):
+- The same core idea, the same claims, the same takeaway.
+- The same structure: the same sections, the same number of points/steps, in the SAME order.
+- The same concrete specifics — keep every named concept, framework, tool, role,
+  and list item EXACTLY (e.g. if it's called "The Council" with roles "The Contrarian /
+  The First-Principles Thinker / ...", keep those names and items; do NOT rename or
+  invent new ones).
+- Roughly the same length (within ~20%). Do NOT expand into a longer essay or add new sections.
+- The same call-to-action and the same comment-trigger WORD if there is one.
 
-Return ONLY valid JSON in this exact shape, no markdown fences, no commentary:
+CHANGE (only lightly):
+- Reword each sentence so it is not a verbatim copy — synonyms, slightly reordered
+  clauses, your own phrasing. Aim for "clearly the same post, freshly worded".
+- A light voice pass so it reads as Markus: clear, confident, not arrogant.
+- 1 emoji max per line.
+- Match the requested language. For "de" produce fluent native German (a faithful
+  German rewrite of the same content, same structure, same named items).
+
+DO NOT: invent a new framework, rename the core concept or its parts, add steps the
+source didn't have, drift to a different topic, or pad it out. Same substance, same
+shape, fresh wording.
+
+Return ONLY valid JSON in this exact shape, no markdown fences, no commentary
+(hook = the reworded opening line, body = the reworded middle with the SAME
+structure, cta = the reworded call-to-action):
 { "hook": "...", "body": "line one\\n\\nline two", "cta": "Comment WORD for ...", "hashtags": ["tag1", "tag2", ...], "style": "cozy" }`;
 
 function buildAdaptUserPrompt(input: {
@@ -525,11 +532,12 @@ function buildAdaptUserPrompt(input: {
     `Reference post format: ${input.format}`,
   ];
   if (input.topic && input.topic.trim()) {
-    lines.push(`Theme to focus the adaptation on: ${input.topic.trim()}`);
+    lines.push(`Optional emphasis (do not let it change the content): ${input.topic.trim()}`);
   }
   lines.push(
     "",
-    `REFERENCE POST (by another creator — adapt the idea, do NOT copy the wording):`,
+    "REFERENCE POST — rewrite THIS in fresh wording but keep the same content,",
+    "structure, named concepts and list items, length, and CTA:",
     input.referenceCaption.trim(),
   );
   return lines.join("\n");
