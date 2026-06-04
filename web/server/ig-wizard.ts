@@ -485,39 +485,46 @@ export async function generateCaption(input: {
 
 // ─── Adapt Inspiration ──────────────────────────────────────────────────────────
 
-const ADAPT_SYSTEM_PROMPT = `You rewrite an Instagram post into Markus' own wording while keeping the SAME
-content. Markus is an indie maker whose brand is "Built with AI" (practical,
-hands-on, never arrogant).
+const ADAPT_SYSTEM_PROMPT = `You rewrite an Instagram post into Markus' own version. Markus is an indie maker,
+brand "Built with AI" (practical, hands-on, never arrogant).
 
-This is a LIGHT REWRITE / spin — NOT a reinvention. A reader who saw the original
-should recognize it as the same post, just not a word-for-word copy. Think
-"say the exact same thing in fresh words", not "write a new post about the topic".
+GOAL: the SAME post — same idea, same structure, same value — but reworded AND
+re-labeled enough that it does NOT read as a copy of the original. This is the
+sweet spot between a verbatim spin (too close) and a brand-new post (too
+different): keep the substance, swap the signature branding.
 
-KEEP (do not change):
-- The same core idea, the same claims, the same takeaway.
-- The same structure: the same sections, the same number of points/steps, in the SAME order.
-- The same concrete specifics — keep every named concept, framework, tool, role,
-  and list item EXACTLY (e.g. if it's called "The Council" with roles "The Contrarian /
-  The First-Principles Thinker / ...", keep those names and items; do NOT rename or
-  invent new ones).
-- Roughly the same length (within ~20%). Do NOT expand into a longer essay or add new sections.
-- The same call-to-action and the same comment-trigger WORD if there is one.
+KEEP (same substance — do not change):
+- The same core idea, claims, takeaway, and the same examples/specifics.
+- The same structure: the same sections, the SAME number of points/steps, in the SAME order.
+- Roughly the same length (within ~20%). Do NOT expand into an essay or add/remove sections.
+- Real product / tool / company names EXACTLY (Claude, Anthropic, ChatGPT, Gemini,
+  GitHub, Veo, etc.). Never rename or genericize a real product.
 
-CHANGE (only lightly):
-- Reword each sentence so it is not a verbatim copy — synonyms, slightly reordered
-  clauses, your own phrasing. Aim for "clearly the same post, freshly worded".
-- A light voice pass so it reads as Markus: clear, confident, not arrogant.
-- 1 emoji max per line.
-- Match the requested language. For "de" produce fluent native German (a faithful
-  German rewrite of the same content, same structure, same named items).
+RE-LABEL (this is the key step — what stops it reading as a copy):
+- The original usually COINS its own catchy names: a framework/method/system name,
+  named roles or personas, or named steps (e.g. a method "The Council" with roles
+  "The Contrarian / The First-Principles Thinker / ..."; or "The Vault / The Standing
+  Order / The Sealed Memory"). REPLACE every one of these coined labels with a fitting
+  SYNONYM or equivalent of your own — same meaning, different word.
+    · "The Council" → "The Panel" / "The Board" / "The Roundtable"
+    · "The Contrarian" → "The Skeptic"; "The Executor" → "The Operator"
+    · German: "Rat" → "Gremium" / "Beirat" / "Komitee"
+  Each renamed role/step must do the EXACT SAME thing as in the original — only its
+  NAME changes, never its function, count, or order.
+- If a comment-trigger WORD is tied to that name, change the trigger to match the new
+  name (e.g. trigger "COUNCIL" → "PANEL").
 
-DO NOT: invent a new framework, rename the core concept or its parts, add steps the
-source didn't have, drift to a different topic, or pad it out. Same substance, same
-shape, fresh wording.
+REWORD:
+- Reword the surrounding sentences lightly in Markus' voice (synonyms, reordered
+  clauses). Clear, confident, never arrogant. 1 emoji max per line.
+- Match the requested language. For "de" produce fluent native German, using German
+  synonyms for the coined labels.
 
-Return ONLY valid JSON in this exact shape, no markdown fences, no commentary
-(hook = the reworded opening line, body = the reworded middle with the SAME
-structure, cta = the reworded call-to-action):
+DO NOT: change the actual advice/content, reorder or add/remove points, rename real
+products, or drift to a different topic. Same substance + structure, fresh wording,
+freshly-named signature concepts.
+
+Return ONLY valid JSON in this exact shape, no markdown fences, no commentary:
 { "hook": "...", "body": "line one\\n\\nline two", "cta": "Comment WORD for ...", "hashtags": ["tag1", "tag2", ...], "style": "cozy" }`;
 
 function buildAdaptUserPrompt(input: {
@@ -536,8 +543,9 @@ function buildAdaptUserPrompt(input: {
   }
   lines.push(
     "",
-    "REFERENCE POST — rewrite THIS in fresh wording but keep the same content,",
-    "structure, named concepts and list items, length, and CTA:",
+    "REFERENCE POST — rewrite THIS keeping the same content, structure, examples,",
+    "length and CTA, but rename every coined/branded concept + role + trigger word",
+    "to a fitting synonym (keep real product names as-is):",
     input.referenceCaption.trim(),
   );
   return lines.join("\n");
