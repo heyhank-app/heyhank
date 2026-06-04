@@ -201,6 +201,15 @@ export async function generateVeoGoogle(
   });
   if (!res.ok) {
     const text = await res.text();
+    // 429 = the Gemini/Veo plan's video quota is used up. Surface a clear,
+    // actionable message instead of a raw API blob (Veo's free tier only allows
+    // a handful of videos/day).
+    if (res.status === 429) {
+      throw new Error(
+        "Google Veo quota exceeded — you've hit today's video limit on this Gemini plan. " +
+          "Wait for the quota to reset or raise the limit in Google AI Studio billing, then try the reel again.",
+      );
+    }
     throw new Error(`Google Veo submit failed ${res.status}: ${text}`);
   }
   const data = (await res.json()) as { name?: string };
