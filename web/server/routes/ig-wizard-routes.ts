@@ -338,13 +338,12 @@ export function registerIgWizardRoutes(api: Hono): void {
         throw new Error("Veo timed out (>8 min)");
       };
 
-      // 2) Generate the b-roll scenes in parallel; overlap the branded presenter
-      //    HOOK INTRO (gpt-image-2 presenter frame → Veo motion). The hook opens
-      //    the reel like a charismatic talking-head, then it cuts to b-roll +
-      //    the Charon narration. Best-effort: a hook failure never sinks the reel.
-      const bodyClipsP = Promise.all(
-        Array.from({ length: distinctBody }, (_, i) => genClip({ prompt: buildReelVeoPrompt(post.topic, i) })),
-      );
+      // 2) HOOK FIRST. The branded presenter hook intro (gpt-image-2 presenter
+      //    frame → Veo motion) is the most important visual — it stops the scroll
+      //    and opens the reel like a charismatic talking-head. So it gets the
+      //    FIRST claim on the Veo quota: if a rate/quota limit hits, the b-roll
+      //    degrades (fewer distinct scenes, tiled), but the hook is never the one
+      //    dropped. Best-effort still: a hook failure never sinks the whole reel.
       let hookClip: string | null = null;
       if (hookIntro) {
         try {
@@ -354,7 +353,10 @@ export function registerIgWizardRoutes(api: Hono): void {
           console.warn(`reel hook intro skipped: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
-      const bodyClips = await bodyClipsP;
+      // Then the b-roll scenes that fill the rest of the timeline.
+      const bodyClips = await Promise.all(
+        Array.from({ length: distinctBody }, (_, i) => genClip({ prompt: buildReelVeoPrompt(post.topic, i) })),
+      );
 
       // 3) Tile clips into one silent long video: [hook?] + b-roll filling the
       //    rest so the total still equals the voiceover length.
