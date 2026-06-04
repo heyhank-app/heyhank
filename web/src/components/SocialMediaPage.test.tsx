@@ -503,13 +503,28 @@ describe("SocialMediaPage — DraftsTab video + sorting", () => {
     mockApi.deleteSocialPost.mockResolvedValue({ ok: true });
   });
 
-  it("renders a playable <video> for a draft that has a videoUrl", async () => {
+  it("renders a video preview for a draft that has a videoUrl", async () => {
     await renderDraftsTab([
       makeDraft({ id: "r1", text: "Reel draft", videoUrl: "/api/media/file/clip.mp4", thumbnailUrl: "/api/media/file/poster.jpg", format: "reel" }),
     ]);
     const vid = screen.getByTestId("draft-video");
     expect(vid).toHaveAttribute("src", "/api/media/file/clip.mp4");
     expect(vid).toHaveAttribute("poster", "/api/media/file/poster.jpg");
+  });
+
+  it("opens a fullscreen video popup when the draft video is clicked", async () => {
+    await renderDraftsTab([
+      makeDraft({ id: "r1", text: "Reel draft", videoUrl: "/api/media/file/clip.mp4", thumbnailUrl: "/api/media/file/poster.jpg", format: "reel" }),
+    ]);
+    // No lightbox until clicked.
+    expect(screen.queryByTestId("video-lightbox-player")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /play video/i }));
+    // The popup player appears with the same source.
+    const player = screen.getByTestId("video-lightbox-player");
+    expect(player).toHaveAttribute("src", "/api/media/file/clip.mp4");
+    // Closing dismisses it.
+    fireEvent.click(screen.getByRole("button", { name: /close video viewer/i }));
+    expect(screen.queryByTestId("video-lightbox-player")).not.toBeInTheDocument();
   });
 
   it("orders drafts newest-first even when the server returns them oldest-first", async () => {

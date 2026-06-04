@@ -41,6 +41,7 @@ import { SessionLaunchOverlay } from "./SessionLaunchOverlay.js";
 import { PlaygroundUpdateOverlay } from "./UpdateOverlay.js";
 import { PlaygroundDockerUpdateDialog } from "./DockerUpdateDialog.js";
 import { ImageLightbox } from "./ImageLightbox.js";
+import { VideoLightbox } from "./VideoLightbox.js";
 import { SessionItem } from "./SessionItem.js";
 import type { CreationProgressEvent } from "../types.js";
 import type { SessionItem as SessionItemType } from "../utils/project-grouping.js";
@@ -2653,6 +2654,10 @@ export function Playground() {
           <PlaygroundLightboxDemo />
         </Section>
 
+        <Section title="VideoLightbox" description="Fullscreen video popup used on PostCard for reel drafts. Click the preview to open; Escape or backdrop closes.">
+          <PlaygroundVideoLightboxDemo />
+        </Section>
+
         <Section title="FormatBadge" description="Distinguishes Carousel, Story and Reel drafts at a glance. Shown next to the status + platforms pills on PostCard. Carousel/Story include a slide/frame count suffix when > 1.">
           <div className="flex flex-wrap gap-2 items-center">
             <PlaygroundFormatBadge format="carousel" mediaCount={5} />
@@ -2715,6 +2720,32 @@ function PlaygroundLightboxDemo() {
       {open !== null && (
         <ImageLightbox urls={urls} startIndex={open} onClose={() => setOpen(null)} />
       )}
+    </div>
+  );
+}
+
+function PlaygroundVideoLightboxDemo() {
+  const [open, setOpen] = useState(false);
+  // A tiny public sample clip; the demo only needs the popup to mount.
+  const url = "https://www.w3schools.com/html/mov_bbb.mp4";
+  const poster =
+    `data:image/svg+xml;utf8,${encodeURIComponent(
+      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 600'><rect width='400' height='600' fill='%23111'/><text x='200' y='310' font-family='sans-serif' font-size='36' fill='white' text-anchor='middle'>Reel</text></svg>`,
+    )}`;
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Play video"
+        className="relative inline-block rounded-lg border border-cc-border/30 overflow-hidden focus:outline-none focus:ring-2 focus:ring-cc-accent group"
+      >
+        <img src={poster} alt="Video preview" className="h-40 w-auto block" />
+        <span className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
+          <span className="w-11 h-11 rounded-full bg-black/55 group-hover:bg-black/75 flex items-center justify-center text-white text-lg">▶</span>
+        </span>
+      </button>
+      {open && <VideoLightbox url={url} poster={poster} onClose={() => setOpen(false)} />}
     </div>
   );
 }

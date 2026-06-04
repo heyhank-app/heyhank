@@ -7,6 +7,7 @@ import { PersonasTab } from "./PersonasTab.js";
 import { AutoDmTab } from "./AutoDmTab.js";
 import { IgWizardTab } from "./IgWizardTab.js";
 import { ImageLightbox } from "./ImageLightbox.js";
+import { VideoLightbox } from "./VideoLightbox.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -1028,6 +1029,7 @@ function PostCard({ post, selected, onToggleSelect, onEdit, onDelete, onArchive,
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<SocialComment[]>([]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [videoOpen, setVideoOpen] = useState(false);
   const isDraft = post.status === "draft";
   const isArchived = post.status === "archived";
   const mediaList = post.mediaUrls || [];
@@ -1124,17 +1126,30 @@ function PostCard({ post, selected, onToggleSelect, onEdit, onDelete, onArchive,
           />
         )}
 
-        {/* Video — a real, playable preview (reels), not just a text link. */}
+        {/* Video — a clickable preview (reels). Click opens a fullscreen popup. */}
         {post.videoUrl && (
-          <video
-            src={post.videoUrl}
-            poster={post.thumbnailUrl || undefined}
-            controls
-            muted
-            playsInline
-            data-testid="draft-video"
-            className="h-40 w-auto rounded-lg border border-cc-border/30 bg-black block"
-          />
+          <button
+            type="button"
+            onClick={() => setVideoOpen(true)}
+            aria-label="Play video"
+            className="relative inline-block rounded-lg border border-cc-border/30 overflow-hidden focus:outline-none focus:ring-2 focus:ring-cc-accent hover:opacity-95 transition-opacity group"
+          >
+            <video
+              src={post.videoUrl}
+              poster={post.thumbnailUrl || undefined}
+              muted
+              playsInline
+              preload="metadata"
+              data-testid="draft-video"
+              className="h-40 w-auto bg-black block pointer-events-none"
+            />
+            <span className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
+              <span className="w-11 h-11 rounded-full bg-black/55 group-hover:bg-black/75 flex items-center justify-center text-white text-lg transition-colors">▶</span>
+            </span>
+          </button>
+        )}
+        {videoOpen && post.videoUrl && (
+          <VideoLightbox url={post.videoUrl} poster={post.thumbnailUrl || undefined} onClose={() => setVideoOpen(false)} />
         )}
 
         {/* First Comment */}
