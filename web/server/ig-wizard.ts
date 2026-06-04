@@ -514,15 +514,26 @@ RE-LABEL (this is the key step — what stops it reading as a copy):
 - If a comment-trigger WORD is tied to that name, change the trigger to match the new
   name (e.g. trigger "COUNCIL" → "PANEL").
 
-REWORD:
-- Reword the surrounding sentences lightly in Markus' voice (synonyms, reordered
-  clauses). Clear, confident, never arrogant. 1 emoji max per line.
+RE-EXPRESS THE PROSE (genuinely rewrite — do NOT word-swap):
+- Rewrite EVERY sentence from scratch with a DIFFERENT sentence structure, a different
+  opening, and a different rhythm. If your version were placed next to the original,
+  NO sentence should be identical or near-identical. Swapping a few adjectives
+  (good→solid, start→launch) is NOT enough — that still reads as copy-paste.
+- The HOOK especially must be genuinely re-built, not the original line with two words
+  changed.
+    · Original hook: "Ever noticed how Claude just... agrees with everything you say?"
+    · Too close (FORBIDDEN): "Ever noticed how Claude just... agrees with everything you say?"
+    · Good: "Claude has a habit nobody questions: it nods along to whatever you tell it."
+- Keep each example's POINT, but phrase it your own way (you may vary the specifics
+  slightly as long as the point lands the same).
+- Markus' voice: clear, confident, never arrogant. 1 emoji max per line.
 - Match the requested language. For "de" produce fluent native German, using German
   synonyms for the coined labels.
 
 DO NOT: change the actual advice/content, reorder or add/remove points, rename real
-products, or drift to a different topic. Same substance + structure, fresh wording,
-freshly-named signature concepts.
+products, drift to a different topic, OR keep any sentence verbatim/near-verbatim from
+the source. Same substance + structure + length, fully re-expressed prose, freshly-named
+signature concepts.
 
 Return ONLY valid JSON in this exact shape, no markdown fences, no commentary:
 { "hook": "...", "body": "line one\\n\\nline two", "cta": "Comment WORD for ...", "hashtags": ["tag1", "tag2", ...], "style": "cozy" }`;
