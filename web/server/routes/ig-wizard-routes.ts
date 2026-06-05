@@ -303,11 +303,14 @@ export function registerIgWizardRoutes(api: Hono): void {
   api.post("/ig-wizard/posts/:id/reel", async (c) => {
     const post = wizardPosts.getPost(c.req.param("id"));
     if (!post) return c.json({ error: "not found" }, 404);
-    const body = (await c.req.json().catch(() => ({}))) as { hookIntro?: unknown; hookSetting?: unknown };
+    const body = (await c.req.json().catch(() => ({}))) as { hookIntro?: unknown; hookSetting?: unknown; cap?: unknown };
     // Branded presenter hook intro is on by default; the setting (studio, desk,
     // cafe, outdoor, loft) is the user's choice — it doesn't have to be a studio.
     const hookIntro = body.hookIntro !== false;
     const hookSetting = normalizeHookSetting(body.hookSetting);
+    // Headwear for the presenter hook: request body wins, else the post's setting,
+    // else default to wearing the M-cap. false → the bare-headed denim look.
+    const hookCap = typeof body.cap === "boolean" ? body.cap : post.cap !== false;
 
     try {
       // 1) Voiceover FIRST — its length drives the reel length so the whole
@@ -348,7 +351,7 @@ export function registerIgWizardRoutes(api: Hono): void {
       let hookClip: string | null = null;
       if (hookIntro) {
         try {
-          const hookImage = await generateReelHookImage({ cap: post.cap !== false, setting: hookSetting });
+          const hookImage = await generateReelHookImage({ cap: hookCap, setting: hookSetting });
           hookClip = await genClip({ prompt: REEL_HOOK_MOTION_PROMPT, firstFramePath: hookImage.path });
         } catch (e) {
           console.warn(`reel hook intro skipped: ${e instanceof Error ? e.message : String(e)}`);

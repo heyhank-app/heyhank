@@ -466,7 +466,11 @@ async function renderSegment(
   for (let i = 0; i < placements.length; i++) {
     const p = placements[i];
     const logoIdx = logoInputStart + i;
-    filters.push(`[${logoIdx}:v]scale=${p.logoWidth}:-1[l${i}]`);
+    // colorkey knocks out the (near-)white background that favicons / generated
+    // placeholders ship with, so logos sit transparently on the video instead of
+    // in an ugly white box. A tight similarity (0.10) only keys near-pure-white,
+    // leaving coloured logo content (the Google "G", the orange asterisk) intact.
+    filters.push(`[${logoIdx}:v]scale=${p.logoWidth}:-1,colorkey=0xFFFFFF:0.10:0.0,format=rgba[l${i}]`);
     const nextLabel = i === placements.length - 1 ? "vout" : `v${i}`;
     filters.push(`[${prev}][l${i}]overlay=${p.logoX}:${p.logoY}[${nextLabel}]`);
     prev = nextLabel;
