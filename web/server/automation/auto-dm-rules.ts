@@ -30,11 +30,32 @@ export interface AutoDmRule {
   postId?: string | null;
   /** Case-insensitive substring the comment text must contain. */
   keyword: string;
-  /** The DM body sent via the Private-Reply Send API. */
+  /**
+   * The DM body sent via the Private-Reply Send API. May contain the literal
+   * placeholder `{{link}}`, which is replaced at send-time with a personalised
+   * tracking link (markusstoeger.com/go/<code>) iff `targetUrl` is set.
+   */
   dmTemplate: string;
+  /**
+   * Destination the DM's {{link}} redirects to (usually a Substack post URL).
+   * When set + the dmTemplate contains {{link}}, each send mints a tracked
+   * link so we can measure the comment→DM→click funnel. Optional: a DM with
+   * no link still works, it just isn't click-measurable.
+   */
+  targetUrl?: string | null;
+  /**
+   * Optional public reply posted in the comment thread AFTER a successful DM
+   * send (e.g. "Just sent it 📩 check your DMs"). Boosts the engagement signal
+   * + shows other readers you respond. Gated on DM success — if the DM fails we
+   * never post the reply. Needs the instagram_manage_comments (IG) /
+   * pages_manage_engagement (FB) scope.
+   */
+  publicReply?: string | null;
   enabled: boolean;
   /** Total successful sends across all triggers (audit). */
   sentCount: number;
+  /** Total public comment-replies posted (audit). */
+  publicReplyCount?: number;
   /** Per-(postId, commenterId) dedupe so we never DM the same person twice. */
   sentTo: Array<{ postId: string; commenterId: string; sentAt: string }>;
   createdAt: string;
@@ -79,7 +100,7 @@ export function getRule(id: string): AutoDmRule | null {
 
 export function createRule(
   input: Pick<AutoDmRule, "platform" | "keyword" | "dmTemplate"> &
-    Partial<Pick<AutoDmRule, "postId" | "enabled" | "notes">>,
+    Partial<Pick<AutoDmRule, "postId" | "enabled" | "notes" | "targetUrl" | "publicReply">>,
 ): AutoDmRule {
   const now = new Date().toISOString();
   const rule: AutoDmRule = {
@@ -88,8 +109,11 @@ export function createRule(
     postId: input.postId ?? null,
     keyword: input.keyword.trim(),
     dmTemplate: input.dmTemplate,
+    targetUrl: input.targetUrl ?? null,
+    publicReply: input.publicReply ?? null,
     enabled: input.enabled ?? true,
     sentCount: 0,
+    publicReplyCount: 0,
     sentTo: [],
     createdAt: now,
     updatedAt: now,
@@ -156,6 +180,17 @@ export function recordSend(ruleId: string, event: CommentEvent): AutoDmRule | nu
     sentAt: new Date().toISOString(),
   });
   rules[idx].sentCount = (rules[idx].sentCount ?? 0) + 1;
+  rules[idx].updatedAt = new Date().toISOString();
+  writeAll(rules);
+  return rules[idx];
+}
+
+/** Record that we posted a public comment-reply for this rule. Bumps the audit counter. */
+export function recordReply(ruleId: string): AutoDmRule | null {
+  const rules = readAll();
+  const idx = rules.findIndex((r) => r.id === ruleId);
+  if (idx === -1) return null;
+  rules[idx].publicReplyCount = (rules[idx].publicReplyCount ?? 0) + 1;
   rules[idx].updatedAt = new Date().toISOString();
   writeAll(rules);
   return rules[idx];

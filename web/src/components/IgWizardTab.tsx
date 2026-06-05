@@ -9,8 +9,77 @@
 // straight into the Auto-DM tab. This closes the funnel loop in one click:
 // caption → comment → auto-DM, no manual setup.
 
-import { useState, useCallback, useMemo } from "react";
-import { igWizardApi, autoDmRulesApi, type IgWizardResult, type IgWizardLeadPackage } from "../api.js";
+import { useState, useCallback, useMemo, useEffect } from "react";
+import {
+  igWizardApi,
+  autoDmRulesApi,
+  type IgWizardResult,
+  type IgWizardLeadPackage,
+  type IgCaptionResult,
+  type IgPlanResult,
+  type IgPlanBrief,
+  type IgContentBrief,
+  type WizardPost,
+  type InspirationItem,
+  type InspirationFormat,
+} from "../api.js";
+
+/**
+ * Build a compact grounding string from a research brief, client-side, so a
+ * manually-loaded brief can ground the caption without triggering a second web
+ * search. Mirrors the server's briefToGroundingText shape loosely — it's just
+ * prompt text, so an exact match isn't required.
+ */
+export function briefToGrounding(brief: IgContentBrief): string {
+  const lines: string[] = [];
+  if (brief.freshItems.length) {
+    lines.push("RECENT & NOTEWORTHY:");
+    for (const f of brief.freshItems) lines.push(`- ${f.headline}: ${f.detail}${f.date ? ` (${f.date})` : ""}`);
+  }
+  if (brief.facts.length) {
+    lines.push("FACTS YOU CAN CITE:");
+    for (const f of brief.facts) lines.push(`- ${f.fact}`);
+  }
+  if (brief.hotDataPoint) lines.push(`STRONG STAT: ${brief.hotDataPoint}`);
+  if (brief.painPoints.length) lines.push(`PAIN POINTS: ${brief.painPoints.join("; ")}`);
+  if (brief.myths.length) lines.push(`MYTHS TO BUST: ${brief.myths.join("; ")}`);
+  if (brief.angles.length) lines.push(`ANGLE IDEAS: ${brief.angles.join("; ")}`);
+  if (brief.ownTakes.length) {
+    lines.push("MARKUS'S OWN TAKES:");
+    for (const t of brief.ownTakes) lines.push(`- ${t}`);
+  }
+  return lines.join("\n");
+}
+
+const DRAFT_PLATFORMS: { id: string; label: string }[] = [
+  { id: "instagram", label: "Instagram" },
+  { id: "facebook", label: "Facebook" },
+  { id: "linkedin", label: "LinkedIn" },
+  { id: "threads", label: "Threads" },
+];
+
+const HERO_SCENES: { id: string; label: string }[] = [
+  { id: "notebook", label: "Notebook" },
+  { id: "laptop", label: "Laptop" },
+  { id: "phone", label: "Phone" },
+  { id: "workspace", label: "Workspace" },
+];
+
+const IG_STYLES: { id: string; label: string }[] = [
+  { id: "cozy", label: "Cozy Builder" },
+  { id: "business", label: "Authority" },
+  { id: "pointing", label: "Pointing" },
+  { id: "bold", label: "Bold Text" },
+  { id: "screen", label: "Screen / Demo" },
+];
+
+type WizardMode = "single" | "plan" | "inspiration" | "saved";
+
+const CTA_TYPE_LABELS: Record<IgPlanBrief["ctaType"], string> = {
+  lead: "Lead",
+  engagement: "Engagement",
+  growth: "Growth",
+};
 
 interface Props {
   showMessage: (text: string, isError?: boolean) => void;
@@ -56,6 +125,7 @@ export function extractTriggerWord(cta: string): string | null {
 }
 
 export function IgWizardTab({ showMessage }: Props) {
+  const [mode, setMode] = useState<WizardMode>("single");
   const [niche, setNiche] = useState("");
   const [language, setLanguage] = useState<"en" | "de">("en");
   const [loading, setLoading] = useState(false);
@@ -63,10 +133,18 @@ export function IgWizardTab({ showMessage }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<CtaCategory>("leads");
 
+  // ── 30-Day Plan state ───────────────────────────────────────────────────────
+  const [planTopic, setPlanTopic] = useState("");
+  const [planResult, setPlanResult] = useState<IgPlanResult | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
+
   const handleGenerate = useCallback(async () => {
     setLoading(true);
     setError(null);
     setResult(null);
+    setSavedPostId(null); // fresh session → next compose creates a new saved post
+    setCaption(null);
     try {
       const res = await igWizardApi.generate(niche.trim(), language);
       setResult(res);
@@ -97,6 +175,127 @@ export function IgWizardTab({ showMessage }: Props) {
   // the same trigger flips to disabled with a "Created" badge.
   const [createdRuleTriggers, setCreatedRuleTriggers] = useState<Set<string>>(new Set());
   const [creatingRuleTrigger, setCreatingRuleTrigger] = useState<string | null>(null);
+
+  // ── Caption Composer state ──────────────────────────────────────────────────
+  // Assembles a full ready-to-post caption from the niche (+ an optional hook /
+  // CTA the user picked from the lists above) via /api/ig-wizard/caption.
+  const [composerHook, setComposerHook] = useState("");
+  const [composerCta, setComposerCta] = useState("");
+  const [caption, setCaption] = useState<IgCaptionResult | null>(null);
+  const [composing, setComposing] = useState(false);
+
+  // Research grounding ("beides wählbar"): autoResearch on = compose researches
+  // inline; clicking 🔬 Research runs it as a visible, reviewable step. A loaded
+  // brief grounds the caption client-side (no second search).
+  const [autoResearch, setAutoResearch] = useState(true);
+  const [brief, setBrief] = useState<IgContentBrief | null>(null);
+  const [researching, setResearching] = useState(false);
+  const [briefOpen, setBriefOpen] = useState(true);
+
+  // The composed caption auto-saves into the wizard's persistent Saved Posts
+  // workbench. We track the saved post's id so a Redo updates it instead of
+  // piling up duplicates. Reset on a fresh Generate (new session = new post).
+  const [savedPostId, setSavedPostId] = useState<string | null>(null);
+  const [savedTick, setSavedTick] = useState(0); // bump to make the Saved Posts tab refetch
+
+  const handleResearch = useCallback(async (forceRefresh = false) => {
+    const topic = niche.trim();
+    if (!topic) {
+      showMessage("Enter a topic/niche first, then research it.", true);
+      return;
+    }
+    setResearching(true);
+    try {
+      const res = await igWizardApi.research({ topic, language, forceRefresh });
+      setBrief(res);
+      setBriefOpen(true);
+      const n = res.freshItems.length + res.facts.length;
+      showMessage(
+        res.cached
+          ? `Loaded a cached brief (${n} facts/items). Hit ↻ to refresh with live data.`
+          : `Researched — ${n} fresh facts/items${res.ownTakes.length ? ` + ${res.ownTakes.length} of your own takes` : ""}.`,
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showMessage(`Research failed: ${msg}`, true);
+    } finally {
+      setResearching(false);
+    }
+  }, [niche, language, showMessage]);
+
+  const handleCompose = useCallback(async () => {
+    setComposing(true);
+    setCaption(null);
+    try {
+      // Prefer a loaded brief (grounds client-side, no extra search). Else, if
+      // autoResearch is on, let the backend research inline.
+      const grounding = brief ? briefToGrounding(brief) : undefined;
+      const res = await igWizardApi.caption({
+        topic: niche.trim(),
+        language,
+        hook: composerHook.trim() || undefined,
+        cta: composerCta.trim() || undefined,
+        grounding,
+        autoResearch: !grounding && autoResearch,
+      });
+      setCaption(res);
+      // Auto-save to the workbench (best-effort — composing must not fail if
+      // the save hiccups). Update the same post on Redo.
+      try {
+        const payload = {
+          topic: niche.trim(),
+          hook: res.hook,
+          body: res.body,
+          cta: res.cta,
+          hashtags: res.hashtags,
+          caption: res.caption,
+          style: res.style,
+        };
+        if (savedPostId) {
+          await igWizardApi.posts.update(savedPostId, payload);
+        } else {
+          const created = await igWizardApi.posts.create({ ...payload, source: "single" });
+          setSavedPostId(created.post.id);
+        }
+        setSavedTick((t) => t + 1);
+        showMessage("Caption composed + saved to your posts.");
+      } catch {
+        showMessage("Caption composed (auto-save to posts failed).", true);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showMessage(`Compose failed: ${msg}`, true);
+    } finally {
+      setComposing(false);
+    }
+  }, [niche, language, composerHook, composerCta, savedPostId, showMessage, brief, autoResearch]);
+
+  const useHookInComposer = useCallback((hook: string) => {
+    setComposerHook(hook);
+    showMessage("Hook added to the Caption Composer below.");
+  }, [showMessage]);
+
+  const useCtaInComposer = useCallback((cta: string) => {
+    setComposerCta(cta);
+    showMessage("CTA added to the Caption Composer below.");
+  }, [showMessage]);
+
+  const handlePlan = useCallback(async () => {
+    setPlanLoading(true);
+    setPlanError(null);
+    setPlanResult(null);
+    try {
+      const res = await igWizardApi.plan({ topic: planTopic.trim(), language, days: 30 });
+      setPlanResult(res);
+      showMessage(`30-day plan ready — ${res.briefs.length} post ideas. Tap a day to compose it.`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setPlanError(msg);
+      showMessage(`Plan failed: ${msg}`, true);
+    } finally {
+      setPlanLoading(false);
+    }
+  }, [planTopic, language, showMessage]);
 
   const handleCreateRule = useCallback(
     async (lead: IgWizardLeadPackage) => {
@@ -139,10 +338,41 @@ export function IgWizardTab({ showMessage }: Props) {
       <header style={{ marginBottom: 16 }}>
         <h2 style={{ margin: "0 0 4px 0" }}>Instagram Wizard</h2>
         <p style={{ margin: 0, color: "var(--text-muted, #888)", fontSize: 14 }}>
-          Type your niche, get 20 viral hooks and 30 CTAs generated by Claude. The Leads
-          CTAs map 1:1 to Auto-DM rules.
+          Hooks, CTAs + full captions for a single post — or a whole month of post ideas from one topic.
         </p>
       </header>
+
+      <div role="tablist" aria-label="Wizard mode" style={{ display: "flex", gap: 4, marginBottom: 20 }}>
+        {([
+          { id: "single" as const, label: "📝 Single Post" },
+          { id: "plan" as const, label: "📅 30-Day Plan" },
+          { id: "inspiration" as const, label: "💡 Inspiration" },
+          { id: "saved" as const, label: "💾 Saved Posts" },
+        ]).map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            role="tab"
+            aria-selected={mode === m.id}
+            onClick={() => setMode(m.id)}
+            style={{
+              padding: "8px 16px",
+              background: mode === m.id ? "var(--btn-primary, #0066cc)" : "transparent",
+              color: mode === m.id ? "white" : "var(--text, #333)",
+              border: "1px solid var(--border, #ddd)",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontWeight: 500,
+              fontSize: 14,
+            }}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+
+      {mode === "single" && (
+       <>
 
       <section
         aria-label="Niche input"
@@ -218,7 +448,7 @@ export function IgWizardTab({ showMessage }: Props) {
         </div>
       )}
 
-      {!result && !loading && !error && (
+      {!result && !loading && !error && !composerHook && !composerCta && (
         <div
           style={{
             padding: 24,
@@ -260,13 +490,13 @@ export function IgWizardTab({ showMessage }: Props) {
               }}
             >
               {result.hooks.map((hook, idx) => (
-                <li key={idx}>
+                <li key={idx} style={{ display: "flex", gap: 6 }}>
                   <button
                     type="button"
                     onClick={() => handleCopy(hook, "hook")}
                     aria-label={`Copy hook: ${hook}`}
                     style={{
-                      width: "100%",
+                      flex: 1,
                       textAlign: "left",
                       padding: "8px 12px",
                       background: "var(--card-bg, #f8f8f8)",
@@ -278,6 +508,24 @@ export function IgWizardTab({ showMessage }: Props) {
                   >
                     <span style={{ color: "var(--text-muted, #888)", marginRight: 8 }}>{idx + 1}.</span>
                     {hook}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => useHookInComposer(hook)}
+                    aria-label={`Use hook in caption composer: ${hook}`}
+                    title="Use in Caption Composer"
+                    style={{
+                      flex: "0 0 auto",
+                      padding: "8px 10px",
+                      background: "transparent",
+                      border: "1px solid var(--border, #ddd)",
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      fontSize: 13,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    ✍️ Use
                   </button>
                 </li>
               ))}
@@ -339,6 +587,7 @@ export function IgWizardTab({ showMessage }: Props) {
                         creating={creatingRuleTrigger === lead.trigger}
                         onCopy={() => handleCopy(lead.cta, "CTA")}
                         onCreateRule={() => handleCreateRule(lead)}
+                        onUseInComposer={() => useCtaInComposer(lead.cta)}
                       />
                     </li>
                   ))}
@@ -346,13 +595,13 @@ export function IgWizardTab({ showMessage }: Props) {
               ) : (
                 <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 6 }}>
                   {activeStringCtas.map((cta, idx) => (
-                    <li key={idx}>
+                    <li key={idx} style={{ display: "flex", gap: 6 }}>
                       <button
                         type="button"
                         onClick={() => handleCopy(cta, "CTA")}
                         aria-label={`Copy CTA: ${cta}`}
                         style={{
-                          width: "100%",
+                          flex: 1,
                           textAlign: "left",
                           padding: "8px 12px",
                           background: "var(--card-bg, #f8f8f8)",
@@ -365,6 +614,24 @@ export function IgWizardTab({ showMessage }: Props) {
                         <span style={{ color: "var(--text-muted, #888)", marginRight: 8 }}>{idx + 1}.</span>
                         {cta}
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => useCtaInComposer(cta)}
+                        aria-label={`Use CTA in caption composer: ${cta}`}
+                        title="Use in Caption Composer"
+                        style={{
+                          flex: "0 0 auto",
+                          padding: "8px 10px",
+                          background: "transparent",
+                          border: "1px solid var(--border, #ddd)",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          fontSize: 13,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        ✍️ Use
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -373,9 +640,1612 @@ export function IgWizardTab({ showMessage }: Props) {
           </section>
         </>
       )}
+
+      {(result || composerHook || composerCta) && (
+        <section aria-labelledby="ig-wizard-composer-heading" style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--border, #ddd)" }}>
+            <h3 id="ig-wizard-composer-heading" style={{ marginTop: 0 }}>📝 Caption Composer</h3>
+            <p style={{ margin: "0 0 12px 0", color: "var(--text-muted, #888)", fontSize: 13 }}>
+              Turn a hook + CTA into a complete, ready-to-post caption (hook · value lines · CTA · hashtags).
+              Hit <strong>✍️ Use</strong> on any hook or lead CTA above to drop it in, or leave blank to let Claude pick.
+            </p>
+
+            <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+              <div>
+                <label htmlFor="composer-hook" style={{ display: "block", fontSize: 12, color: "var(--text-muted, #888)", marginBottom: 2 }}>
+                  Hook (optional)
+                </label>
+                <input
+                  id="composer-hook"
+                  type="text"
+                  value={composerHook}
+                  onChange={(e) => setComposerHook(e.target.value)}
+                  placeholder="Leave blank to let Claude pick the strongest hook"
+                  style={{ width: "100%", padding: "8px 10px", boxSizing: "border-box" }}
+                  disabled={composing}
+                />
+              </div>
+              <div>
+                <label htmlFor="composer-cta" style={{ display: "block", fontSize: 12, color: "var(--text-muted, #888)", marginBottom: 2 }}>
+                  Lead CTA (optional)
+                </label>
+                <input
+                  id="composer-cta"
+                  type="text"
+                  value={composerCta}
+                  onChange={(e) => setComposerCta(e.target.value)}
+                  placeholder="e.g. Comment GUIDE for my free AI workflow ⚡"
+                  style={{ width: "100%", padding: "8px 10px", boxSizing: "border-box" }}
+                  disabled={composing}
+                />
+              </div>
+            </div>
+
+            {/* Research grounding — makes the body cite real, current AI news
+                instead of generic advice. "Beides wählbar": auto-on toggle, or
+                run it as a visible step with the 🔬 button. */}
+            <ResearchPanel
+              brief={brief}
+              researching={researching}
+              autoResearch={autoResearch}
+              open={briefOpen}
+              onToggleAuto={() => setAutoResearch((v) => !v)}
+              onResearch={() => handleResearch(false)}
+              onRefresh={() => handleResearch(true)}
+              onToggleOpen={() => setBriefOpen((v) => !v)}
+              onClear={() => setBrief(null)}
+              onUseAngle={(a) => { setComposerHook(a); showMessage("Angle dropped into the hook field."); }}
+            />
+
+            <button
+              type="button"
+              onClick={handleCompose}
+              disabled={composing}
+              aria-label="Compose full caption"
+              style={{
+                padding: "8px 16px",
+                background: composing ? "var(--btn-disabled, #ccc)" : "var(--btn-primary, #0066cc)",
+                color: "white",
+                border: "none",
+                borderRadius: 4,
+                cursor: composing ? "wait" : "pointer",
+                fontWeight: 500,
+              }}
+            >
+              {composing ? (brief || autoResearch ? "Researching + Composing…" : "Composing…") : "Compose Caption"}
+            </button>
+
+            {caption && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>Your caption</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(caption.caption, "caption")}
+                    aria-label="Copy full caption"
+                    style={{
+                      padding: "5px 12px",
+                      background: "var(--btn-primary, #0066cc)",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      fontSize: 13,
+                    }}
+                  >
+                    📋 Copy caption
+                  </button>
+                </div>
+                <textarea
+                  readOnly
+                  aria-label="Composed caption"
+                  value={caption.caption}
+                  rows={Math.min(16, caption.caption.split("\n").length + 2)}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "10px 12px",
+                    fontSize: 14,
+                    lineHeight: 1.5,
+                    fontFamily: "inherit",
+                    background: "var(--card-bg, #f8f8f8)",
+                    border: "1px solid var(--border, #ddd)",
+                    borderRadius: 4,
+                    resize: "vertical",
+                  }}
+                />
+                <p style={{ margin: "6px 0 0 0", fontSize: 12, color: "var(--text-muted, #888)" }}>
+                  {caption.hashtags.length > 0 && <>{caption.hashtags.length} hashtags · </>}
+                  {caption.language.toUpperCase()}
+                  {caption.grounded
+                    ? <span style={{ marginLeft: 8, color: "var(--success-text, #137333)", fontWeight: 500 }}>🔬 grounded in research</span>
+                    : <span style={{ marginLeft: 8 }}>· generic (no research)</span>}
+                </p>
+
+                {/* Auto-saved to the wizard workbench. Finalize (image, platforms,
+                    → Drafts) over in the Saved Posts tab. */}
+                {savedPostId && (
+                  <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px dashed var(--border, #ddd)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13, color: "var(--success-text, #137333)", fontWeight: 500 }}>
+                      ✓ Saved to your posts
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setMode("saved")}
+                      aria-label="Open Saved Posts to add an image and send to Drafts"
+                      style={{ padding: "5px 12px", background: "transparent", border: "1px solid var(--border, #ddd)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
+                    >
+                      💾 Open Saved Posts →
+                    </button>
+                    <span style={{ fontSize: 11, color: "var(--text-muted, #888)" }}>
+                      Add a branded image + send to Drafts there.
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+        </section>
+      )}
+       </>
+      )}
+
+      {mode === "plan" && (
+        <PlanMode
+          topic={planTopic}
+          setTopic={setPlanTopic}
+          language={language}
+          loading={planLoading}
+          error={planError}
+          result={planResult}
+          onGenerate={handlePlan}
+          onCopy={handleCopy}
+          onSaved={() => setSavedTick((t) => t + 1)}
+          showMessage={showMessage}
+        />
+      )}
+
+      {mode === "inspiration" && (
+        <InspirationMode
+          onAdapted={() => setSavedTick((t) => t + 1)}
+          onGoToSaved={() => setMode("saved")}
+          showMessage={showMessage}
+        />
+      )}
+
+      {mode === "saved" && (
+        <SavedPostsMode refreshKey={savedTick} onCopy={handleCopy} showMessage={showMessage} />
+      )}
     </div>
   );
 }
+
+// ─── InspirationMode (manual swipe file) ─────────────────────────────────────
+
+const INSPIRATION_FORMAT_OPTIONS: { id: InspirationFormat; label: string }[] = [
+  { id: "post", label: "Post" },
+  { id: "carousel", label: "Carousel" },
+  { id: "reel", label: "Reel" },
+  { id: "story", label: "Story" },
+];
+
+const FORMAT_BADGE: Record<InspirationFormat, { bg: string; fg: string }> = {
+  post: { bg: "#e8f0fe", fg: "#1565c0" },
+  carousel: { bg: "#fef7e0", fg: "#b06000" },
+  reel: { bg: "#fce8e6", fg: "#c5221f" },
+  story: { bg: "#e6f4ea", fg: "#137333" },
+};
+
+/** True for media URLs that should render in a <video> rather than <img>. */
+function isVideoUrl(url: string): boolean {
+  return /\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(url);
+}
+
+interface InspirationModeProps {
+  onAdapted: () => void;
+  onGoToSaved: () => void;
+  showMessage: (text: string, isError?: boolean) => void;
+}
+
+function InspirationMode({ onAdapted, onGoToSaved, showMessage }: InspirationModeProps) {
+  const [items, setItems] = useState<InspirationItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Import form state.
+  const [handle, setHandle] = useState("");
+  const [format, setFormat] = useState<InspirationFormat>("reel");
+  const [captionText, setCaptionText] = useState("");
+  const [topic, setTopic] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [notes, setNotes] = useState("");
+  const [mediaUrls, setMediaUrls] = useState<string[]>([]);
+  const [mediaUrlInput, setMediaUrlInput] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const [adaptingId, setAdaptingId] = useState<string | null>(null);
+  const [adaptLang, setAdaptLang] = useState<"en" | "de">("en");
+
+  // Apify Instagram import.
+  const [importHandle, setImportHandle] = useState("");
+  const [importLimit, setImportLimit] = useState(12);
+  const [importing, setImporting] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await igWizardApi.inspiration.list();
+      setItems(res.items);
+    } catch (e) {
+      showMessage(e instanceof Error ? e.message : "Failed to load inspiration", true);
+    } finally {
+      setLoading(false);
+    }
+  }, [showMessage]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleUpload = useCallback(
+    async (file: File | null | undefined) => {
+      if (!file) return;
+      setUploading(true);
+      try {
+        const res = await igWizardApi.inspiration.uploadMedia(file);
+        setMediaUrls((prev) => [...prev, res.url]);
+      } catch (e) {
+        showMessage(e instanceof Error ? e.message : "Upload failed", true);
+      } finally {
+        setUploading(false);
+      }
+    },
+    [showMessage],
+  );
+
+  const handleAddUrl = useCallback(() => {
+    const u = mediaUrlInput.trim();
+    if (!u) return;
+    setMediaUrls((prev) => [...prev, u]);
+    setMediaUrlInput("");
+  }, [mediaUrlInput]);
+
+  const resetForm = useCallback(() => {
+    setHandle("");
+    setCaptionText("");
+    setTopic("");
+    setSourceUrl("");
+    setNotes("");
+    setMediaUrls([]);
+    setMediaUrlInput("");
+  }, []);
+
+  const handleCreate = useCallback(async () => {
+    if (!handle.trim()) {
+      showMessage("Handle is required (e.g. @creator)", true);
+      return;
+    }
+    if (!captionText.trim()) {
+      showMessage("Paste the post caption/text", true);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await igWizardApi.inspiration.create({
+        handle: handle.trim(),
+        format,
+        caption: captionText.trim(),
+        topic: topic.trim() || undefined,
+        mediaUrls,
+        sourceUrl: sourceUrl.trim() || undefined,
+        notes: notes.trim() || undefined,
+      });
+      resetForm();
+      await load();
+      showMessage("Inspiration saved 💡");
+    } catch (e) {
+      showMessage(e instanceof Error ? e.message : "Save failed", true);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [handle, captionText, format, topic, mediaUrls, sourceUrl, notes, resetForm, load, showMessage]);
+
+  const handleAdapt = useCallback(
+    async (id: string) => {
+      setAdaptingId(id);
+      try {
+        await igWizardApi.inspiration.adapt(id, adaptLang);
+        onAdapted();
+        showMessage("Adapted into your voice — saved to 💾 Saved Posts");
+      } catch (e) {
+        showMessage(e instanceof Error ? e.message : "Adapt failed", true);
+      } finally {
+        setAdaptingId(null);
+      }
+    },
+    [adaptLang, onAdapted, showMessage],
+  );
+
+  const handleDelete = useCallback(
+    async (id: string) => {
+      try {
+        await igWizardApi.inspiration.remove(id);
+        setItems((prev) => prev.filter((i) => i.id !== id));
+      } catch (e) {
+        showMessage(e instanceof Error ? e.message : "Delete failed", true);
+      }
+    },
+    [showMessage],
+  );
+
+  const handleImportInstagram = useCallback(async () => {
+    if (!importHandle.trim()) {
+      showMessage("Enter a creator handle to import (e.g. @creator)", true);
+      return;
+    }
+    setImporting(true);
+    try {
+      const res = await igWizardApi.inspiration.importInstagram(importHandle.trim(), importLimit);
+      await load();
+      setImportHandle("");
+      showMessage(`Imported ${res.imported} post${res.imported === 1 ? "" : "s"} from Instagram ⚡`);
+    } catch (e) {
+      showMessage(e instanceof Error ? e.message : "Import failed", true);
+    } finally {
+      setImporting(false);
+    }
+  }, [importHandle, importLimit, load, showMessage]);
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "8px 10px",
+    border: "1px solid var(--border, #ddd)",
+    borderRadius: 4,
+    fontSize: 14,
+    boxSizing: "border-box",
+    background: "var(--input-bg, #fff)",
+    color: "var(--text, #333)",
+  };
+
+  return (
+    <div data-testid="inspiration-mode">
+      <p style={{ margin: "0 0 16px 0", color: "var(--text-muted, #888)", fontSize: 14 }}>
+        Paste posts you admire from other creators, then one-click <strong>“→ Adapt for me”</strong>{" "}
+        rewrites the idea in your own voice as a draft. No Instagram risk — you curate the swipe file.
+      </p>
+
+      {/* ── Auto-import from Instagram via Apify ── */}
+      <section
+        aria-label="Import from Instagram"
+        style={{
+          border: "1px solid var(--accent-border, #b3d1ff)",
+          background: "var(--accent-bg, #f0f6ff)",
+          borderRadius: 8,
+          padding: 14,
+          marginBottom: 16,
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 600, marginRight: 4 }}>⚡ Auto-import from Instagram</span>
+        <input
+          aria-label="Instagram handle to import"
+          placeholder="@vaibhavsisinty"
+          value={importHandle}
+          onChange={(e) => setImportHandle(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void handleImportInstagram();
+            }
+          }}
+          style={{ ...inputStyle, flex: "1 1 180px", width: "auto" }}
+        />
+        <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
+          posts:
+          <select
+            aria-label="Number of posts to import"
+            value={importLimit}
+            onChange={(e) => setImportLimit(Number(e.target.value))}
+            style={{ ...inputStyle, width: "auto", padding: "4px 8px" }}
+          >
+            {[6, 12, 24, 36].map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={handleImportInstagram}
+          disabled={importing}
+          style={{
+            padding: "8px 16px",
+            background: "var(--btn-primary, #0066cc)",
+            color: "white",
+            border: "none",
+            borderRadius: 4,
+            cursor: importing ? "default" : "pointer",
+            fontWeight: 500,
+            fontSize: 13,
+            opacity: importing ? 0.6 : 1,
+          }}
+        >
+          {importing ? "Importing…" : "Import"}
+        </button>
+        <span style={{ flexBasis: "100%", fontSize: 11, color: "var(--text-muted, #888)" }}>
+          Pulls recent posts via Apify (residential proxies, no login) — needs an Apify token in Settings.
+        </span>
+      </section>
+
+      {/* ── Manual import form ── */}
+      <section
+        aria-label="Import inspiration"
+        style={{
+          border: "1px solid var(--border, #ddd)",
+          borderRadius: 8,
+          padding: 16,
+          marginBottom: 24,
+          display: "grid",
+          gap: 12,
+        }}
+      >
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <label style={{ flex: "1 1 180px", fontSize: 13, fontWeight: 500 }}>
+            Creator handle
+            <input
+              aria-label="Creator handle"
+              placeholder="@vaibhavsisinty"
+              value={handle}
+              onChange={(e) => setHandle(e.target.value)}
+              style={{ ...inputStyle, marginTop: 4 }}
+            />
+          </label>
+          <label style={{ flex: "1 1 140px", fontSize: 13, fontWeight: 500 }}>
+            Format
+            <select
+              aria-label="Post format"
+              value={format}
+              onChange={(e) => setFormat(e.target.value as InspirationFormat)}
+              style={{ ...inputStyle, marginTop: 4 }}
+            >
+              {INSPIRATION_FORMAT_OPTIONS.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ flex: "1 1 180px", fontSize: 13, fontWeight: 500 }}>
+            Theme (optional)
+            <input
+              aria-label="Theme"
+              placeholder="self-hosting AI cheap"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              style={{ ...inputStyle, marginTop: 4 }}
+            />
+          </label>
+        </div>
+
+        <label style={{ fontSize: 13, fontWeight: 500 }}>
+          Post caption / text
+          <textarea
+            aria-label="Post caption"
+            placeholder="Paste the creator's caption or on-screen text here…"
+            value={captionText}
+            onChange={(e) => setCaptionText(e.target.value)}
+            rows={4}
+            style={{ ...inputStyle, marginTop: 4, resize: "vertical", fontFamily: "inherit" }}
+          />
+        </label>
+
+        {/* Media: upload + URL */}
+        <div style={{ display: "grid", gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 500 }}>Media (images / videos)</span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <label
+              style={{
+                padding: "6px 12px",
+                border: "1px dashed var(--border, #aaa)",
+                borderRadius: 4,
+                cursor: "pointer",
+                fontSize: 13,
+              }}
+            >
+              {uploading ? "Uploading…" : "⬆ Upload file"}
+              <input
+                aria-label="Upload media file"
+                type="file"
+                accept="image/*,video/*"
+                onChange={(e) => {
+                  void handleUpload(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+                style={{ display: "none" }}
+              />
+            </label>
+            <input
+              aria-label="Media URL"
+              placeholder="…or paste an image/video URL"
+              value={mediaUrlInput}
+              onChange={(e) => setMediaUrlInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAddUrl();
+                }
+              }}
+              style={{ ...inputStyle, flex: "1 1 220px", width: "auto" }}
+            />
+            <button
+              type="button"
+              onClick={handleAddUrl}
+              style={{
+                padding: "6px 12px",
+                border: "1px solid var(--border, #ddd)",
+                borderRadius: 4,
+                cursor: "pointer",
+                fontSize: 13,
+                background: "transparent",
+                color: "var(--text, #333)",
+              }}
+            >
+              Add URL
+            </button>
+          </div>
+          {mediaUrls.length > 0 && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {mediaUrls.map((u, i) => (
+                <div key={`${u}-${i}`} style={{ position: "relative" }}>
+                  {isVideoUrl(u) ? (
+                    <video
+                      src={u}
+                      muted
+                      playsInline
+                      style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 4, border: "1px solid var(--border,#ddd)" }}
+                    />
+                  ) : (
+                    <img
+                      src={u}
+                      alt={`media ${i + 1}`}
+                      style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 4, border: "1px solid var(--border,#ddd)" }}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    aria-label={`Remove media ${i + 1}`}
+                    onClick={() => setMediaUrls((prev) => prev.filter((_, j) => j !== i))}
+                    style={{
+                      position: "absolute",
+                      top: -6,
+                      right: -6,
+                      width: 18,
+                      height: 18,
+                      borderRadius: "50%",
+                      border: "none",
+                      background: "#c5221f",
+                      color: "white",
+                      fontSize: 11,
+                      cursor: "pointer",
+                      lineHeight: "18px",
+                      padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <label style={{ flex: "1 1 220px", fontSize: 13, fontWeight: 500 }}>
+            Source URL (optional)
+            <input
+              aria-label="Source URL"
+              placeholder="https://instagram.com/p/…"
+              value={sourceUrl}
+              onChange={(e) => setSourceUrl(e.target.value)}
+              style={{ ...inputStyle, marginTop: 4 }}
+            />
+          </label>
+          <label style={{ flex: "1 1 220px", fontSize: 13, fontWeight: 500 }}>
+            Why I like it (optional)
+            <input
+              aria-label="Notes"
+              placeholder="strong hook, clear payoff…"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              style={{ ...inputStyle, marginTop: 4 }}
+            />
+          </label>
+        </div>
+
+        <div>
+          <button
+            type="button"
+            onClick={handleCreate}
+            disabled={submitting}
+            style={{
+              padding: "8px 18px",
+              background: "var(--btn-primary, #0066cc)",
+              color: "white",
+              border: "none",
+              borderRadius: 4,
+              cursor: submitting ? "default" : "pointer",
+              fontWeight: 500,
+              fontSize: 14,
+              opacity: submitting ? 0.6 : 1,
+            }}
+          >
+            {submitting ? "Saving…" : "💡 Save inspiration"}
+          </button>
+        </div>
+      </section>
+
+      {/* ── Saved inspiration cards ── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <h3 style={{ margin: 0, fontSize: 15 }}>Your swipe file ({items.length})</h3>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+          <span style={{ color: "var(--text-muted,#888)" }}>Adapt in:</span>
+          <select
+            aria-label="Adapt language"
+            value={adaptLang}
+            onChange={(e) => setAdaptLang(e.target.value as "en" | "de")}
+            style={{ ...inputStyle, width: "auto", padding: "4px 8px" }}
+          >
+            <option value="en">English</option>
+            <option value="de">Deutsch</option>
+          </select>
+        </div>
+      </div>
+
+      {loading ? (
+        <p style={{ color: "var(--text-muted, #888)" }}>Loading…</p>
+      ) : items.length === 0 ? (
+        <p style={{ color: "var(--text-muted, #888)" }}>
+          No inspiration yet — paste your first creator post above.
+        </p>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+          {items.map((item) => {
+            const badge = FORMAT_BADGE[item.format];
+            const firstMedia = item.mediaUrls[0];
+            return (
+              <div
+                key={item.id}
+                data-testid="inspiration-card"
+                style={{
+                  border: "1px solid var(--border, #ddd)",
+                  borderRadius: 8,
+                  padding: 12,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  background: "var(--card-bg, #fff)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontWeight: 600, fontSize: 14 }}>@{item.handle}</span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      padding: "2px 8px",
+                      borderRadius: 10,
+                      background: badge.bg,
+                      color: badge.fg,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {item.format}
+                  </span>
+                </div>
+
+                {firstMedia &&
+                  (isVideoUrl(firstMedia) ? (
+                    <video
+                      src={firstMedia}
+                      controls
+                      muted
+                      playsInline
+                      style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 4, background: "#000" }}
+                    />
+                  ) : (
+                    <img
+                      src={firstMedia}
+                      alt={`${item.handle} ${item.format}`}
+                      style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 4 }}
+                    />
+                  ))}
+
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 13,
+                    color: "var(--text, #333)",
+                    whiteSpace: "pre-wrap",
+                    maxHeight: 80,
+                    overflow: "hidden",
+                  }}
+                >
+                  {item.caption}
+                </p>
+                {item.notes && (
+                  <p style={{ margin: 0, fontSize: 12, fontStyle: "italic", color: "var(--text-muted, #888)" }}>
+                    💭 {item.notes}
+                  </p>
+                )}
+
+                <div style={{ display: "flex", gap: 8, marginTop: "auto" }}>
+                  <button
+                    type="button"
+                    onClick={() => handleAdapt(item.id)}
+                    disabled={adaptingId === item.id}
+                    style={{
+                      flex: 1,
+                      padding: "8px 10px",
+                      background: "var(--btn-primary, #0066cc)",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 4,
+                      cursor: adaptingId === item.id ? "default" : "pointer",
+                      fontSize: 13,
+                      fontWeight: 500,
+                      opacity: adaptingId === item.id ? 0.6 : 1,
+                    }}
+                  >
+                    {adaptingId === item.id ? "Adapting…" : "→ Adapt for me"}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Delete inspiration from ${item.handle}`}
+                    onClick={() => handleDelete(item.id)}
+                    style={{
+                      padding: "8px 12px",
+                      background: "transparent",
+                      border: "1px solid var(--border, #ddd)",
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      fontSize: 13,
+                      color: "#c5221f",
+                    }}
+                  >
+                    🗑
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {items.length > 0 && (
+        <button
+          type="button"
+          onClick={onGoToSaved}
+          style={{
+            marginTop: 16,
+            padding: "6px 12px",
+            background: "transparent",
+            border: "1px solid var(--border, #ddd)",
+            borderRadius: 4,
+            cursor: "pointer",
+            fontSize: 13,
+            color: "var(--text, #333)",
+          }}
+        >
+          💾 View adapted drafts in Saved Posts →
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── PlanMode (30-Day Plan) ──────────────────────────────────────────────────
+
+const CTA_TYPE_COLORS: Record<IgPlanBrief["ctaType"], { bg: string; fg: string }> = {
+  lead: { bg: "var(--badge-bg, #e8f0fe)", fg: "var(--badge-text, #1565c0)" },
+  engagement: { bg: "#fce8e6", fg: "#c5221f" },
+  growth: { bg: "#e6f4ea", fg: "#137333" },
+};
+
+interface PlanModeProps {
+  topic: string;
+  setTopic: (v: string) => void;
+  language: "en" | "de";
+  loading: boolean;
+  error: string | null;
+  result: IgPlanResult | null;
+  onGenerate: () => void;
+  onCopy: (text: string, label: string) => void;
+  onSaved: () => void;
+  showMessage: (text: string, isError?: boolean) => void;
+}
+
+interface ResearchPanelProps {
+  brief: IgContentBrief | null;
+  researching: boolean;
+  autoResearch: boolean;
+  open: boolean;
+  onToggleAuto: () => void;
+  onResearch: () => void;
+  onRefresh: () => void;
+  onToggleOpen: () => void;
+  onClear: () => void;
+  onUseAngle: (angle: string) => void;
+}
+
+/**
+ * The research-grounding panel above the Compose button. Surfaces the live
+ * Content Brief (fresh AI news + facts + the user's own takes) so captions are
+ * specific. Auto-research toggle = ground every compose; the 🔬 button runs it
+ * as a visible, reviewable step ("beides wählbar").
+ */
+function ResearchPanel({
+  brief, researching, autoResearch, open,
+  onToggleAuto, onResearch, onRefresh, onToggleOpen, onClear, onUseAngle,
+}: ResearchPanelProps) {
+  const pill = {
+    padding: "5px 12px", borderRadius: 4, border: "1px solid var(--border, #ddd)",
+    background: "transparent", cursor: researching ? "wait" : "pointer", fontSize: 12,
+  } as const;
+  return (
+    <section
+      aria-label="Research grounding"
+      style={{ margin: "4px 0 14px 0", padding: 12, border: "1px solid var(--border, #ddd)", borderRadius: 6, background: "var(--card-bg, #f8f8f8)" }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <strong style={{ fontSize: 13 }}>🔬 Research</strong>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+          <input type="checkbox" checked={autoResearch} onChange={onToggleAuto} aria-label="Auto-research before composing" />
+          Auto-ground every caption (live AI news)
+        </label>
+        <span style={{ flex: 1 }} />
+        <button type="button" style={pill} disabled={researching} onClick={onResearch} aria-label="Research this topic now">
+          {researching ? "Researching…" : brief ? "Re-research" : "🔬 Research now"}
+        </button>
+        {brief && (
+          <button type="button" style={pill} disabled={researching} onClick={onRefresh} aria-label="Refresh with live data" title="Bypass cache, fetch live">↻ Live</button>
+        )}
+      </div>
+
+      <p style={{ margin: "8px 0 0 0", fontSize: 11, color: "var(--text-muted, #888)" }}>
+        Pulls fresh, noteworthy AI developments (new Claude/Gemini/ChatGPT features, trending GitHub, cool projects) + your own vault takes so the body cites real specifics instead of generic advice.
+      </p>
+
+      {brief && (
+        <div style={{ marginTop: 10, borderTop: "1px dashed var(--border, #ddd)", paddingTop: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <button
+              type="button"
+              onClick={onToggleOpen}
+              aria-expanded={open}
+              aria-label={open ? "Collapse brief" : "Expand brief"}
+              style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 500, padding: 0 }}
+            >
+              {open ? "▼" : "▶"} Content brief
+              {brief.cached && <span style={{ marginLeft: 6, color: "var(--text-muted, #888)", fontWeight: 400 }}>(cached)</span>}
+            </button>
+            <span style={{ flex: 1 }} />
+            <button type="button" onClick={onClear} aria-label="Clear brief" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 12, color: "var(--text-muted, #888)" }}>✕ clear</button>
+          </div>
+
+          {open && (
+            <div style={{ display: "grid", gap: 10, fontSize: 12 }}>
+              {brief.freshItems.length > 0 && (
+                <div>
+                  <div style={{ fontWeight: 600, marginBottom: 3 }}>📰 Recent & noteworthy</div>
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {brief.freshItems.map((f, i) => (
+                      <li key={i} style={{ marginBottom: 3 }}>
+                        <strong>{f.headline}</strong>{f.detail ? ` — ${f.detail}` : ""}{f.date ? ` (${f.date})` : ""}
+                        {f.source && <> · <a href={f.source} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>source</a></>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {brief.facts.length > 0 && (
+                <div>
+                  <div style={{ fontWeight: 600, marginBottom: 3 }}>✅ Facts to cite</div>
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {brief.facts.map((f, i) => (
+                      <li key={i} style={{ marginBottom: 2 }}>{f.fact}{f.source && <> · <a href={f.source} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>src</a></>}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {brief.hotDataPoint && (
+                <div><strong>📊 Stat:</strong> {brief.hotDataPoint}</div>
+              )}
+              {brief.angles.length > 0 && (
+                <div>
+                  <div style={{ fontWeight: 600, marginBottom: 3 }}>🎯 Angles <span style={{ fontWeight: 400, color: "var(--text-muted, #888)" }}>(click to use as hook)</span></div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {brief.angles.map((a, i) => (
+                      <button key={i} type="button" onClick={() => onUseAngle(a)} style={{ ...pill, cursor: "pointer", textAlign: "left" }} aria-label={`Use angle: ${a}`}>
+                        {a}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {brief.ownTakes.length > 0 && (
+                <div>
+                  <div style={{ fontWeight: 600, marginBottom: 3 }}>📚 Your own takes (vault)</div>
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {brief.ownTakes.map((t, i) => <li key={i} style={{ marginBottom: 2, color: "var(--text-muted, #555)" }}>{t}</li>)}
+                  </ul>
+                </div>
+              )}
+              {brief.sources.length > 0 && (
+                <div style={{ fontSize: 11, color: "var(--text-muted, #888)" }}>
+                  {brief.sources.length} source{brief.sources.length === 1 ? "" : "s"} ·{" "}
+                  {brief.sources.slice(0, 3).map((s, i) => (
+                    <span key={i}><a href={s} target="_blank" rel="noopener noreferrer">[{i + 1}]</a>{" "}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The "30-Day Plan" mode: one topic → a month of distinct post ideas. Each day
+ * is an editable brief (angle + hook + ctaType) that expands IN PLACE into a
+ * caption + image + draft — the other days stay visible the whole time.
+ */
+function PlanMode({ topic, setTopic, language, loading, error, result, onGenerate, onCopy, onSaved, showMessage }: PlanModeProps) {
+  return (
+    <div>
+      <section
+        aria-label="Plan topic input"
+        style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 20, flexWrap: "wrap" }}
+      >
+        <label htmlFor="ig-plan-topic" style={{ fontWeight: 500 }}>Topic</label>
+        <input
+          id="ig-plan-topic"
+          type="text"
+          value={topic}
+          onChange={(e) => setTopic(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !loading) onGenerate();
+          }}
+          placeholder="e.g. self-hosting AI tools to cut SaaS costs"
+          style={{ flex: "1 1 280px", minWidth: 200, padding: "8px 10px" }}
+          disabled={loading}
+        />
+        <button
+          type="button"
+          onClick={onGenerate}
+          disabled={loading}
+          aria-label="Generate 30-day plan"
+          style={{
+            padding: "8px 16px",
+            background: loading ? "var(--btn-disabled, #ccc)" : "var(--btn-primary, #0066cc)",
+            color: "white",
+            border: "none",
+            borderRadius: 4,
+            cursor: loading ? "wait" : "pointer",
+            fontWeight: 500,
+          }}
+        >
+          {loading ? "Planning…" : "Generate 30-Day Plan"}
+        </button>
+      </section>
+
+      {error && (
+        <div role="alert" style={{ padding: 12, marginBottom: 16, background: "var(--alert-bg, #fee)", border: "1px solid var(--alert-border, #f99)", borderRadius: 4, color: "var(--alert-text, #800)" }}>
+          <strong>Error:</strong> {error}
+        </div>
+      )}
+
+      {!result && !loading && !error && (
+        <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted, #888)", border: "1px dashed var(--border, #ccc)", borderRadius: 6 }}>
+          <p style={{ margin: "0 0 8px 0" }}>
+            One topic → 30 distinct post ideas. Each day rotates a different angle so the feed never repeats.
+          </p>
+          <p style={{ margin: 0, fontSize: 12 }}>
+            Tap <strong>Compose</strong> on any day to expand its hook into a full caption.
+          </p>
+        </div>
+      )}
+
+      {result && (
+        <section aria-labelledby="ig-plan-heading">
+          <h3 id="ig-plan-heading" style={{ marginTop: 0 }}>
+            {result.briefs.length}-Day Plan{" "}
+            <span style={{ fontWeight: 400, color: "var(--text-muted, #888)" }}>· {result.topic}</span>
+          </h3>
+          <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 8 }}>
+            {result.briefs.map((brief) => (
+              <li key={brief.day}>
+                <PlanBriefCard
+                  brief={brief}
+                  topic={result.topic === "(empty)" ? topic : result.topic}
+                  language={language}
+                  onCopy={onCopy}
+                  onSaved={onSaved}
+                  showMessage={showMessage}
+                />
+              </li>
+            ))}
+          </ol>
+          <p style={{ margin: "10px 0 0 0", fontSize: 12, color: "var(--text-muted, #888)" }}>
+            {language.toUpperCase()} · Edit any hook, then <strong>Compose</strong> a day in place — the other days stay put.
+          </p>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ─── PlanBriefCard ───────────────────────────────────────────────────────────
+//
+// One day of the 30-day plan, worked IN PLACE: the hook is editable, and
+// "Compose" expands a caption + image + draft right under the brief without
+// navigating away — so the other 29 days stay on screen the whole time.
+
+function PlanBriefCard({
+  brief,
+  topic,
+  language,
+  onCopy,
+  onSaved,
+  showMessage,
+}: {
+  brief: IgPlanBrief;
+  topic: string;
+  language: "en" | "de";
+  onCopy: (text: string, label: string) => void;
+  onSaved: () => void;
+  showMessage: (text: string, isError?: boolean) => void;
+}) {
+  const [hook, setHook] = useState(brief.hook);
+  const [expanded, setExpanded] = useState(false);
+  const [caption, setCaption] = useState<IgCaptionResult | null>(null);
+  const [composing, setComposing] = useState(false);
+  const [savedPostId, setSavedPostId] = useState<string | null>(null);
+
+  // Compose this day's caption → auto-save it as a wizard post (source=plan).
+  // Redo updates the same post instead of piling up duplicates.
+  async function handleCompose() {
+    setComposing(true);
+    try {
+      const res = await igWizardApi.caption({ topic, language, hook: hook.trim() || undefined });
+      setCaption(res);
+      try {
+        const payload = { topic, hook: res.hook, body: res.body, cta: res.cta, hashtags: res.hashtags, caption: res.caption, style: res.style };
+        if (savedPostId) {
+          await igWizardApi.posts.update(savedPostId, payload);
+        } else {
+          const created = await igWizardApi.posts.create({ ...payload, source: "plan", day: brief.day });
+          setSavedPostId(created.post.id);
+        }
+        onSaved();
+        showMessage(`Day ${brief.day} composed + saved to your posts.`);
+      } catch {
+        showMessage(`Day ${brief.day} composed (auto-save failed).`, true);
+      }
+    } catch (e: unknown) {
+      showMessage(`Compose failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setComposing(false);
+    }
+  }
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "6px 8px",
+    fontSize: 14,
+    fontWeight: 500,
+    border: "1px solid var(--border, #ddd)",
+    borderRadius: 4,
+    background: "var(--bg, #fff)",
+  };
+
+  return (
+    <div style={{ padding: 10, background: "var(--card-bg, #f8f8f8)", border: "1px solid var(--border, #ddd)", borderRadius: 6 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <span style={{ fontWeight: 600, color: "var(--text-muted, #888)", fontSize: 13, minWidth: 48, paddingTop: 6 }}>
+          Day {brief.day}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <input
+            type="text"
+            value={hook}
+            onChange={(e) => setHook(e.target.value)}
+            aria-label={`Hook for day ${brief.day}`}
+            style={inputStyle}
+          />
+          <div style={{ fontSize: 12, color: "var(--text-muted, #666)", marginTop: 3 }}>{brief.angle}</div>
+        </div>
+        <span
+          aria-label={`CTA type: ${CTA_TYPE_LABELS[brief.ctaType]}`}
+          style={{
+            fontSize: 11,
+            padding: "2px 8px",
+            borderRadius: 10,
+            whiteSpace: "nowrap",
+            background: CTA_TYPE_COLORS[brief.ctaType].bg,
+            color: CTA_TYPE_COLORS[brief.ctaType].fg,
+            marginTop: 4,
+          }}
+        >
+          {CTA_TYPE_LABELS[brief.ctaType]}
+        </span>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-label={expanded ? `Collapse day ${brief.day}` : `Compose caption for day ${brief.day}`}
+          aria-expanded={expanded}
+          style={{
+            flex: "0 0 auto",
+            padding: "6px 12px",
+            background: expanded ? "transparent" : "var(--btn-primary, #0066cc)",
+            color: expanded ? "var(--text, #333)" : "white",
+            border: expanded ? "1px solid var(--border, #ddd)" : "none",
+            borderRadius: 4,
+            cursor: "pointer",
+            fontSize: 12,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {expanded ? "Hide" : "✍️ Compose"}
+        </button>
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--border, #ddd)" }}>
+          {!caption ? (
+            <button
+              type="button"
+              onClick={handleCompose}
+              disabled={composing}
+              aria-label={`Generate caption for day ${brief.day}`}
+              style={{
+                padding: "6px 14px",
+                background: composing ? "var(--btn-disabled, #ccc)" : "var(--btn-primary, #0066cc)",
+                color: "white",
+                border: "none",
+                borderRadius: 4,
+                cursor: composing ? "wait" : "pointer",
+                fontSize: 13,
+                fontWeight: 500,
+              }}
+            >
+              {composing ? "Composing…" : "Compose full caption"}
+            </button>
+          ) : (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <span style={{ fontSize: 12, fontWeight: 500, color: "var(--success-text, #137333)" }}>✓ Saved to your posts</span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => onCopy(caption.caption, "caption")}
+                    aria-label={`Copy caption for day ${brief.day}`}
+                    style={{ padding: "4px 10px", background: "transparent", border: "1px solid var(--border, #ddd)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
+                  >
+                    📋 Copy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCompose}
+                    disabled={composing}
+                    aria-label={`Regenerate caption for day ${brief.day}`}
+                    style={{ padding: "4px 10px", background: "transparent", border: "1px solid var(--border, #ddd)", borderRadius: 4, cursor: composing ? "wait" : "pointer", fontSize: 12 }}
+                  >
+                    {composing ? "…" : "↻ Redo"}
+                  </button>
+                </div>
+              </div>
+              <textarea
+                readOnly
+                aria-label={`Composed caption for day ${brief.day}`}
+                value={caption.caption}
+                rows={Math.min(14, caption.caption.split("\n").length + 2)}
+                style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", fontSize: 13, lineHeight: 1.5, fontFamily: "inherit", background: "var(--bg, #fff)", border: "1px solid var(--border, #ddd)", borderRadius: 4, resize: "vertical" }}
+              />
+              <p style={{ margin: "6px 0 0 0", fontSize: 11, color: "var(--text-muted, #888)" }}>
+                Add a branded image + send to Drafts in the <strong>💾 Saved Posts</strong> tab.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── SavedPostsMode (the persistent workbench) ───────────────────────────────
+//
+// Lists every caption you've composed (auto-saved). Persists across wizard
+// restarts. Curate with per-post + bulk delete, generate a branded image, then
+// promote the keepers "→ to Drafts" (the publish queue).
+
+function SavedPostsMode({
+  refreshKey,
+  onCopy,
+  showMessage,
+}: {
+  refreshKey: number;
+  onCopy: (text: string, label: string) => void;
+  showMessage: (text: string, isError?: boolean) => void;
+}) {
+  const [posts, setPosts] = useState<WizardPost[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkDraftBusy, setBulkDraftBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await igWizardApi.posts.list();
+      setPosts(res.posts);
+    } catch (e: unknown) {
+      showMessage(`Failed to load saved posts: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setLoading(false);
+    }
+  }, [showMessage]);
+
+  // Reload on mount + whenever the wizard signals a new save (refreshKey bump).
+  useEffect(() => { load(); }, [load, refreshKey]);
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  const allSelected = posts.length > 0 && posts.every((p) => selected.has(p.id));
+  function toggleSelectAll() {
+    setSelected(allSelected ? new Set() : new Set(posts.map((p) => p.id)));
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await igWizardApi.posts.remove(id);
+      setPosts((prev) => prev.filter((p) => p.id !== id));
+      setSelected((prev) => { const n = new Set(prev); n.delete(id); return n; });
+      showMessage("Post deleted.");
+    } catch (e: unknown) {
+      showMessage(`Delete failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    }
+  }
+
+  async function handleBulkDelete() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    if (typeof window !== "undefined" && !window.confirm(`Delete ${ids.length} post(s)? This cannot be undone.`)) return;
+    setBulkBusy(true);
+    try {
+      const res = await igWizardApi.posts.bulkRemove(ids);
+      setPosts((prev) => prev.filter((p) => !selected.has(p.id)));
+      setSelected(new Set());
+      showMessage(`Deleted ${res.removed} post(s).`);
+    } catch (e: unknown) {
+      showMessage(`Bulk delete failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  function patchPost(updated: WizardPost) {
+    setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  }
+
+  async function handleBulkToDraft() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setBulkDraftBusy(true);
+    try {
+      const res = await igWizardApi.posts.bulkToDraft(ids);
+      // Mark the promoted ones so the "in Drafts" badge shows.
+      const promotedIds = new Set(res.results.filter((r) => r.ok).map((r) => r.id));
+      setPosts((prev) => prev.map((p) => (promotedIds.has(p.id) ? { ...p, promotedDraftId: "promoted" } : p)));
+      setSelected(new Set());
+      showMessage(`Sent ${res.promoted} post(s) to Drafts.`);
+    } catch (e: unknown) {
+      showMessage(`Bulk → Drafts failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setBulkDraftBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <h3 style={{ margin: "0 0 2px 0" }}>💾 Saved Posts <span style={{ fontWeight: 400, color: "var(--text-muted, #888)" }}>({posts.length})</span></h3>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted, #888)" }}>
+            Your workbench — auto-saved, persists across restarts. Curate, add images, send keepers to Drafts.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={load}
+          disabled={loading}
+          aria-label="Refresh saved posts"
+          style={{ padding: "5px 12px", background: "transparent", border: "1px solid var(--border, #ddd)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
+        >
+          {loading ? "Loading…" : "↻ Refresh"}
+        </button>
+      </div>
+
+      {posts.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+            <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} aria-label="Select all posts" />
+            Select all
+          </label>
+          {selected.size > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={handleBulkToDraft}
+                disabled={bulkDraftBusy}
+                aria-label={`Send ${selected.size} selected posts to Drafts`}
+                style={{ padding: "5px 12px", background: bulkDraftBusy ? "var(--btn-disabled, #ccc)" : "var(--btn-primary, #0066cc)", color: "white", border: "none", borderRadius: 4, cursor: bulkDraftBusy ? "wait" : "pointer", fontSize: 13, fontWeight: 500 }}
+              >
+                {bulkDraftBusy ? "Sending…" : `→ Send ${selected.size} to Drafts`}
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                disabled={bulkBusy}
+                aria-label={`Delete ${selected.size} selected posts`}
+                style={{ padding: "5px 12px", background: bulkBusy ? "var(--btn-disabled, #ccc)" : "#c5221f", color: "white", border: "none", borderRadius: 4, cursor: bulkBusy ? "wait" : "pointer", fontSize: 13, fontWeight: 500 }}
+              >
+                {bulkBusy ? "Deleting…" : `🗑 Delete ${selected.size} selected`}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {loading && posts.length === 0 ? (
+        <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted, #888)" }}>Loading…</div>
+      ) : posts.length === 0 ? (
+        <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted, #888)", border: "1px dashed var(--border, #ccc)", borderRadius: 6 }}>
+          <p style={{ margin: "0 0 8px 0" }}>No saved posts yet.</p>
+          <p style={{ margin: 0, fontSize: 12 }}>Compose a caption in <strong>Single Post</strong> or <strong>30-Day Plan</strong> — it auto-saves here.</p>
+        </div>
+      ) : (
+        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 10 }}>
+          {posts.map((post) => (
+            <li key={post.id}>
+              <SavedPostCard
+                post={post}
+                selected={selected.has(post.id)}
+                onToggleSelect={() => toggleSelect(post.id)}
+                onDelete={() => handleDelete(post.id)}
+                onPatch={patchPost}
+                onCopy={onCopy}
+                showMessage={showMessage}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SavedPostCard({
+  post,
+  selected,
+  onToggleSelect,
+  onDelete,
+  onPatch,
+  onCopy,
+  showMessage,
+}: {
+  post: WizardPost;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onDelete: () => void;
+  onPatch: (p: WizardPost) => void;
+  onCopy: (text: string, label: string) => void;
+  showMessage: (text: string, isError?: boolean) => void;
+}) {
+  const [hero, setHero] = useState(post.hero || "notebook");
+  const [style, setStyle] = useState(post.style || "cozy");
+  const [cap, setCap] = useState(post.cap !== false);
+  const [generatingImage, setGeneratingImage] = useState(false);
+  const [promoting, setPromoting] = useState(false);
+  const [slides, setSlides] = useState(5);
+  const [generatingCarousel, setGeneratingCarousel] = useState(false);
+  const [generatingReel, setGeneratingReel] = useState(false);
+  const busy = generatingImage || generatingCarousel || generatingReel || promoting;
+
+  async function handleGenerateImage() {
+    setGeneratingImage(true);
+    try {
+      const res = await igWizardApi.posts.generateImage(post.id, hero, style, cap);
+      onPatch(res.post);
+      showMessage("Branded image generated.");
+    } catch (e: unknown) {
+      showMessage(`Image failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setGeneratingImage(false);
+    }
+  }
+
+  async function handleGenerateCarousel() {
+    setGeneratingCarousel(true);
+    try {
+      const res = await igWizardApi.posts.generateCarousel(post.id, slides, hero, style, cap);
+      onPatch(res.post);
+      showMessage(`Carousel generated (${res.mediaUrls.length} slides).`);
+    } catch (e: unknown) {
+      showMessage(`Carousel failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setGeneratingCarousel(false);
+    }
+  }
+
+  async function handleGenerateReel() {
+    setGeneratingReel(true);
+    try {
+      const res = await igWizardApi.posts.generateReel(post.id, 8);
+      onPatch(res.post);
+      showMessage("Reel generated (Veo + voiceover).");
+    } catch (e: unknown) {
+      showMessage(`Reel failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setGeneratingReel(false);
+    }
+  }
+
+  async function handleToDraft() {
+    setPromoting(true);
+    try {
+      const res = await igWizardApi.posts.toDraft(post.id);
+      onPatch(res.post);
+      showMessage("Sent to Drafts — schedule/publish it in the Drafts tab.");
+    } catch (e: unknown) {
+      showMessage(`Send to Drafts failed: ${e instanceof Error ? e.message : String(e)}`, true);
+    } finally {
+      setPromoting(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", gap: 12, padding: 10, background: "var(--card-bg, #f8f8f8)", border: `1px solid ${selected ? "var(--btn-primary, #0066cc)" : "var(--border, #ddd)"}`, borderRadius: 6 }}>
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={onToggleSelect}
+        aria-label={`Select post: ${post.hook || post.topic}`}
+        style={{ marginTop: 4 }}
+      />
+      {(() => {
+        // A rendered reel gets a real, playable <video> — not just a dead
+        // thumbnail. Otherwise the user clicks "🎬 Reel", it generates, and the
+        // video is invisible in the card ("where is the reel?").
+        if (post.format === "reel" && post.videoUrl) {
+          return (
+            <video
+              src={post.videoUrl}
+              poster={post.thumbnailUrl || post.imageUrl || undefined}
+              controls
+              muted
+              playsInline
+              data-testid="saved-reel-video"
+              style={{ width: 120, height: 160, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border, #ddd)", background: "#000", flex: "0 0 auto", display: "block" }}
+            />
+          );
+        }
+        const thumb = post.format === "reel" ? (post.thumbnailUrl || post.imageUrl) : (post.mediaUrls && post.mediaUrls.length ? post.mediaUrls[0] : post.imageUrl);
+        return thumb ? (
+          <div style={{ position: "relative", flex: "0 0 auto" }}>
+            <img src={thumb} alt="Post media" style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border, #ddd)", display: "block" }} />
+            {post.format === "carousel" && post.mediaUrls && post.mediaUrls.length > 1 && (
+              <span style={{ position: "absolute", top: 3, right: 3, fontSize: 10, fontWeight: 600, background: "rgba(0,0,0,0.65)", color: "white", borderRadius: 8, padding: "1px 6px" }}>🎠 {post.mediaUrls.length}</span>
+            )}
+            {post.format === "reel" && (
+              <span style={{ position: "absolute", bottom: 3, right: 3, fontSize: 12, background: "rgba(0,0,0,0.65)", color: "white", borderRadius: 8, padding: "0 5px" }}>▶ render to play</span>
+            )}
+          </div>
+        ) : post.format === "reel" ? (
+          <div style={{ width: 88, height: 88, borderRadius: 6, border: "1px dashed var(--border, #ddd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--text-muted, #888)", textAlign: "center", flex: "0 0 auto", padding: 4 }}>
+            click 🎬 Reel to render
+          </div>
+        ) : (
+          <div style={{ width: 88, height: 88, borderRadius: 6, border: "1px dashed var(--border, #ddd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--text-muted, #888)", textAlign: "center", flex: "0 0 auto", padding: 4 }}>
+            no media
+          </div>
+        );
+      })()}
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em", padding: "1px 6px", borderRadius: 8, background: post.source === "plan" ? "#e8f0fe" : "#e6f4ea", color: post.source === "plan" ? "#1565c0" : "#137333" }}>
+            {post.source === "plan" ? `Plan${post.day ? ` · Day ${post.day}` : ""}` : "Single"}
+          </span>
+          {post.format && post.format !== "post" && (
+            <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em", padding: "1px 6px", borderRadius: 8, background: "#fff3e0", color: "#e65100" }}>
+              {post.format === "carousel" ? "🎠 Carousel" : "🎬 Reel"}
+            </span>
+          )}
+          <span style={{ fontSize: 11, color: "var(--text-muted, #888)" }}>{post.platforms.join(", ")}</span>
+          {post.promotedDraftId && (
+            <span style={{ fontSize: 10, color: "var(--success-text, #137333)", fontWeight: 500 }}>✓ in Drafts</span>
+          )}
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{post.hook || "(no hook)"}</div>
+        <div style={{ fontSize: 12, color: "var(--text-muted, #666)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{post.body}</div>
+
+        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <button type="button" onClick={() => onCopy(post.caption, "caption")} aria-label="Copy caption" style={miniBtn}>📋 Copy</button>
+          <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11 }}>
+            <select value={style} onChange={(e) => setStyle(e.target.value)} aria-label={`Image style for ${post.hook}`} style={{ padding: "2px 4px", fontSize: 11 }}>
+              {IG_STYLES.map((s) => (<option key={s.id} value={s.id}>{s.label}</option>))}
+            </select>
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, cursor: "pointer" }} title="Wear the M-cap or generate bare-headed">
+            <input type="checkbox" checked={cap} onChange={(e) => setCap(e.target.checked)} aria-label={`M-cap for ${post.hook}`} />
+            cap
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11 }}>
+            <select value={hero} onChange={(e) => setHero(e.target.value)} aria-label={`Image scene for ${post.hook}`} style={{ padding: "2px 4px", fontSize: 11 }}>
+              {HERO_SCENES.map((h) => (<option key={h.id} value={h.id}>{h.label}</option>))}
+            </select>
+          </label>
+          <button type="button" onClick={handleGenerateImage} disabled={busy} aria-label={`Generate image for ${post.hook}`} style={{ ...miniBtn, cursor: busy ? "wait" : "pointer" }}>
+            {generatingImage ? "Generating ~1min…" : post.imageUrl && post.format === "post" ? "↻ Image" : "✨ Image"}
+          </button>
+          <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11 }}>
+            <select value={slides} onChange={(e) => setSlides(Number(e.target.value))} aria-label={`Carousel slide count for ${post.hook}`} style={{ padding: "2px 4px", fontSize: 11 }}>
+              {[3, 4, 5, 6, 7, 8, 9, 10].map((n) => (<option key={n} value={n}>{n}</option>))}
+            </select>
+          </label>
+          <button type="button" onClick={handleGenerateCarousel} disabled={busy} aria-label={`Generate carousel for ${post.hook}`} style={{ ...miniBtn, cursor: busy ? "wait" : "pointer" }}>
+            {generatingCarousel ? `Generating ${slides} slides…` : "🎠 Carousel"}
+          </button>
+          <button type="button" onClick={handleGenerateReel} disabled={busy} aria-label={`Generate reel for ${post.hook}`} title="Veo video + voiceover (~1-3 min)" style={{ ...miniBtn, cursor: busy ? "wait" : "pointer" }}>
+            {generatingReel ? "Generating reel ~2min…" : "🎬 Reel"}
+          </button>
+          <button type="button" onClick={handleToDraft} disabled={busy} aria-label={`Send ${post.hook} to Drafts`} style={{ ...miniBtnPrimary, cursor: busy ? "wait" : "pointer" }}>
+            {promoting ? "Sending…" : "→ Drafts"}
+          </button>
+          <button type="button" onClick={onDelete} aria-label={`Delete ${post.hook}`} style={{ ...miniBtn, color: "#c5221f", borderColor: "#f3b9b6" }}>🗑</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const miniBtn: React.CSSProperties = {
+  padding: "4px 10px",
+  background: "transparent",
+  border: "1px solid var(--border, #ddd)",
+  borderRadius: 4,
+  cursor: "pointer",
+  fontSize: 11,
+};
+const miniBtnPrimary: React.CSSProperties = {
+  padding: "4px 10px",
+  background: "var(--btn-primary, #0066cc)",
+  color: "white",
+  border: "none",
+  borderRadius: 4,
+  cursor: "pointer",
+  fontSize: 11,
+  fontWeight: 500,
+};
 
 // ─── LeadCtaCard ─────────────────────────────────────────────────────────────
 
@@ -386,6 +2256,7 @@ interface LeadCtaCardProps {
   creating: boolean;
   onCopy: () => void;
   onCreateRule: () => void;
+  onUseInComposer: () => void;
 }
 
 /**
@@ -394,7 +2265,7 @@ interface LeadCtaCardProps {
  * wires the package into the Auto-DM tab in one click. Disabled + checkmark
  * once the rule has been created in this session.
  */
-function LeadCtaCard({ index, lead, ruleCreated, creating, onCopy, onCreateRule }: LeadCtaCardProps) {
+function LeadCtaCard({ index, lead, ruleCreated, creating, onCopy, onCreateRule, onUseInComposer }: LeadCtaCardProps) {
   const canCreate = Boolean(lead.trigger && lead.dmTemplate);
   return (
     <article
@@ -463,6 +2334,23 @@ function LeadCtaCard({ index, lead, ruleCreated, creating, onCopy, onCreateRule 
         </div>
       )}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 2 }}>
+        <button
+          type="button"
+          onClick={onUseInComposer}
+          aria-label={`Use this CTA in the caption composer: ${lead.cta}`}
+          title="Use in Caption Composer"
+          style={{
+            fontSize: 12,
+            padding: "4px 10px",
+            background: "transparent",
+            color: "var(--text, #333)",
+            border: "1px solid var(--border, #ddd)",
+            borderRadius: 4,
+            cursor: "pointer",
+          }}
+        >
+          ✍️ Use
+        </button>
         {ruleCreated ? (
           <span
             role="status"

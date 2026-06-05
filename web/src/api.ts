@@ -1462,7 +1462,7 @@ export const api = {
     if (opts?.status) params.set("status", opts.status);
     if (opts?.platform) params.set("platform", opts.platform);
     if (opts?.limit) params.set("limit", String(opts.limit));
-    return get<{ posts: Array<{ id: string; text: string; status: string; platforms: string[]; createdAt: string; scheduledAt?: string | null }> }>(`/socialmedia/posts?${params}`);
+    return get<{ posts: Array<{ id: string; text: string; status: string; platforms: string[]; createdAt: string; updatedAt?: string; scheduledAt?: string | null; videoUrl?: string; thumbnailUrl?: string; mediaUrls?: string[]; format?: "post" | "carousel" | "story" | "reel" }> }>(`/socialmedia/posts?${params}`);
   },
   getSocialPost: (id: string) =>
     get<{ id: string; text: string; status: string; platforms: string[]; createdAt: string; scheduledAt?: string | null }>(`/socialmedia/posts/${encodeURIComponent(id)}`),
@@ -1813,9 +1813,250 @@ export interface IgWizardResult {
   model: string;
 }
 
+export type IgStyle = "cozy" | "business" | "pointing" | "bold" | "screen";
+
+export interface IgCaptionResult {
+  hook: string;
+  body: string;
+  cta: string;
+  hashtags: string[];
+  /** hook + body + cta + hashtags, joined and ready to paste. */
+  caption: string;
+  /** AI-suggested image style for this post. */
+  style: IgStyle;
+  language: string;
+  model: string;
+  /** True if the body was grounded in a research brief (real facts) vs generic. */
+  grounded?: boolean;
+}
+
+export interface IgCaptionInput {
+  topic: string;
+  language?: "en" | "de";
+  /** Optional pre-picked hook to anchor the caption to. */
+  hook?: string;
+  /** Optional pre-picked lead CTA to anchor the caption to. */
+  cta?: string;
+  /** Pre-built grounding text from a research brief (manual research flow). */
+  grounding?: string;
+  /** Research inline before composing (auto flow). Ignored if grounding is set. */
+  autoResearch?: boolean;
+  /** Optional niche/angle to focus the inline research. */
+  niche?: string;
+}
+
+// ─── Research / Content Brief ────────────────────────────────────────────────
+
+export interface IgBriefFact {
+  fact: string;
+  source?: string;
+}
+
+export interface IgFreshItem {
+  headline: string;
+  detail: string;
+  source?: string;
+  date?: string;
+}
+
+export interface IgContentBrief {
+  topic: string;
+  niche: string;
+  language: string;
+  angles: string[];
+  facts: IgBriefFact[];
+  freshItems: IgFreshItem[];
+  painPoints: string[];
+  myths: string[];
+  hotDataPoint?: string;
+  ownTakes: string[];
+  sources: string[];
+  generatedAt: string;
+  cached: boolean;
+}
+
+export interface IgResearchInput {
+  topic: string;
+  niche?: string;
+  language?: "en" | "de";
+  forceRefresh?: boolean;
+}
+
+export type IgPlanCtaType = "lead" | "engagement" | "growth";
+
+export interface IgPlanBrief {
+  day: number;
+  angle: string;
+  hook: string;
+  ctaType: IgPlanCtaType;
+}
+
+export interface IgPlanResult {
+  topic: string;
+  language: string;
+  briefs: IgPlanBrief[];
+  model: string;
+}
+
+export interface IgPlanInput {
+  topic: string;
+  language?: "en" | "de";
+  days?: number;
+}
+
+export interface IgCoverImage {
+  filename: string;
+  url: string;
+  path: string;
+  prompt: string;
+  model: string;
+}
+
+/** A social draft created by promoting a wizard post (see posts/:id/to-draft). */
+export interface IgComposeDraftPost {
+  id: string;
+  text: string;
+  status: string;
+  platforms: string[];
+  mediaUrls: string[];
+  firstComment?: string;
+  format?: string;
+  createdAt: string;
+}
+
+export type WizardPostFormat = "post" | "carousel" | "reel";
+
+export interface WizardPost {
+  id: string;
+  topic: string;
+  hook: string;
+  body: string;
+  cta: string;
+  hashtags: string[];
+  caption: string;
+  platforms: string[];
+  format?: WizardPostFormat;
+  imageUrl?: string | null;
+  imageFilename?: string | null;
+  mediaUrls?: string[];
+  videoUrl?: string | null;
+  thumbnailUrl?: string | null;
+  hero?: string;
+  style?: string;
+  cap?: boolean;
+  source: "single" | "plan";
+  day?: number | null;
+  promotedDraftId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateWizardPostInput {
+  topic: string;
+  hook: string;
+  body: string;
+  cta: string;
+  hashtags: string[];
+  caption: string;
+  source: "single" | "plan";
+  platforms?: string[];
+  hero?: string;
+  style?: string;
+  day?: number;
+}
+
+export type InspirationFormat = "post" | "carousel" | "reel" | "story";
+
+export interface InspirationItem {
+  id: string;
+  handle: string;
+  format: InspirationFormat;
+  caption: string;
+  topic?: string;
+  mediaUrls: string[];
+  sourceUrl?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateInspirationInput {
+  handle: string;
+  format: InspirationFormat;
+  caption: string;
+  topic?: string;
+  mediaUrls?: string[];
+  sourceUrl?: string;
+  notes?: string;
+}
+
 export const igWizardApi = {
   generate: (niche: string, language: "en" | "de" = "en") =>
     post<IgWizardResult>("/ig-wizard/generate", { niche, language }),
+  caption: (input: IgCaptionInput) =>
+    post<IgCaptionResult>("/ig-wizard/caption", { language: "en", ...input }),
+  research: (input: IgResearchInput) =>
+    post<IgContentBrief>("/ig-wizard/research", { language: "en", ...input }),
+  plan: (input: IgPlanInput) =>
+    post<IgPlanResult>("/ig-wizard/plan", { language: "en", days: 30, ...input }),
+  // ── Saved Posts (the wizard's persistent workbench) ──
+  posts: {
+    list: () => get<{ posts: WizardPost[] }>("/ig-wizard/posts"),
+    create: (input: CreateWizardPostInput) =>
+      post<{ ok: boolean; post: WizardPost }>("/ig-wizard/posts", input),
+    update: (id: string, changes: Partial<CreateWizardPostInput>) =>
+      patch<WizardPost>(`/ig-wizard/posts/${encodeURIComponent(id)}`, changes),
+    remove: (id: string) => del<{ ok: boolean }>(`/ig-wizard/posts/${encodeURIComponent(id)}`),
+    bulkRemove: (ids: string[]) =>
+      post<{ ok: boolean; removed: number }>("/ig-wizard/posts/bulk-delete", { ids }),
+    generateImage: (id: string, hero?: string, style?: string, cap?: boolean) =>
+      post<{ ok: boolean; post: WizardPost; image: IgCoverImage }>(`/ig-wizard/posts/${encodeURIComponent(id)}/image`, { hero, style, cap }),
+    generateCarousel: (id: string, slides: number, hero?: string, style?: string, cap?: boolean) =>
+      post<{ ok: boolean; post: WizardPost; slides: { text: string }[]; mediaUrls: string[] }>(`/ig-wizard/posts/${encodeURIComponent(id)}/carousel`, { slides, hero, style, cap }),
+    generateReel: (id: string, durationSeconds?: 4 | 6 | 8) =>
+      post<{ ok: boolean; post: WizardPost; videoUrl: string }>(`/ig-wizard/posts/${encodeURIComponent(id)}/reel`, { durationSeconds }),
+    toDraft: (id: string) =>
+      post<{ ok: boolean; draft: IgComposeDraftPost; post: WizardPost }>(`/ig-wizard/posts/${encodeURIComponent(id)}/to-draft`, {}),
+    bulkToDraft: (ids: string[]) =>
+      post<{ ok: boolean; promoted: number; results: Array<{ id: string; ok: boolean; draftId?: string; error?: string }> }>(
+        "/ig-wizard/posts/bulk-to-draft",
+        { ids },
+      ),
+  },
+  // ── Inspiration (manual swipe file from creators you admire) ──
+  inspiration: {
+    list: () => get<{ items: InspirationItem[] }>("/ig-wizard/inspiration"),
+    create: (input: CreateInspirationInput) =>
+      post<{ ok: boolean; item: InspirationItem }>("/ig-wizard/inspiration", input),
+    remove: (id: string) =>
+      del<{ ok: boolean }>(`/ig-wizard/inspiration/${encodeURIComponent(id)}`),
+    adapt: (id: string, language: "en" | "de" = "en", topic?: string) =>
+      post<{ ok: boolean; post: WizardPost; result: IgCaptionResult }>(
+        `/ig-wizard/inspiration/${encodeURIComponent(id)}/adapt`,
+        { language, topic },
+      ),
+    /** Pull a creator's recent posts via Apify straight into the swipe file. */
+    importInstagram: (handle: string, limit = 12) =>
+      post<{ ok: boolean; imported: number; items: InspirationItem[] }>(
+        "/ig-wizard/inspiration/import-instagram",
+        { handle, limit },
+      ),
+    /** Upload an image/video file → returns its /api/media/file URL. */
+    uploadMedia: async (file: File): Promise<{ ok: boolean; filename: string; url: string }> => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/media/upload", {
+        method: "POST",
+        headers: { ...getAuthHeaders() },
+        body: formData,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Upload failed (${res.status}): ${text}`);
+      }
+      return res.json();
+    },
+  },
 };
 
 // ─── Auto-DM rules (used by IG Wizard Create-Rule button) ────────────────────
@@ -1824,6 +2065,10 @@ export interface AutoDmRuleCreateInput {
   platform: "instagram" | "facebook";
   keyword: string;
   dmTemplate: string;
+  /** Destination for the {{link}} tracking placeholder (usually a Substack post). */
+  targetUrl?: string | null;
+  /** Optional public comment-reply posted after a successful DM (engagement boost). */
+  publicReply?: string | null;
   postId?: string | null;
   enabled?: boolean;
   notes?: string;
@@ -1834,15 +2079,39 @@ export interface AutoDmRule {
   platform: "instagram" | "facebook";
   keyword: string;
   dmTemplate: string;
+  targetUrl?: string | null;
+  publicReply?: string | null;
   enabled: boolean;
   sentCount: number;
+  publicReplyCount?: number;
   createdAt: string;
   updatedAt: string;
   postId?: string | null;
   notes?: string;
 }
 
+export interface RuleFunnel {
+  ruleId: string;
+  keyword: string;
+  linksSent: number;
+  linksClicked: number;
+  totalClicks: number;
+  clickRate: number | null;
+  lastClickAt: string | null;
+}
+
+export interface FunnelSummary {
+  rules: RuleFunnel[];
+  totals: {
+    linksSent: number;
+    linksClicked: number;
+    totalClicks: number;
+    clickRate: number | null;
+  };
+}
+
 export const autoDmRulesApi = {
   create: (input: AutoDmRuleCreateInput) =>
     post<{ ok: boolean; rule: AutoDmRule }>("/automation/rules", input),
+  funnel: () => get<FunnelSummary>("/automation/funnel"),
 };

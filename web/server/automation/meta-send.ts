@@ -95,6 +95,70 @@ export async function sendPrivateReply(args: {
   }
 }
 
+export interface ReplyResult {
+  ok: boolean;
+  replyId?: string;
+  error?: string;
+  raw?: unknown;
+}
+
+/**
+ * Post a PUBLIC reply in the comment thread (not a DM). Used for the
+ * engagement-boost combo: a keyword comment triggers a DM *and* a visible
+ * "Just sent it 📩" reply on the original comment.
+ *
+ *   Instagram: POST graph.instagram.com/v21.0/{comment-id}/replies
+ *              (user access token, scope instagram_manage_comments)
+ *   Facebook:  POST graph.facebook.com/v21.0/{comment-id}/comments
+ *              (page access token, scope pages_manage_engagement)
+ *
+ * The two platforms use different sub-edges (`/replies` vs `/comments`) but
+ * both take a single `message` param + identify the parent via the comment id.
+ */
+export async function sendCommentReply(args: {
+  event: CommentEvent;
+  replyText: string;
+}): Promise<ReplyResult> {
+  const { event, replyText } = args;
+  const secrets = getMetaSecrets();
+
+  let token: string;
+  let url: string;
+  if (event.platform === "instagram") {
+    token = secrets.userAccessToken;
+    if (!token) return { ok: false, error: "no userAccessToken configured for Instagram (run OAuth flow first)" };
+    url = `${GRAPH_IG_BASE}/${encodeURIComponent(event.commentId)}/replies?access_token=${encodeURIComponent(token)}`;
+  } else {
+    token = secrets.pageAccessToken;
+    if (!token) return { ok: false, error: "no pageAccessToken configured for Facebook (generate System-User Page Token)" };
+    url = `${GRAPH_FB_BASE}/${encodeURIComponent(event.commentId)}/comments?access_token=${encodeURIComponent(token)}`;
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: replyText }),
+    });
+    const text = await res.text();
+    let parsed: unknown;
+    try { parsed = JSON.parse(text); } catch { parsed = text; }
+
+    if (!res.ok) {
+      const errMsg = extractGraphError(parsed) ?? `HTTP ${res.status}`;
+      return { ok: false, error: errMsg, raw: parsed };
+    }
+
+    const replyId =
+      typeof parsed === "object" && parsed && "id" in parsed
+        ? String((parsed as { id: string }).id)
+        : undefined;
+    return { ok: true, replyId, raw: parsed };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /** Pull `error.message` (or `error.error_user_msg`) out of a Graph error response. */
 function extractGraphError(parsed: unknown): string | null {
   if (!parsed || typeof parsed !== "object") return null;

@@ -46,7 +46,18 @@ import { SocialMediaPage } from "./SocialMediaPage.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function makeDraft(overrides: Partial<{ id: string; text: string; platforms: string[] }> = {}) {
+function makeDraft(
+  overrides: Partial<{
+    id: string;
+    text: string;
+    platforms: string[];
+    createdAt: string;
+    updatedAt: string;
+    videoUrl: string;
+    thumbnailUrl: string;
+    format: string;
+  }> = {},
+) {
   return {
     id: "draft-1",
     text: "Hello world",
@@ -481,5 +492,62 @@ describe("SocialMediaPage — SettingsTab multi-backend", () => {
     });
     const testBtn = screen.getByRole("button", { name: /Test Connection/ });
     expect(testBtn).toBeDisabled();
+  });
+});
+
+// Drafts: a reel draft must show a playable <video> (not just a text link), and
+// the list must be ordered newest-first regardless of server order.
+describe("SocialMediaPage — DraftsTab video + sorting", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApi.deleteSocialPost.mockResolvedValue({ ok: true });
+  });
+
+  it("renders a video preview for a draft that has a videoUrl", async () => {
+    await renderDraftsTab([
+      makeDraft({ id: "r1", text: "Reel draft", videoUrl: "/api/media/file/clip.mp4", thumbnailUrl: "/api/media/file/poster.jpg", format: "reel" }),
+    ]);
+    const vid = screen.getByTestId("draft-video");
+    expect(vid).toHaveAttribute("src", "/api/media/file/clip.mp4");
+    expect(vid).toHaveAttribute("poster", "/api/media/file/poster.jpg");
+  });
+
+  it("opens a fullscreen video popup when the draft video is clicked", async () => {
+    await renderDraftsTab([
+      makeDraft({ id: "r1", text: "Reel draft", videoUrl: "/api/media/file/clip.mp4", thumbnailUrl: "/api/media/file/poster.jpg", format: "reel" }),
+    ]);
+    // No lightbox until clicked.
+    expect(screen.queryByTestId("video-lightbox-player")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /play video/i }));
+    // The popup player appears with the same source.
+    const player = screen.getByTestId("video-lightbox-player");
+    expect(player).toHaveAttribute("src", "/api/media/file/clip.mp4");
+    // Closing dismisses it.
+    fireEvent.click(screen.getByRole("button", { name: /close video viewer/i }));
+    expect(screen.queryByTestId("video-lightbox-player")).not.toBeInTheDocument();
+  });
+
+  it("orders drafts newest-first even when the server returns them oldest-first", async () => {
+    // Server returns oldest first; the UI must flip it to newest first.
+    await renderDraftsTab([
+      makeDraft({ id: "old", text: "OLDER draft", createdAt: "2026-06-01T00:00:00.000Z" }),
+      makeDraft({ id: "new", text: "NEWER draft", createdAt: "2026-06-04T00:00:00.000Z" }),
+    ]);
+    const newer = screen.getByText("NEWER draft");
+    const older = screen.getByText("OLDER draft");
+    // NEWER must appear before OLDER in document order.
+    // Node.DOCUMENT_POSITION_FOLLOWING (4) = older follows newer.
+    expect(newer.compareDocumentPosition(older) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("prefers updatedAt over createdAt for ordering", async () => {
+    await renderDraftsTab([
+      // 'a' was created later but updated long ago; 'b' created earlier but updated just now → b first.
+      makeDraft({ id: "a", text: "Recently created", createdAt: "2026-06-04T00:00:00.000Z", updatedAt: "2026-06-01T00:00:00.000Z" }),
+      makeDraft({ id: "b", text: "Recently updated", createdAt: "2026-06-02T00:00:00.000Z", updatedAt: "2026-06-04T12:00:00.000Z" }),
+    ]);
+    const updated = screen.getByText("Recently updated");
+    const created = screen.getByText("Recently created");
+    expect(updated.compareDocumentPosition(created) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

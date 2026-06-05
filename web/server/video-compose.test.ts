@@ -129,6 +129,15 @@ describe("buildDrawtextFilter()", () => {
     expect(filter).toContain("y=200");
   });
 
+  it("anchors 'bottom' to the bottom edge, lifted by bottomOffset when set", () => {
+    // Default bottom uses the font size as the margin.
+    const def = buildDrawtextFilter({ text: "Hi", position: "bottom", fontSize: 40 }, getTheme("neutral"));
+    expect(def).toContain("y=h-text_h-40");
+    // bottomOffset lifts the box into the readable lower third.
+    const lifted = buildDrawtextFilter({ text: "Hi", position: "bottom", fontSize: 40, bottomOffset: 220 }, getTheme("neutral"));
+    expect(lifted).toContain("y=h-text_h-220");
+  });
+
   it("adds a padded box when bgColor is set", () => {
     const filter = buildDrawtextFilter(
       { text: "Badge", bgColor: "#D97757", bgPadding: 24 },

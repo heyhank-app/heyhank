@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 let detectVeoMode: typeof import("./fal-video.js").detectVeoMode;
 let readImageAsBase64: typeof import("./fal-video.js").readImageAsBase64;
 let buildVeoRequestBody: typeof import("./fal-video.js").buildVeoRequestBody;
+let generateVeoGoogle: typeof import("./fal-video.js").generateVeoGoogle;
 
 let tempHome: string;
 
@@ -19,11 +20,30 @@ beforeEach(async () => {
   detectVeoMode = mod.detectVeoMode;
   readImageAsBase64 = mod.readImageAsBase64;
   buildVeoRequestBody = mod.buildVeoRequestBody;
+  generateVeoGoogle = mod.generateVeoGoogle;
 });
 
 afterEach(() => {
   delete process.env.HEYHANK_HOME;
+  delete process.env.GEMINI_API_KEY;
+  vi.restoreAllMocks();
   rmSync(tempHome, { recursive: true, force: true });
+});
+
+describe("generateVeoGoogle error handling", () => {
+  it("turns a 429 into a clear 'quota exceeded' message (not a raw API blob)", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 429, message: "You exceeded your current quota" } }), { status: 429 }),
+    );
+    await expect(generateVeoGoogle({ prompt: "a test clip" })).rejects.toThrow(/Veo quota exceeded/i);
+  });
+
+  it("surfaces other HTTP errors with their status", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("bad request", { status: 400 }));
+    await expect(generateVeoGoogle({ prompt: "x" })).rejects.toThrow(/Veo submit failed 400/);
+  });
 });
 
 describe("detectVeoMode", () => {

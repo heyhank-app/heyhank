@@ -7,6 +7,7 @@ import { PersonasTab } from "./PersonasTab.js";
 import { AutoDmTab } from "./AutoDmTab.js";
 import { IgWizardTab } from "./IgWizardTab.js";
 import { ImageLightbox } from "./ImageLightbox.js";
+import { VideoLightbox } from "./VideoLightbox.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -16,6 +17,7 @@ interface SocialPost {
   status: string;
   platforms: string[];
   createdAt: string;
+  updatedAt?: string;
   scheduledAt?: string | null;
   title?: string;
   firstComment?: string;
@@ -826,7 +828,11 @@ function DraftsTab({ refreshKey, showMessage, onEdit, onRefresh }: {
   const loadDrafts = useCallback(async () => {
     try {
       const data = await api.listSocialPosts({ limit: 50, status: "draft" });
-      setDrafts((data.posts || []).map(normalizePost));
+      // Newest drafts first (server order isn't guaranteed). Uses updated/created.
+      const sorted = (data.posts || [])
+        .map(normalizePost)
+        .sort((a, b) => postSortDate(b) - postSortDate(a));
+      setDrafts(sorted);
     } catch { /* silent */ }
   }, []);
 
@@ -1023,6 +1029,7 @@ function PostCard({ post, selected, onToggleSelect, onEdit, onDelete, onArchive,
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<SocialComment[]>([]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [videoOpen, setVideoOpen] = useState(false);
   const isDraft = post.status === "draft";
   const isArchived = post.status === "archived";
   const mediaList = post.mediaUrls || [];
@@ -1119,12 +1126,30 @@ function PostCard({ post, selected, onToggleSelect, onEdit, onDelete, onArchive,
           />
         )}
 
-        {/* Video */}
+        {/* Video — a clickable preview (reels). Click opens a fullscreen popup. */}
         {post.videoUrl && (
-          <div className="flex items-center gap-1.5 text-[10px] text-cc-muted bg-cc-bg rounded-md px-2 py-1">
-            <span>🎬</span>
-            <span className="truncate">{post.videoUrl}</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => setVideoOpen(true)}
+            aria-label="Play video"
+            className="relative inline-block rounded-lg border border-cc-border/30 overflow-hidden focus:outline-none focus:ring-2 focus:ring-cc-accent hover:opacity-95 transition-opacity group"
+          >
+            <video
+              src={post.videoUrl}
+              poster={post.thumbnailUrl || undefined}
+              muted
+              playsInline
+              preload="metadata"
+              data-testid="draft-video"
+              className="h-40 w-auto bg-black block pointer-events-none"
+            />
+            <span className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
+              <span className="w-11 h-11 rounded-full bg-black/55 group-hover:bg-black/75 flex items-center justify-center text-white text-lg transition-colors">▶</span>
+            </span>
+          </button>
+        )}
+        {videoOpen && post.videoUrl && (
+          <VideoLightbox url={post.videoUrl} poster={post.thumbnailUrl || undefined} onClose={() => setVideoOpen(false)} />
         )}
 
         {/* First Comment */}

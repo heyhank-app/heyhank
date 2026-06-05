@@ -45,8 +45,16 @@ function GEMINI_KEY(): string {
 export type GoogleVeoModel =
   | "veo-3.1-generate-preview"
   | "veo-3.1-fast-generate-preview"
+  | "veo-3.1-lite-generate-preview"
   | "veo-3.0-generate-001"
   | "veo-3.0-fast-generate-001";
+
+/**
+ * Default Veo model for reels. "lite" is the cheapest 3.1 tier and has its OWN
+ * daily quota (separate from "fast"), so it's the safest default for cost +
+ * rate-limit headroom. Override per call via params.model.
+ */
+export const DEFAULT_VEO_MODEL: GoogleVeoModel = "veo-3.1-lite-generate-preview";
 
 /** Veo image-conditioning modes. Auto-detected from inputs if omitted. */
 export type VeoMode = "text" | "firstFrame" | "firstLastFrame" | "reference";
@@ -190,7 +198,7 @@ export async function generateVeoGoogle(
   const apiKey = GEMINI_KEY();
   if (!apiKey) throw new Error("geminiApiKey not configured in HeyHank settings");
 
-  const model = params.model ?? "veo-3.1-fast-generate-preview";
+  const model = params.model ?? DEFAULT_VEO_MODEL;
   const url = `${GOOGLE_VEO_BASE}/models/${model}:predictLongRunning?key=${apiKey}`;
   const body = await buildVeoRequestBody(params);
 
@@ -201,6 +209,15 @@ export async function generateVeoGoogle(
   });
   if (!res.ok) {
     const text = await res.text();
+    // 429 = the Gemini/Veo plan's video quota is used up. Surface a clear,
+    // actionable message instead of a raw API blob (Veo's free tier only allows
+    // a handful of videos/day).
+    if (res.status === 429) {
+      throw new Error(
+        "Google Veo quota exceeded — you've hit today's video limit on this Gemini plan. " +
+          "Wait for the quota to reset or raise the limit in Google AI Studio billing, then try the reel again.",
+      );
+    }
     throw new Error(`Google Veo submit failed ${res.status}: ${text}`);
   }
   const data = (await res.json()) as { name?: string };

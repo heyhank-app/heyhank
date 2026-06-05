@@ -1,0 +1,223 @@
+// Tests for the branded IG cover generator. The OpenAI fetch + the reference
+// photos are stubbed so no real gpt-image-2 call happens and no real files on
+// /opt are required. Output is written to a temp HEYHANK_HOME/media.
+
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+let tempHome: string;
+let refDir: string;
+type CoverModule = typeof import("./ig-cover.js");
+let cover: CoverModule;
+
+beforeEach(async () => {
+  tempHome = mkdtempSync(join(tmpdir(), "ig-cover-test-"));
+  refDir = mkdtempSync(join(tmpdir(), "ig-cover-refs-"));
+  // Fake reference photos so existsSync passes + readFileSync returns bytes.
+  writeFileSync(join(refDir, "r1.jpeg"), Buffer.from([0xff, 0xd8, 0xff]));
+  writeFileSync(join(refDir, "r2.jpeg"), Buffer.from([0xff, 0xd8, 0xff]));
+  process.env.HEYHANK_HOME = tempHome;
+  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MARKUS_REF_1 = join(refDir, "r1.jpeg");
+  process.env.MARKUS_REF_2 = join(refDir, "r2.jpeg");
+  vi.resetModules();
+  cover = await import("./ig-cover.js");
+});
+
+afterEach(() => {
+  rmSync(tempHome, { recursive: true, force: true });
+  rmSync(refDir, { recursive: true, force: true });
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.MARKUS_REF_1;
+  delete process.env.MARKUS_REF_2;
+});
+
+// A 1x1 PNG, base64 — what gpt-image-2 would return in data[0].b64_json.
+const PNG_B64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+describe("buildIgCoverPrompt", () => {
+  it("embeds the headline + badge + identity anchors", () => {
+    const p = cover.buildIgCoverPrompt({ headline: "Stop renting your AI", badge: "Built with AI", hero: "laptop" });
+    expect(p).toContain("Stop renting your AI");
+    expect(p).toContain("Built with AI");
+    expect(p).toContain("M-cap");
+    expect(p).toContain("1:1 square");
+    expect(p).toContain("laptop");
+  });
+
+  it("defaults the badge + hero when omitted", () => {
+    const p = cover.buildIgCoverPrompt({ headline: "Hi" });
+    expect(p).toContain("Built with AI");
+    expect(p).toContain("notebook");
+  });
+
+  it("varies the composition per style while keeping the locked identity", () => {
+    const business = cover.buildIgCoverPrompt({ headline: "X", style: "business" });
+    const pointing = cover.buildIgCoverPrompt({ headline: "X", style: "pointing" });
+    const bold = cover.buildIgCoverPrompt({ headline: "X", style: "bold" });
+    const screen = cover.buildIgCoverPrompt({ headline: "X", style: "screen" });
+    // Every style keeps the M-cap identity anchor.
+    for (const p of [business, pointing, bold, screen]) expect(p).toContain("M-cap");
+    // But each has its own composition cue.
+    expect(business).toMatch(/studio|professional|collared/i);
+    expect(pointing).toMatch(/pointing|gestur/i);
+    expect(bold).toMatch(/DOMINATES|typography|poster/i);
+    expect(screen).toMatch(/screen|monitor|dashboard/i);
+  });
+
+  it("normalizeStyle falls back to cozy for unknown values", () => {
+    expect(cover.normalizeStyle("business")).toBe("business");
+    expect(cover.normalizeStyle("nonsense")).toBe("cozy");
+    expect(cover.normalizeStyle(undefined)).toBe("cozy");
+  });
+
+  it("exposes the 5-style library", () => {
+    expect(cover.IG_STYLES.map((s) => s.id)).toEqual(["cozy", "business", "pointing", "bold", "screen"]);
+  });
+
+  it("drops the M-cap from the prompt when cap is false", () => {
+    const capped = cover.buildIgCoverPrompt({ headline: "X", cap: true });
+    const bare = cover.buildIgCoverPrompt({ headline: "X", cap: false });
+    expect(capped).toContain("M-cap");
+    expect(bare).not.toContain("M-cap");
+    expect(bare).toMatch(/NO hat|bare head|bald/i);
+  });
+});
+
+describe("generateIgCover", () => {
+  it("posts to the edits endpoint with refs and saves the decoded PNG", async () => {
+    let capturedUrl = "";
+    let capturedAuth = "";
+    const fakeFetch = vi.fn(async (url: string, init: RequestInit) => {
+      capturedUrl = url;
+      capturedAuth = (init.headers as Record<string, string>).Authorization;
+      // The body is FormData with model + refs.
+      expect(init.body).toBeInstanceOf(FormData);
+      return new Response(JSON.stringify({ data: [{ b64_json: PNG_B64 }] }), { status: 200 });
+    });
+
+    const res = await cover.generateIgCover(
+      { headline: "Self-host your AI", hero: "notebook" },
+      { fetch: fakeFetch as never, now: () => 1717000000000, rand: () => "abc123" },
+    );
+
+    expect(capturedUrl).toContain("/v1/images/edits");
+    expect(capturedAuth).toBe("Bearer test-key");
+    expect(res.filename).toBe("img_1717000000000_abc123.png");
+    expect(res.url).toBe("/api/media/file/img_1717000000000_abc123.png");
+    expect(res.model).toBe("gpt-image-2");
+    // The file was actually written + decoded.
+    expect(existsSync(res.path)).toBe(true);
+    expect(readFileSync(res.path).length).toBeGreaterThan(0);
+  });
+
+  it("throws a clean error when the API returns an error", async () => {
+    const fakeFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ error: { message: "content policy" } }), { status: 400 }),
+    );
+    await expect(
+      cover.generateIgCover({ headline: "x" }, { fetch: fakeFetch as never }),
+    ).rejects.toThrow(/content policy/);
+  });
+
+  it("throws when no image data comes back", async () => {
+    const fakeFetch = vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    await expect(
+      cover.generateIgCover({ headline: "x" }, { fetch: fakeFetch as never }),
+    ).rejects.toThrow(/no image data/);
+  });
+
+  it("requires a headline", async () => {
+    const fakeFetch = vi.fn(async () => new Response("{}", { status: 200 }));
+    await expect(
+      cover.generateIgCover({ headline: "  " }, { fetch: fakeFetch as never }),
+    ).rejects.toThrow(/headline is required/);
+  });
+});
+
+describe("buildConceptSlidePrompt + generateConceptSlide", () => {
+  it("builds a person-free prompt with the headline, visual + accent", () => {
+    const p = cover.buildConceptSlidePrompt({
+      headline: "Your prompts are the problem",
+      visual: "a stylized terminal motif",
+      accent: { name: "cyan blue", hex: "#2BB3FF" },
+    });
+    expect(p).toMatch(/NO people/i);
+    expect(p).toContain("Your prompts are the problem");
+    expect(p).toContain("a stylized terminal motif");
+    expect(p).toContain("cyan blue");
+    expect(p).toContain("Built with AI");
+    // Critically: no readable text/gibberish inside the visual (only headline+badge).
+    expect(p).toMatch(/do NOT render any readable text|ABSTRACT/i);
+  });
+
+  it("conceptAccent rotates deterministically and wraps", () => {
+    expect(cover.conceptAccent(0)).toEqual(cover.CONCEPT_ACCENTS[0]);
+    expect(cover.conceptAccent(cover.CONCEPT_ACCENTS.length)).toEqual(cover.CONCEPT_ACCENTS[0]); // wraps
+    expect(cover.conceptAccent(1)).toEqual(cover.CONCEPT_ACCENTS[1]);
+  });
+
+  it("posts to the GENERATIONS endpoint (JSON body, NO reference images) + saves the PNG", async () => {
+    let capturedUrl = "";
+    let capturedBody: unknown = null;
+    const fakeFetch = vi.fn(async (url: string, init: RequestInit) => {
+      capturedUrl = url;
+      // Concept slides use a JSON body (no FormData / no Markus refs).
+      expect(typeof init.body).toBe("string");
+      capturedBody = JSON.parse(init.body as string);
+      return new Response(JSON.stringify({ data: [{ b64_json: PNG_B64 }] }), { status: 200 });
+    });
+
+    const res = await cover.generateConceptSlide(
+      { headline: "One idea per slide", visual: "abstract nodes", accent: { name: "teal", hex: "#19C2C2" } },
+      { fetch: fakeFetch as never, now: () => 1717000000001, rand: () => "cncpt1" },
+    );
+
+    expect(capturedUrl).toContain("/v1/images/generations");
+    expect((capturedBody as { model?: string }).model).toBe("gpt-image-2");
+    expect(res.filename).toBe("img_1717000000001_cncpt1.png");
+    expect(existsSync(res.path)).toBe(true);
+    expect(readFileSync(res.path).length).toBeGreaterThan(0);
+  });
+
+  it("requires a headline", async () => {
+    const fakeFetch = vi.fn(async () => new Response("{}", { status: 200 }));
+    await expect(
+      cover.generateConceptSlide({ headline: "  " }, { fetch: fakeFetch as never }),
+    ).rejects.toThrow(/headline is required/);
+  });
+});
+
+describe("buildReelHookPrompt + normalizeHookSetting", () => {
+  it("locks identity, varies setting, keeps the presenter silent + magical (no talking)", () => {
+    const studio = cover.buildReelHookPrompt(true, "studio");
+    const cafe = cover.buildReelHookPrompt(true, "cafe");
+    for (const p of [studio, cafe]) {
+      expect(p).toMatch(/M-cap/);
+      expect(p).toMatch(/2:3 portrait/);
+      expect(p).toMatch(/NO text/i);
+      // The clone must NOT look like it's talking (Charon narrates the audio).
+      expect(p).toMatch(/closed[- ]mouth|mouth.*closed|NOT talking|NOT speaking/i);
+      // It does something magical with two glowing tiles (no real brand logos).
+      expect(p).toMatch(/holographic|glowing/i);
+      expect(p).toMatch(/brand logos/i);
+    }
+    // Setting actually changes (not always a studio — the user can vary it).
+    expect(studio).toMatch(/studio/i);
+    expect(cafe).toMatch(/caf/i);
+    expect(studio).not.toEqual(cafe);
+  });
+
+  it("drops the M-cap when cap is false", () => {
+    expect(cover.buildReelHookPrompt(false, "desk")).toMatch(/NO hat|bare head|bald/i);
+  });
+
+  it("normalizeHookSetting falls back to studio for unknown values", () => {
+    expect(cover.normalizeHookSetting("outdoor")).toBe("outdoor");
+    expect(cover.normalizeHookSetting("nonsense")).toBe("studio");
+    expect(cover.normalizeHookSetting(undefined)).toBe("studio");
+  });
+});

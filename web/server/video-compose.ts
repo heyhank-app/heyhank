@@ -68,6 +68,12 @@ export interface TextOverlay {
   maxWidth?: number;
   /** Line height multiplier for wrapped text. Default 1.15. */
   lineHeight?: number;
+  /**
+   * For position "bottom": how many px to lift the box off the bottom edge.
+   * Default = fontSize (sits right at the edge). Set higher to place captions in
+   * the readable lower-third, clear of platform UI chrome at the very bottom.
+   */
+  bottomOffset?: number;
 }
 
 /**
@@ -117,6 +123,13 @@ export interface ComposeRequest {
   brand?: string;
   /** Output basename (no extension). Default `reel_<ts>_<rnd>`. */
   outputName?: string;
+  /**
+   * Optional single audio track laid over the ENTIRE concatenated reel (e.g. a
+   * voiceover that should span all segments). Muxed in a final pass after concat
+   * with `-shortest`, replacing any per-segment audio. Use this instead of
+   * per-segment `audioPath` when one continuous track covers the whole video.
+   */
+  audioPath?: string;
 }
 
 export interface ComposeResult {
@@ -150,7 +163,7 @@ export function escapeDrawtext(s: string): string {
     .replace(/\n/g, "\\n");
 }
 
-function resolveYExpr(position: OverlayPosition | undefined, fontSize: number): string {
+function resolveYExpr(position: OverlayPosition | undefined, fontSize: number, bottomOffset?: number): string {
   if (!position || position === "center") {
     return `(h-text_h)/2`;
   }
@@ -158,7 +171,7 @@ function resolveYExpr(position: OverlayPosition | undefined, fontSize: number): 
     return `${Math.max(40, fontSize)}`;
   }
   if (position === "bottom") {
-    return `h-text_h-${Math.max(40, fontSize)}`;
+    return `h-text_h-${Math.max(40, bottomOffset ?? fontSize)}`;
   }
   if (typeof position === "object" && "y" in position) {
     return String(position.y);
@@ -217,7 +230,7 @@ export function buildDrawtextFilter(overlay: TextOverlay, theme: BrandTheme): st
   const fontfile = (overlay.bold ?? true) ? FONT_BOLD : FONT_REGULAR;
   const text = escapeDrawtext(overlay.text);
   const x = `(w-text_w)/2`;
-  const y = resolveYExpr(overlay.position, fontSize);
+  const y = resolveYExpr(overlay.position, fontSize, overlay.bottomOffset);
   const enable = enableExpr(overlay.startSeconds, overlay.endSeconds);
 
   const xExpr = resolveXExpr(overlay.position) === `(w-text_w)/2` ? x : resolveXExpr(overlay.position);
@@ -453,7 +466,11 @@ async function renderSegment(
   for (let i = 0; i < placements.length; i++) {
     const p = placements[i];
     const logoIdx = logoInputStart + i;
-    filters.push(`[${logoIdx}:v]scale=${p.logoWidth}:-1[l${i}]`);
+    // colorkey knocks out the (near-)white background that favicons / generated
+    // placeholders ship with, so logos sit transparently on the video instead of
+    // in an ugly white box. A tight similarity (0.10) only keys near-pure-white,
+    // leaving coloured logo content (the Google "G", the orange asterisk) intact.
+    filters.push(`[${logoIdx}:v]scale=${p.logoWidth}:-1,colorkey=0xFFFFFF:0.10:0.0,format=rgba[l${i}]`);
     const nextLabel = i === placements.length - 1 ? "vout" : `v${i}`;
     filters.push(`[${prev}][l${i}]overlay=${p.logoX}:${p.logoY}[${nextLabel}]`);
     prev = nextLabel;
@@ -534,6 +551,9 @@ export async function composeReel(request: ComposeRequest): Promise<ComposeResul
     const listBody = segmentPaths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n");
     writeFileSync(listPath, listBody);
 
+    // Concat to the final path, unless a global audio track needs a second
+    // pass — then concat to a temp and mux the audio over the whole video.
+    const concatTarget = request.audioPath ? join(workDir, "concat_out.mp4") : outputPath;
     await runFfmpeg([
       "-y",
       "-f",
@@ -544,8 +564,25 @@ export async function composeReel(request: ComposeRequest): Promise<ComposeResul
       listPath,
       "-c",
       "copy",
-      outputPath,
+      concatTarget,
     ]);
+
+    if (request.audioPath) {
+      // Lay one continuous audio track over the entire reel; `-shortest` ends at
+      // whichever of video/audio runs out first.
+      await runFfmpeg([
+        "-y",
+        "-i", concatTarget,
+        "-i", request.audioPath,
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
+        outputPath,
+      ]);
+    }
 
     const totalDuration = request.segments.reduce((sum, s) => {
       if (s.type === "image") return sum + s.durationSeconds;

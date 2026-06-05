@@ -39,9 +39,10 @@ import { registerFederationRoutes } from "./routes/federation-routes.js";
 import { registerTelephonyRoutes } from "./routes/telephony-routes.js";
 import { registerSocialMediaRoutes } from "./routes/socialmedia-routes.js";
 import { registerSocialViewRoutes } from "./socialview/routes.js";
-import { registerMetaWebhookRoutes, setMetaSender } from "./automation/meta-webhook-routes.js";
+import { registerMetaWebhookRoutes, setMetaSender, setMetaReplySender } from "./automation/meta-webhook-routes.js";
 import { registerAutomationRoutes } from "./automation/automation-routes.js";
-import { sendPrivateReply } from "./automation/meta-send.js";
+import { registerGoRoutes } from "./automation/go-routes.js";
+import { sendPrivateReply, sendCommentReply } from "./automation/meta-send.js";
 import { registerAssistantRoutes } from "./routes/assistant-routes.js";
 import { registerEmailRoutes } from "./routes/email-routes.js";
 import { registerProviderRoutes } from "./routes/provider-routes.js";
@@ -221,6 +222,16 @@ export function createRoutes(
     if (
       c.req.path.startsWith("/auth/meta/") ||
       c.req.path.startsWith("/api/auth/meta/")
+    ) {
+      return next();
+    }
+
+    // Skip auth for the Auto-DM tracking-link redirect. Instagram/Facebook
+    // users tapping markusstoeger.com/go/<code> have no HeyHank session; the
+    // route just resolves the code, logs a click, and 302s onward.
+    if (
+      c.req.path.startsWith("/go/") ||
+      c.req.path.startsWith("/api/go/")
     ) {
       return next();
     }
@@ -1392,10 +1403,12 @@ export function createRoutes(
   registerSocialViewRoutes(api);
   registerMetaWebhookRoutes(api);
   registerAutomationRoutes(api);
+  registerGoRoutes(api);
   // Wire the production Meta Send API into the webhook dispatcher so matched
   // comments actually fire DMs (the dispatcher itself is unit-testable
   // without this wiring by passing a mock sender to setMetaSender()).
   setMetaSender(sendPrivateReply);
+  setMetaReplySender(sendCommentReply);
   registerAssistantRoutes(api);
   registerEmailRoutes(api);
   registerProviderRoutes(api);
