@@ -9,6 +9,7 @@ import {
   adaptInspiration,
   generatePlan,
   generateCarouselScript,
+  generateReelScenes,
   assembleCaption,
   normalizeLanguage,
   normalizeNiche,
@@ -353,9 +354,20 @@ export function registerIgWizardRoutes(api: Hono): void {
           console.warn(`reel hook intro skipped: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
-      // Then the b-roll scenes that fill the rest of the timeline.
+      // Then the b-roll scenes that fill the rest of the timeline. Generate
+      // CONTENT-SPECIFIC scene descriptions from the post's own hook + body so the
+      // middle matches the topic instead of looking like generic stock footage;
+      // fall back to the generic scene rotation if scene generation fails.
+      const scenesRes = await generateReelScenes({
+        topic: post.topic,
+        hook: post.hook,
+        body: post.body,
+        count: distinctBody,
+        language: normalizeLanguage(undefined),
+      }).catch(() => null);
+      const scenes = scenesRes && scenesRes.ok ? scenesRes.result.scenes : [];
       const bodyClips = await Promise.all(
-        Array.from({ length: distinctBody }, (_, i) => genClip({ prompt: buildReelVeoPrompt(post.topic, i) })),
+        Array.from({ length: distinctBody }, (_, i) => genClip({ prompt: buildReelVeoPrompt(post.topic, i, scenes[i]) })),
       );
 
       // 3) Tile clips into one silent long video: [hook?] + b-roll filling the
@@ -672,15 +684,18 @@ export function buildReelCaptions(
     const start = +cursor.toFixed(2);
     const end = +Math.min(duration, cursor + dur - GAP).toFixed(2);
     cursor += dur;
-    // SMALL + BOTTOM: the box sits low so the subject (hook magic, face, b-roll)
-    // is never covered. lineHeight 1.3 + small padding keeps wrapped lines tight.
+    // SMALL + LOWER-THIRD: the box sits in the readable lower third (lifted
+    // ~220px off the very bottom edge, clear of IG's UI chrome) so it's easy to
+    // read AND never covers the subject. lineHeight 1.3 + small padding keep
+    // wrapped lines tight.
+    const BOTTOM_OFFSET = 220;
     if (line.kind === "cta") {
       // Orange box = the funnel call-to-action.
-      return { text: line.text, position: "bottom" as const, fontSize: 38, color: "#ffffff",
+      return { text: line.text, position: "bottom" as const, bottomOffset: BOTTOM_OFFSET, fontSize: 38, color: "#ffffff",
         bgColor: "#c2410c", bgPadding: 9, bold: true, maxWidth: 660, lineHeight: 1.3,
         startSeconds: start, endSeconds: end };
     }
-    return { text: line.text, position: "bottom" as const, fontSize: line.kind === "hook" ? 40 : 38, color: "#ffffff",
+    return { text: line.text, position: "bottom" as const, bottomOffset: BOTTOM_OFFSET, fontSize: line.kind === "hook" ? 40 : 38, color: "#ffffff",
       bgColor: "black", bgPadding: 9, bold: true, maxWidth: 660, lineHeight: 1.3,
       startSeconds: start, endSeconds: end };
   });
@@ -700,13 +715,15 @@ const REEL_SCENE_VARIANTS = [
   "an abstract flowing network of glowing nodes and data streams, dark premium background",
 ];
 
-export function buildReelVeoPrompt(topic: string, variant = 0): string {
+export function buildReelVeoPrompt(topic: string, variant = 0, scene?: string): string {
   const t = (topic || "").trim();
   const theme = t ? `B-roll for a short video about "${t}". ` : "";
-  const scene = REEL_SCENE_VARIANTS[variant % REEL_SCENE_VARIANTS.length];
+  // Prefer an AI-generated, content-specific scene; fall back to the generic
+  // rotation so the reel still renders if scene generation fails.
+  const sceneText = (scene && scene.trim()) || REEL_SCENE_VARIANTS[variant % REEL_SCENE_VARIANTS.length];
   return (
     `Vertical 9:16 cinematic b-roll. ${theme}` +
-    `Modern, energetic tech atmosphere: ${scene}, dynamic rim lighting, ` +
+    `Modern, energetic tech atmosphere: ${sceneText}, dynamic rim lighting, ` +
     "subtle particle/bokeh, a smooth dolly camera move. Premium editorial color " +
     "grade, high contrast, fast premium product-film feel. " +
     "No on-screen text, no captions, no subtitles, no logos, no watermark."

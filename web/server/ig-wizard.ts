@@ -721,6 +721,64 @@ export async function generateCarouselScript(input: {
   return { ok: true, result: { slides, model: "internal-ai" } };
 }
 
+// ─── Reel b-roll scenes ─────────────────────────────────────────────────────────
+
+export interface ReelScenesResult { scenes: string[]; model: string; }
+export interface ReelScenesOk { ok: true; result: ReelScenesResult; }
+export interface ReelScenesErr { ok: false; error: string; status: 502 | 503; }
+
+const REEL_SCENES_SYSTEM_PROMPT = `You are a cinematographer planning B-ROLL shots for a vertical short-form video.
+Given the video's topic + hook + body, write {{N}} DISTINCT b-roll shot descriptions
+that visually MATCH this specific content — not generic stock footage.
+
+Rules:
+  - Each scene = ONE short shot description, 6-16 words.
+  - NO people, NO faces, NO hands, NO on-screen text / letters / UI labels / numbers.
+  - Concrete + specific to THIS topic. Avoid generic "neon server room" unless the
+    content is literally about servers. Match the IDEA: e.g. a multi-agent debate →
+    several glowing panels facing each other exchanging light; self-hosting → a small
+    home-lab mini PC glowing on a shelf; a prompt trick → a single command line of
+    light forming and branching.
+  - Cinematic, premium, dark high-tech aesthetic. Each scene clearly different.
+
+Return ONLY valid JSON, no markdown fences, no commentary:
+{ "scenes": [ "...", ... exactly {{N}} items ] }`;
+
+/**
+ * Generate N content-specific b-roll shot descriptions for a reel from the post's
+ * own hook + body, so the middle of the reel matches the topic instead of looking
+ * like generic stock tech footage. Falls back (caller's responsibility) to the
+ * generic scene rotation if this errors.
+ */
+export async function generateReelScenes(input: {
+  topic: string;
+  hook: string;
+  body: string;
+  count: number;
+  language: IgWizardLanguage;
+}): Promise<ReelScenesOk | ReelScenesErr> {
+  if (!hasInternalAI()) return { ok: false, status: 503, error: "No internal AI provider is configured." };
+  const n = Math.max(1, Math.min(4, Math.round(input.count) || 1));
+  const sys = REEL_SCENES_SYSTEM_PROMPT.replace(/\{\{N\}\}/g, String(n));
+  const ai = await callInternalAI({
+    systemPrompt: sys,
+    userPrompt: `Topic: ${input.topic || "AI tools"}\nHook: ${input.hook}\nBody: ${input.body}\nLanguage: ${input.language}\nScenes: ${n}`,
+    maxTokens: 600,
+    temperature: 0.8,
+    timeoutMs: 40_000,
+  });
+  if (!ai.ok) return { ok: false, status: 502, error: ai.error || "AI call failed" };
+
+  const block = extractJsonBlock(ai.text);
+  let parsed: { scenes?: unknown };
+  try { parsed = JSON.parse(block) as { scenes?: unknown }; } catch { return { ok: false, status: 502, error: "AI returned invalid scenes JSON." }; }
+  const scenes = Array.isArray(parsed.scenes)
+    ? parsed.scenes.filter((s): s is string => typeof s === "string" && s.trim().length > 0).map((s) => s.trim()).slice(0, n)
+    : [];
+  if (scenes.length === 0) return { ok: false, status: 502, error: "AI returned no usable scenes." };
+  return { ok: true, result: { scenes, model: "internal-ai" } };
+}
+
 // ─── 30-Day Plan ────────────────────────────────────────────────────────────────
 
 const PLAN_SYSTEM_PROMPT = `You are a social-media strategist who turns ONE topic into a month of Instagram content that builds an email list.

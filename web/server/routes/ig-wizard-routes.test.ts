@@ -711,6 +711,8 @@ describe("buildReelCaptions", () => {
     expect(caps[0].text).toBe("Stop renting AI");
     expect(caps[0].position).toBe("bottom");
     expect(caps.every((c) => c.position === "bottom")).toBe(true);
+    // Lifted into the readable lower third (not glued to the very bottom edge).
+    expect(caps.every((c) => (c.bottomOffset ?? 0) >= 150)).toBe(true);
     // Small fonts (≤ 40) so the hook magic + face stay the star.
     expect(caps.every((c) => (c.fontSize ?? 0) <= 40)).toBe(true);
     expect(caps[caps.length - 1].text).toBe("Comment STACK");
@@ -850,6 +852,18 @@ describe("buildReelVeoPrompt", () => {
     const p = buildReelVeoPrompt("");
     expect(p).toMatch(/9:16/);
     expect(p).toMatch(/no on-screen text/i);
+  });
+
+  it("uses an explicit AI scene when provided (content-specific b-roll)", () => {
+    const p = buildReelVeoPrompt("AI debate", 0, "five glowing panels facing each other exchanging light");
+    expect(p).toContain("five glowing panels facing each other exchanging light");
+    // The generic fallback scene is NOT used when a scene is given.
+    expect(p).not.toMatch(/rack of servers with blinking status LEDs/);
+  });
+
+  it("falls back to the generic scene rotation when no scene is given", () => {
+    const p = buildReelVeoPrompt("AI", 1);
+    expect(p).toMatch(/servers|mini PC|network of glowing nodes|terminal/i);
   });
 });
 

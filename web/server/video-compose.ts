@@ -68,6 +68,12 @@ export interface TextOverlay {
   maxWidth?: number;
   /** Line height multiplier for wrapped text. Default 1.15. */
   lineHeight?: number;
+  /**
+   * For position "bottom": how many px to lift the box off the bottom edge.
+   * Default = fontSize (sits right at the edge). Set higher to place captions in
+   * the readable lower-third, clear of platform UI chrome at the very bottom.
+   */
+  bottomOffset?: number;
 }
 
 /**
@@ -157,7 +163,7 @@ export function escapeDrawtext(s: string): string {
     .replace(/\n/g, "\\n");
 }
 
-function resolveYExpr(position: OverlayPosition | undefined, fontSize: number): string {
+function resolveYExpr(position: OverlayPosition | undefined, fontSize: number, bottomOffset?: number): string {
   if (!position || position === "center") {
     return `(h-text_h)/2`;
   }
@@ -165,7 +171,7 @@ function resolveYExpr(position: OverlayPosition | undefined, fontSize: number): 
     return `${Math.max(40, fontSize)}`;
   }
   if (position === "bottom") {
-    return `h-text_h-${Math.max(40, fontSize)}`;
+    return `h-text_h-${Math.max(40, bottomOffset ?? fontSize)}`;
   }
   if (typeof position === "object" && "y" in position) {
     return String(position.y);
@@ -224,7 +230,7 @@ export function buildDrawtextFilter(overlay: TextOverlay, theme: BrandTheme): st
   const fontfile = (overlay.bold ?? true) ? FONT_BOLD : FONT_REGULAR;
   const text = escapeDrawtext(overlay.text);
   const x = `(w-text_w)/2`;
-  const y = resolveYExpr(overlay.position, fontSize);
+  const y = resolveYExpr(overlay.position, fontSize, overlay.bottomOffset);
   const enable = enableExpr(overlay.startSeconds, overlay.endSeconds);
 
   const xExpr = resolveXExpr(overlay.position) === `(w-text_w)/2` ? x : resolveXExpr(overlay.position);

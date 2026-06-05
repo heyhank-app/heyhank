@@ -5,6 +5,7 @@ import {
   adaptInspiration,
   generatePlan,
   generateCarouselScript,
+  generateReelScenes,
   normalizeLanguage,
   normalizeNiche,
   normalizeTopic,
@@ -418,6 +419,42 @@ describe("generateCarouselScript", () => {
     mockHasProvider = true;
     mockReturn = { text: "not json", ok: true, error: undefined };
     const r = await generateCarouselScript({ topic: "x", hook: "h", body: "b", cta: "c", language: "en", slides: 5 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(502);
+  });
+});
+
+describe("generateReelScenes", () => {
+  beforeEach(() => {
+    mockHasProvider = true;
+    mockReturn = {
+      text: JSON.stringify({ scenes: ["five glowing panels facing each other exchanging light", "a single command line of light branching into five streams", "a dark roundtable of floating holographic screens"] }),
+      ok: true,
+      error: undefined,
+    };
+  });
+
+  it("returns content-specific b-roll scenes capped at the requested count", async () => {
+    const res = await generateReelScenes({ topic: "The Roundtable", hook: "Claude agrees with everything", body: "5 roles debate it", count: 3, language: "en" });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.result.scenes).toHaveLength(3);
+    expect(res.result.scenes[0]).toMatch(/glowing panels/);
+  });
+
+  it("clamps the count to 1..4", async () => {
+    const res = await generateReelScenes({ topic: "x", hook: "h", body: "b", count: 99, language: "en" });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.result.scenes.length).toBeLessThanOrEqual(4);
+  });
+
+  it("503 with no provider, 502 on junk JSON", async () => {
+    mockHasProvider = false;
+    expect((await generateReelScenes({ topic: "x", hook: "h", body: "b", count: 2, language: "en" })).ok).toBe(false);
+    mockHasProvider = true;
+    mockReturn = { text: "no json here", ok: true, error: undefined };
+    const r = await generateReelScenes({ topic: "x", hook: "h", body: "b", count: 2, language: "en" });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(502);
   });
