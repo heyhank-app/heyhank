@@ -70,6 +70,17 @@ export const BUILTIN_SOURCES: MarketplaceSource[] = [
     description:
       "17 skills covering voice, LinkedIn, Instagram Reels, YouTube thumbnails, analytics, and community.",
   },
+  {
+    id: "xquik-dev-tweetclaw",
+    name: "TweetClaw",
+    owner: "Xquik",
+    url: "https://github.com/Xquik-dev/tweetclaw",
+    ghOwner: "Xquik-dev",
+    ghRepo: "tweetclaw",
+    branch: "master",
+    description:
+      "X/Twitter research and automation skill for source-backed social workflows.",
+  },
 ];
 
 /** Validates a slug to prevent path traversal. */
